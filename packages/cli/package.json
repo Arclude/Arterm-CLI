@@ -1,0 +1,23 @@
+{
+  "name": "@arterm/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "arterm": "./dist/main.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "arterm": "node dist/main.js"
+  },
+  "dependencies": {
+    "@arterm/core": "workspace:*",
+    "@arterm/providers": "workspace:*",
+    "@arterm/tools": "workspace:*",
+    "@arterm/tui": "workspace:*",
+    "commander": "^12.1.0"
+  }
+}
