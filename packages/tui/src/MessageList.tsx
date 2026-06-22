@@ -58,29 +58,26 @@ export function Item({ item }: { item: DisplayItem }): React.ReactElement {
           <Text>{item.text}</Text>
         </MessageBlock>
       );
-    case "tool":
-      return (
-        <Box flexDirection="column">
-          <Box>
-            <Text color={item.isError ? "red" : "yellow"} bold>
-              {"• "}
-              {item.name}
-            </Text>
-            {item.args ? <Text color="gray"> {truncate(item.args, 60)}</Text> : null}
-            {item.ms !== undefined ? (
-              <Text color="gray">
-                {"  · "}
-                {item.ms}ms · {item.bytes ?? 0}B · ≈{item.tok ?? 0} tok
-              </Text>
-            ) : null}
+    case "tool": {
+      // A result row (output, no args) renders only the indented tree line so it
+      // reads as the continuation of its call row rather than a second "• name".
+      if (item.output !== undefined && item.args === undefined) {
+        return (
+          <Box paddingLeft={2}>
+            <Text color={item.isError ? "red" : "gray"}>└─ {truncate(item.output, 400)}</Text>
           </Box>
-          {item.output ? (
-            <Box paddingLeft={2}>
-              <Text color={item.isError ? "red" : "gray"}>└─ {truncate(item.output, 400)}</Text>
-            </Box>
-          ) : null}
+        );
+      }
+      return (
+        <Box>
+          <Text color={item.isError ? "red" : "yellow"} bold>
+            {"• "}
+            {item.name}
+          </Text>
+          {item.args ? <Text color="gray"> {truncate(item.args, 60)}</Text> : null}
         </Box>
       );
+    }
     case "system":
       return (
         <Box paddingLeft={1}>

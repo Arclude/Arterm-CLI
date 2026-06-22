@@ -27,16 +27,10 @@ export function ModelPicker({
   loading?: boolean;
 }): React.ReactElement {
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="cyan"
-      paddingX={1}
-      marginTop={1}
-    >
+    <Box flexDirection="column" marginTop={1}>
       <Box>
         <Text color="cyan" bold>
-          Select a model
+          ── Select a model ──
         </Text>
         <Text color="gray" dimColor>
           {"   ↑/↓ move · Enter choose · Esc close"}

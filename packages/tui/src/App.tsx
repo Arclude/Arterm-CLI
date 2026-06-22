@@ -1,9 +1,8 @@
 import type { ModelInfo, PermissionAsker } from "@arterm/core";
 import { Box, Static, Text, useApp, useInput } from "ink";
-import Spinner from "ink-spinner";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Item, MessageList } from "./MessageList.js";
+import { Item } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
 import { type Status, StatusBar } from "./StatusBar.js";
@@ -63,7 +62,6 @@ function InputLine({
 export function App({ session }: { session: Session }): React.ReactElement {
   const { exit } = useApp();
   const [items, setItems] = useState<DisplayItem[]>([]);
-  const [live, setLive] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [input, setInput] = useState("");
   const [model, setModel] = useState(session.agent.model);
@@ -115,12 +113,8 @@ export function App({ session }: { session: Session }): React.ReactElement {
           turnStartRef.current = Date.now();
           turnRef.current = { inTok: 0, outTok: 0, rounds: 0 };
           break;
-        case "text_delta":
-          setLive((prev) => prev + event.delta);
-          break;
         case "assistant_message": {
           const text = event.message.content.trim();
-          setLive("");
           if (text) push({ kind: "assistant", text });
           turnRef.current.rounds += 1;
           break;
@@ -159,7 +153,6 @@ export function App({ session }: { session: Session }): React.ReactElement {
           }
           break;
         case "error":
-          setLive("");
           push({ kind: "system", text: `error: ${event.error}` });
           break;
         case "turn_end":
@@ -243,7 +236,6 @@ export function App({ session }: { session: Session }): React.ReactElement {
         case "clear":
           session.agent.reset();
           setItems([]);
-          setLive("");
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -303,7 +295,6 @@ export function App({ session }: { session: Session }): React.ReactElement {
       <Static items={items}>
         {(item, i) => <Item key={i} item={item} />}
       </Static>
-      {live ? <MessageList items={[]} live={live} /> : null}
       {pending ? (
         <PermissionPrompt pending={pending} />
       ) : pickerOpen ? (
@@ -316,9 +307,7 @@ export function App({ session }: { session: Session }): React.ReactElement {
       ) : (
         <Box marginTop={1}>
           {busy ? (
-            <Text color="gray">
-              <Spinner type="dots" /> running — Esc to cancel
-            </Text>
+            <Text color="yellow">● working… (Esc to cancel)</Text>
           ) : (
             <InputLine
               active={!busy}

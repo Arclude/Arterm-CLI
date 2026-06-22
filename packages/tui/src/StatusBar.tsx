@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Box, Text } from "ink";
-import Spinner from "ink-spinner";
 import type React from "react";
 
 export type Status = "idle" | "thinking" | "tool";
@@ -63,14 +62,7 @@ export function StatusBar({
   const branch = gitBranch();
   const cwd = basename(process.cwd());
   const pct = ctxWindow ? Math.min(100, Math.round((ctxUsed / ctxWindow) * 100)) : 0;
-  const dot =
-    status === "idle" ? (
-      <Text color="green">●</Text>
-    ) : (
-      <Text color="yellow">
-        <Spinner type="dots" />
-      </Text>
-    );
+  const dot = <Text color={status === "idle" ? "green" : "yellow"}>●</Text>;
 
   return (
     <Box flexDirection="column" marginTop={1}>

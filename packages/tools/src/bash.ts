@@ -43,7 +43,8 @@ export const bashTool: Tool = {
         timeout,
         reject: false,
         all: true,
-        signal: ctx.signal,
+        // execa v9 renamed `signal` → `cancelSignal`.
+        ...(ctx.signal ? { cancelSignal: ctx.signal } : {}),
       });
       const out = result.all ?? `${result.stdout}\n${result.stderr}`;
       const status = result.exitCode === 0 ? "" : `\n[exit code ${result.exitCode}]`;

@@ -17,13 +17,16 @@ export function PermissionPrompt({ pending }: { pending: PendingPermission }): R
   });
 
   const summary = pending.tool.preview?.(pending.args) ?? pending.tool.name;
+  // Border-free on purpose: a bordered box that appears/disappears leaves "ghost"
+  // outlines in terminals that don't fully erase the previous dynamic frame.
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+    <Box flexDirection="column" marginTop={1}>
       <Text color="yellow" bold>
-        Permission required
+        ⚠ Permission required — {summary}
       </Text>
-      <Text>{summary}</Text>
-      <Text color="gray">[y] allow once · [a] always allow {pending.tool.name} · [n] deny</Text>
+      <Text color="gray">
+        [y] allow once · [a] always allow {pending.tool.name} · [n] deny
+      </Text>
     </Box>
   );
 }
