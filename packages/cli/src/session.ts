@@ -50,6 +50,8 @@ export function buildSession(opts: SessionOptions): {
     bus,
     config,
     providerLabel: provider.id,
+    toolCount: defaultTools().length,
+    yolo: opts.yolo ?? false,
     setAsker(next) {
       asker = next;
     },
