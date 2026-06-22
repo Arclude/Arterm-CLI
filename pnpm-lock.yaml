@@ -26,6 +26,25 @@ importers:
 
   packages/cli:
     dependencies:
+      commander:
+        specifier: ^12.1.0
+        version: 12.1.0
+      execa:
+        specifier: ^9.5.2
+        version: 9.6.1
+      fast-glob:
+        specifier: ^3.3.2
+        version: 3.3.3
+      ink:
+        specifier: ^5.1.0
+        version: 5.2.1(@types/react@18.3.31)(react@18.3.1)
+      ink-spinner:
+        specifier: ^5.0.0
+        version: 5.0.0(ink@5.2.1(@types/react@18.3.31)(react@18.3.1))(react@18.3.1)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+    devDependencies:
       '@arterm/core':
         specifier: workspace:*
         version: link:../core
@@ -38,9 +57,6 @@ importers:
       '@arterm/tui':
         specifier: workspace:*
         version: link:../tui
-      commander:
-        specifier: ^12.1.0
-        version: 12.1.0
 
   packages/core:
     dependencies:

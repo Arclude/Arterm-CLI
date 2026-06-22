@@ -1,23 +1,60 @@
 {
-  "name": "@arterm/cli",
+  "name": "arterm-cli",
   "version": "0.1.0",
-  "private": true,
+  "description": "Local AI coding agent for your terminal — Ollama, llama.cpp, and OpenAI-compatible providers, a rich Ink TUI, and permission-gated file/shell tools.",
   "type": "module",
   "bin": {
     "arterm": "./dist/main.js"
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "author": "Arclude",
+  "homepage": "https://github.com/Arclude/Arterm-CLI#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arclude/Arterm-CLI.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Arclude/Arterm-CLI/issues"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "coding-agent",
+    "ollama",
+    "llama.cpp",
+    "openai",
+    "tui",
+    "ink",
+    "local-llm",
+    "terminal"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
+    "prepublishOnly": "tsup",
     "arterm": "node dist/main.js"
   },
   "dependencies": {
+    "commander": "^12.1.0",
+    "execa": "^9.5.2",
+    "fast-glob": "^3.3.2",
+    "ink": "^5.1.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
     "@arterm/core": "workspace:*",
     "@arterm/providers": "workspace:*",
     "@arterm/tools": "workspace:*",
-    "@arterm/tui": "workspace:*",
-    "commander": "^12.1.0"
+    "@arterm/tui": "workspace:*"
   }
 }

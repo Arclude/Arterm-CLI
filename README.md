@@ -1,166 +1,174 @@
 # Arterm-CLI
 
-A terminal AI coding agent that runs **local** models. Arterm takes a hybrid
-approach to model hosting: connect to a running [Ollama](https://ollama.com)
-server, or load a `.gguf` file directly in-process via
-[`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp) — no API keys, no
-cloud. It streams chat into an [Ink](https://github.com/vadimdemedes/ink) TUI and
-can read, search, and edit your files and run shell commands through a
-permission-gated tool set.
+A terminal AI coding agent that runs **local** models. Connect to a running
+[Ollama](https://ollama.com) server, point it at any **OpenAI-compatible**
+endpoint (LM Studio, vLLM, llama.cpp server, …), or load a `.gguf` file directly
+in-process via [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp) —
+no cloud, no API keys required. Arterm streams chat into a rich
+[Ink](https://github.com/vadimdemedes/ink) TUI and can read, search, and edit
+your files and run shell commands through a permission-gated tool set.
+
+```
+▌ARTERM v0.1.0  │  ● idle  │  ollama/qwen2.5:7b  │  ctx ██░░░░░░░░ 12%/32k  │  ↑1.2k ↓340
+📁 my-project  │  ⎇ main  │  🔧 7 tools  │  ⏱ 15:45:27  │  ASK
+Enter send   ? help   Alt+P models   Esc cancel   ^C quit
+```
 
 ## Features
 
-- **Ink TUI** — an interactive terminal chat with a live status bar (provider,
-  model, token count) and slash commands.
-- **Streaming chat** — model output is rendered token-by-token; press `Esc` to
-  cancel a running turn.
+- **Rich Ink TUI** — colored message blocks, live token-by-token streaming, tool
+  rows with timing/size metadata, a per-turn stats line, and a multi-segment
+  status bar (provider, model, context gauge, token counts, branch, clock).
+- **Interactive model picker** — press **Alt+P** (or `/model`) for an arrow-key
+  selectable list of available models with sizes; `?` opens help.
 - **File & shell tools** — `read`, `ls`, `glob`, `grep`, `write`, `edit`, and
-  `bash`, all scoped to the working directory.
-- **Per-tool permission system** — read-only tools auto-allow; tools that mutate
-  state or run commands prompt before each call, with an "always allow" that
-  persists.
-- **Hybrid providers** — talk to Ollama over HTTP, or load a GGUF directly with
-  `node-llama-cpp`. Models can be listed across both backends at once.
+  `bash`, all sandboxed to the working directory.
+- **Permission system** — read-only tools auto-allow; tools that mutate state or
+  run commands prompt before each call, with an "always allow" that persists.
+  `--yolo` skips prompts.
+- **Multiple providers** — Ollama over HTTP, any OpenAI-compatible server, or a
+  GGUF loaded directly with `node-llama-cpp`.
 - **Native + JSON-fallback tool-calling** — uses a backend's native
   function-calling API when the model supports it, and falls back to a
-  model-agnostic JSON protocol parsed from the text body when it doesn't.
+  model-agnostic JSON protocol parsed from the text when it doesn't.
 
-## Requirements
+## Install
 
-- **Node** >= 22
-- **pnpm** >= 9
-- One of (optional, depending on the provider you use):
-  - **Ollama** running locally (`ollama serve`), for the `ollama` provider, or
-  - a **`.gguf` file** plus `node-llama-cpp`, for the `llamacpp` provider.
-
-## Install & build
+Requires **Node.js >= 22**.
 
 ```bash
-pnpm install
-pnpm -r build
+# Global install
+npm install -g arterm-cli
+
+# …or run without installing
+npx arterm-cli
 ```
 
-This builds every package under `packages/`. After building, the CLI entry point
-is `packages/cli/dist/main.js`, exposed as the `arterm` bin.
+Then start the chat TUI from any project directory:
+
+```bash
+arterm
+```
+
+You also need a model backend running — the simplest is Ollama:
+
+```bash
+# https://ollama.com
+ollama serve            # start the server
+ollama pull qwen2.5:7b  # a tool-capable model is recommended
+arterm --model qwen2.5:7b
+```
 
 ## Usage
 
-Run the built CLI directly:
-
 ```bash
-node packages/cli/dist/main.js
-```
-
-or, once the `arterm` bin is on your `PATH` (e.g. via `pnpm link` or after
-publishing):
-
-```bash
-# Start the interactive chat TUI (this is the default command)
-arterm
-
-# List available models across all configured providers
-arterm models
-
-# Download a model via Ollama
-arterm pull <model>
+arterm                       # start the interactive chat TUI (default)
+arterm --model qwen2.5:7b    # pick a model for this session
+arterm --provider ollama     # pick a provider
+arterm --yolo                # skip permission prompts
+arterm models                # list models across configured providers
+arterm pull <model>          # download a model via Ollama
 ```
 
 ### Global flags
 
-These apply to every command and override the saved config:
+| Flag                  | Description                                            |
+| --------------------- | ----------------------------------------------------- |
+| `-p, --provider <id>` | Provider: `ollama`, `openai-compat`, or `llamacpp`.   |
+| `-m, --model <name>`  | Model name (Ollama tag) or `.gguf` filename.          |
+| `--yolo`              | Skip all permission prompts for the session.          |
 
-| Flag                       | Description                                  |
-| -------------------------- | -------------------------------------------- |
-| `-p, --provider <id>`      | Provider to use: `ollama` or `llamacpp`.     |
-| `-m, --model <name>`       | Model name (Ollama tag) or `.gguf` filename. |
-| `--yolo`                   | Skip all permission prompts.                 |
+### Inside the TUI
 
-> When using the `ollama` provider, Ollama must be running. Start it with
-> `ollama serve`. If it is unreachable, Arterm prints a warning at startup and
-> suggests switching to `--provider llamacpp`.
+| Key / command          | Action                                            |
+| ---------------------- | ------------------------------------------------- |
+| `Enter`                | Send the message.                                 |
+| `?`                    | Show help.                                         |
+| `Alt+P` / `/model`     | Open the interactive model picker.                |
+| `/model <name\|N>`     | Switch model directly (by name or list number).   |
+| `/models`              | Open the model picker.                            |
+| `/clear`               | Reset the conversation.                           |
+| `/exit`                | Quit (also `/quit` or `Ctrl+C`).                  |
+| `Esc`                  | Cancel the running turn.                          |
 
-### TUI slash commands
+When a tool wants to write, edit, or run a shell command, Arterm shows a
+permission prompt: `[y]` allow once · `[a]` always allow this tool · `[n]` deny.
 
-Inside the chat TUI:
+## Providers
 
-| Command         | Action                          |
-| --------------- | ------------------------------- |
-| `/help`         | Show the help text.             |
-| `/clear`        | Clear the conversation.         |
-| `/model <name>` | Switch the active model.        |
-| `/models`       | List available models.          |
-| `/exit`         | Quit (also `/quit` or `Ctrl+C`).|
-| `Esc`           | Cancel the running turn.        |
+| Provider        | Config / flag             | Notes                                                  |
+| --------------- | ------------------------- | ------------------------------------------------------ |
+| `ollama`        | `--provider ollama`       | Talks to a running Ollama server over HTTP.            |
+| `openai-compat` | `--provider openai-compat`| Any OpenAI `/v1` endpoint (LM Studio, vLLM, …).        |
+| `llamacpp`      | `--provider llamacpp`     | Loads a `.gguf` in-process via `node-llama-cpp`.       |
 
-## Direct GGUF loading (llamacpp)
-
-`node-llama-cpp` is an **optional** dependency and is **not installed by
-default** — its native (e.g. CUDA) binaries are very large. The `llamacpp`
-provider imports it lazily and surfaces a clear error if it is missing.
-
-To enable direct GGUF loading:
-
-```bash
-# Install node-llama-cpp into the workspace (or into packages/providers)
-pnpm add -w node-llama-cpp
-```
-
-Then drop a model file into `~/.arterm/models/` and select it:
+`node-llama-cpp` is **optional** and not installed by default (its native
+binaries are large). The `llamacpp` provider imports it lazily and prints a clear
+error if it is missing. Install it and drop GGUF files into `~/.arterm/models/`:
 
 ```bash
+npm install -g node-llama-cpp
 arterm --provider llamacpp --model <file.gguf>
 ```
 
-The provider loads the GGUF in-process (no server required). Tool-calling uses
-the universal JSON fallback, so it works regardless of the model.
+## Security
 
-## Architecture
+Arterm runs models that can read your files and execute shell commands, so it is
+built to be safe by default:
 
-A pnpm + TypeScript (ESM) monorepo. Five packages live under `packages/`, and the
-dependency direction is one-way: **everything depends on `core`**, which owns the
-shared interfaces.
+- **Directory sandbox** — `read`, `write`, `edit`, `ls`, `glob`, and `grep` are
+  confined to the working directory; paths and glob patterns that escape it
+  (absolute paths, `..` segments) are refused — even the auto-allowed search
+  tools cannot read e.g. `~/.ssh` or `/etc`.
+- **Permission prompts** — `write`, `edit`, and `bash` ask before every call
+  unless you opt out per-tool ("always allow") or globally (`--yolo`).
+- **Dangerous-command guard** — a few obviously destructive `bash` patterns
+  (`rm -rf /`, `mkfs`, fork bombs, …) are refused outright. This is
+  defense-in-depth only; the permission prompt is the real guard.
+- **Local by default** — no telemetry and no network calls beyond the model
+  backend you configure.
 
-| Package             | Responsibility                                                                  |
-| ------------------- | ------------------------------------------------------------------------------- |
-| `@arterm/core`      | Shared types (`ChatProvider`, `Tool`, `Message`), the agent loop, config, event bus, permission manager, and the tool-calling protocol. |
-| `@arterm/providers` | Backend implementations: `OllamaProvider` and `LlamaCppProvider`, plus a registry to build/list them. |
-| `@arterm/tools`     | The file & shell tools (`read`, `ls`, `glob`, `grep`, `write`, `edit`, `bash`) and their registry. |
-| `@arterm/tui`       | The Ink terminal UI: chat view, status bar, permission prompts, slash commands. |
-| `@arterm/cli`       | The `arterm` binary: argument parsing (commander), session wiring, and the `chat`/`models`/`pull` commands. |
+> Tools see whatever is in the working directory, including secrets in files like
+> `.env`. Run Arterm from a project directory you trust, and prefer the default
+> (prompting) mode over `--yolo` on untrusted code.
 
 ## Config
 
-Configuration lives in `~/.arterm/` (the `ARTERM_HOME` directory). It is created
-on demand; sensible defaults are used when no file is present.
-
+Configuration lives in `~/.arterm/` and is created on demand.
 `~/.arterm/config.json` fields:
 
-| Field         | Description                                                       | Default                  |
-| ------------- | ----------------------------------------------------------------- | ------------------------ |
-| `provider`    | Active provider id (`ollama` or `llamacpp`).                      | `"ollama"`               |
-| `model`       | Active model (Ollama tag, or a `.gguf` filename for `llamacpp`).  | `"llama3.2"`             |
-| `ollamaHost`  | Base URL of the Ollama server (env `OLLAMA_HOST` overrides).      | `http://127.0.0.1:11434` |
-| `modelsDir`   | Directory holding `.gguf` files for direct loading.              | `~/.arterm/models`       |
-| `temperature` | Sampling temperature.                                             | `0.7`                    |
-| `permissions` | Per-tool permission overrides, persisted by "always allow".      | `{}`                     |
-
-`~/.arterm/models/` holds the `.gguf` files used by the `llamacpp` provider.
-
-## Permissions
-
-Every tool declares a default permission level, resolved at call time in this
-order: a session-wide bypass (`--yolo`), then per-tool overrides (config /
-"always allow"), then the tool's own default.
-
-- **Read-only tools** (`read`, `ls`, `glob`, `grep`) — auto-allow.
-- **Mutating / shell tools** (`write`, `edit`, `bash`) — ask before each call.
-- Choosing **"always allow"** at a prompt persists an override to
-  `~/.arterm/config.json` so the tool won't ask again.
-- **`--yolo`** bypasses all prompts for the session.
-- A few obviously destructive `bash` patterns are refused outright, even with
-  permission.
+| Field              | Description                                          | Default                  |
+| ------------------ | ---------------------------------------------------- | ------------------------ |
+| `provider`         | Active provider id.                                  | `"ollama"`               |
+| `model`            | Active model (Ollama tag or `.gguf` filename).       | `"llama3.2"`             |
+| `ollamaHost`       | Ollama server URL (env `OLLAMA_HOST` overrides).     | `http://127.0.0.1:11434` |
+| `openaiCompatHost` | OpenAI-compatible base URL (incl. `/v1`).            | `http://localhost:1234/v1` |
+| `modelsDir`        | Directory of `.gguf` files for `llamacpp`.           | `~/.arterm/models`       |
+| `temperature`      | Sampling temperature.                                | `0.7`                    |
+| `permissions`      | Per-tool overrides, persisted by "always allow".     | `{}`                     |
 
 ## Development
 
-See [CLAUDE.md](./CLAUDE.md) for the contributor/AI guide: monorepo conventions,
-key commands, and how to add a tool or a provider.
+A pnpm + TypeScript (ESM) monorepo. The dependency direction is one-way:
+everything depends on `core`, which owns the shared interfaces.
+
+| Package             | Responsibility                                                            |
+| ------------------- | ------------------------------------------------------------------------ |
+| `@arterm/core`      | Shared types, the agent loop, config, event bus, permissions, tool protocol. |
+| `@arterm/providers` | `OllamaProvider`, `OpenAICompatProvider`, `LlamaCppProvider` + registry.  |
+| `@arterm/tools`     | The file & shell tools and their registry.                               |
+| `@arterm/tui`       | The Ink terminal UI: chat, status bar, model picker, permission prompts.  |
+| `arterm-cli`        | The published `arterm` binary (commander + session wiring).              |
+
+```bash
+pnpm install
+pnpm -r build      # build every package
+pnpm -r test       # run the test suites
+node packages/cli/dist/main.js   # run the locally-built CLI
+```
+
+See [CLAUDE.md](./CLAUDE.md) for the contributor guide.
+
+## License
+
+[MIT](./LICENSE) © Arclude
