@@ -2,8 +2,17 @@ import type { Tool } from "@arterm/core";
 import { execa } from "execa";
 import { requireString } from "./paths.js";
 
-/** Obvious-footgun patterns that are refused even with permission. */
-const DENY = [/\brm\s+-rf\s+\/(?:\s|$)/, /\bmkfs\b/, /\bdd\s+if=/, /:\(\)\s*\{.*\};:/];
+/**
+ * Obvious-footgun patterns refused even with permission. This is defense-in-depth
+ * only — the real guard is the "ask" permission prompt; do not rely on this list.
+ */
+const DENY = [
+  /\brm\s+-[a-z]*[rf][a-z]*\s+(\/|~)(\s|\*|$)/, // rm -rf / , rm -rf ~ , rm -rf /*
+  /--no-preserve-root/,
+  /\bmkfs\b/,
+  /\bdd\b.*\bof=\/dev\//, // dd ... of=/dev/sdX
+  /:\(\)\s*\{.*\};\s*:/, // fork bomb
+];
 
 export const bashTool: Tool = {
   name: "bash",

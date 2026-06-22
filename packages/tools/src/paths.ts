@@ -14,6 +14,23 @@ export function resolveWithin(cwd: string, p: string): string {
   return abs;
 }
 
+/** True when `abs` is inside (or equal to) `cwd`. */
+export function isWithin(cwd: string, abs: string): boolean {
+  const rel = relative(cwd, abs);
+  return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
+}
+
+/**
+ * Refuses glob patterns that could escape the working directory — absolute
+ * patterns or any `..` segment. read-only search tools (glob/grep) run without a
+ * permission prompt, so this is what keeps them from reading e.g. ~/.ssh.
+ */
+export function assertSafeGlob(pattern: string): void {
+  if (isAbsolute(pattern) || /(^|[\\/])\.\.([\\/]|$)/.test(pattern)) {
+    throw new Error(`Pattern must stay within the working directory: ${pattern}`);
+  }
+}
+
 export function requireString(args: Record<string, unknown>, key: string): string {
   const v = args[key];
   if (typeof v !== "string" || v.length === 0) {

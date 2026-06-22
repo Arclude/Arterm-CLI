@@ -1,6 +1,6 @@
 import type { Tool } from "@arterm/core";
 import fg from "fast-glob";
-import { requireString } from "./paths.js";
+import { assertSafeGlob, requireString } from "./paths.js";
 
 export const globTool: Tool = {
   name: "glob",
@@ -16,6 +16,7 @@ export const globTool: Tool = {
   preview: (args) => `glob ${String(args.pattern)}`,
   async execute(args, ctx) {
     const pattern = requireString(args, "pattern");
+    assertSafeGlob(pattern);
     const matches = await fg(pattern, {
       cwd: ctx.cwd,
       dot: false,

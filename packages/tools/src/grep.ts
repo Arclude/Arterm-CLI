@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import type { Tool } from "@arterm/core";
 import fg from "fast-glob";
-import { optionalString, requireString } from "./paths.js";
+import { assertSafeGlob, isWithin, optionalString, requireString } from "./paths.js";
 
 const MAX_MATCHES = 100;
 
@@ -24,6 +24,7 @@ export const grepTool: Tool = {
   async execute(args, ctx) {
     const pattern = requireString(args, "pattern");
     const glob = optionalString(args, "glob") ?? "**/*";
+    assertSafeGlob(glob);
     let regex: RegExp;
     try {
       regex = new RegExp(pattern);
@@ -42,6 +43,7 @@ export const grepTool: Tool = {
     const results: string[] = [];
     for (const file of files) {
       if (results.length >= MAX_MATCHES) break;
+      if (!isWithin(ctx.cwd, file)) continue;
       let content: string;
       try {
         content = await fs.readFile(file, "utf8");
