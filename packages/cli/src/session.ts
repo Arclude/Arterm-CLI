@@ -7,10 +7,11 @@ import {
   PermissionManager,
   type PermissionMode,
   createContextStrategy,
+  runSubagent,
   saveConfig,
 } from "@arterm/core";
 import { createProvider } from "@arterm/providers";
-import { defaultTools, taskDoneTool } from "@arterm/tools";
+import { createSpawnTool, defaultTools, taskDoneTool } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
 
 export interface SessionOptions {
@@ -52,6 +53,28 @@ export function buildSession(opts: SessionOptions): {
     compactAtPercent: config.context?.compactAtPercent,
   });
 
+  // Sub-agent delegation: the main agent gets a `spawn` tool that runs a fresh
+  // sub-agent (own history, the core tool set, no `spawn` of its own → one level
+  // deep) toward a task and returns its result.
+  const spawnFn = async (task: string, role?: string): Promise<string> => {
+    bus.emit({ type: "subagent_start", task, role });
+    const output = await runSubagent(task, {
+      provider,
+      model: agent.model,
+      tools: defaultTools(),
+      permissions,
+      ask: (tool, args) => asker(tool, args),
+      cwd,
+      taskDone: taskDoneTool,
+      context: createContextStrategy(config),
+      maxSteps: config.autonomy?.maxSteps,
+      role,
+    });
+    bus.emit({ type: "subagent_done", output });
+    return output;
+  };
+  agent.setTools([...agent.tools, createSpawnTool(spawnFn)]);
+
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
     mode: config.autonomy?.mode ?? "once",
     maxSteps: config.autonomy?.maxSteps,
@@ -62,7 +85,7 @@ export function buildSession(opts: SessionOptions): {
     bus,
     config,
     providerLabel: provider.id,
-    toolCount: defaultTools().length,
+    toolCount: agent.tools.length,
     yolo: opts.yolo ?? false,
     setAsker(next) {
       asker = next;

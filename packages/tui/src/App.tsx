@@ -254,6 +254,15 @@ export function App({
           setGoalText("");
           push({ kind: "system", text: `■ autonomy stopped — ${event.reason}` });
           break;
+        case "subagent_start":
+          push({
+            kind: "system",
+            text: `⟳ sub-agent${event.role ? ` (${event.role})` : ""}: ${event.task.slice(0, 80)}`,
+          });
+          break;
+        case "subagent_done":
+          push({ kind: "system", text: `↩ sub-agent done: ${event.output.slice(0, 120)}` });
+          break;
         case "error":
           push({ kind: "system", text: `error: ${event.error}` });
           break;

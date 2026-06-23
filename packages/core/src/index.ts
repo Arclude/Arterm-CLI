@@ -14,3 +14,4 @@ export * from "./contextRegistry.js";
 export * from "./toolProtocol.js";
 export * from "./agent.js";
 export * from "./autonomy.js";
+export * from "./subagent.js";
