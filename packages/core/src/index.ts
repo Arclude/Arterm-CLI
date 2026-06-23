@@ -3,6 +3,7 @@ export * from "./eventBus.js";
 export * from "./config.js";
 export * from "./permissions.js";
 export * from "./keystore.js";
+export * from "./modelsDev.js";
 export * from "./sessions.js";
 export * from "./sessionStore.js";
 export * from "./storeRegistry.js";

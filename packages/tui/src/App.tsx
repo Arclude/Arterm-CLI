@@ -1,12 +1,14 @@
 import {
   PERMISSION_MODES,
+  fetchCatalog,
   type ModelInfo,
   type PermissionAsker,
   type PermissionMode,
+  searchCatalog,
 } from "@arterm/core";
 import { Box, Static, Text, useApp, useInput } from "ink";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type HistoryNav,
   emptyHistory,
@@ -29,7 +31,8 @@ const HELP = [
   "  /help                 show this help        (or press ? )",
   "  /model                open the model picker (or press Alt+P)",
   "  /model <name|N>       switch model directly",
-  "  /models               open the model picker",
+  "  /models               open the model picker (type to filter)",
+  "  /catalog [query]      search the models.dev catalog (~5k models)",
   "  /clear                reset the conversation",
   "  /goal <text>          run autonomously toward a goal (decide→act→reflect→repeat)",
   "  /steer <text>         redirect the running goal · /pause /resume /stop",
@@ -125,6 +128,11 @@ export function App({
   const [pickerModels, setPickerModels] = useState<ModelInfo[]>([]);
   const [pickerIndex, setPickerIndex] = useState(0);
   const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const filteredPickerModels = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    return q ? pickerModels.filter((m) => m.name.toLowerCase().includes(q)) : pickerModels;
+  }, [pickerModels, pickerQuery]);
 
   const abortRef = useRef<AbortController | null>(null);
   const turnStartRef = useRef(0);
@@ -281,6 +289,7 @@ export function App({
   const openPicker = useCallback(async () => {
     setPickerOpen(true);
     setPickerLoading(true);
+    setPickerQuery("");
     try {
       const models = await session.listModels();
       setPickerModels(models);
@@ -336,17 +345,24 @@ export function App({
     { isActive: status === "idle" && !pickerOpen && !pending },
   );
 
-  // Picker navigation.
+  // Picker navigation + type-to-search filtering.
   useInput(
-    (_input, key) => {
+    (input2, key) => {
+      const list = filteredPickerModels;
       if (key.upArrow) setPickerIndex((i) => Math.max(0, i - 1));
-      else if (key.downArrow) setPickerIndex((i) => Math.min(pickerModels.length - 1, i + 1));
+      else if (key.downArrow) setPickerIndex((i) => Math.min(list.length - 1, i + 1));
       else if (key.return) {
-        const m = pickerModels[pickerIndex];
+        const m = list[pickerIndex];
         if (m) choose(m.name);
         setPickerOpen(false);
       } else if (key.escape) {
         setPickerOpen(false);
+      } else if (key.backspace || key.delete) {
+        setPickerQuery((q) => q.slice(0, -1));
+        setPickerIndex(0);
+      } else if (input2 && !key.ctrl && !key.meta) {
+        setPickerQuery((q) => q + input2);
+        setPickerIndex(0);
       }
     },
     { isActive: pickerOpen },
@@ -374,6 +390,34 @@ export function App({
         case "models":
           await openPicker();
           break;
+        case "catalog": {
+          const q = rest.join(" ").trim();
+          push({ kind: "system", text: "loading models.dev catalog…" });
+          try {
+            const catalog = await fetchCatalog();
+            const matches = searchCatalog(catalog, q, 25);
+            if (matches.length === 0) {
+              push({ kind: "system", text: `no catalog models match "${q}"` });
+            } else {
+              const lines = matches.map((m) => {
+                const ctx = m.contextWindow ? ` · ${Math.round(m.contextWindow / 1000)}k ctx` : "";
+                const cost =
+                  m.inputCost != null ? ` · $${m.inputCost}/$${m.outputCost ?? "?"} per 1M` : "";
+                return `  ${m.provider}/${m.id}${ctx}${cost}${m.toolCall ? " · tools" : ""}`;
+              });
+              push({
+                kind: "system",
+                text: `models.dev — ${catalog.length} models, top ${matches.length}:\n${lines.join("\n")}`,
+              });
+            }
+          } catch (err) {
+            push({
+              kind: "system",
+              text: `catalog failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+          break;
+        }
         case "compact": {
           // On success the agent emits a `context_compacted` event that the bus
           // handler renders; only the no-op needs its own message here.
@@ -561,10 +605,11 @@ export function App({
         <PermissionPrompt pending={pending} />
       ) : pickerOpen ? (
         <ModelPicker
-          models={pickerModels}
+          models={filteredPickerModels}
           index={pickerIndex}
           current={model}
           loading={pickerLoading}
+          query={pickerQuery}
         />
       ) : (
         <Box marginTop={1}>

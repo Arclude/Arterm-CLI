@@ -20,11 +20,13 @@ export function ModelPicker({
   index,
   current,
   loading,
+  query,
 }: {
   models: ModelInfo[];
   index: number;
   current: string;
   loading?: boolean;
+  query?: string;
 }): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -33,13 +35,21 @@ export function ModelPicker({
           ── Select a model ──
         </Text>
         <Text color="gray" dimColor>
-          {"   ↑/↓ move · Enter choose · Esc close"}
+          {"   type to filter · ↑/↓ move · Enter choose · Esc close"}
         </Text>
+      </Box>
+      <Box>
+        <Text color="cyan">{"🔎 "}</Text>
+        <Text>{query ?? ""}</Text>
+        <Text color="cyan">▏</Text>
       </Box>
       {loading ? (
         <Text color="gray">  loading…</Text>
       ) : models.length === 0 ? (
-        <Text color="gray">  (no models found on this provider)</Text>
+        <Text color="gray">
+          {"  "}
+          {query ? "(no matches)" : "(no models found on this provider)"}
+        </Text>
       ) : (
         models.map((m, i) => {
           const sel = i === index;
