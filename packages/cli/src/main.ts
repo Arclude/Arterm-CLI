@@ -1,4 +1,5 @@
 import { createSessionStore, loadConfig, retentionFromConfig } from "@arterm/core";
+import { McpManager } from "@arterm/tools";
 import { OllamaProvider, allProviders } from "@arterm/providers";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
@@ -48,8 +49,23 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   // compaction never loses the on-disk record.
   session.agent.setOnMessage((message) => handle.logMessage(message));
 
+  // Connect configured MCP servers and fold their tools into the agent.
+  const mcp = new McpManager(config.mcpServers);
+  const mcpTools = await mcp.connect();
+  if (mcpTools.length > 0) {
+    session.agent.setTools([...session.agent.tools, ...mcpTools]);
+    session.toolCount = session.agent.tools.length;
+  }
+  session.mcpServers = mcp.summary;
+  for (const s of mcp.summary) {
+    if (s.status === "failed") {
+      process.stdout.write(`⚠ MCP server "${s.name}" failed to connect: ${s.error}\n`);
+    }
+  }
+
   await runTui(session, { goal: globals.goal });
 
+  await mcp.close();
   await persist();
 }
 

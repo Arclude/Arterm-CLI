@@ -79,6 +79,7 @@ export function buildSession(opts: SessionOptions): {
       config.mode = next;
     },
     autonomy,
+    mcpServers: [],
   };
 
   const persist = async () => {

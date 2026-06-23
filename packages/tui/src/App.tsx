@@ -34,6 +34,7 @@ const HELP = [
   "  /goal <text>          run autonomously toward a goal (decide→act→reflect→repeat)",
   "  /steer <text>         redirect the running goal · /pause /resume /stop",
   "  /compact              shrink the conversation context (auto when near full)",
+  "  /mcp                  list connected MCP servers and their tools",
   "  /mode [ask|auto|plan|yolo]  set permission mode (no arg cycles)",
   "  /auto /plan /ask /yolo      shortcuts for /mode",
   "  /exit                 quit (or Ctrl+C)",
@@ -424,6 +425,23 @@ export function App({
         case "stop":
           session.autonomy.stop();
           break;
+        case "mcp": {
+          const servers = session.mcpServers;
+          if (servers.length === 0) {
+            push({
+              kind: "system",
+              text: "no MCP servers configured — add them to ~/.arterm/config.json → mcpServers",
+            });
+          } else {
+            const lines = servers.map((s) =>
+              s.status === "connected"
+                ? `  ✓ ${s.name} — ${s.toolCount} tool(s)`
+                : `  ✗ ${s.name} — failed: ${s.error ?? "unknown"}`,
+            );
+            push({ kind: "system", text: `MCP servers:\n${lines.join("\n")}` });
+          }
+          break;
+        }
         case "model": {
           const arg = rest.join(" ").trim();
           if (!arg) {

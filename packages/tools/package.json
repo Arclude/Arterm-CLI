@@ -11,7 +11,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "typecheck": "tsc --noEmit",
@@ -19,6 +21,7 @@
   },
   "dependencies": {
     "@arterm/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "execa": "^9.5.2",
     "fast-glob": "^3.3.2"
   }

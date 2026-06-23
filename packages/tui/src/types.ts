@@ -4,6 +4,7 @@ import type {
   AutonomyEngine,
   CompactionResult,
   EventBus,
+  McpServerSummary,
   ModelInfo,
   PermissionAsker,
   PermissionMode,
@@ -33,6 +34,8 @@ export interface Session {
   setMode(mode: PermissionMode): void;
   /** Autonomous goal-loop engine (/goal, /steer, /pause, /resume, /stop). */
   autonomy: AutonomyEngine;
+  /** Connected MCP servers (for /mcp); populated after startup. */
+  mcpServers: McpServerSummary[];
 }
 
 /** A rendered transcript entry. */

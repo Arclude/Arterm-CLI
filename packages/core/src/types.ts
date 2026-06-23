@@ -85,6 +85,14 @@ export type PermissionLevel = "allow" | "ask" | "deny";
 /** How the autonomy engine runs a goal: "once" stops when done, "eternal" keeps going. */
 export type AutonomyMode = "once" | "eternal";
 
+/** Connection status of one configured MCP server (for the /mcp view). */
+export interface McpServerSummary {
+  name: string;
+  status: "connected" | "failed";
+  toolCount: number;
+  error?: string;
+}
+
 /**
  * What a tool does, used by permission modes: "read" tools never mutate, "edit"
  * tools change files in the project, "execute" tools run arbitrary commands.

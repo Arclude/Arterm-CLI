@@ -48,6 +48,8 @@ export interface ArtermConfig {
     /** Safety step cap for "once" mode. */
     maxSteps?: number;
   };
+  /** External MCP (Model Context Protocol) servers to connect over stdio. */
+  mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
 }
 
 export const ARTERM_HOME = join(homedir(), ".arterm");
@@ -66,6 +68,7 @@ export function defaultConfig(): ArtermConfig {
     session: { mode: "off" },
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
     autonomy: { mode: "once", maxSteps: 25 },
+    mcpServers: {},
   };
 }
 
