@@ -1,8 +1,12 @@
 import type { ArtermConfig, ChatProvider } from "@arterm/core";
 import { Keystore } from "@arterm/core";
+import { AnthropicProvider } from "./anthropic.js";
 import { LlamaCppProvider } from "./llamacpp.js";
 import { OllamaProvider } from "./ollama.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
+
+/** OpenAI's hosted endpoint, for the convenience "openai" provider id. */
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
 
 let cachedKeystore: Keystore | undefined;
 
@@ -29,6 +33,13 @@ export function createProvider(config: ArtermConfig, providerId?: string): ChatP
         baseUrl: config.openaiCompatHost,
         apiKey: apiKeyFor("openai-compat", "OPENAI_API_KEY"),
       });
+    case "openai":
+      return new OpenAICompatProvider({
+        baseUrl: OPENAI_BASE_URL,
+        apiKey: apiKeyFor("openai", "OPENAI_API_KEY"),
+      });
+    case "anthropic":
+      return new AnthropicProvider({ apiKey: apiKeyFor("anthropic", "ANTHROPIC_API_KEY") });
     default:
       throw new Error(`Unknown provider: ${id}`);
   }
@@ -43,5 +54,6 @@ export function allProviders(config: ArtermConfig): ChatProvider[] {
       baseUrl: config.openaiCompatHost,
       apiKey: apiKeyFor("openai-compat", "OPENAI_API_KEY"),
     }),
+    new AnthropicProvider({ apiKey: apiKeyFor("anthropic", "ANTHROPIC_API_KEY") }),
   ];
 }
