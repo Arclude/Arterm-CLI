@@ -6,6 +6,7 @@ import {
   type PermissionAsker,
   PermissionManager,
   type PermissionMode,
+  RiskArbiter,
   createContextStrategy,
   runFleet,
   runSubagent,
@@ -39,7 +40,8 @@ export function buildSession(opts: SessionOptions): {
 
   const provider = createProvider(config, providerId);
   const initialMode: PermissionMode = opts.yolo ? "yolo" : (config.mode ?? "ask");
-  const permissions = new PermissionManager(config.permissions, initialMode);
+  const arbiter = config.arbiter?.enabled === false ? undefined : new RiskArbiter();
+  const permissions = new PermissionManager(config.permissions, initialMode, arbiter);
   const bus = new EventBus();
 
   // The TUI installs the real asker; until then deny by default.

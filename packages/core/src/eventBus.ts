@@ -7,7 +7,7 @@ export type AgentEvent =
   | { type: "assistant_message"; message: Message }
   | { type: "tool_call"; call: ToolCall }
   | { type: "tool_result"; callId: string; name: string; output: string; isError: boolean }
-  | { type: "tool_denied"; callId: string; name: string }
+  | { type: "tool_denied"; callId: string; name: string; reason?: string }
   | { type: "usage"; usage: TokenUsage }
   | { type: "context_compacted"; before: number; after: number; reason: "auto" | "manual" }
   | { type: "turn_end" }

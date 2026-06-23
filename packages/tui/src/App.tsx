@@ -199,7 +199,10 @@ export function App({
           setStatus("thinking");
           break;
         case "tool_denied":
-          push({ kind: "system", text: `✗ denied ${event.name}` });
+          push({
+            kind: "system",
+            text: `✗ denied ${event.name}${event.reason ? ` — ${event.reason}` : ""}`,
+          });
           break;
         case "usage":
           if (event.usage.promptTokens) {

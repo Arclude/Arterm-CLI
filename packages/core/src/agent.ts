@@ -294,7 +294,12 @@ export class Agent {
 
     const decision = await this.opts.permissions.check(tool, call.arguments, this.opts.ask);
     if (!decision.allowed) {
-      this.bus.emit({ type: "tool_denied", callId: call.id, name: call.name });
+      this.bus.emit({
+        type: "tool_denied",
+        callId: call.id,
+        name: call.name,
+        reason: decision.reason,
+      });
       await this.pushToolResult(
         call,
         decision.reason ?? "Tool call denied by the user.",

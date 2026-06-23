@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { RiskArbiter } from "./arbiter.js";
 import { PermissionManager } from "./permissions.js";
 import type { Tool } from "./types.js";
 
@@ -96,5 +97,27 @@ describe("PermissionManager", () => {
     const d = await pm.check(tool("edit", "ask", "edit"), {}, ask);
     expect(d.allowed).toBe(true);
     expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("with the Brain Arbiter, denies critical calls without asking", async () => {
+    const ask = vi.fn();
+    const pm = new PermissionManager({}, "auto", new RiskArbiter());
+    const d = await pm.check(tool("bash", "ask", "execute"), { command: "rm -rf /" }, ask as never);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toMatch(/critical/);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("with the Brain Arbiter, escalates a risky edit in auto mode", async () => {
+    const ask = vi.fn().mockResolvedValue("deny");
+    const pm = new PermissionManager({}, "auto", new RiskArbiter());
+    // A normal edit auto-approves in auto mode...
+    const normal = await pm.check(tool("write", "ask", "edit"), { path: "a.ts" }, ask);
+    expect(normal.allowed).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    // ...but a sensitive-file edit is escalated to the human.
+    const risky = await pm.check(tool("write", "ask", "edit"), { path: ".env" }, ask);
+    expect(ask).toHaveBeenCalledOnce();
+    expect(risky.allowed).toBe(false);
   });
 });

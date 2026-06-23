@@ -1,3 +1,4 @@
+import type { ToolArbiter } from "./arbiter.js";
 import type { PermissionAsker, PermissionLevel, Tool, ToolCategory } from "./types.js";
 
 /**
@@ -30,10 +31,16 @@ export interface PermissionDecision {
 export class PermissionManager {
   private overrides: Record<string, PermissionLevel>;
   private mode: PermissionMode;
+  private readonly arbiter?: ToolArbiter;
 
-  constructor(overrides: Record<string, PermissionLevel> = {}, mode: PermissionMode = "ask") {
+  constructor(
+    overrides: Record<string, PermissionLevel> = {},
+    mode: PermissionMode = "ask",
+    arbiter?: ToolArbiter,
+  ) {
     this.overrides = { ...overrides };
     this.mode = mode;
+    this.arbiter = arbiter;
   }
 
   getMode(): PermissionMode {
@@ -75,8 +82,20 @@ export class PermissionManager {
     if (level === "allow") return { allowed: true, persist: false };
     if (level === "deny") return { allowed: false, persist: false };
 
-    // Auto mode silently approves file edits, but still prompts for execute tools.
-    if (this.mode === "auto" && category === "edit") {
+    // Brain Arbiter: classify the call's risk and possibly deny / force-escalate.
+    let forceAsk = false;
+    if (this.arbiter) {
+      const verdict = this.arbiter.decide(tool, args, { mode: this.mode, category });
+      if (verdict.decision === "deny") {
+        return { allowed: false, persist: false, reason: verdict.reason };
+      }
+      if (verdict.decision === "allow") return { allowed: true, persist: false };
+      if (verdict.decision === "escalate") forceAsk = true;
+    }
+
+    // Auto mode silently approves file edits, but still prompts for execute tools
+    // (and anything the arbiter escalated).
+    if (!forceAsk && this.mode === "auto" && category === "edit") {
       return { allowed: true, persist: false };
     }
 

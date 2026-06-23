@@ -54,6 +54,8 @@ export interface ArtermConfig {
   plugins: Record<string, { trust: TrustTier }>;
   /** Parallel sub-agent fan-out (spawn_parallel). */
   fleet: { concurrency?: number };
+  /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
+  arbiter: { enabled: boolean };
 }
 
 export const ARTERM_HOME = join(homedir(), ".arterm");
@@ -75,6 +77,7 @@ export function defaultConfig(): ArtermConfig {
     mcpServers: {},
     plugins: {},
     fleet: { concurrency: 4 },
+    arbiter: { enabled: true },
   };
 }
 
