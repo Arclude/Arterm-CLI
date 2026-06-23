@@ -9,6 +9,7 @@ export const grepTool: Tool = {
   name: "grep",
   description: "Search file contents for a regular expression and return matching lines.",
   permission: "allow",
+  category: "read",
   parameters: {
     type: "object",
     properties: {

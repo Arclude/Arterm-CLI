@@ -82,6 +82,15 @@ export interface ToolResult {
 
 export type PermissionLevel = "allow" | "ask" | "deny";
 
+/** How the autonomy engine runs a goal: "once" stops when done, "eternal" keeps going. */
+export type AutonomyMode = "once" | "eternal";
+
+/**
+ * What a tool does, used by permission modes: "read" tools never mutate, "edit"
+ * tools change files in the project, "execute" tools run arbitrary commands.
+ */
+export type ToolCategory = "read" | "edit" | "execute";
+
 export interface Tool {
   name: string;
   description: string;
@@ -89,6 +98,8 @@ export interface Tool {
   parameters: Record<string, unknown>;
   /** Default permission level for this tool. */
   permission: PermissionLevel;
+  /** Effect category; drives auto/plan permission modes. Defaults to "execute". */
+  category?: ToolCategory;
   /** Short human-readable summary of a pending call, shown in the permission prompt. */
   preview?(args: Record<string, unknown>): string;
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;

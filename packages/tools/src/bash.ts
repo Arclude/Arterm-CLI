@@ -20,6 +20,7 @@ export const bashTool: Tool = {
     "Run a shell command in the working directory and return combined stdout/stderr. " +
     "Uses the system shell. Prefer dedicated tools (read/edit/glob) when they fit.",
   permission: "ask",
+  category: "execute",
   parameters: {
     type: "object",
     properties: {

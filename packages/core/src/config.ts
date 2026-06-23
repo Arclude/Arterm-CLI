@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { PermissionLevel } from "./types.js";
+import type { PermissionMode } from "./permissions.js";
+import type { AutonomyMode, PermissionLevel } from "./types.js";
 
 export interface ArtermConfig {
   /** Active provider id ("ollama" | "llamacpp"). */
@@ -18,6 +19,35 @@ export interface ArtermConfig {
   temperature: number;
   /** Per-tool permission overrides, persisted by "always allow". */
   permissions: Record<string, PermissionLevel>;
+  /** Default permission mode (ask | auto | plan | yolo). */
+  mode: PermissionMode;
+  /** On-disk session transcript logging + retention. */
+  session: {
+    /** "off" = never write transcripts (default); "jsonl" = one file per session. */
+    mode: "off" | "jsonl";
+    /** Keep at most this many most-recent sessions. */
+    maxSessions?: number;
+    /** Delete sessions older than this many days. */
+    maxAgeDays?: number;
+  };
+  /** Conversation context-window compaction. */
+  context: {
+    /** "none" = never compact; "window" = keep a recent slice; "summary" = (future). */
+    strategy: "none" | "window" | "summary";
+    /** Model context window in tokens, used to decide when to auto-compact. */
+    window?: number;
+    /** Compact once usage crosses this fraction of `window` (0–1). */
+    compactAtPercent?: number;
+    /** Window strategy: keep at most this many recent messages. */
+    maxMessages?: number;
+  };
+  /** Autonomous goal-loop defaults (/goal). */
+  autonomy: {
+    /** "once" stops when the goal is done; "eternal" runs until stopped. */
+    mode: AutonomyMode;
+    /** Safety step cap for "once" mode. */
+    maxSteps?: number;
+  };
 }
 
 export const ARTERM_HOME = join(homedir(), ".arterm");
@@ -32,6 +62,10 @@ export function defaultConfig(): ArtermConfig {
     modelsDir: join(ARTERM_HOME, "models"),
     temperature: 0.7,
     permissions: {},
+    mode: "ask",
+    session: { mode: "off" },
+    context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
+    autonomy: { mode: "once", maxSteps: 25 },
   };
 }
 

@@ -6,7 +6,7 @@ import type { Session } from "./types.js";
 export type { Session, DisplayItem } from "./types.js";
 
 /** Boots the full-screen Ink TUI and resolves when the user exits. */
-export async function runTui(session: Session): Promise<void> {
-  const instance = render(React.createElement(App, { session }));
+export async function runTui(session: Session, opts?: { goal?: string }): Promise<void> {
+  const instance = render(React.createElement(App, { session, initialGoal: opts?.goal }));
   await instance.waitUntilExit();
 }

@@ -40,24 +40,55 @@ function asCall(value: RawCall): ToolCall | null {
 }
 
 /**
+ * Scans `text` for top-level balanced `{...}` JSON objects, respecting string
+ * literals and escapes so braces inside strings don't throw off the matching.
+ * Used to recover bare (unfenced) tool calls.
+ */
+function extractBalancedObjects(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}" && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        out.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Extracts tool calls from assistant text and returns the text with those blocks
  * stripped. Tolerates ```json fences, plain ``` fences, and arrays of calls.
+ * Falls back to bare (unfenced) JSON objects — common with small local models —
+ * which also rescues calls whose file content embeds its own ``` fences.
  */
 export function parseToolCalls(text: string): { calls: ToolCall[]; cleaned: string } {
   const calls: ToolCall[] = [];
-  const fence = /```(?:json)?\s*([\s\S]*?)```/g;
   let cleaned = text;
-  let match: RegExpExecArray | null;
 
-  // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex exec loop
-  while ((match = fence.exec(text)) !== null) {
-    const body = match[1]?.trim();
-    if (!body) continue;
+  const consume = (body: string, fullMatch: string): void => {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(body);
+      parsed = JSON.parse(body.trim());
     } catch {
-      continue;
+      return;
     }
     const candidates = Array.isArray(parsed) ? parsed : [parsed];
     let consumed = false;
@@ -70,7 +101,23 @@ export function parseToolCalls(text: string): { calls: ToolCall[]; cleaned: stri
         }
       }
     }
-    if (consumed) cleaned = cleaned.replace(match[0], "");
+    if (consumed) cleaned = cleaned.replace(fullMatch, "");
+  };
+
+  // 1) Preferred: fenced ```json blocks.
+  const fence = /```(?:json)?\s*([\s\S]*?)```/g;
+  let match: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex exec loop
+  while ((match = fence.exec(text)) !== null) {
+    const body = match[1];
+    if (body?.trim()) consume(body, match[0]);
+  }
+
+  // 2) Fallback: bare JSON objects (no fence, or fences broken by nested ```).
+  if (calls.length === 0) {
+    for (const obj of extractBalancedObjects(text)) {
+      if (obj.includes('"tool"')) consume(obj, obj);
+    }
   }
 
   return { calls, cleaned: cleaned.trim() };

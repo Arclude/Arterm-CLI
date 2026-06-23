@@ -46,6 +46,20 @@ const Sep = (): React.ReactElement => (
   </Text>
 );
 
+/** Status-bar color for each permission mode. */
+function modeColor(mode: string): string {
+  switch (mode) {
+    case "YOLO":
+      return "red";
+    case "PLAN":
+      return "cyan";
+    case "AUTO":
+      return "green";
+    default:
+      return "yellow";
+  }
+}
+
 export function StatusBar({
   provider,
   model,
@@ -99,7 +113,7 @@ export function StatusBar({
         <Sep />
         <Text color="gray">⏱ {clock}</Text>
         <Sep />
-        <Text color={mode === "YOLO" ? "red" : "yellow"}>{mode}</Text>
+        <Text color={modeColor(mode)}>{mode}</Text>
       </Box>
       <Box>
         <Text color="gray" dimColor>

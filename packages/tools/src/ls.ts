@@ -6,6 +6,7 @@ export const lsTool: Tool = {
   name: "ls",
   description: "List the entries of a directory (defaults to the working directory).",
   permission: "allow",
+  category: "read",
   parameters: {
     type: "object",
     properties: {

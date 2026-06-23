@@ -2,11 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { PermissionManager } from "./permissions.js";
 import type { Tool } from "./types.js";
 
-const tool = (name: string, permission: Tool["permission"]): Tool => ({
+const tool = (
+  name: string,
+  permission: Tool["permission"],
+  category?: Tool["category"],
+): Tool => ({
   name,
   description: "",
   parameters: {},
   permission,
+  category,
   execute: async () => ({ output: "" }),
 });
 
@@ -51,8 +56,44 @@ describe("PermissionManager", () => {
 
   it("yolo bypasses everything", async () => {
     const ask = vi.fn();
-    const pm = new PermissionManager({}, true);
+    const pm = new PermissionManager({}, "yolo");
     const d = await pm.check(tool("bash", "ask"), {}, ask as never);
+    expect(d.allowed).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("auto mode approves edits silently but still asks for execute tools", async () => {
+    const ask = vi.fn().mockResolvedValue("deny");
+    const pm = new PermissionManager({}, "auto");
+
+    const edit = await pm.check(tool("write", "ask", "edit"), {}, ask);
+    expect(edit.allowed).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+
+    const exec = await pm.check(tool("bash", "ask", "execute"), {}, ask);
+    expect(ask).toHaveBeenCalledOnce();
+    expect(exec.allowed).toBe(false);
+  });
+
+  it("plan mode blocks edits/execute without asking but allows reads", async () => {
+    const ask = vi.fn();
+    const pm = new PermissionManager({}, "plan");
+
+    const edit = await pm.check(tool("write", "ask", "edit"), {}, ask as never);
+    expect(edit.allowed).toBe(false);
+    expect(edit.reason).toMatch(/plan mode/);
+
+    const read = await pm.check(tool("read", "allow", "read"), {}, ask as never);
+    expect(read.allowed).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("setMode switches behavior at runtime", async () => {
+    const ask = vi.fn().mockResolvedValue("deny");
+    const pm = new PermissionManager();
+    expect(pm.getMode()).toBe("ask");
+    pm.setMode("auto");
+    const d = await pm.check(tool("edit", "ask", "edit"), {}, ask);
     expect(d.allowed).toBe(true);
     expect(ask).not.toHaveBeenCalled();
   });

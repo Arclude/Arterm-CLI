@@ -1,4 +1,4 @@
-import { SessionLog, loadConfig } from "@arterm/core";
+import { createSessionStore, loadConfig, retentionFromConfig } from "@arterm/core";
 import { OllamaProvider, allProviders } from "@arterm/providers";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
@@ -10,6 +10,7 @@ interface GlobalOpts {
   provider?: string;
   model?: string;
   yolo?: boolean;
+  goal?: string;
 }
 
 async function startChat(globals: GlobalOpts): Promise<void> {
@@ -33,17 +34,21 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     cwd: process.cwd(),
   });
 
-  // Record this session up front so even an empty conversation is logged.
-  const log = await SessionLog.create({ model: config.model, provider: providerId });
-
-  await runTui(session);
-
-  // Persist the full conversation after the TUI exits — agent.history holds the
-  // complete user/assistant/tool transcript, which is simpler and more reliable
-  // than reconstructing it from individual bus events.
-  for (const message of session.agent.history) {
-    await log.logMessage(message);
+  // Trim old transcripts (best-effort), then open this session's store handle.
+  // With session.mode "off" (the default) this is a no-op and nothing hits disk.
+  const store = createSessionStore(config);
+  try {
+    await store.prune(retentionFromConfig(config));
+  } catch {
+    // Pruning must never block startup.
   }
+  const handle = await store.create({ model: config.model, provider: providerId });
+
+  // Log messages incrementally as they're produced, so in-memory context
+  // compaction never loses the on-disk record.
+  session.agent.setOnMessage((message) => handle.logMessage(message));
+
+  await runTui(session, { goal: globals.goal });
 
   await persist();
 }
@@ -89,7 +94,8 @@ async function main(): Promise<void> {
     .version(VERSION)
     .option("-p, --provider <id>", "provider: ollama | llamacpp")
     .option("-m, --model <name>", "model name or .gguf file")
-    .option("--yolo", "skip all permission prompts");
+    .option("--yolo", "skip all permission prompts")
+    .option("--goal <text>", "start an autonomous run toward this goal");
 
   program
     .command("chat", { isDefault: true })

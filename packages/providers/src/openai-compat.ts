@@ -9,6 +9,9 @@ import type {
   ToolSchema,
 } from "@arterm/core";
 
+/** Max wait for metadata calls (model list/reachability) before giving up, in ms. */
+const METADATA_TIMEOUT_MS = 5000;
+
 interface OpenAIModelsResponse {
   data?: Array<{ id: string }>;
 }
@@ -64,7 +67,10 @@ export class OpenAICompatProvider implements ChatProvider {
   /** True if the server responds, used for auto-detection. */
   async isReachable(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/models`, { headers: this.headers() });
+      const res = await fetch(`${this.baseUrl}/models`, {
+        headers: this.headers(),
+        signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+      });
       return res.ok;
     } catch {
       return false;
@@ -72,7 +78,14 @@ export class OpenAICompatProvider implements ChatProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    const res = await fetch(`${this.baseUrl}/models`, { headers: this.headers() });
+    const res = await fetch(`${this.baseUrl}/models`, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+    }).catch((err) => {
+      throw new Error(
+        `OpenAI-compat /models unreachable at ${this.baseUrl}: ${(err as Error).message}`,
+      );
+    });
     if (!res.ok) throw new Error(`OpenAI-compat /models failed: ${res.status}`);
     const data = (await res.json()) as OpenAIModelsResponse;
     return (data.data ?? []).map((m) => ({

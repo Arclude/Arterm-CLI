@@ -24,6 +24,9 @@ const TOOL_CAPABLE = [
   "hermes3",
 ];
 
+/** Max wait for metadata calls (tags/reachability) before giving up, in ms. */
+const METADATA_TIMEOUT_MS = 5000;
+
 interface OllamaTagsResponse {
   models?: Array<{ name: string; size?: number }>;
 }
@@ -62,7 +65,9 @@ export class OllamaProvider implements ChatProvider {
   /** True if the Ollama server responds, used for auto-detection. */
   async isReachable(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.host}/api/tags`);
+      const res = await fetch(`${this.host}/api/tags`, {
+        signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+      });
       return res.ok;
     } catch {
       return false;
@@ -70,7 +75,11 @@ export class OllamaProvider implements ChatProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    const res = await fetch(`${this.host}/api/tags`);
+    const res = await fetch(`${this.host}/api/tags`, {
+      signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+    }).catch((err) => {
+      throw new Error(`Ollama /api/tags unreachable at ${this.host}: ${(err as Error).message}`);
+    });
     if (!res.ok) throw new Error(`Ollama /api/tags failed: ${res.status}`);
     const data = (await res.json()) as OllamaTagsResponse;
     return (data.models ?? []).map((m) => ({

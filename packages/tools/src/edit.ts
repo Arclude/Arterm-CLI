@@ -8,6 +8,7 @@ export const editTool: Tool = {
     "Replace an exact substring in a file. old_string must appear exactly once unless " +
     "replace_all is true. Read the file first to craft a unique old_string.",
   permission: "ask",
+  category: "edit",
   parameters: {
     type: "object",
     properties: {

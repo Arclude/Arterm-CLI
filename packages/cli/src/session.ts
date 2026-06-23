@@ -1,13 +1,16 @@
 import {
   Agent,
   type ArtermConfig,
+  AutonomyEngine,
   EventBus,
   type PermissionAsker,
   PermissionManager,
+  type PermissionMode,
+  createContextStrategy,
   saveConfig,
 } from "@arterm/core";
 import { createProvider } from "@arterm/providers";
-import { defaultTools } from "@arterm/tools";
+import { defaultTools, taskDoneTool } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
 
 export interface SessionOptions {
@@ -28,7 +31,8 @@ export function buildSession(opts: SessionOptions): {
   const model = opts.model ?? config.model;
 
   const provider = createProvider(config, providerId);
-  const permissions = new PermissionManager(config.permissions, opts.yolo);
+  const initialMode: PermissionMode = opts.yolo ? "yolo" : (config.mode ?? "ask");
+  const permissions = new PermissionManager(config.permissions, initialMode);
   const bus = new EventBus();
 
   // The TUI installs the real asker; until then deny by default.
@@ -43,6 +47,14 @@ export function buildSession(opts: SessionOptions): {
     bus,
     cwd,
     temperature: config.temperature,
+    context: createContextStrategy(config),
+    contextWindow: config.context?.window,
+    compactAtPercent: config.context?.compactAtPercent,
+  });
+
+  const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
+    mode: config.autonomy?.mode ?? "once",
+    maxSteps: config.autonomy?.maxSteps,
   });
 
   const session: Session = {
@@ -60,11 +72,21 @@ export function buildSession(opts: SessionOptions): {
       agent.setModel(next);
       config.model = next;
     },
+    compact: () => agent.compact("manual"),
+    permissionMode: initialMode,
+    setMode(next) {
+      permissions.setMode(next);
+      config.mode = next;
+    },
+    autonomy,
   };
 
   const persist = async () => {
     config.provider = providerId;
     config.permissions = permissions.snapshot();
+    // Persist auto/plan/ask as the default, but never make yolo sticky.
+    const current = permissions.getMode();
+    config.mode = current === "yolo" ? "ask" : current;
     await saveConfig(config);
   };
 

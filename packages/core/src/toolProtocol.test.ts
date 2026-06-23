@@ -31,4 +31,34 @@ describe("parseToolCalls", () => {
     const { calls } = parseToolCalls("```json\n{not valid}\n```");
     expect(calls).toHaveLength(0);
   });
+
+  it("recovers a bare (unfenced) tool call", () => {
+    const text = 'Sure.\n{"tool": "write_file", "args": {"path": "a.ts", "content": "x"}}';
+    const { calls, cleaned } = parseToolCalls(text);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("write_file");
+    expect(calls[0]?.arguments).toEqual({ path: "a.ts", content: "x" });
+    expect(cleaned).toBe("Sure.");
+  });
+
+  it("recovers a call whose file content embeds ``` fences", () => {
+    const content = "# Title\n```js\nconst x = 1;\n```\n";
+    const text = `\`\`\`json\n${JSON.stringify({ tool: "write_file", args: { path: "README.md", content } })}\n\`\`\``;
+    const { calls } = parseToolCalls(text);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("write_file");
+    expect((calls[0]?.arguments as { content: string }).content).toBe(content);
+  });
+
+  it("does not treat plain json objects without a tool field as calls", () => {
+    const { calls } = parseToolCalls('Here is config: {"path": "a.ts", "size": 12}');
+    expect(calls).toHaveLength(0);
+  });
+
+  it("prefers fenced calls and ignores the bare fallback when a fence matched", () => {
+    const text =
+      '```json\n{"tool":"read","args":{"path":"a"}}\n```\nNote: {"tool":"ls","args":{}}';
+    const { calls } = parseToolCalls(text);
+    expect(calls.map((c) => c.name)).toEqual(["read"]);
+  });
 });

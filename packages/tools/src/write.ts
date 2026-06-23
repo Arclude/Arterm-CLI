@@ -7,6 +7,7 @@ export const writeTool: Tool = {
   name: "write",
   description: "Create or overwrite a file with the given content.",
   permission: "ask",
+  category: "edit",
   parameters: {
     type: "object",
     properties: {

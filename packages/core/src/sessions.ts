@@ -5,7 +5,7 @@ import { ARTERM_HOME } from "./config.js";
 import type { Message } from "./types.js";
 
 /** Directory holding one append-only JSONL file per session. */
-const SESSIONS_DIR = join(ARTERM_HOME, "sessions");
+export const SESSIONS_DIR = join(ARTERM_HOME, "sessions");
 
 /** First line of every session file: provenance for the conversation. */
 interface SessionMeta {
@@ -43,11 +43,14 @@ export class SessionLog {
     return this._path;
   }
 
-  /** Create a new session file (with its meta line) under the sessions dir. */
-  static async create(meta: { model: string; provider: string }): Promise<SessionLog> {
-    await fs.mkdir(SESSIONS_DIR, { recursive: true });
+  /** Create a new session file (with its meta line) under `dir`. */
+  static async create(
+    meta: { model: string; provider: string },
+    dir: string = SESSIONS_DIR,
+  ): Promise<SessionLog> {
+    await fs.mkdir(dir, { recursive: true });
     const id = randomUUID();
-    const path = join(SESSIONS_DIR, `${id}.jsonl`);
+    const path = join(dir, `${id}.jsonl`);
     const log = new SessionLog(id, path);
     const metaLine: SessionMeta = {
       kind: "meta",
@@ -76,10 +79,10 @@ export class SessionLog {
  * Each summary comes from the file's first (meta) line; unreadable or malformed
  * files are skipped. Returns [] when no sessions dir exists yet.
  */
-export async function listSessions(): Promise<SessionSummary[]> {
+export async function listSessions(dir: string = SESSIONS_DIR): Promise<SessionSummary[]> {
   let entries: string[];
   try {
-    entries = await fs.readdir(SESSIONS_DIR);
+    entries = await fs.readdir(dir);
   } catch {
     return [];
   }
@@ -87,7 +90,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
   const summaries: SessionSummary[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(".jsonl")) continue;
-    const path = join(SESSIONS_DIR, entry);
+    const path = join(dir, entry);
     try {
       const raw = await fs.readFile(path, "utf8");
       const firstLine = raw.split("\n", 1)[0] ?? "";

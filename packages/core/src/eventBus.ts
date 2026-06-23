@@ -1,4 +1,4 @@
-import type { Message, TokenUsage, ToolCall } from "./types.js";
+import type { AutonomyMode, Message, TokenUsage, ToolCall } from "./types.js";
 
 /** Lifecycle + observability events emitted by the agent loop. */
 export type AgentEvent =
@@ -9,8 +9,18 @@ export type AgentEvent =
   | { type: "tool_result"; callId: string; name: string; output: string; isError: boolean }
   | { type: "tool_denied"; callId: string; name: string }
   | { type: "usage"; usage: TokenUsage }
+  | { type: "context_compacted"; before: number; after: number; reason: "auto" | "manual" }
   | { type: "turn_end" }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string }
+  // Autonomy engine lifecycle.
+  | { type: "goal_set"; goal: string; mode: AutonomyMode }
+  | { type: "autonomy_step"; step: number }
+  | { type: "autonomy_reflect"; done: boolean; note?: string }
+  | { type: "autonomy_steer"; note: string }
+  | { type: "autonomy_paused" }
+  | { type: "autonomy_resumed" }
+  | { type: "autonomy_done"; summary: string }
+  | { type: "autonomy_stopped"; reason: string };
 
 type Listener = (event: AgentEvent) => void;
 

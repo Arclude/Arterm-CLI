@@ -6,6 +6,7 @@ export const globTool: Tool = {
   name: "glob",
   description: "Find files matching a glob pattern (e.g. 'src/**/*.ts').",
   permission: "allow",
+  category: "read",
   parameters: {
     type: "object",
     properties: {

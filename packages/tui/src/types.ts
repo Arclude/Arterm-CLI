@@ -1,4 +1,13 @@
-import type { Agent, ArtermConfig, EventBus, ModelInfo, PermissionAsker } from "@arterm/core";
+import type {
+  Agent,
+  ArtermConfig,
+  AutonomyEngine,
+  CompactionResult,
+  EventBus,
+  ModelInfo,
+  PermissionAsker,
+  PermissionMode,
+} from "@arterm/core";
 
 /** Everything the TUI needs from the host (CLI), kept behind one interface. */
 export interface Session {
@@ -16,6 +25,14 @@ export interface Session {
   listModels(): Promise<ModelInfo[]>;
   /** Switch the active model (for /model <name>). */
   switchModel(model: string): void;
+  /** Compact the conversation context now (for /compact). */
+  compact(): Promise<CompactionResult>;
+  /** Current permission mode (ask | auto | plan | yolo). */
+  permissionMode: PermissionMode;
+  /** Change the permission mode (Shift+Tab / /mode). */
+  setMode(mode: PermissionMode): void;
+  /** Autonomous goal-loop engine (/goal, /steer, /pause, /resume, /stop). */
+  autonomy: AutonomyEngine;
 }
 
 /** A rendered transcript entry. */

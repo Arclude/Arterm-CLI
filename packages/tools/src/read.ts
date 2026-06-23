@@ -8,6 +8,7 @@ export const readTool: Tool = {
   name: "read",
   description: "Read a UTF-8 text file and return its contents with line numbers.",
   permission: "allow",
+  category: "read",
   parameters: {
     type: "object",
     properties: {
