@@ -8,6 +8,7 @@ import type {
   ChatProvider,
   Message,
   PermissionAsker,
+  SkillInfo,
   Tool,
   ToolCall,
   ToolSchema,
@@ -35,6 +36,8 @@ export interface AgentOptions {
   compactAtPercent?: number;
   /** Invoked for every message appended to history (for incremental logging). */
   onMessage?: (message: Message) => void | Promise<void>;
+  /** Skills advertised to the model in the system prompt (run via /skill). */
+  skills?: SkillInfo[];
 }
 
 const DEFAULT_SYSTEM =
@@ -113,6 +116,11 @@ export class Agent {
     this.opts.onMessage = onMessage;
   }
 
+  /** Advertise the available skills to the model (shown in the system prompt). */
+  setSkills(skills: SkillInfo[]): void {
+    this.opts.skills = skills;
+  }
+
   /** Current tool set. */
   get tools(): Tool[] {
     return this.opts.tools;
@@ -179,6 +187,11 @@ export class Agent {
       }
     } catch {
       // If the directory can't be listed, the `ls` tool still works at call time.
+    }
+    const skills = this.opts.skills;
+    if (skills && skills.length > 0) {
+      lines.push("", "Available skills (the user can run one with /skill <name>):");
+      lines.push(skills.map((s) => `- ${s.name}: ${s.description}`).join("\n"));
     }
     if (this.opts.permissions.getMode() === "plan") {
       lines.push(

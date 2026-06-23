@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PermissionMode } from "./permissions.js";
-import type { AutonomyMode, PermissionLevel } from "./types.js";
+import type { AutonomyMode, PermissionLevel, TrustTier } from "./types.js";
 
 export interface ArtermConfig {
   /** Active provider id ("ollama" | "llamacpp"). */
@@ -50,6 +50,8 @@ export interface ArtermConfig {
   };
   /** External MCP (Model Context Protocol) servers to connect over stdio. */
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  /** Per-plugin trust level (untrusted by default — tools forced to ask, execute blocked). */
+  plugins: Record<string, { trust: TrustTier }>;
 }
 
 export const ARTERM_HOME = join(homedir(), ".arterm");
@@ -69,6 +71,7 @@ export function defaultConfig(): ArtermConfig {
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
     autonomy: { mode: "once", maxSteps: 25 },
     mcpServers: {},
+    plugins: {},
   };
 }
 

@@ -93,6 +93,26 @@ export interface McpServerSummary {
   error?: string;
 }
 
+/** Whether a plugin's tools are trusted. Untrusted tools are gated (ask + no execute). */
+export type TrustTier = "trusted" | "untrusted";
+
+/** Load status of one local plugin (for the /plugins view). */
+export interface PluginSummary {
+  name: string;
+  status: "loaded" | "failed";
+  toolCount: number;
+  trust: TrustTier;
+  /** Number of tools blocked by capability gating (untrusted execute tools). */
+  blocked?: number;
+  error?: string;
+}
+
+/** A reusable prompt-based capability surfaced to the model and run via /skill. */
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
+
 /**
  * What a tool does, used by permission modes: "read" tools never mutate, "edit"
  * tools change files in the project, "execute" tools run arbitrary commands.

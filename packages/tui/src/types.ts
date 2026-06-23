@@ -8,6 +8,8 @@ import type {
   ModelInfo,
   PermissionAsker,
   PermissionMode,
+  PluginSummary,
+  SkillInfo,
 } from "@arterm/core";
 
 /** Everything the TUI needs from the host (CLI), kept behind one interface. */
@@ -36,6 +38,12 @@ export interface Session {
   autonomy: AutonomyEngine;
   /** Connected MCP servers (for /mcp); populated after startup. */
   mcpServers: McpServerSummary[];
+  /** Loaded plugins (for /plugins); populated after startup. */
+  plugins: PluginSummary[];
+  /** Available skills (for /skills); populated after startup. */
+  skills: SkillInfo[];
+  /** Returns a skill's instruction body to run it (for /skill <name>). */
+  getSkillBody(name: string): string | undefined;
 }
 
 /** A rendered transcript entry. */

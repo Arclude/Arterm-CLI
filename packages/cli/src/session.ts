@@ -80,6 +80,9 @@ export function buildSession(opts: SessionOptions): {
     },
     autonomy,
     mcpServers: [],
+    plugins: [],
+    skills: [],
+    getSkillBody: () => undefined,
   };
 
   const persist = async () => {

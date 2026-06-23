@@ -35,6 +35,8 @@ const HELP = [
   "  /steer <text>         redirect the running goal · /pause /resume /stop",
   "  /compact              shrink the conversation context (auto when near full)",
   "  /mcp                  list connected MCP servers and their tools",
+  "  /plugins              list loaded plugins (with trust + gating)",
+  "  /skills · /skill <n>  list skills · run a skill by name",
   "  /mode [ask|auto|plan|yolo]  set permission mode (no arg cycles)",
   "  /auto /plan /ask /yolo      shortcuts for /mode",
   "  /exit                 quit (or Ctrl+C)",
@@ -440,6 +442,52 @@ export function App({
             );
             push({ kind: "system", text: `MCP servers:\n${lines.join("\n")}` });
           }
+          break;
+        }
+        case "plugins": {
+          const ps = session.plugins;
+          if (ps.length === 0) {
+            push({
+              kind: "system",
+              text: "no plugins loaded — drop them in ~/.arterm/plugins/<name>/ and set trust in config",
+            });
+          } else {
+            const lines = ps.map((p) =>
+              p.status === "loaded"
+                ? `  ${p.trust === "trusted" ? "✓" : "•"} ${p.name} [${p.trust}] — ${p.toolCount} tool(s)${
+                    p.blocked ? `, ${p.blocked} blocked` : ""
+                  }`
+                : `  ✗ ${p.name} — failed: ${p.error ?? "unknown"}`,
+            );
+            push({ kind: "system", text: `Plugins:\n${lines.join("\n")}` });
+          }
+          break;
+        }
+        case "skills": {
+          const sk = session.skills;
+          if (sk.length === 0) {
+            push({ kind: "system", text: "no skills found — add markdown files to ~/.arterm/skills/" });
+          } else {
+            push({
+              kind: "system",
+              text: `Skills:\n${sk.map((s) => `  ${s.name} — ${s.description}`).join("\n")}`,
+            });
+          }
+          break;
+        }
+        case "skill": {
+          const sname = rest.join(" ").trim();
+          const body = sname ? session.getSkillBody(sname) : undefined;
+          if (!body) {
+            push({ kind: "system", text: `unknown skill: ${sname || "(none)"} — see /skills` });
+            break;
+          }
+          push({ kind: "system", text: `▸ running skill: ${sname}` });
+          push({ kind: "user", text: `(skill: ${sname})` });
+          const controller = new AbortController();
+          abortRef.current = controller;
+          await session.agent.run(body, controller.signal);
+          abortRef.current = null;
           break;
         }
         case "model": {

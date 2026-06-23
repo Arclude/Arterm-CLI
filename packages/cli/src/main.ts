@@ -1,5 +1,6 @@
-import { createSessionStore, loadConfig, retentionFromConfig } from "@arterm/core";
-import { McpManager } from "@arterm/tools";
+import { join } from "node:path";
+import { ARTERM_HOME, createSessionStore, loadConfig, retentionFromConfig } from "@arterm/core";
+import { McpManager, PluginLoader, SkillRegistry } from "@arterm/tools";
 import { OllamaProvider, allProviders } from "@arterm/providers";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
@@ -49,17 +50,38 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   // compaction never loses the on-disk record.
   session.agent.setOnMessage((message) => handle.logMessage(message));
 
-  // Connect configured MCP servers and fold their tools into the agent.
+  // Load external capabilities: MCP servers, local plugins, and skills.
   const mcp = new McpManager(config.mcpServers);
-  const mcpTools = await mcp.connect();
-  if (mcpTools.length > 0) {
-    session.agent.setTools([...session.agent.tools, ...mcpTools]);
+  const pluginTrust = Object.fromEntries(
+    Object.entries(config.plugins ?? {}).map(([name, p]) => [name, p.trust]),
+  );
+  const plugins = new PluginLoader(join(ARTERM_HOME, "plugins"), pluginTrust);
+  const skills = new SkillRegistry(join(ARTERM_HOME, "skills"));
+
+  const [mcpTools, pluginTools] = await Promise.all([mcp.connect(), plugins.load()]);
+  await skills.load();
+
+  // Fold external tools into the agent (built-ins win on name collisions).
+  const existing = new Set(session.agent.tools.map((t) => t.name));
+  const extra = [...mcpTools, ...pluginTools].filter((t) => !existing.has(t.name));
+  if (extra.length > 0) {
+    session.agent.setTools([...session.agent.tools, ...extra]);
     session.toolCount = session.agent.tools.length;
   }
+  session.agent.setSkills(skills.list());
   session.mcpServers = mcp.summary;
+  session.plugins = plugins.summary;
+  session.skills = skills.list();
+  session.getSkillBody = (name) => skills.get(name)?.body;
+
   for (const s of mcp.summary) {
     if (s.status === "failed") {
       process.stdout.write(`⚠ MCP server "${s.name}" failed to connect: ${s.error}\n`);
+    }
+  }
+  for (const p of plugins.summary) {
+    if (p.status === "failed") {
+      process.stdout.write(`⚠ plugin "${p.name}" failed to load: ${p.error}\n`);
     }
   }
 
