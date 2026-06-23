@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import { ARTERM_HOME, createSessionStore, loadConfig, retentionFromConfig } from "@arterm/core";
+import {
+  ARTERM_HOME,
+  Keystore,
+  createSessionStore,
+  loadConfig,
+  retentionFromConfig,
+} from "@arterm/core";
 import { McpManager, PluginLoader, SkillRegistry } from "@arterm/tools";
 import { OllamaProvider, allProviders } from "@arterm/providers";
 import { runTui } from "@arterm/tui";
@@ -124,6 +130,35 @@ async function pullModel(model: string): Promise<void> {
   process.stdout.write("Done.\n");
 }
 
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8").trim();
+}
+
+async function authSet(name: string, value?: string): Promise<void> {
+  const secret = value ?? (await readStdin());
+  if (!secret) {
+    process.stderr.write("Provide the secret via --value or pipe it on stdin.\n");
+    process.exitCode = 1;
+    return;
+  }
+  Keystore.open().set(name, secret);
+  process.stdout.write(`✓ stored encrypted key "${name}"\n`);
+}
+
+function authList(): void {
+  const names = Keystore.open().names();
+  if (names.length === 0) process.stdout.write("No stored keys.\n");
+  else process.stdout.write(`Stored keys:\n${names.map((n) => `  ${n}`).join("\n")}\n`);
+}
+
+function authRemove(name: string): void {
+  const removed = Keystore.open().remove(name);
+  process.stdout.write(removed ? `✓ removed "${name}"\n` : `no key named "${name}"\n`);
+}
+
 async function main(): Promise<void> {
   const program = new Command();
   program
@@ -148,6 +183,17 @@ async function main(): Promise<void> {
     .action(listModels);
 
   program.command("pull <model>").description("download a model via Ollama").action(pullModel);
+
+  const auth = program.command("auth").description("manage encrypted API keys (AES-256-GCM)");
+  auth
+    .command("set <name>")
+    .description("store an API key (encrypted); value from --value or stdin")
+    .option("--value <secret>", "the secret value (otherwise read from stdin)")
+    .action(async (name: string, opts: { value?: string }) => {
+      await authSet(name, opts.value);
+    });
+  auth.command("list").description("list stored key names").action(authList);
+  auth.command("remove <name>").description("delete a stored key").action(authRemove);
 
   await program.parseAsync(process.argv);
 }
