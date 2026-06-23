@@ -7,11 +7,17 @@ import {
   PermissionManager,
   type PermissionMode,
   createContextStrategy,
+  runFleet,
   runSubagent,
   saveConfig,
 } from "@arterm/core";
 import { createProvider } from "@arterm/providers";
-import { createSpawnTool, defaultTools, taskDoneTool } from "@arterm/tools";
+import {
+  createSpawnParallelTool,
+  createSpawnTool,
+  defaultTools,
+  taskDoneTool,
+} from "@arterm/tools";
 import type { Session } from "@arterm/tui";
 
 export interface SessionOptions {
@@ -73,7 +79,33 @@ export function buildSession(opts: SessionOptions): {
     bus.emit({ type: "subagent_done", output });
     return output;
   };
-  agent.setTools([...agent.tools, createSpawnTool(spawnFn)]);
+
+  // Parallel fan-out: run several independent sub-tasks concurrently.
+  const fleetFn = async (tasks: { task: string; role?: string }[]) => {
+    bus.emit({ type: "fleet_start", count: tasks.length });
+    const results = await runFleet(tasks, {
+      provider,
+      model: agent.model,
+      tools: defaultTools(),
+      permissions,
+      ask: (tool, args) => asker(tool, args),
+      cwd,
+      taskDone: taskDoneTool,
+      context: createContextStrategy(config),
+      maxSteps: config.autonomy?.maxSteps,
+      concurrency: config.fleet?.concurrency,
+      onStart: (_i, task, role) => bus.emit({ type: "subagent_start", task, role }),
+      onDone: (_i, output) => bus.emit({ type: "subagent_done", output }),
+    });
+    bus.emit({ type: "fleet_done", count: results.length });
+    return results.map((r) => ({ task: r.task, output: r.output }));
+  };
+
+  agent.setTools([
+    ...agent.tools,
+    createSpawnTool(spawnFn),
+    createSpawnParallelTool(fleetFn),
+  ]);
 
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
     mode: config.autonomy?.mode ?? "once",

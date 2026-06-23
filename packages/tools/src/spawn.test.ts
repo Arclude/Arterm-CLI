@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSpawnTool } from "./spawn.js";
+import { createSpawnParallelTool, createSpawnTool } from "./spawn.js";
 
 describe("createSpawnTool", () => {
   it("is an ask/execute tool named spawn with a task param", () => {
@@ -26,5 +26,34 @@ describe("createSpawnTool", () => {
     const res = await tool.execute({ task: "x" }, { cwd: "." });
     expect(res.isError).toBe(true);
     expect(res.output).toContain("boom");
+  });
+});
+
+describe("createSpawnParallelTool", () => {
+  it("passes the task array through and combines the results", async () => {
+    const fleet = vi.fn().mockResolvedValue([
+      { task: "review a", output: "a ok" },
+      { task: "review b", output: "b ok" },
+    ]);
+    const tool = createSpawnParallelTool(fleet);
+    expect(tool.name).toBe("spawn_parallel");
+    const res = await tool.execute(
+      { tasks: [{ task: "review a", role: "reviewer" }, { task: "review b" }] },
+      { cwd: "." },
+    );
+    expect(fleet).toHaveBeenCalledWith([
+      { task: "review a", role: "reviewer" },
+      { task: "review b", role: undefined },
+    ]);
+    expect(res.output).toContain("review a");
+    expect(res.output).toContain("a ok");
+    expect(res.output).toContain("b ok");
+  });
+
+  it("errors on a missing or empty tasks array", async () => {
+    const tool = createSpawnParallelTool(async () => []);
+    expect((await tool.execute({}, { cwd: "." })).isError).toBe(true);
+    expect((await tool.execute({ tasks: [] }, { cwd: "." })).isError).toBe(true);
+    expect((await tool.execute({ tasks: [{ notask: 1 }] }, { cwd: "." })).isError).toBe(true);
   });
 });

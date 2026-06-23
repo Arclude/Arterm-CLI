@@ -43,3 +43,72 @@ export function createSpawnTool(spawn: SpawnFn): Tool {
     },
   };
 }
+
+/** Runs several sub-tasks concurrently and resolves their results in order. */
+export type FleetFn = (
+  tasks: { task: string; role?: string }[],
+) => Promise<{ task: string; output: string }[]>;
+
+/**
+ * Builds the `spawn_parallel` tool: dispatch several independent sub-tasks to run
+ * concurrently and return their combined results. Injected into the main agent
+ * only (sub-agents don't fan out further).
+ */
+export function createSpawnParallelTool(fleet: FleetFn): Tool {
+  return {
+    name: "spawn_parallel",
+    description:
+      "Dispatch several INDEPENDENT sub-tasks to sub-agents that run concurrently, then return " +
+      "all their results. Use when work fans out across files/items that don't depend on each " +
+      "other. Each task may set a role (reviewer | researcher | tester | implementer | explorer).",
+    permission: "ask",
+    category: "execute",
+    parameters: {
+      type: "object",
+      properties: {
+        tasks: {
+          type: "array",
+          description: "Independent sub-tasks to run in parallel.",
+          items: {
+            type: "object",
+            properties: {
+              task: { type: "string" },
+              role: { type: "string" },
+            },
+            required: ["task"],
+          },
+        },
+      },
+      required: ["tasks"],
+    },
+    preview: (args) =>
+      `spawn ${Array.isArray(args.tasks) ? args.tasks.length : 0} sub-agents in parallel`,
+    async execute(args) {
+      const raw = args.tasks;
+      if (!Array.isArray(raw) || raw.length === 0) {
+        return { output: "spawn_parallel requires a non-empty 'tasks' array", isError: true };
+      }
+      const tasks = raw
+        .map((t) => {
+          const o = t as { task?: unknown; role?: unknown };
+          return {
+            task: typeof o.task === "string" ? o.task : "",
+            role: typeof o.role === "string" ? o.role : undefined,
+          };
+        })
+        .filter((t) => t.task);
+      if (tasks.length === 0) {
+        return { output: "no valid tasks in 'tasks' array", isError: true };
+      }
+      try {
+        const results = await fleet(tasks);
+        const out = results
+          .map((r, i) => `### Sub-agent ${i + 1}: ${r.task}\n${r.output}`)
+          .join("\n\n");
+        return { output: out };
+      } catch (err) {
+        return { output: `fleet failed: ${(err as Error).message}`, isError: true };
+      }
+    },
+  };
+}

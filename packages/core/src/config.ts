@@ -52,6 +52,8 @@ export interface ArtermConfig {
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   /** Per-plugin trust level (untrusted by default — tools forced to ask, execute blocked). */
   plugins: Record<string, { trust: TrustTier }>;
+  /** Parallel sub-agent fan-out (spawn_parallel). */
+  fleet: { concurrency?: number };
 }
 
 export const ARTERM_HOME = join(homedir(), ".arterm");
@@ -72,6 +74,7 @@ export function defaultConfig(): ArtermConfig {
     autonomy: { mode: "once", maxSteps: 25 },
     mcpServers: {},
     plugins: {},
+    fleet: { concurrency: 4 },
   };
 }
 

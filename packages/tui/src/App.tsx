@@ -263,6 +263,12 @@ export function App({
         case "subagent_done":
           push({ kind: "system", text: `↩ sub-agent done: ${event.output.slice(0, 120)}` });
           break;
+        case "fleet_start":
+          push({ kind: "system", text: `⛓ dispatching ${event.count} sub-agents in parallel…` });
+          break;
+        case "fleet_done":
+          push({ kind: "system", text: `⛓ fleet complete (${event.count} done)` });
+          break;
         case "error":
           push({ kind: "system", text: `error: ${event.error}` });
           break;

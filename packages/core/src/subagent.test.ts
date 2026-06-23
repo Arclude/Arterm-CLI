@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { PermissionManager } from "./permissions.js";
-import { availableRoles, roleInstruction, runSubagent } from "./subagent.js";
+import { availableRoles, roleInstruction, runFleet, runSubagent } from "./subagent.js";
 import type { ChatProvider, Tool } from "./types.js";
+
+/** Stub provider that immediately calls task_done with a fixed summary. */
+function doneProvider(summary: string): ChatProvider {
+  return {
+    id: "stub",
+    supportsNativeTools: () => true,
+    listModels: async () => [],
+    async *chat() {
+      yield {
+        type: "tool_call",
+        call: { id: "1", name: "task_done", arguments: { summary } },
+      };
+      yield { type: "done" };
+    },
+  };
+}
 
 const taskDone: Tool = {
   name: "task_done",
@@ -95,5 +111,39 @@ describe("runSubagent", () => {
 
     expect(seenPrompt).toContain("code reviewer");
     expect(seenPrompt).toContain("review auth.ts");
+  });
+});
+
+describe("runFleet", () => {
+  const base = {
+    provider: doneProvider("completed"),
+    model: "x",
+    tools: [] as Tool[],
+    permissions: new PermissionManager({}, "yolo" as const),
+    ask: async () => "deny" as const,
+    cwd: process.cwd(),
+    taskDone,
+    maxSteps: 3,
+  };
+
+  it("runs tasks concurrently and returns results in input order", async () => {
+    const results = await runFleet([{ task: "A" }, { task: "B" }, { task: "C" }], {
+      ...base,
+      concurrency: 2,
+    });
+    expect(results.map((r) => r.task)).toEqual(["A", "B", "C"]);
+    expect(results.every((r) => r.output === "completed")).toBe(true);
+  });
+
+  it("invokes onStart/onDone once per task", async () => {
+    const starts: number[] = [];
+    const dones: number[] = [];
+    await runFleet([{ task: "A" }, { task: "B" }], {
+      ...base,
+      onStart: (i) => starts.push(i),
+      onDone: (i) => dones.push(i),
+    });
+    expect(starts.sort()).toEqual([0, 1]);
+    expect(dones.sort()).toEqual([0, 1]);
   });
 });

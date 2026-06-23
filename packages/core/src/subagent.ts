@@ -95,3 +95,56 @@ export async function runSubagent(
   }
   return doneSummary || lastAssistant || "(sub-agent produced no output)";
 }
+
+export interface FleetTask {
+  task: string;
+  role?: string;
+}
+
+export interface FleetResult {
+  task: string;
+  role?: string;
+  output: string;
+}
+
+export interface FleetOptions extends Omit<SubagentOptions, "role"> {
+  /** Max sub-agents running at once (default 4). */
+  concurrency?: number;
+  onStart?: (index: number, task: string, role?: string) => void;
+  onDone?: (index: number, output: string) => void;
+}
+
+/**
+ * Runs several sub-agents concurrently (bounded by `concurrency`) and returns
+ * their results in input order. A failing sub-agent yields an error string in its
+ * slot rather than aborting the whole fleet.
+ */
+export async function runFleet(
+  tasks: FleetTask[],
+  opts: FleetOptions,
+  signal?: AbortSignal,
+): Promise<FleetResult[]> {
+  const concurrency = Math.max(1, opts.concurrency ?? 4);
+  const results: FleetResult[] = new Array(tasks.length);
+  let next = 0;
+
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = next++;
+      if (index >= tasks.length) return;
+      const t = tasks[index] as FleetTask;
+      opts.onStart?.(index, t.task, t.role);
+      let output: string;
+      try {
+        output = await runSubagent(t.task, { ...opts, role: t.role }, signal);
+      } catch (err) {
+        output = `sub-agent failed: ${(err as Error).message}`;
+      }
+      opts.onDone?.(index, output);
+      results[index] = { task: t.task, role: t.role, output };
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
+  return results;
+}

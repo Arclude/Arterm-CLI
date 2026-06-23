@@ -23,7 +23,9 @@ export type AgentEvent =
   | { type: "autonomy_stopped"; reason: string }
   // Sub-agent (fleet) lifecycle.
   | { type: "subagent_start"; task: string; role?: string }
-  | { type: "subagent_done"; output: string };
+  | { type: "subagent_done"; output: string }
+  | { type: "fleet_start"; count: number }
+  | { type: "fleet_done"; count: number };
 
 type Listener = (event: AgentEvent) => void;
 
