@@ -9,7 +9,7 @@ import {
   retentionFromConfig,
 } from "@arterm/core";
 import { OllamaProvider, allProviders } from "@arterm/providers";
-import { McpManager, PluginLoader, SkillRegistry } from "@arterm/tools";
+import { McpManager, PluginLoader, SkillRegistry, startMemoryMcpServer } from "@arterm/tools";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
 import { formatRecordsText, startMemoryServer } from "./memoryServer.js";
@@ -250,6 +250,14 @@ async function main(): Promise<void> {
     .command("ls")
     .description("print this project's memory to the terminal")
     .action(memoryList);
+
+  program
+    .command("mcp")
+    .description("expose this project's memory as a stdio MCP server (like claude-mem)")
+    .action(async () => {
+      // stdout is the MCP transport — keep it clean; the server logs to stderr.
+      await startMemoryMcpServer({ cwd: process.cwd() });
+    });
 
   await program.parseAsync(process.argv);
 }

@@ -15,4 +15,5 @@ export {
   type SpawnFn,
   type FleetFn,
 } from "./spawn.js";
-export { createMemorySearchTool, createRememberTool } from "./memoryTools.js";
+export { createMemorySearchTool, createRememberTool, formatLearning } from "./memoryTools.js";
+export { startMemoryMcpServer } from "./mcpMemoryServer.js";

@@ -11,7 +11,8 @@ function learningText(r: MemoryRecord): string {
   return [r.title, r.body ?? "", (r.files ?? []).join(" ")].join(" ");
 }
 
-function formatLearning(r: MemoryRecord): string {
+/** One-line human/agent-readable rendering of a learning. */
+export function formatLearning(r: MemoryRecord): string {
   const files = r.files && r.files.length > 0 ? ` (${r.files.join(", ")})` : "";
   const body = r.body ? ` — ${r.body}` : "";
   return `[${r.type}] ${r.title}${body}${files}`;
