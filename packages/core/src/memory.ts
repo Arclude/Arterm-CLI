@@ -74,6 +74,32 @@ export function projectKey(cwd: string): string {
 
 /** Directory holding all project memory files. */
 export const MEMORY_DIR = join(ARTERM_HOME, "memory");
+/** Maps each projectKey back to its human-readable cwd (for the viewer). */
+export const MEMORY_INDEX = join(MEMORY_DIR, "index.json");
+
+/** Parse JSONL text into records, skipping blank/corrupt lines. */
+function parseRecords(raw: string): MemoryRecord[] {
+  const records: MemoryRecord[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      records.push(JSON.parse(trimmed) as MemoryRecord);
+    } catch {
+      // Skip corrupt lines rather than failing the whole read.
+    }
+  }
+  return records;
+}
+
+/** Read and parse a project's JSONL file; [] if missing. */
+async function readRecordsFile(path: string): Promise<MemoryRecord[]> {
+  try {
+    return parseRecords(await fs.readFile(path, "utf8"));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Append-only JSONL memory: one `{projectKey}.jsonl` per project under
@@ -82,42 +108,83 @@ export const MEMORY_DIR = join(ARTERM_HOME, "memory");
 export class JsonlMemoryStore implements MemoryStore {
   readonly id = "jsonl";
   private readonly path: string;
+  private indexed = false;
 
-  constructor(cwd: string, dir: string = MEMORY_DIR) {
+  constructor(
+    private readonly cwd: string,
+    private readonly dir: string = MEMORY_DIR,
+  ) {
     this.path = join(dir, `${projectKey(cwd)}.jsonl`);
   }
 
   async append(record: MemoryRecord): Promise<void> {
     try {
-      await fs.mkdir(join(this.path, ".."), { recursive: true });
+      await fs.mkdir(this.dir, { recursive: true });
       await fs.appendFile(this.path, `${JSON.stringify(record)}\n`, "utf8");
+      if (!this.indexed) {
+        await registerProject(this.cwd, record.ts, this.dir);
+        this.indexed = true;
+      }
     } catch {
       // Memory writes must never break a session.
     }
   }
 
   async all(): Promise<MemoryRecord[]> {
-    let raw: string;
-    try {
-      raw = await fs.readFile(this.path, "utf8");
-    } catch {
-      return [];
-    }
-    const records: MemoryRecord[] = [];
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        records.push(JSON.parse(trimmed) as MemoryRecord);
-      } catch {
-        // Skip corrupt lines rather than failing the whole read.
-      }
-    }
-    return records;
+    return readRecordsFile(this.path);
   }
 
   async recent(limit: number): Promise<MemoryRecord[]> {
     const all = await this.all();
     return limit > 0 ? all.slice(-limit) : all;
   }
+}
+
+/** One entry in the project index: which directory a memory file belongs to. */
+export interface ProjectInfo {
+  key: string;
+  cwd: string;
+  updatedAt: number;
+}
+
+type ProjectIndex = Record<string, { cwd: string; updatedAt: number }>;
+
+async function readIndex(dir: string): Promise<ProjectIndex> {
+  try {
+    return JSON.parse(await fs.readFile(join(dir, "index.json"), "utf8")) as ProjectIndex;
+  } catch {
+    return {};
+  }
+}
+
+/** Record (or refresh) the cwd↔projectKey mapping so the viewer can name projects. */
+export async function registerProject(
+  cwd: string,
+  updatedAt: number,
+  dir: string = MEMORY_DIR,
+): Promise<void> {
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    const index = await readIndex(dir);
+    index[projectKey(cwd)] = { cwd, updatedAt };
+    await fs.writeFile(join(dir, "index.json"), `${JSON.stringify(index, null, 2)}\n`, "utf8");
+  } catch {
+    // Indexing is best-effort; memory still works without it.
+  }
+}
+
+/** All known projects with memory, newest-updated first. */
+export async function listMemoryProjects(dir: string = MEMORY_DIR): Promise<ProjectInfo[]> {
+  const index = await readIndex(dir);
+  return Object.entries(index)
+    .map(([key, v]) => ({ key, cwd: v.cwd, updatedAt: v.updatedAt }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Read a project's records by its key (used by the viewer). */
+export async function readProjectRecords(
+  key: string,
+  dir: string = MEMORY_DIR,
+): Promise<MemoryRecord[]> {
+  return readRecordsFile(join(dir, `${key}.jsonl`));
 }

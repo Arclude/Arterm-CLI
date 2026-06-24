@@ -2,7 +2,15 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { JsonlMemoryStore, type MemoryRecord, NullMemoryStore, projectKey } from "./memory.js";
+import {
+  JsonlMemoryStore,
+  type MemoryRecord,
+  NullMemoryStore,
+  listMemoryProjects,
+  projectKey,
+  readProjectRecords,
+  registerProject,
+} from "./memory.js";
 
 function rec(title: string, ts: number): MemoryRecord {
   return { id: `id-${title}`, kind: "learning", ts, type: "note", title };
@@ -68,5 +76,43 @@ describe("JsonlMemoryStore", () => {
     await fs.appendFile(file, "{ not json\n", "utf8");
     await store.append(rec("good2", 2));
     expect((await store.all()).map((r) => r.title)).toEqual(["good", "good2"]);
+  });
+});
+
+describe("project index", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = join(tmpdir(), `arterm-mem-${Math.random().toString(36).slice(2)}`);
+    await fs.mkdir(dir, { recursive: true });
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("append registers the project so it can be listed by key→cwd", async () => {
+    const store = new JsonlMemoryStore("/work/my-app", dir);
+    await store.append(rec("hi", 5));
+    const projects = await listMemoryProjects(dir);
+    expect(projects).toHaveLength(1);
+    expect(projects[0]).toMatchObject({ key: projectKey("/work/my-app"), cwd: "/work/my-app" });
+  });
+
+  it("lists multiple projects newest-updated first", async () => {
+    await registerProject("/a", 10, dir);
+    await registerProject("/b", 30, dir);
+    await registerProject("/c", 20, dir);
+    expect((await listMemoryProjects(dir)).map((p) => p.cwd)).toEqual(["/b", "/c", "/a"]);
+  });
+
+  it("readProjectRecords reads by key", async () => {
+    const store = new JsonlMemoryStore("/proj", dir);
+    await store.append(rec("one", 1));
+    const byKey = await readProjectRecords(projectKey("/proj"), dir);
+    expect(byKey.map((r) => r.title)).toEqual(["one"]);
+    expect(await readProjectRecords("nonexistent", dir)).toEqual([]);
+  });
+
+  it("returns [] when there is no index", async () => {
+    expect(await listMemoryProjects(dir)).toEqual([]);
   });
 });

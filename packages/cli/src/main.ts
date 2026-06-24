@@ -4,12 +4,15 @@ import {
   Keystore,
   createSessionStore,
   loadConfig,
+  projectKey,
+  readProjectRecords,
   retentionFromConfig,
 } from "@arterm/core";
-import { McpManager, PluginLoader, SkillRegistry } from "@arterm/tools";
 import { OllamaProvider, allProviders } from "@arterm/providers";
+import { McpManager, PluginLoader, SkillRegistry } from "@arterm/tools";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
+import { formatRecordsText, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
 
 const VERSION = "0.1.0";
@@ -165,6 +168,39 @@ function authRemove(name: string): void {
   process.stdout.write(removed ? `✓ removed "${name}"\n` : `no key named "${name}"\n`);
 }
 
+async function openBrowser(url: string): Promise<void> {
+  try {
+    const { spawn } = await import("node:child_process");
+    const cmd =
+      process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
+    const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+  } catch {
+    // Opening a browser is best-effort.
+  }
+}
+
+async function memoryServe(opts: { port?: string; open?: boolean }): Promise<void> {
+  const port = opts.port ? Number(opts.port) : 7777;
+  const cwd = process.cwd();
+  const server = await startMemoryServer({ cwd, port });
+  process.stdout.write(
+    `Arterm memory viewer → ${server.url}\nProject: ${cwd}\nPress Ctrl+C to stop.\n`,
+  );
+  if (opts.open) await openBrowser(server.url);
+  await new Promise<void>((resolve) => {
+    process.on("SIGINT", () => {
+      process.stdout.write("\nStopping memory viewer.\n");
+      void server.close().then(resolve);
+    });
+  });
+}
+
+async function memoryList(): Promise<void> {
+  const records = await readProjectRecords(projectKey(process.cwd()));
+  process.stdout.write(`${formatRecordsText(records)}\n`);
+}
+
 async function main(): Promise<void> {
   const program = new Command();
   program
@@ -200,6 +236,20 @@ async function main(): Promise<void> {
     });
   auth.command("list").description("list stored key names").action(authList);
   auth.command("remove <name>").description("delete a stored key").action(authRemove);
+
+  const memory = program.command("memory").description("view this project's persistent memory");
+  memory
+    .command("serve", { isDefault: true })
+    .description("serve the memory viewer (live local web UI)")
+    .option("--port <n>", "port to listen on (default 7777)")
+    .option("--open", "open the viewer in your browser")
+    .action(async (opts: { port?: string; open?: boolean }) => {
+      await memoryServe(opts);
+    });
+  memory
+    .command("ls")
+    .description("print this project's memory to the terminal")
+    .action(memoryList);
 
   await program.parseAsync(process.argv);
 }
