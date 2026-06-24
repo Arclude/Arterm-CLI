@@ -3,17 +3,23 @@ import {
   type ArtermConfig,
   AutonomyEngine,
   EventBus,
+  MemoryRecorder,
   type PermissionAsker,
   PermissionManager,
   type PermissionMode,
   RiskArbiter,
   createContextStrategy,
+  createMemoryStore,
+  digest as digestObservations,
+  formatMemorySection,
   runFleet,
   runSubagent,
   saveConfig,
 } from "@arterm/core";
 import { createProvider } from "@arterm/providers";
 import {
+  createMemorySearchTool,
+  createRememberTool,
   createSpawnParallelTool,
   createSpawnTool,
   defaultTools,
@@ -33,6 +39,8 @@ export interface SessionOptions {
 export function buildSession(opts: SessionOptions): {
   session: Session;
   persist: () => Promise<void>;
+  /** Digest this session's activity into persistent memory (call at session end). */
+  digest: () => Promise<void>;
 } {
   const { config, cwd } = opts;
   const providerId = opts.providerId ?? config.provider;
@@ -43,6 +51,14 @@ export function buildSession(opts: SessionOptions): {
   const arbiter = config.arbiter?.enabled === false ? undefined : new RiskArbiter();
   const permissions = new PermissionManager(config.permissions, initialMode, arbiter);
   const bus = new EventBus();
+
+  // Persistent, project-scoped memory: capture this session's activity off the
+  // bus, recall prior learnings into the system prompt, digest at session end.
+  const memoryStore = createMemoryStore(config, cwd);
+  const memoryEnabled = memoryStore.id !== "off";
+  const recorder = new MemoryRecorder();
+  if (memoryEnabled) recorder.attach(bus);
+  const maxInject = config.memory?.maxInject ?? 12;
 
   // The TUI installs the real asker; until then deny by default.
   let asker: PermissionAsker = async () => "deny";
@@ -59,6 +75,9 @@ export function buildSession(opts: SessionOptions): {
     context: createContextStrategy(config),
     contextWindow: config.context?.window,
     compactAtPercent: config.context?.compactAtPercent,
+    recall: memoryEnabled
+      ? async () => formatMemorySection(await memoryStore.recent(maxInject))
+      : undefined,
   });
 
   // Sub-agent delegation: the main agent gets a `spawn` tool that runs a fresh
@@ -107,7 +126,51 @@ export function buildSession(opts: SessionOptions): {
     ...agent.tools,
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
+    ...(memoryEnabled
+      ? [createMemorySearchTool(memoryStore), createRememberTool(memoryStore)]
+      : []),
   ]);
+
+  // End-of-session digest: compress buffered activity into durable learnings via
+  // a quiet, tool-free single-shot model call (Arterm's claude-mem "worker").
+  const summarize = async (prompt: string): Promise<string> => {
+    let text = "";
+    for await (const chunk of provider.chat({
+      model: agent.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+    })) {
+      if (chunk.type === "text") text += chunk.delta;
+    }
+    return text;
+  };
+
+  // Single-flight: a periodic digest and the end-of-session digest must never run
+  // concurrently (they share the buffer and the model).
+  let digesting = false;
+  const digest = async (): Promise<void> => {
+    if (!memoryEnabled || config.memory?.autoDigest === false || digesting) return;
+    const observations = recorder.observations();
+    if (observations.length === 0) return;
+    digesting = true;
+    try {
+      const learnings = await digestObservations(observations, summarize);
+      for (const record of learnings) await memoryStore.append(record);
+    } finally {
+      // Always reset the window: digestObservations never throws, and a model that
+      // produced nothing parseable shouldn't wedge the periodic trigger.
+      recorder.clear();
+      digesting = false;
+    }
+  };
+
+  // Periodic, claude-mem-style digest: fire after every N captured observations.
+  const digestEvery = config.memory?.digestEvery ?? 20;
+  if (memoryEnabled && config.memory?.autoDigest !== false && digestEvery > 0) {
+    recorder.setAutoFlush(digestEvery, () => {
+      void digest();
+    });
+  }
 
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
     mode: config.autonomy?.mode ?? "once",
@@ -151,5 +214,5 @@ export function buildSession(opts: SessionOptions): {
     await saveConfig(config);
   };
 
-  return { session, persist };
+  return { session, persist, digest };
 }

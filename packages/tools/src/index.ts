@@ -15,3 +15,4 @@ export {
   type SpawnFn,
   type FleetFn,
 } from "./spawn.js";
+export { createMemorySearchTool, createRememberTool } from "./memoryTools.js";

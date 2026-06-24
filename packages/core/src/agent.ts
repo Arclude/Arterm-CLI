@@ -38,6 +38,11 @@ export interface AgentOptions {
   onMessage?: (message: Message) => void | Promise<void>;
   /** Skills advertised to the model in the system prompt (run via /skill). */
   skills?: SkillInfo[];
+  /**
+   * Returns a "project memory" section to inject into the system prompt (durable
+   * facts from previous sessions). Invoked fresh each turn; return "" for none.
+   */
+  recall?: () => Promise<string> | string;
 }
 
 const DEFAULT_SYSTEM =
@@ -200,6 +205,14 @@ export class Agent {
           "blocked. Only read and explore, then reply with a concise plan of the changes you " +
           "would make.",
       );
+    }
+    if (this.opts.recall) {
+      try {
+        const memory = (await this.opts.recall()).trim();
+        if (memory) lines.push("", memory);
+      } catch {
+        // Memory recall must never break a turn.
+      }
     }
     return lines.join("\n");
   }

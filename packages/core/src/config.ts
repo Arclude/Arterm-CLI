@@ -56,6 +56,17 @@ export interface ArtermConfig {
   fleet: { concurrency?: number };
   /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
   arbiter: { enabled: boolean };
+  /** Persistent, project-scoped memory (claude-mem-style capture/digest/recall). */
+  memory: {
+    /** "jsonl" = persist learnings per project (default); "off" = disabled. */
+    mode: "off" | "jsonl";
+    /** How many recent learnings to inject into the system prompt (default 12). */
+    maxInject?: number;
+    /** Digest the session's activity into learnings at session end (default true). */
+    autoDigest?: boolean;
+    /** Also digest mid-session after every N captured observations (default 20; 0 = off). */
+    digestEvery?: number;
+  };
 }
 
 export const ARTERM_HOME = join(homedir(), ".arterm");
@@ -78,6 +89,7 @@ export function defaultConfig(): ArtermConfig {
     plugins: {},
     fleet: { concurrency: 4 },
     arbiter: { enabled: true },
+    memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20 },
   };
 }
 

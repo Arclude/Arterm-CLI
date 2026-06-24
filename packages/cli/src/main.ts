@@ -34,7 +34,7 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
 
-  const { session, persist } = buildSession({
+  const { session, persist, digest } = buildSession({
     config,
     providerId: globals.provider,
     model: globals.model,
@@ -94,6 +94,12 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   await runTui(session, { goal: globals.goal });
 
   await mcp.close();
+  // Digest this session's activity into persistent memory before exiting.
+  try {
+    await digest();
+  } catch {
+    // Memory digest must never block a clean shutdown.
+  }
   await persist();
 }
 
