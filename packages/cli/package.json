@@ -4,9 +4,13 @@
   "description": "Local AI coding agent for your terminal — Ollama, llama.cpp, and OpenAI-compatible providers, a rich Ink TUI, and permission-gated file/shell tools.",
   "type": "module",
   "bin": {
-    "arterm": "./dist/main.js"
+    "arterm": "dist/main.js"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=22"
   },

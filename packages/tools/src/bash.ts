@@ -21,6 +21,8 @@ export const bashTool: Tool = {
     "Uses the system shell. Prefer dedicated tools (read/edit/glob) when they fit.",
   permission: "ask",
   category: "execute",
+  mutating: true,
+  riskTier: "destructive",
   parameters: {
     type: "object",
     properties: {

@@ -42,9 +42,29 @@ const HIGH_BASH: RegExp[] = [
 /** Paths whose edits warrant a human look (secrets, keys, git internals). */
 const SENSITIVE_PATH = /(^|\/)(\.env|\.git\/|id_rsa|\.ssh\/|secrets?\.|credentials)/i;
 
+const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+/** Raise an assessment to at least `floor`, keeping the more specific reason. */
+function atLeast(a: RiskAssessment, floor: RiskLevel, reason: string): RiskAssessment {
+  return RANK[a.level] >= RANK[floor] ? a : { level: floor, reason: a.reason ?? reason };
+}
+
 /** Heuristically assess how risky a specific tool call is. Pure + testable. */
 export function assessRisk(tool: Tool, args: Record<string, unknown>): RiskAssessment {
   const category: ToolCategory = tool.category ?? "execute";
+  const base = assessByArgs(tool, args, category);
+  // A tool tagged intrinsically destructive is escalated even when its args look benign.
+  if (tool.riskTier === "destructive") {
+    return atLeast(base, "high", `destructive tool: ${tool.name}`);
+  }
+  return base;
+}
+
+function assessByArgs(
+  tool: Tool,
+  args: Record<string, unknown>,
+  category: ToolCategory,
+): RiskAssessment {
   if (category === "read") return { level: "low" };
 
   if (category === "execute") {

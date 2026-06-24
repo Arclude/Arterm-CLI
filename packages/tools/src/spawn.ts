@@ -19,6 +19,7 @@ export function createSpawnTool(spawn: SpawnFn): Tool {
       "'research Y'). Optional role: reviewer | researcher | tester | implementer | explorer.",
     permission: "ask",
     category: "execute",
+    mutating: true,
     parameters: {
       type: "object",
       properties: {
@@ -63,6 +64,7 @@ export function createSpawnParallelTool(fleet: FleetFn): Tool {
       "other. Each task may set a role (reviewer | researcher | tester | implementer | explorer).",
     permission: "ask",
     category: "execute",
+    mutating: true,
     parameters: {
       type: "object",
       properties: {

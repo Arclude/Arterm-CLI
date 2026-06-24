@@ -1,4 +1,5 @@
 import {
+  type AutonomyMode,
   type ModelInfo,
   PERMISSION_MODES,
   type PermissionAsker,
@@ -6,7 +7,7 @@ import {
   fetchCatalog,
   searchCatalog,
 } from "@arterm/core";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginOverlay } from "./LoginOverlay.js";
@@ -38,6 +39,7 @@ const HELP = [
   "  /catalog [query]      search the models.dev catalog (~5k models)",
   "  /clear                reset the conversation",
   "  /goal <text>          run autonomously toward a goal (decide→act→reflect→repeat)",
+  "  /autonomy <mode> <goal>  run a goal in once | eternal | parallel mode",
   "  /steer <text>         redirect the running goal · /pause /resume /stop",
   "  /compact              shrink the conversation context (auto when near full)",
   "  /mcp                  list connected MCP servers and their tools",
@@ -46,7 +48,7 @@ const HELP = [
   "  /mode [ask|auto|plan|yolo]  set permission mode (no arg cycles)",
   "  /auto /plan /ask /yolo      shortcuts for /mode",
   "  /exit                 quit (or Ctrl+C)",
-  "Keys:  Enter send · ↑/↓ history · PgUp/PgDn scroll · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
+  "Keys:  Enter send · ↑/↓ history · scroll with your terminal · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
   "Modes: ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all",
   "Edit:  Backspace del char · Ctrl+W del word · Ctrl+U clear line",
 ].join("\n");
@@ -125,6 +127,7 @@ const COMMANDS = [
   "catalog",
   "clear",
   "goal",
+  "autonomy",
   "steer",
   "pause",
   "resume",
@@ -145,9 +148,6 @@ const COMMANDS = [
 
 /** Modes cycled by Shift+Tab; yolo is deliberately excluded (set it via /mode yolo). */
 const MODE_CYCLE: PermissionMode[] = ["ask", "auto", "plan"];
-
-/** Cap on transcript items laid out per frame; older ones are clipped anyway. */
-const MAX_RENDER = 200;
 
 /** Current terminal size, tracking resize events so the layout fills the screen. */
 function useTermSize(): { rows: number; columns: number } {
@@ -198,7 +198,6 @@ export function App({
   const [loginIndex, setLoginIndex] = useState(0);
   const [loginSel, setLoginSel] = useState<LoginProvider | null>(null);
   const [loginKey, setLoginKey] = useState("");
-  const [scroll, setScroll] = useState(0);
   const [signedIn, setSignedIn] = useState<string[]>(() => session.signedInProviders());
   const filteredPickerModels = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase();
@@ -210,21 +209,6 @@ export function App({
   const turnRef = useRef({ inTok: 0, outTok: 0, rounds: 0 });
 
   const push = useCallback((item: DisplayItem) => setItems((prev) => [...prev, item]), []);
-
-  // Keep the viewport stable while scrolled up: when new items arrive, push the
-  // offset by the same amount; at the bottom (offset 0) we follow the latest.
-  const prevLen = useRef(0);
-  useEffect(() => {
-    const delta = items.length - prevLen.current;
-    prevLen.current = items.length;
-    if (delta > 0) setScroll((s) => (s > 0 ? s + delta : 0));
-  }, [items.length]);
-
-  // PgUp/PgDn scroll the transcript through history.
-  useInput((_input, key) => {
-    if (key.pageUp) setScroll((s) => Math.min(Math.max(0, items.length - 1), s + 5));
-    else if (key.pageDown) setScroll((s) => Math.max(0, s - 5));
-  });
 
   // Wire the permission prompt into the agent's permission flow (once).
   useEffect(() => {
@@ -357,6 +341,18 @@ export function App({
           break;
         case "fleet_done":
           push({ kind: "system", text: `⛓ fleet complete (${event.count} done)` });
+          break;
+        case "autonomy_fleet_round":
+          push({
+            kind: "system",
+            text: `◆ round ${event.round}: dispatching ${event.tasks.length} subtask(s)`,
+          });
+          break;
+        case "autonomy_aggregate":
+          push({
+            kind: "system",
+            text: `◆ round ${event.round} aggregated (${event.count} result(s))`,
+          });
           break;
         case "error":
           push({ kind: "system", text: `error: ${event.error}` });
@@ -588,7 +584,6 @@ export function App({
         case "clear":
           session.agent.reset();
           setItems([]);
-          setScroll(0);
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -661,6 +656,22 @@ export function App({
             push({ kind: "system", text: "usage: /goal <description>" });
           } else if (session.autonomy.state === "running" || session.autonomy.state === "paused") {
             push({ kind: "system", text: "a goal is already running — /stop it first" });
+          } else {
+            void session.autonomy.start(g);
+          }
+          break;
+        }
+        case "autonomy": {
+          const [modeArg = "", ...goalParts] = rest.join(" ").trim().split(/\s+/);
+          const mode = modeArg.toLowerCase();
+          const modes: AutonomyMode[] = ["once", "eternal", "parallel"];
+          const g = goalParts.join(" ").trim();
+          if (!modes.includes(mode as AutonomyMode) || !g) {
+            push({ kind: "system", text: "usage: /autonomy <once|eternal|parallel> <goal>" });
+          } else if (session.autonomy.state === "running" || session.autonomy.state === "paused") {
+            push({ kind: "system", text: "a goal is already running — /stop it first" });
+          } else if (!session.autonomy.setMode(mode as AutonomyMode)) {
+            push({ kind: "system", text: "can't switch autonomy mode while a goal is active" });
           } else {
             void session.autonomy.start(g);
           }
@@ -824,30 +835,14 @@ export function App({
   const busy = status !== "idle";
   const mode = permMode.toUpperCase();
 
-  const { rows, columns } = useTermSize();
-  const maxScroll = Math.max(0, items.length - 1);
-  const scrollClamped = Math.min(scroll, maxScroll);
-  const sliceEnd = items.length - scrollClamped;
-  const sliceStart = Math.max(0, sliceEnd - MAX_RENDER);
-  const visibleItems = items.slice(sliceStart, sliceEnd);
+  const { columns } = useTermSize();
 
   return (
-    <Box flexDirection="column" height={rows} width={columns}>
-      {/* Scrollback fills the space above the footer, anchored to the bottom so the
-          latest message sits just over the input. Overflow is clipped at the top;
-          PgUp/PgDn page through history. */}
-      <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
-        {visibleItems.map((item, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: transcript is append-only, so the absolute index is a stable identity
-          <Item key={sliceStart + i} item={item} />
-        ))}
-      </Box>
-      {scrollClamped > 0 ? (
-        <Text color="yellow" dimColor>
-          {"  ▲ "}
-          {scrollClamped} newer hidden · PgDn for latest
-        </Text>
-      ) : null}
+    <Box flexDirection="column" width={columns}>
+      {/* Committed transcript is written ONCE to the terminal's native scrollback via
+          <Static>, so the live (re-rendered) region below always stays within the
+          viewport — no overflow corruption. Scroll history with your terminal. */}
+      <Static items={items}>{(item, i) => <Item key={i} item={item} />}</Static>
       {pending ? (
         <PermissionPrompt pending={pending} />
       ) : pickerOpen ? (

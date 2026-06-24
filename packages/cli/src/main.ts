@@ -21,6 +21,7 @@ interface GlobalOpts {
   provider?: string;
   model?: string;
   yolo?: boolean;
+  confirmDestructive?: boolean;
   goal?: string;
 }
 
@@ -42,6 +43,7 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     providerId: globals.provider,
     model: globals.model,
     yolo: globals.yolo,
+    confirmDestructive: globals.confirmDestructive,
     cwd: process.cwd(),
   });
 
@@ -212,7 +214,8 @@ async function main(): Promise<void> {
       "provider: ollama | llamacpp | openai-compat | anthropic | openai | gemini | xai | deepseek | groq | openrouter | mistral",
     )
     .option("-m, --model <name>", "model name or .gguf file")
-    .option("--yolo", "skip all permission prompts")
+    .option("--yolo", "skip permission prompts (still blocks critical/destructive calls)")
+    .option("--confirm-destructive", "always re-prompt before destructive tools, even in auto/yolo")
     .option("--goal <text>", "start an autonomous run toward this goal");
 
   program

@@ -56,6 +56,11 @@ export interface ArtermConfig {
   fleet: { concurrency?: number };
   /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
   arbiter: { enabled: boolean };
+  /**
+   * Re-prompt for tools tagged `riskTier: "destructive"` even in auto/yolo modes.
+   * Off by default; enable with `--confirm-destructive`.
+   */
+  confirmDestructive: boolean;
   /** Persistent, project-scoped memory (claude-mem-style capture/digest/recall). */
   memory: {
     /** "jsonl" = persist learnings per project (default); "off" = disabled. */
@@ -89,6 +94,7 @@ export function defaultConfig(): ArtermConfig {
     plugins: {},
     fleet: { concurrency: 4 },
     arbiter: { enabled: true },
+    confirmDestructive: false,
     memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20 },
   };
 }

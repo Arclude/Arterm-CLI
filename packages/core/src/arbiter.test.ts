@@ -47,6 +47,24 @@ describe("assessRisk", () => {
       "critical",
     );
   });
+
+  it("raises a destructive-tier tool to at least high even with benign args", () => {
+    // Same args rate medium without the tier...
+    expect(assessRisk(tool("danger", "execute"), { command: "ls" }).level).toBe("medium");
+    // ...but the intrinsic tier escalates it.
+    const t: Tool = { ...tool("danger", "execute"), riskTier: "destructive" };
+    expect(assessRisk(t, { command: "ls" }).level).toBe("high");
+  });
+
+  it("keeps a destructive-tier tool critical when its args are catastrophic", () => {
+    const t: Tool = { ...tool("bash", "execute"), riskTier: "destructive" };
+    expect(assessRisk(t, { command: "rm -rf /" }).level).toBe("critical");
+  });
+
+  it("leaves safe/caution tiers unchanged", () => {
+    const t: Tool = { ...tool("write", "edit"), riskTier: "caution" };
+    expect(assessRisk(t, { path: "a.ts" }).level).toBe("medium");
+  });
 });
 
 describe("RiskArbiter", () => {

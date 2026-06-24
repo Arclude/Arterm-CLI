@@ -9,6 +9,8 @@ export const editTool: Tool = {
     "replace_all is true. Read the file first to craft a unique old_string.",
   permission: "ask",
   category: "edit",
+  mutating: true,
+  riskTier: "caution",
   parameters: {
     type: "object",
     properties: {

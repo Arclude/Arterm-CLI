@@ -25,7 +25,10 @@ export type AgentEvent =
   | { type: "subagent_start"; task: string; role?: string }
   | { type: "subagent_done"; output: string }
   | { type: "fleet_start"; count: number }
-  | { type: "fleet_done"; count: number };
+  | { type: "fleet_done"; count: number }
+  // Parallel-autonomy rounds (leader decomposes → fleet → aggregate).
+  | { type: "autonomy_fleet_round"; round: number; tasks: { task: string; role?: string }[] }
+  | { type: "autonomy_aggregate"; round: number; count: number };
 
 type Listener = (event: AgentEvent) => void;
 

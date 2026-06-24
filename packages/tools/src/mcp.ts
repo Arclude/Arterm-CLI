@@ -49,6 +49,7 @@ export function mcpToolToArtermTool(server: string, def: McpToolDef, call: McpCa
     parameters: schema,
     permission: "ask",
     category: "execute",
+    mutating: true,
     preview: () => `mcp ${server}/${def.name}`,
     async execute(args) {
       try {

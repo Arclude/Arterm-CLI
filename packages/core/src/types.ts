@@ -82,8 +82,14 @@ export interface ToolResult {
 
 export type PermissionLevel = "allow" | "ask" | "deny";
 
-/** How the autonomy engine runs a goal: "once" stops when done, "eternal" keeps going. */
-export type AutonomyMode = "once" | "eternal";
+/**
+ * How the autonomy engine runs a goal:
+ *   - "once":     stops when the goal is done.
+ *   - "eternal":  keeps going until stopped.
+ *   - "parallel": each round the leader decomposes the goal into concurrent subagent
+ *                 tasks (fleet), aggregates the results, reflects, and repeats.
+ */
+export type AutonomyMode = "once" | "eternal" | "parallel";
 
 /** Connection status of one configured MCP server (for the /mcp view). */
 export interface McpServerSummary {
@@ -119,6 +125,9 @@ export interface SkillInfo {
  */
 export type ToolCategory = "read" | "edit" | "execute";
 
+/** Intrinsic danger of a tool, independent of its arguments. */
+export type RiskTier = "safe" | "caution" | "destructive";
+
 export interface Tool {
   name: string;
   description: string;
@@ -128,6 +137,13 @@ export interface Tool {
   permission: PermissionLevel;
   /** Effect category; drives auto/plan permission modes. Defaults to "execute". */
   category?: ToolCategory;
+  /** True when this tool changes state (writes files, runs commands). Read tools omit it. */
+  mutating?: boolean;
+  /**
+   * How dangerous this tool is, independent of its arguments. "destructive" tools
+   * are gated even under yolo when `confirmDestructive` is on. Defaults to "safe".
+   */
+  riskTier?: RiskTier;
   /** Short human-readable summary of a pending call, shown in the permission prompt. */
   preview?(args: Record<string, unknown>): string;
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;

@@ -3,11 +3,7 @@ import { RiskArbiter } from "./arbiter.js";
 import { PermissionManager } from "./permissions.js";
 import type { Tool } from "./types.js";
 
-const tool = (
-  name: string,
-  permission: Tool["permission"],
-  category?: Tool["category"],
-): Tool => ({
+const tool = (name: string, permission: Tool["permission"], category?: Tool["category"]): Tool => ({
   name,
   description: "",
   parameters: {},
@@ -55,12 +51,42 @@ describe("PermissionManager", () => {
     expect(pm.snapshot().write).toBe("allow");
   });
 
-  it("yolo bypasses everything", async () => {
+  it("yolo approves safe calls without asking", async () => {
     const ask = vi.fn();
     const pm = new PermissionManager({}, "yolo");
     const d = await pm.check(tool("bash", "ask"), {}, ask as never);
     expect(d.allowed).toBe(true);
     expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("yolo stays fail-closed: the arbiter still denies critical calls", async () => {
+    const ask = vi.fn();
+    const pm = new PermissionManager({}, "yolo", new RiskArbiter());
+    const d = await pm.check(tool("bash", "ask", "execute"), { command: "rm -rf /" }, ask as never);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toMatch(/critical/);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("yolo still honors a tool-level deny", async () => {
+    const ask = vi.fn();
+    const pm = new PermissionManager({}, "yolo");
+    const d = await pm.check(tool("rm", "deny"), {}, ask as never);
+    expect(d.allowed).toBe(false);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("confirmDestructive re-prompts for destructive tools even under yolo", async () => {
+    const ask = vi.fn().mockResolvedValue("deny");
+    const pm = new PermissionManager({}, "yolo", new RiskArbiter(), true);
+    const destructive: Tool = { ...tool("bash", "ask", "execute"), riskTier: "destructive" };
+    // A benign command would normally pass silently in yolo, but the gate forces a prompt.
+    const d = await pm.check(destructive, { command: "ls" }, ask);
+    expect(ask).toHaveBeenCalledOnce();
+    expect(d.allowed).toBe(false);
+    // A non-destructive tool is still silent under yolo.
+    const safe = await pm.check(tool("write", "ask", "edit"), { path: "a.ts" }, ask);
+    expect(safe.allowed).toBe(true);
   });
 
   it("auto mode approves edits silently but still asks for execute tools", async () => {

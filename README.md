@@ -74,7 +74,7 @@ arterm pull <model>          # download a model via Ollama
 
 | Flag                  | Description                                            |
 | --------------------- | ----------------------------------------------------- |
-| `-p, --provider <id>` | Provider: `ollama`, `openai-compat`, or `llamacpp`.   |
+| `-p, --provider <id>` | Provider: `ollama`, `llamacpp`, `openai-compat`, `anthropic`, or a hosted preset (`openai`, `gemini`, `xai`, `deepseek`, `groq`, `openrouter`, `mistral`). |
 | `-m, --model <name>`  | Model name (Ollama tag) or `.gguf` filename.          |
 | `--yolo`              | Skip all permission prompts for the session.          |
 
@@ -101,6 +101,34 @@ permission prompt: `[y]` allow once · `[a]` always allow this tool · `[n]` den
 | `ollama`        | `--provider ollama`       | Talks to a running Ollama server over HTTP.            |
 | `openai-compat` | `--provider openai-compat`| Any OpenAI `/v1` endpoint (LM Studio, vLLM, …).        |
 | `llamacpp`      | `--provider llamacpp`     | Loads a `.gguf` in-process via `node-llama-cpp`.       |
+| `anthropic`     | `--provider anthropic`    | Claude via the native API. `arterm auth set anthropic`. |
+| `openai`        | `--provider openai`       | ChatGPT models via `api.openai.com`. `arterm auth set openai`. |
+| `gemini`        | `--provider gemini`       | Google Gemini (OpenAI-compat endpoint). `arterm auth set gemini`. |
+| `xai`           | `--provider xai`          | xAI Grok. `arterm auth set xai`.                       |
+| `deepseek`      | `--provider deepseek`     | DeepSeek. `arterm auth set deepseek`.                  |
+| `groq`          | `--provider groq`         | Groq. `arterm auth set groq`.                          |
+| `openrouter`    | `--provider openrouter`   | OpenRouter. `arterm auth set openrouter`.              |
+| `mistral`       | `--provider mistral`      | Mistral. `arterm auth set mistral`.                    |
+
+### Signing in to a cloud provider
+
+Hosted providers need an API key. Store it once (encrypted, AES-256-GCM) and
+Arterm uses it automatically:
+
+```bash
+arterm auth set openai       # paste the key when prompted (read from stdin)
+arterm auth set gemini --value "$GEMINI_API_KEY"
+arterm auth list             # show stored key names
+arterm auth remove xai       # delete one
+
+arterm --provider openai --model gpt-4o
+arterm --provider gemini --model gemini-2.0-flash
+```
+
+The key name is the provider id. As a fallback, each provider also reads its
+conventional env var (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`,
+`DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY`,
+`ANTHROPIC_API_KEY`).
 
 `node-llama-cpp` is **optional** and not installed by default (its native
 binaries are large). The `llamacpp` provider imports it lazily and prints a clear

@@ -39,6 +39,8 @@ export interface SessionOptions {
   providerId?: string;
   model?: string;
   yolo?: boolean;
+  /** Re-prompt for destructive tools even in auto/yolo (overrides config). */
+  confirmDestructive?: boolean;
   cwd: string;
 }
 
@@ -59,7 +61,13 @@ export function buildSession(opts: SessionOptions): {
   let provider = createProvider(config, providerId);
   const initialMode: PermissionMode = opts.yolo ? "yolo" : (config.mode ?? "ask");
   const arbiter = config.arbiter?.enabled === false ? undefined : new RiskArbiter();
-  const permissions = new PermissionManager(config.permissions, initialMode, arbiter);
+  const confirmDestructive = opts.confirmDestructive ?? config.confirmDestructive ?? false;
+  const permissions = new PermissionManager(
+    config.permissions,
+    initialMode,
+    arbiter,
+    confirmDestructive,
+  );
   const bus = new EventBus();
 
   // Persistent, project-scoped memory: capture this session's activity off the
@@ -111,26 +119,35 @@ export function buildSession(opts: SessionOptions): {
     return output;
   };
 
-  // Parallel fan-out: run several independent sub-tasks concurrently.
-  const fleetFn = async (tasks: { task: string; role?: string }[]) => {
+  // Parallel fan-out: run several independent sub-tasks concurrently. Threaded with
+  // an optional abort signal so the autonomy engine can cancel an in-flight round.
+  const runFleetTasks = async (tasks: { task: string; role?: string }[], signal?: AbortSignal) => {
     bus.emit({ type: "fleet_start", count: tasks.length });
-    const results = await runFleet(tasks, {
-      provider,
-      model: agent.model,
-      tools: defaultTools(),
-      permissions,
-      ask: (tool, args) => asker(tool, args),
-      cwd,
-      taskDone: taskDoneTool,
-      context: createContextStrategy(config),
-      maxSteps: config.autonomy?.maxSteps,
-      concurrency: config.fleet?.concurrency,
-      onStart: (_i, task, role) => bus.emit({ type: "subagent_start", task, role }),
-      onDone: (_i, output) => bus.emit({ type: "subagent_done", output }),
-    });
+    const results = await runFleet(
+      tasks,
+      {
+        provider,
+        model: agent.model,
+        tools: defaultTools(),
+        permissions,
+        ask: (tool, args) => asker(tool, args),
+        cwd,
+        taskDone: taskDoneTool,
+        context: createContextStrategy(config),
+        maxSteps: config.autonomy?.maxSteps,
+        concurrency: config.fleet?.concurrency,
+        onStart: (_i, task, role) => bus.emit({ type: "subagent_start", task, role }),
+        onDone: (_i, output) => bus.emit({ type: "subagent_done", output }),
+      },
+      signal,
+    );
     bus.emit({ type: "fleet_done", count: results.length });
-    return results.map((r) => ({ task: r.task, output: r.output }));
+    return results.map((r) => ({ task: r.task, role: r.role, output: r.output }));
   };
+
+  // The `spawn_parallel` tool form (no abort signal; the model drives it).
+  const fleetFn = (tasks: { task: string; role?: string }[]) =>
+    runFleetTasks(tasks).then((rs) => rs.map((r) => ({ task: r.task, output: r.output })));
 
   agent.setTools([
     ...agent.tools,
@@ -185,6 +202,7 @@ export function buildSession(opts: SessionOptions): {
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
     mode: config.autonomy?.mode ?? "once",
     maxSteps: config.autonomy?.maxSteps,
+    runFleet: (tasks, signal) => runFleetTasks(tasks, signal),
   });
 
   const session: Session = {

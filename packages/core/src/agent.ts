@@ -162,6 +162,27 @@ export class Agent {
     return { done, note: text.trim().slice(0, 200) };
   }
 
+  /**
+   * One-shot planning probe over the current history, WITHOUT tools and WITHOUT
+   * mutating history. Returns the model's raw text. Used by parallel autonomy to ask
+   * the leader to decompose the goal into independent subtasks.
+   */
+  async plan(prompt: string, signal?: AbortSignal): Promise<string> {
+    const { provider, model } = this.opts;
+    const system = await this.buildSystem(true);
+    const probe: Message = { role: "user", content: prompt };
+    let text = "";
+    for await (const chunk of provider.chat({
+      model,
+      messages: [system, ...this.messages, probe],
+      temperature: 0,
+      signal,
+    })) {
+      if (chunk.type === "text") text += chunk.delta;
+    }
+    return text.trim();
+  }
+
   private toolSchemas(): ToolSchema[] {
     return this.opts.tools.map((t) => ({
       name: t.name,

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Agent } from "./agent.js";
-import { AutonomyEngine } from "./autonomy.js";
+import { AutonomyEngine, type AutonomyFleetRunner, type AutonomyTask } from "./autonomy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import { PermissionManager } from "./permissions.js";
-import type { ChatProvider, Tool } from "./types.js";
+import type { AutonomyMode, ChatProvider, Tool } from "./types.js";
 
 const taskDone: Tool = {
   name: "task_done",
@@ -50,12 +50,25 @@ class FakeAgent {
   async assess(): Promise<{ done: boolean; note: string }> {
     return this.assessVerdict;
   }
+  // Scripted decomposition output, one entry per round (defaults to "[]").
+  plans: string[] = [];
+  private planN = 0;
+  async plan(): Promise<string> {
+    const out = this.plans[this.planN] ?? "[]";
+    this.planN += 1;
+    return out;
+  }
 }
 
 function makeEngine(
   agent: FakeAgent,
   bus: EventBus,
-  opts?: { mode?: "once" | "eternal"; maxSteps?: number },
+  opts?: {
+    mode?: AutonomyMode;
+    maxSteps?: number;
+    fanout?: number;
+    runFleet?: AutonomyFleetRunner;
+  },
 ) {
   return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, opts);
 }
@@ -166,6 +179,117 @@ describe("AutonomyEngine", () => {
     expect(events.some((e) => e.type === "autonomy_paused")).toBe(true);
     expect(events.some((e) => e.type === "autonomy_resumed")).toBe(true);
     expect(engine.state).toBe("done");
+  });
+});
+
+describe("AutonomyEngine (parallel mode)", () => {
+  it("decomposes a round, dispatches the fleet, and finishes on assess-done", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"task":"a"},{"task":"b","role":"tester"}]'];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    let dispatched: AutonomyTask[] = [];
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      dispatched = tasks;
+      return tasks.map((t) => ({ ...t, output: `did ${t.task}` }));
+    };
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5, runFleet });
+
+    await engine.start("ship it");
+
+    expect(dispatched).toEqual([
+      { task: "a", role: undefined },
+      { task: "b", role: "tester" },
+    ]);
+    expect(engine.state).toBe("done");
+    expect(events.some((e) => e.type === "autonomy_fleet_round")).toBe(true);
+    expect(events.some((e) => e.type === "autonomy_aggregate")).toBe(true);
+  });
+
+  it("caps the fan-out at 16 subtasks per round", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    const twenty = Array.from({ length: 20 }, (_, i) => ({ task: `t${i}` }));
+    agent.plans = [JSON.stringify(twenty)];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    let count = -1;
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      count = tasks.length;
+      return tasks.map((t) => ({ ...t, output: "" }));
+    };
+    const engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5, runFleet });
+
+    await engine.start("g");
+
+    expect(count).toBe(16);
+  });
+
+  it("feeds the fleet results back into the leader's history", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"task":"alpha"}]'];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    const runFleet: AutonomyFleetRunner = async (tasks) =>
+      tasks.map((t) => ({ ...t, output: "RESULT-XYZ" }));
+    const engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5, runFleet });
+
+    await engine.start("g");
+
+    // aggregate() calls agent.run with the subtask outputs embedded.
+    expect(agent.prompts.some((p) => p.includes("RESULT-XYZ"))).toBe(true);
+  });
+
+  it("stop aborts the in-flight fleet and exits stopped", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"task":"a"}]'];
+    // biome-ignore lint/style/useConst: assigned after the runFleet closure that references it
+    let engine!: AutonomyEngine;
+    let abortedSignal = false;
+    const runFleet: AutonomyFleetRunner = async (_tasks, signal) => {
+      engine.stop();
+      abortedSignal = signal.aborted;
+      throw new Error("aborted");
+    };
+    engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5, runFleet });
+
+    await engine.start("g");
+
+    expect(abortedSignal).toBe(true);
+    expect(engine.state).toBe("stopped");
+  });
+
+  it("treats malformed decomposition as no work and falls back to assess", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ["this is not json"];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    let called = false;
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      called = true;
+      return tasks.map((t) => ({ ...t, output: "" }));
+    };
+    const engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5, runFleet });
+
+    await engine.start("g");
+
+    expect(called).toBe(false);
+    expect(engine.state).toBe("done");
+  });
+
+  it("requires a fleet runner", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5 });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("stopped");
+    expect(events.some((e) => e.type === "autonomy_stopped" && /fleet runner/.test(e.reason))).toBe(
+      true,
+    );
   });
 });
 
