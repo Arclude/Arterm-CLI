@@ -44,6 +44,15 @@ function truncate(text: string, max: number): string {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
+/** Colour a diff-preview line by its leading marker. */
+function diffLineColor(line: string): string {
+  const c = line[0];
+  if (c === "+") return "green";
+  if (c === "-") return "red";
+  if (c === "@" || c === "…") return "cyan";
+  return "gray";
+}
+
 export function Item({ item }: { item: DisplayItem }): React.ReactElement {
   switch (item.kind) {
     case "user":
@@ -65,6 +74,27 @@ export function Item({ item }: { item: DisplayItem }): React.ReactElement {
         return (
           <Box paddingLeft={2}>
             <Text color={item.isError ? "red" : "gray"}>└─ {truncate(item.output, 400)}</Text>
+          </Box>
+        );
+      }
+      // A file-mutating call (edit/write/multi_edit) renders its diff so the
+      // change is visible even in auto/yolo mode where no permission prompt shows.
+      if (item.diff) {
+        const [head = item.name, ...body] = item.diff.split("\n");
+        return (
+          <Box flexDirection="column">
+            <Text color={item.isError ? "red" : "yellow"} bold>
+              {"• "}
+              {head}
+            </Text>
+            <Box flexDirection="column" paddingLeft={2}>
+              {body.map((line, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, never reordered
+                <Text key={i} color={diffLineColor(line)} wrap="truncate">
+                  {line.length > 0 ? line : " "}
+                </Text>
+              ))}
+            </Box>
           </Box>
         );
       }

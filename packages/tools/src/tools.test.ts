@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveWithin } from "./paths.js";
-import { editTool, globTool, readTool } from "./registry.js";
+import { editTool, globTool, multiEditTool, readTool } from "./registry.js";
 
 let dir: string;
 const ctx = () => ({ cwd: dir });
@@ -49,6 +49,78 @@ describe("editTool", () => {
       ctx(),
     );
     expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("y y y");
+  });
+});
+
+describe("multiEditTool", () => {
+  it("applies several edits in order, sequentially", async () => {
+    await fs.writeFile(join(dir, "a.txt"), "one two three");
+    const res = await multiEditTool.execute(
+      {
+        path: "a.txt",
+        edits: [
+          { old_string: "one", new_string: "1" },
+          { old_string: "1 two", new_string: "1-2" },
+        ],
+      },
+      ctx(),
+    );
+    expect(res.isError).toBeFalsy();
+    expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("1-2 three");
+  });
+
+  it("is atomic — a later failed edit leaves the file untouched", async () => {
+    await fs.writeFile(join(dir, "a.txt"), "alpha beta");
+    const res = await multiEditTool.execute(
+      {
+        path: "a.txt",
+        edits: [
+          { old_string: "alpha", new_string: "ALPHA" },
+          { old_string: "missing", new_string: "x" },
+        ],
+      },
+      ctx(),
+    );
+    expect(res.isError).toBe(true);
+    expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("alpha beta");
+  });
+
+  it("errors when an edit's old_string is not unique without replace_all", async () => {
+    await fs.writeFile(join(dir, "a.txt"), "x x x");
+    const res = await multiEditTool.execute(
+      { path: "a.txt", edits: [{ old_string: "x", new_string: "y" }] },
+      ctx(),
+    );
+    expect(res.isError).toBe(true);
+    expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("x x x");
+  });
+
+  it("honours replace_all per edit", async () => {
+    await fs.writeFile(join(dir, "a.txt"), "x x | y");
+    const res = await multiEditTool.execute(
+      {
+        path: "a.txt",
+        edits: [
+          { old_string: "x", new_string: "z", replace_all: true },
+          { old_string: "y", new_string: "w" },
+        ],
+      },
+      ctx(),
+    );
+    expect(res.isError).toBeFalsy();
+    expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("z z | w");
+  });
+
+  it("previews a -/+ diff (first line is the summary)", () => {
+    const preview = multiEditTool.preview?.({
+      path: "a.txt",
+      edits: [{ old_string: "foo", new_string: "bar" }],
+    });
+    expect(preview).toBeTruthy();
+    const [head, ...body] = (preview ?? "").split("\n");
+    expect(head).toContain("multi_edit a.txt");
+    expect(body).toContain("-foo");
+    expect(body).toContain("+bar");
   });
 });
 

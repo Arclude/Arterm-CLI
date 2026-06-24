@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
-import type { Tool } from "@arterm/core";
+import { type Tool, writePreview } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 
 export const writeTool: Tool = {
@@ -18,7 +18,8 @@ export const writeTool: Tool = {
     },
     required: ["path", "content"],
   },
-  preview: (args) => `write ${String(args.path)} (${String(args.content ?? "").length} bytes)`,
+  preview: (args) =>
+    writePreview(String(args.path), typeof args.content === "string" ? args.content : ""),
   async execute(args, ctx) {
     const abs = resolveWithin(ctx.cwd, requireString(args, "path"));
     const content = requireString(args, "content");

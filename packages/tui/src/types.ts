@@ -75,6 +75,8 @@ export type DisplayItem =
       kind: "tool";
       name: string;
       args?: string;
+      /** Pretty diff preview (edit/write/multi_edit), rendered instead of raw args. */
+      diff?: string;
       output?: string;
       isError?: boolean;
       ms?: number;

@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import type { Tool } from "@arterm/core";
+import { type Tool, editPreview } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 
 export const editTool: Tool = {
@@ -21,7 +21,13 @@ export const editTool: Tool = {
     },
     required: ["path", "old_string", "new_string"],
   },
-  preview: (args) => `edit ${String(args.path)}`,
+  preview: (args) =>
+    editPreview(
+      String(args.path),
+      typeof args.old_string === "string" ? args.old_string : "",
+      typeof args.new_string === "string" ? args.new_string : "",
+      args.replace_all === true,
+    ),
   async execute(args, ctx) {
     const abs = resolveWithin(ctx.cwd, requireString(args, "path"));
     const oldStr = requireString(args, "old_string");

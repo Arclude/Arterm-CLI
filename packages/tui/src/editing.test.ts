@@ -125,6 +125,30 @@ describe("reduceInput", () => {
     expect(reduceInput("abc", "", { escape: true })).toEqual({ type: "noop" });
     expect(reduceInput("abc", "", { tab: true })).toEqual({ type: "noop" });
   });
+
+  it("inserts a multi-character paste literally instead of submitting on its newline", () => {
+    expect(reduceInput("hi ", "world\nthere", NONE)).toEqual({
+      type: "change",
+      value: "hi world\nthere",
+    });
+  });
+
+  it("strips bracketed-paste markers and normalises CRLF in the paste", () => {
+    const esc = String.fromCharCode(27);
+    const wrapped = `${esc}[200~line1\r\nline2${esc}[201~`;
+    expect(reduceInput("", wrapped, NONE)).toEqual({ type: "change", value: "line1\nline2" });
+  });
+
+  it("Alt/Meta+Enter inserts a newline rather than submitting", () => {
+    expect(reduceInput("line1", "", { return: true, meta: true })).toEqual({
+      type: "change",
+      value: "line1\n",
+    });
+  });
+
+  it("plain Enter still submits", () => {
+    expect(reduceInput("done", "", { return: true })).toEqual({ type: "submit", value: "done" });
+  });
 });
 
 describe("input history", () => {

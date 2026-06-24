@@ -6,6 +6,7 @@ import {
   type PermissionMode,
   fetchCatalog,
   searchCatalog,
+  toolCallPreview,
 } from "@arterm/core";
 import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import type React from "react";
@@ -58,6 +59,7 @@ function InputLine({
   active,
   value,
   commands,
+  columns,
   onChange,
   onSubmit,
   onHelp,
@@ -67,6 +69,7 @@ function InputLine({
   active: boolean;
   value: string;
   commands: readonly string[];
+  columns: number;
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onHelp: () => void;
@@ -74,6 +77,18 @@ function InputLine({
   onHistoryNext: () => void;
 }): React.ReactElement {
   const suggestion = commandSuggestion(value, commands);
+  const { stdout } = useStdout();
+  // Turn on the terminal's bracketed-paste mode while the prompt is active, so a
+  // paste arrives wrapped in ESC[200~ … ESC[201~ and reduceInput inserts it
+  // literally instead of submitting on an embedded newline.
+  useEffect(() => {
+    if (!active || !stdout) return;
+    const esc = String.fromCharCode(27);
+    stdout.write(`${esc}[?2004h`);
+    return () => {
+      stdout.write(`${esc}[?2004l`);
+    };
+  }, [active, stdout]);
   useInput(
     (input, key) => {
       // Tab completes a slash command to its first match. Shift+Tab is the
@@ -100,20 +115,24 @@ function InputLine({
     },
     { isActive: active },
   );
+  // One width-bounded, wrapping <Text>: a long paste flows onto as many lines as
+  // it needs and the box grows vertically, instead of overflowing or ghosting.
   return (
-    <Box>
-      <Text color="cyan" bold>
-        {"› "}
-      </Text>
-      <Text>{value}</Text>
-      <Text color="cyan">▏</Text>
-      {suggestion ? (
-        <Text color="gray" dimColor>
-          {suggestion}
-          {"  ⇥ tab"}
+    <Box width={columns}>
+      <Text wrap="wrap">
+        <Text color="cyan" bold>
+          {"› "}
         </Text>
-      ) : null}
-      {value === "" ? <Text color="gray"> message… (type ? for help)</Text> : null}
+        {value}
+        <Text color="cyan">▏</Text>
+        {suggestion ? (
+          <Text color="gray" dimColor>
+            {suggestion}
+            {"  ⇥ tab"}
+          </Text>
+        ) : null}
+        {value === "" ? <Text color="gray"> message… (type ? for help)</Text> : null}
+      </Text>
     </Box>
   );
 }
@@ -255,6 +274,7 @@ export function App({
             kind: "tool",
             name: event.call.name,
             args: JSON.stringify(event.call.arguments),
+            diff: toolCallPreview(event.call.name, event.call.arguments) ?? undefined,
           });
           break;
         case "tool_result":
@@ -872,6 +892,7 @@ export function App({
               active={!busy}
               value={input}
               commands={COMMANDS}
+              columns={columns}
               onChange={setInput}
               onSubmit={submit}
               onHelp={() => push({ kind: "system", text: HELP })}
@@ -902,6 +923,7 @@ export function App({
         ctxWindow={DEFAULT_CTX}
         toolCount={session.toolCount}
         mode={mode}
+        columns={columns}
       />
     </Box>
   );

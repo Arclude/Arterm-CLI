@@ -35,15 +35,50 @@ export function deleteWordBackward(value: string): string {
   return wordStart === -1 ? "" : trimmed.slice(0, wordStart);
 }
 
+/** Normalises pasted line endings (CRLF or a lone CR) to "\n". */
+function normalizeNewlines(s: string): string {
+  return s.replace(/\r\n?/g, "\n");
+}
+
+/** Bracketed-paste markers a terminal wraps pasted text in: ESC[200~ … ESC[201~. */
+const PASTE_MARKER = /\[20[01]~/g;
+
+/** True if the chunk carries bracketed-paste markers (start or end). */
+export function isPaste(input: string): boolean {
+  return input.includes("[200~") || input.includes("[201~");
+}
+
+/** Strips bracketed-paste markers and normalises newlines to plain pasted text. */
+function stripPaste(s: string): string {
+  // The ESC byte that frames each marker is dropped first (avoiding a control
+  // char in the regex), then the literal marker bodies "[200~" / "[201~".
+  const esc = String.fromCharCode(27);
+  return normalizeNewlines(s.split(esc).join("").replace(PASTE_MARKER, ""));
+}
+
 /**
  * Maps a keypress to an edit action. Centralises the prompt's keymap:
- * - Enter submits.
+ * - Pasted text (a bracketed-paste chunk, or any multi-character chunk) is
+ *   inserted literally, newlines included — an embedded Enter never submits.
+ * - Enter submits; Alt/Option+Enter inserts a newline (compose multi-line by hand).
  * - Ctrl+W / Ctrl+Backspace deletes the previous word.
  * - Ctrl+U clears the line.
  * - Backspace/Delete removes one char.
  * - `?` on an empty line opens help.
  */
 export function reduceInput(value: string, input: string, key: KeyLike): InputAction {
+  // Pasted text arrives as a single chunk (wrapped in bracketed-paste markers
+  // when supported, otherwise just a multi-character string). Insert it as-is so
+  // a newline inside the paste does not trigger an early submit.
+  if (isPaste(input)) {
+    return { type: "change", value: value + stripPaste(input) };
+  }
+  if (!key.ctrl && !key.meta && input.length > 1) {
+    return { type: "change", value: value + normalizeNewlines(input) };
+  }
+
+  // Alt/Option+Enter inserts a newline; plain Enter still submits.
+  if (key.return && key.meta) return { type: "change", value: `${value}\n` };
   if (key.return) return { type: "submit", value };
 
   // Word/line deletion (checked before the plain-backspace and ctrl-swallow rules).
