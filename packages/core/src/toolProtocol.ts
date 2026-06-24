@@ -30,13 +30,25 @@ export function toolSystemPrompt(tools: ToolSchema[]): string {
 interface RawCall {
   tool?: unknown;
   args?: unknown;
+  // The OpenAI/native function-call shape that local models (e.g. qwen on Ollama)
+  // emit as plain text when their native tool path doesn't fire.
+  name?: unknown;
+  arguments?: unknown;
 }
 
 function asCall(value: RawCall): ToolCall | null {
-  if (typeof value.tool !== "string") return null;
-  const args =
-    value.args && typeof value.args === "object" ? (value.args as Record<string, unknown>) : {};
-  return { id: randomUUID(), name: value.tool, arguments: args };
+  // Accept both {tool, args} (our documented shape) and {name, arguments}
+  // (the OpenAI/native shape local models emit as text).
+  const name =
+    typeof value.tool === "string"
+      ? value.tool
+      : typeof value.name === "string"
+        ? value.name
+        : undefined;
+  if (!name) return null;
+  const rawArgs = typeof value.tool === "string" ? value.args : value.arguments;
+  const args = rawArgs && typeof rawArgs === "object" ? (rawArgs as Record<string, unknown>) : {};
+  return { id: randomUUID(), name, arguments: args };
 }
 
 /**
@@ -93,7 +105,7 @@ export function parseToolCalls(text: string): { calls: ToolCall[]; cleaned: stri
     const candidates = Array.isArray(parsed) ? parsed : [parsed];
     let consumed = false;
     for (const c of candidates) {
-      if (c && typeof c === "object" && "tool" in c) {
+      if (c && typeof c === "object" && ("tool" in c || "name" in c)) {
         const call = asCall(c as RawCall);
         if (call) {
           calls.push(call);
@@ -116,7 +128,11 @@ export function parseToolCalls(text: string): { calls: ToolCall[]; cleaned: stri
   // 2) Fallback: bare JSON objects (no fence, or fences broken by nested ```).
   if (calls.length === 0) {
     for (const obj of extractBalancedObjects(text)) {
-      if (obj.includes('"tool"')) consume(obj, obj);
+      // Require name+arguments together for the {name,…} shape to avoid matching
+      // unrelated JSON objects that merely have a "name" field.
+      if (obj.includes('"tool"') || (obj.includes('"name"') && obj.includes('"arguments"'))) {
+        consume(obj, obj);
+      }
     }
   }
 

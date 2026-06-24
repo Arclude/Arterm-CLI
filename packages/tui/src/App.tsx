@@ -1,27 +1,29 @@
 import {
-  PERMISSION_MODES,
-  fetchCatalog,
   type ModelInfo,
+  PERMISSION_MODES,
   type PermissionAsker,
   type PermissionMode,
+  fetchCatalog,
   searchCatalog,
 } from "@arterm/core";
-import { Box, Static, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LoginOverlay } from "./LoginOverlay.js";
+import { Item } from "./MessageList.js";
+import { ModelPicker } from "./ModelPicker.js";
+import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
+import { type Status, StatusBar } from "./StatusBar.js";
 import {
   type HistoryNav,
+  commandSuggestion,
   emptyHistory,
   historyDown,
   historyPush,
   historyUp,
   reduceInput,
 } from "./editing.js";
-import { Item } from "./MessageList.js";
-import { ModelPicker } from "./ModelPicker.js";
-import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
-import { type Status, StatusBar } from "./StatusBar.js";
-import type { DisplayItem, Session } from "./types.js";
+import type { DisplayItem, LoginProvider, Session } from "./types.js";
 
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
 const DEFAULT_CTX = 32768;
@@ -32,6 +34,7 @@ const HELP = [
   "  /model                open the model picker (or press Alt+P)",
   "  /model <name|N>       switch model directly",
   "  /models               open the model picker (type to filter)",
+  "  /login                sign in to a provider (pick provider + API key)",
   "  /catalog [query]      search the models.dev catalog (~5k models)",
   "  /clear                reset the conversation",
   "  /goal <text>          run autonomously toward a goal (decide→act→reflect→repeat)",
@@ -43,7 +46,7 @@ const HELP = [
   "  /mode [ask|auto|plan|yolo]  set permission mode (no arg cycles)",
   "  /auto /plan /ask /yolo      shortcuts for /mode",
   "  /exit                 quit (or Ctrl+C)",
-  "Keys:  Enter send · ↑/↓ history · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
+  "Keys:  Enter send · ↑/↓ history · PgUp/PgDn scroll · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
   "Modes: ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all",
   "Edit:  Backspace del char · Ctrl+W del word · Ctrl+U clear line",
 ].join("\n");
@@ -52,6 +55,7 @@ const HELP = [
 function InputLine({
   active,
   value,
+  commands,
   onChange,
   onSubmit,
   onHelp,
@@ -60,14 +64,22 @@ function InputLine({
 }: {
   active: boolean;
   value: string;
+  commands: readonly string[];
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onHelp: () => void;
   onHistoryPrev: () => void;
   onHistoryNext: () => void;
 }): React.ReactElement {
+  const suggestion = commandSuggestion(value, commands);
   useInput(
     (input, key) => {
+      // Tab completes a slash command to its first match. Shift+Tab is the
+      // permission-mode cycle, handled in App — fall through and leave it.
+      if (key.tab && !key.shift) {
+        if (suggestion) onChange(value + suggestion);
+        return;
+      }
       const action = reduceInput(value, input, key);
       switch (action.type) {
         case "submit":
@@ -93,13 +105,64 @@ function InputLine({
       </Text>
       <Text>{value}</Text>
       <Text color="cyan">▏</Text>
-      {value === "" ? <Text color="gray"> message…  (type ? for help)</Text> : null}
+      {suggestion ? (
+        <Text color="gray" dimColor>
+          {suggestion}
+          {"  ⇥ tab"}
+        </Text>
+      ) : null}
+      {value === "" ? <Text color="gray"> message… (type ? for help)</Text> : null}
     </Box>
   );
 }
 
+/** Slash commands offered for Tab-completion (mirrors the handleSlash switch). */
+const COMMANDS = [
+  "help",
+  "model",
+  "models",
+  "login",
+  "catalog",
+  "clear",
+  "goal",
+  "steer",
+  "pause",
+  "resume",
+  "stop",
+  "compact",
+  "mcp",
+  "plugins",
+  "skills",
+  "skill",
+  "mode",
+  "auto",
+  "plan",
+  "ask",
+  "yolo",
+  "exit",
+  "quit",
+] as const;
+
 /** Modes cycled by Shift+Tab; yolo is deliberately excluded (set it via /mode yolo). */
 const MODE_CYCLE: PermissionMode[] = ["ask", "auto", "plan"];
+
+/** Cap on transcript items laid out per frame; older ones are clipped anyway. */
+const MAX_RENDER = 200;
+
+/** Current terminal size, tracking resize events so the layout fills the screen. */
+function useTermSize(): { rows: number; columns: number } {
+  const { stdout } = useStdout();
+  const [size, setSize] = useState({ rows: stdout?.rows ?? 24, columns: stdout?.columns ?? 80 });
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = () => setSize({ rows: stdout.rows ?? 24, columns: stdout.columns ?? 80 });
+    stdout.on("resize", onResize);
+    return () => {
+      stdout.off("resize", onResize);
+    };
+  }, [stdout]);
+  return size;
+}
 
 export function App({
   session,
@@ -129,6 +192,14 @@ export function App({
   const [pickerIndex, setPickerIndex] = useState(0);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [providerLabel, setProviderLabel] = useState(session.providerLabel);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginStep, setLoginStep] = useState<"provider" | "key">("provider");
+  const [loginIndex, setLoginIndex] = useState(0);
+  const [loginSel, setLoginSel] = useState<LoginProvider | null>(null);
+  const [loginKey, setLoginKey] = useState("");
+  const [scroll, setScroll] = useState(0);
+  const [signedIn, setSignedIn] = useState<string[]>(() => session.signedInProviders());
   const filteredPickerModels = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase();
     return q ? pickerModels.filter((m) => m.name.toLowerCase().includes(q)) : pickerModels;
@@ -139,6 +210,21 @@ export function App({
   const turnRef = useRef({ inTok: 0, outTok: 0, rounds: 0 });
 
   const push = useCallback((item: DisplayItem) => setItems((prev) => [...prev, item]), []);
+
+  // Keep the viewport stable while scrolled up: when new items arrive, push the
+  // offset by the same amount; at the bottom (offset 0) we follow the latest.
+  const prevLen = useRef(0);
+  useEffect(() => {
+    const delta = items.length - prevLen.current;
+    prevLen.current = items.length;
+    if (delta > 0) setScroll((s) => (s > 0 ? s + delta : 0));
+  }, [items.length]);
+
+  // PgUp/PgDn scroll the transcript through history.
+  useInput((_input, key) => {
+    if (key.pageUp) setScroll((s) => Math.min(Math.max(0, items.length - 1), s + 5));
+    else if (key.pageDown) setScroll((s) => Math.max(0, s - 5));
+  });
 
   // Wire the permission prompt into the agent's permission flow (once).
   useEffect(() => {
@@ -309,9 +395,11 @@ export function App({
     setPickerLoading(true);
     setPickerQuery("");
     try {
-      const models = await session.listModels();
+      const models = await session.listAllModels();
       setPickerModels(models);
-      const cur = models.findIndex((m) => m.name === session.agent.model);
+      const cur = models.findIndex(
+        (m) => m.name === session.agent.model && m.provider === session.providerLabel,
+      );
       setPickerIndex(cur >= 0 ? cur : 0);
     } catch (err) {
       setPickerModels([]);
@@ -334,6 +422,28 @@ export function App({
     [session, push],
   );
 
+  // Pick a model from the aggregated list: switch provider too when it differs.
+  const chooseModel = useCallback(
+    (m: ModelInfo) => {
+      try {
+        if (m.provider && m.provider !== session.providerLabel) {
+          session.switchProvider(m.provider);
+          setProviderLabel(session.providerLabel);
+          setSignedIn(session.signedInProviders());
+        }
+        session.switchModel(m.name);
+        setModel(m.name);
+        push({ kind: "system", text: `✓ ${session.providerLabel} / ${m.name}` });
+      } catch (err) {
+        push({
+          kind: "system",
+          text: `✗ switch failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    },
+    [session, push],
+  );
+
   // Permission mode: cycle with Shift+Tab, set explicitly via /mode (and /auto, /plan…).
   const applyMode = useCallback(
     (next: PermissionMode): void => {
@@ -344,12 +454,44 @@ export function App({
     [session, push],
   );
 
+  const openLogin = useCallback(() => {
+    setSignedIn(session.signedInProviders());
+    setLoginStep("provider");
+    setLoginIndex(0);
+    setLoginSel(null);
+    setLoginKey("");
+    setLoginOpen(true);
+  }, [session]);
+
+  // Persist the key (if any), switch the active provider, and sync the status bar.
+  const switchTo = useCallback(
+    (p: LoginProvider, key?: string) => {
+      try {
+        if (key) session.setApiKey(p.id, key);
+        session.switchProvider(p.id);
+        setSignedIn(session.signedInProviders());
+        setProviderLabel(session.providerLabel);
+        setModel(session.agent.model);
+        push({
+          kind: "system",
+          text: `✓ provider → ${p.id}${key ? " · key saved" : ""} — run /model to pick a model`,
+        });
+      } catch (err) {
+        push({
+          kind: "system",
+          text: `✗ login failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    },
+    [session, push],
+  );
+
   // Alt+P (or Ctrl+P) opens the model picker.
   useInput(
     (input2, key) => {
       if ((key.meta || key.ctrl) && (input2 === "p" || input2 === "P")) void openPicker();
     },
-    { isActive: status === "idle" && !pickerOpen && !pending },
+    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending },
   );
 
   // Shift+Tab cycles the permission mode (ASK → AUTO → PLAN).
@@ -360,7 +502,7 @@ export function App({
         applyMode(MODE_CYCLE[(i + 1) % MODE_CYCLE.length] ?? "ask");
       }
     },
-    { isActive: status === "idle" && !pickerOpen && !pending },
+    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending },
   );
 
   // Picker navigation + type-to-search filtering.
@@ -371,7 +513,7 @@ export function App({
       else if (key.downArrow) setPickerIndex((i) => Math.min(list.length - 1, i + 1));
       else if (key.return) {
         const m = list[pickerIndex];
-        if (m) choose(m.name);
+        if (m) chooseModel(m);
         setPickerOpen(false);
       } else if (key.escape) {
         setPickerOpen(false);
@@ -386,6 +528,55 @@ export function App({
     { isActive: pickerOpen },
   );
 
+  // Login overlay: navigate providers, then type/paste the API key.
+  useInput(
+    (input2, key) => {
+      if (key.escape) {
+        setLoginOpen(false);
+        return;
+      }
+      if (loginStep === "provider") {
+        const list = session.loginProviders;
+        const p = list[loginIndex];
+        if (key.upArrow) setLoginIndex((i) => Math.max(0, i - 1));
+        else if (key.downArrow) setLoginIndex((i) => Math.min(list.length - 1, i + 1));
+        else if (key.return) {
+          if (!p) return;
+          // No key needed, or already signed in → switch straight away using the
+          // stored key. Otherwise collect a key first.
+          if (!p.needsKey || signedIn.includes(p.id)) {
+            switchTo(p);
+            setLoginOpen(false);
+          } else {
+            setLoginSel(p);
+            setLoginKey("");
+            setLoginStep("key");
+          }
+        } else if (input2 === "r" && p?.needsKey) {
+          // Replace a stored key: jump to key entry even if already signed in.
+          setLoginSel(p);
+          setLoginKey("");
+          setLoginStep("key");
+        } else if (input2 === "x" && p && signedIn.includes(p.id)) {
+          // Forget this provider's stored key.
+          session.removeApiKey(p.id);
+          setSignedIn(session.signedInProviders());
+        }
+        return;
+      }
+      // step === "key": collect the secret, masked in the overlay.
+      if (key.return) {
+        if (loginSel && loginKey.trim()) switchTo(loginSel, loginKey.trim());
+        setLoginOpen(false);
+      } else if (key.backspace || key.delete) {
+        setLoginKey((k) => k.slice(0, -1));
+      } else if (input2 && !key.ctrl && !key.meta) {
+        setLoginKey((k) => k + input2);
+      }
+    },
+    { isActive: loginOpen },
+  );
+
   const handleSlash = useCallback(
     async (raw: string): Promise<void> => {
       const [cmd, ...rest] = raw.slice(1).trim().split(/\s+/);
@@ -397,6 +588,7 @@ export function App({
         case "clear":
           session.agent.reset();
           setItems([]);
+          setScroll(0);
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -528,7 +720,10 @@ export function App({
         case "skills": {
           const sk = session.skills;
           if (sk.length === 0) {
-            push({ kind: "system", text: "no skills found — add markdown files to ~/.arterm/skills/" });
+            push({
+              kind: "system",
+              text: "no skills found — add markdown files to ~/.arterm/skills/",
+            });
           } else {
             push({
               kind: "system",
@@ -560,14 +755,29 @@ export function App({
           }
           const n = Number(arg);
           const picked = Number.isInteger(n) ? pickerModels[n - 1] : undefined;
-          choose(picked ? picked.name : arg);
+          if (picked) chooseModel(picked);
+          else choose(arg);
           break;
         }
+        case "login":
+          openLogin();
+          break;
         default:
           push({ kind: "system", text: `unknown command: /${cmd} — type ? for help` });
       }
     },
-    [session, exit, openPicker, choose, push, pickerModels, applyMode, permMode],
+    [
+      session,
+      exit,
+      openPicker,
+      openLogin,
+      choose,
+      chooseModel,
+      push,
+      pickerModels,
+      applyMode,
+      permMode,
+    ],
   );
 
   const submit = useCallback(
@@ -614,11 +824,30 @@ export function App({
   const busy = status !== "idle";
   const mode = permMode.toUpperCase();
 
+  const { rows, columns } = useTermSize();
+  const maxScroll = Math.max(0, items.length - 1);
+  const scrollClamped = Math.min(scroll, maxScroll);
+  const sliceEnd = items.length - scrollClamped;
+  const sliceStart = Math.max(0, sliceEnd - MAX_RENDER);
+  const visibleItems = items.slice(sliceStart, sliceEnd);
+
   return (
-    <Box flexDirection="column">
-      <Static items={items}>
-        {(item, i) => <Item key={i} item={item} />}
-      </Static>
+    <Box flexDirection="column" height={rows} width={columns}>
+      {/* Scrollback fills the space above the footer, anchored to the bottom so the
+          latest message sits just over the input. Overflow is clipped at the top;
+          PgUp/PgDn page through history. */}
+      <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
+        {visibleItems.map((item, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: transcript is append-only, so the absolute index is a stable identity
+          <Item key={sliceStart + i} item={item} />
+        ))}
+      </Box>
+      {scrollClamped > 0 ? (
+        <Text color="yellow" dimColor>
+          {"  ▲ "}
+          {scrollClamped} newer hidden · PgDn for latest
+        </Text>
+      ) : null}
       {pending ? (
         <PermissionPrompt pending={pending} />
       ) : pickerOpen ? (
@@ -629,6 +858,16 @@ export function App({
           loading={pickerLoading}
           query={pickerQuery}
         />
+      ) : loginOpen ? (
+        <LoginOverlay
+          step={loginStep}
+          providers={session.loginProviders}
+          index={loginIndex}
+          current={providerLabel}
+          signedIn={signedIn}
+          selected={loginSel ?? undefined}
+          keyValue={loginKey}
+        />
       ) : (
         <Box marginTop={1}>
           {busy ? (
@@ -637,6 +876,7 @@ export function App({
             <InputLine
               active={!busy}
               value={input}
+              commands={COMMANDS}
               onChange={setInput}
               onSubmit={submit}
               onHelp={() => push({ kind: "system", text: HELP })}
@@ -658,7 +898,7 @@ export function App({
         </Box>
       ) : null}
       <StatusBar
-        provider={session.providerLabel}
+        provider={providerLabel}
         model={model}
         status={status}
         inTok={inTok}

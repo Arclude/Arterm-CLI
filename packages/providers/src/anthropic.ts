@@ -83,10 +83,12 @@ export class AnthropicProvider implements ChatProvider {
   readonly id = "anthropic";
   private readonly client: Anthropic;
   private readonly maxTokens: number;
+  private readonly apiKey: string | undefined;
 
   constructor(opts: AnthropicOptions = {}) {
+    this.apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
     this.client = new Anthropic({
-      apiKey: opts.apiKey ?? process.env.ANTHROPIC_API_KEY,
+      apiKey: this.apiKey,
       ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
     });
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
@@ -101,6 +103,11 @@ export class AnthropicProvider implements ChatProvider {
   }
 
   async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {
+    if (!this.apiKey) {
+      throw new Error(
+        "No Anthropic API key. Run `arterm auth set anthropic`, or sign in with /login.",
+      );
+    }
     const { system, messages } = toAnthropicConversation(req.messages);
     // `temperature` is intentionally omitted — current Claude models (Opus
     // 4.8/4.7, Fable 5) reject sampling parameters with a 400.

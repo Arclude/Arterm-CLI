@@ -2,15 +2,47 @@ import { describe, expect, it } from "vitest";
 import {
   type HistoryNav,
   type KeyLike,
+  commandSuggestion,
+  completeCommand,
   deleteWordBackward,
   emptyHistory,
   historyDown,
   historyPush,
   historyUp,
+  matchCommands,
   reduceInput,
 } from "./editing.js";
 
 const NONE: KeyLike = {};
+
+const CMDS = ["help", "model", "models", "login", "mode", "mcp"] as const;
+
+describe("command completion", () => {
+  it("suggests the first matching command's remaining characters", () => {
+    expect(commandSuggestion("/lo", CMDS)).toBe("gin");
+    expect(completeCommand("/lo", CMDS)).toBe("/login");
+  });
+
+  it("matches every command sharing the prefix, in list order", () => {
+    expect(matchCommands("/mo", CMDS)).toEqual(["model", "models", "mode"]);
+  });
+
+  it("excludes an exact full match (so a complete command suggests nothing extra)", () => {
+    // "model" is exact and excluded; "models" still extends it.
+    expect(matchCommands("/model", CMDS)).toEqual(["models"]);
+    expect(commandSuggestion("/login", CMDS)).toBe("");
+  });
+
+  it("never completes plain text or argument tokens", () => {
+    expect(matchCommands("hello", CMDS)).toEqual([]);
+    expect(matchCommands("/model gpt", CMDS)).toEqual([]);
+    expect(commandSuggestion("/model gpt", CMDS)).toBe("");
+  });
+
+  it("leaves the input unchanged when nothing matches", () => {
+    expect(completeCommand("/zzz", CMDS)).toBe("/zzz");
+  });
+});
 
 describe("deleteWordBackward", () => {
   it("removes the last word but keeps the separating space", () => {

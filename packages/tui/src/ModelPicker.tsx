@@ -44,7 +44,7 @@ export function ModelPicker({
         <Text color="cyan">▏</Text>
       </Box>
       {loading ? (
-        <Text color="gray">  loading…</Text>
+        <Text color="gray"> loading…</Text>
       ) : models.length === 0 ? (
         <Text color="gray">
           {"  "}
@@ -54,7 +54,7 @@ export function ModelPicker({
         models.map((m, i) => {
           const sel = i === index;
           return (
-            <Box key={m.name}>
+            <Box key={`${m.provider}/${m.name}`}>
               <Text
                 color={sel ? "black" : "white"}
                 backgroundColor={sel ? "cyan" : undefined}

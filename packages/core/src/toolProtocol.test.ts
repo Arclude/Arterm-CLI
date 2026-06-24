@@ -16,6 +16,26 @@ describe("parseToolCalls", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("accepts the {name, arguments} shape emitted by local models (qwen/Ollama)", () => {
+    const text = '{"name": "get_weather", "arguments": {"city": "Paris"}}';
+    const { calls } = parseToolCalls(text);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("get_weather");
+    expect(calls[0]?.arguments).toEqual({ city: "Paris" });
+  });
+
+  it("accepts a fenced {name, arguments} block", () => {
+    const text = '```json\n{"name": "edit", "arguments": {"path": "a.ts"}}\n```';
+    const { calls } = parseToolCalls(text);
+    expect(calls[0]?.name).toBe("edit");
+    expect(calls[0]?.arguments).toEqual({ path: "a.ts" });
+  });
+
+  it("does not treat a bare object with only a name (no arguments) as a tool call", () => {
+    const { calls } = parseToolCalls('Here is data: {"name": "John", "age": 3}');
+    expect(calls).toHaveLength(0);
+  });
+
   it("defaults missing args to an empty object", () => {
     const { calls } = parseToolCalls('```json\n{"tool": "ls"}\n```');
     expect(calls[0]?.arguments).toEqual({});
@@ -56,8 +76,7 @@ describe("parseToolCalls", () => {
   });
 
   it("prefers fenced calls and ignores the bare fallback when a fence matched", () => {
-    const text =
-      '```json\n{"tool":"read","args":{"path":"a"}}\n```\nNote: {"tool":"ls","args":{}}';
+    const text = '```json\n{"tool":"read","args":{"path":"a"}}\n```\nNote: {"tool":"ls","args":{}}';
     const { calls } = parseToolCalls(text);
     expect(calls.map((c) => c.name)).toEqual(["read"]);
   });

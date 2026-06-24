@@ -63,6 +63,33 @@ export function reduceInput(value: string, input: string, key: KeyLike): InputAc
 }
 
 /**
+ * Slash-command names (no leading slash) that begin with the typed prefix.
+ * Returns [] unless the line is a bare command token: it must start with "/"
+ * and contain no space yet (we never complete arguments). Exact matches are
+ * excluded so a fully-typed command shows no suggestion of itself.
+ */
+export function matchCommands(value: string, commands: readonly string[]): string[] {
+  if (!value.startsWith("/")) return [];
+  const typed = value.slice(1).toLowerCase();
+  if (typed.includes(" ")) return [];
+  return commands.filter((c) => c !== typed && c.startsWith(typed));
+}
+
+/**
+ * The trailing characters to append to complete the current input to its first
+ * matching command (the ghost text shown after the cursor), or "" if none.
+ */
+export function commandSuggestion(value: string, commands: readonly string[]): string {
+  const first = matchCommands(value, commands)[0];
+  return first ? first.slice(value.length - 1) : "";
+}
+
+/** Apply the suggestion: the input completed to its first matching command. */
+export function completeCommand(value: string, commands: readonly string[]): string {
+  return value + commandSuggestion(value, commands);
+}
+
+/**
  * Shell-style input history. `entries` are oldest-first submitted lines. `cursor`
  * ranges over [0, entries.length]; `cursor === entries.length` means "editing the
  * live draft" (not browsing). `draft` preserves the text typed before browsing so

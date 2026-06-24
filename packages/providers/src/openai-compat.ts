@@ -44,17 +44,20 @@ interface PendingToolCall {
 }
 
 export interface OpenAICompatOptions {
+  /** Reported provider id (defaults to "openai-compat"); hosted presets set their own. */
+  id?: string;
   baseUrl: string;
   apiKey?: string;
 }
 
 /** Talks to any OpenAI-compatible server (LM Studio, llama.cpp server, vLLM, ...). */
 export class OpenAICompatProvider implements ChatProvider {
-  readonly id = "openai-compat";
+  readonly id: string;
   private baseUrl: string;
   private apiKey?: string;
 
   constructor(opts: OpenAICompatOptions) {
+    this.id = opts.id ?? "openai-compat";
     this.baseUrl = opts.baseUrl.replace(/\/$/, "");
     this.apiKey = opts.apiKey;
   }

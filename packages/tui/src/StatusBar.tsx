@@ -117,7 +117,7 @@ export function StatusBar({
       </Box>
       <Box>
         <Text color="gray" dimColor>
-          Enter send   ? help   Alt+P models   Esc cancel   ^C quit
+          Enter send ? help Alt+P models PgUp/PgDn scroll ^C quit
         </Text>
       </Box>
     </Box>

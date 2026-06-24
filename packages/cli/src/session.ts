@@ -16,7 +16,14 @@ import {
   runSubagent,
   saveConfig,
 } from "@arterm/core";
-import { createProvider } from "@arterm/providers";
+import {
+  allProviders,
+  createProvider,
+  setApiKey as persistApiKey,
+  providerCatalog,
+  removeApiKey,
+  storedKeyNames,
+} from "@arterm/providers";
 import {
   createMemorySearchTool,
   createRememberTool,
@@ -46,7 +53,10 @@ export function buildSession(opts: SessionOptions): {
   const providerId = opts.providerId ?? config.provider;
   const model = opts.model ?? config.model;
 
-  const provider = createProvider(config, providerId);
+  // Reassignable: /login swaps the active provider in place. The closures below
+  // (sub-agent spawn, summarize, listModels) read this binding at call time, so
+  // a switch propagates to all of them.
+  let provider = createProvider(config, providerId);
   const initialMode: PermissionMode = opts.yolo ? "yolo" : (config.mode ?? "ask");
   const arbiter = config.arbiter?.enabled === false ? undefined : new RiskArbiter();
   const permissions = new PermissionManager(config.permissions, initialMode, arbiter);
@@ -181,17 +191,40 @@ export function buildSession(opts: SessionOptions): {
     agent,
     bus,
     config,
-    providerLabel: provider.id,
+    get providerLabel() {
+      return provider.id;
+    },
     toolCount: agent.tools.length,
     yolo: opts.yolo ?? false,
     setAsker(next) {
       asker = next;
     },
     listModels: () => provider.listModels(),
+    listAllModels: async () => {
+      // Aggregate across local backends + every provider with a stored/env key,
+      // each model tagged with its provider id. Unreachable backends are skipped.
+      const lists = await Promise.all(
+        allProviders(config).map((p) => p.listModels().catch(() => [])),
+      );
+      return lists.flat();
+    },
     switchModel(next) {
       agent.setModel(next);
       config.model = next;
     },
+    switchProvider(id) {
+      provider = createProvider(config, id);
+      agent.setProvider(provider);
+      config.provider = id;
+    },
+    setApiKey(name, key) {
+      persistApiKey(name, key);
+    },
+    removeApiKey(name) {
+      removeApiKey(name);
+    },
+    signedInProviders: () => storedKeyNames(),
+    loginProviders: [...providerCatalog],
     compact: () => agent.compact("manual"),
     permissionMode: initialMode,
     setMode(next) {
@@ -206,7 +239,7 @@ export function buildSession(opts: SessionOptions): {
   };
 
   const persist = async () => {
-    config.provider = providerId;
+    config.provider = provider.id;
     config.permissions = permissions.snapshot();
     // Persist auto/plan/ask as the default, but never make yolo sticky.
     const current = permissions.getMode();

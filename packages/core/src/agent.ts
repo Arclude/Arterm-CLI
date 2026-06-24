@@ -49,7 +49,7 @@ const DEFAULT_SYSTEM =
   "You are Arterm, a local AI coding agent running in the user's terminal. " +
   "You can read, search, and edit files and run shell commands via tools. " +
   "You are already running inside the user's project directory (shown below). " +
-  "When the user refers to \"the project\", \"this project\", the README, or asks you to " +
+  'When the user refers to "the project", "this project", the README, or asks you to ' +
   "inspect, read, summarize, or build on it, that means the working directory — " +
   "NEVER ask the user for the project location or a file path. Discover files yourself: " +
   "call the `ls` tool (its path defaults to the project root) and `read` the files you need, " +
@@ -147,9 +147,7 @@ export class Agent {
     const system = await this.buildSystem(true);
     const probe: Message = {
       role: "user",
-      content:
-        `GOAL: "${goal}"\nConsidering everything done so far, is the goal FULLY complete? ` +
-        `Reply with exactly "DONE" if it is finished, otherwise "CONTINUE" and one line on the next step.`,
+      content: `GOAL: "${goal}"\nConsidering everything done so far, is the goal FULLY complete? Reply with exactly "DONE" if it is finished, otherwise "CONTINUE" and one line on the next step.`,
     };
     let text = "";
     for await (const chunk of provider.chat({
@@ -278,13 +276,17 @@ export class Agent {
         calls.push(chunk.call);
         this.bus.emit({ type: "tool_call", call: chunk.call });
       } else if (chunk.type === "done" && chunk.usage) {
-        if (chunk.usage.promptTokens !== undefined) this.lastPromptTokens = chunk.usage.promptTokens;
+        if (chunk.usage.promptTokens !== undefined)
+          this.lastPromptTokens = chunk.usage.promptTokens;
         this.bus.emit({ type: "usage", usage: chunk.usage });
       }
     }
 
     // Fallback path: recover tool calls from the text body.
-    if (!native && tools.length > 0) {
+    // Tool-call fallback: parse JSON tool calls from the text body whenever the
+    // provider yielded none natively. Covers non-native models *and* native ones
+    // (e.g. qwen on Ollama) that emit the call as JSON text with tool_calls=null.
+    if (tools.length > 0 && calls.length === 0) {
       const parsed = parseToolCalls(text);
       if (parsed.calls.length > 0) {
         text = parsed.cleaned;
@@ -313,11 +315,7 @@ export class Agent {
         name: call.name,
         reason: decision.reason,
       });
-      await this.pushToolResult(
-        call,
-        decision.reason ?? "Tool call denied by the user.",
-        true,
-      );
+      await this.pushToolResult(call, decision.reason ?? "Tool call denied by the user.", true);
       return;
     }
 

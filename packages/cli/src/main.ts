@@ -207,7 +207,10 @@ async function main(): Promise<void> {
     .name("arterm")
     .description("Local AI coding agent for your terminal")
     .version(VERSION)
-    .option("-p, --provider <id>", "provider: ollama | llamacpp")
+    .option(
+      "-p, --provider <id>",
+      "provider: ollama | llamacpp | openai-compat | anthropic | openai | gemini | xai | deepseek | groq | openrouter | mistral",
+    )
     .option("-m, --model <name>", "model name or .gguf file")
     .option("--yolo", "skip all permission prompts")
     .option("--goal <text>", "start an autonomous run toward this goal");
@@ -229,7 +232,11 @@ async function main(): Promise<void> {
   const auth = program.command("auth").description("manage encrypted API keys (AES-256-GCM)");
   auth
     .command("set <name>")
-    .description("store an API key (encrypted); value from --value or stdin")
+    .description(
+      "store an API key (encrypted); name is the provider id " +
+        "(openai | anthropic | gemini | xai | deepseek | groq | openrouter | mistral); " +
+        "value from --value or stdin",
+    )
     .option("--value <secret>", "the secret value (otherwise read from stdin)")
     .action(async (name: string, opts: { value?: string }) => {
       await authSet(name, opts.value);
