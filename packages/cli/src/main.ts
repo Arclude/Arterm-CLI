@@ -23,7 +23,7 @@ import { Command } from "commander";
 import { formatRecordsText, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 interface GlobalOpts {
   provider?: string;

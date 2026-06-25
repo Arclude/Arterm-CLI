@@ -1,6 +1,6 @@
 {
   "name": "arterm-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Local AI coding agent for your terminal — hybrid Ollama + direct GGUF",
