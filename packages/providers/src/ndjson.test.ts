@@ -32,4 +32,9 @@ describe("parseNdjson", () => {
     const out = await collect(parseNdjson(streamOf(['{"done":true}'])));
     expect(out).toEqual([{ done: true }]);
   });
+
+  it("skips a malformed line instead of killing the stream", async () => {
+    const out = await collect(parseNdjson(streamOf(['{"a":1}\n', "not json\n", '{"a":2}\n'])));
+    expect(out).toEqual([{ a: 1 }, { a: 2 }]);
+  });
 });

@@ -45,9 +45,12 @@ export const editTool: Tool = {
         isError: true,
       };
     }
+    // NB: use index+slice, not String.replace — replace() interprets `$&`, `$1`,
+    // `$$` etc. in new_string as patterns and would silently corrupt the write.
+    const idx = content.indexOf(oldStr);
     const updated = replaceAll
       ? content.split(oldStr).join(newStr)
-      : content.replace(oldStr, newStr);
+      : content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
     await fs.writeFile(abs, updated, "utf8");
     return { output: `Replaced ${replaceAll ? count : 1} occurrence(s) in ${args.path}` };
   },

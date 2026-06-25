@@ -264,6 +264,44 @@ describe("Agent tool calls (toolCall pipeline)", () => {
     expect(result).toMatchObject({ output: "OVERRIDE" });
     expect(ran).toBe(false); // the default execute stage was replaced
   });
+
+  it("leaves a tool result for every call when aborted mid-tool-loop (no orphan)", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider([
+      [
+        { type: "tool_call", call: { id: "c1", name: "t", arguments: {} } },
+        { type: "tool_call", call: { id: "c2", name: "t", arguments: {} } },
+      ],
+      [{ type: "text", delta: "done" }],
+    ]);
+    const controller = new AbortController();
+    const t: Tool = {
+      name: "t",
+      description: "",
+      parameters: {},
+      permission: "allow",
+      category: "read",
+      // Abort the turn once the first call starts executing.
+      execute: async () => {
+        controller.abort();
+        return { output: "ok" };
+      },
+    };
+    await makeAgent(provider, bus, [t]).run("go", controller.signal);
+
+    const results = events.filter((e) => e.type === "tool_result") as Array<{
+      callId: string;
+      isError: boolean;
+      output: string;
+    }>;
+    // Both recorded tool_calls must have a matching tool result, or the next turn's
+    // history would have an assistant tool_call with no tool message.
+    expect(results.map((r) => r.callId).sort()).toEqual(["c1", "c2"]);
+    const c2 = results.find((r) => r.callId === "c2");
+    expect(c2?.isError).toBe(true);
+    expect(c2?.output).toContain("cancelled");
+  });
 });
 
 describe("Agent streaming seams (userInput / request / response / assistantOutput)", () => {

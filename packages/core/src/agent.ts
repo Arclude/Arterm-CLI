@@ -436,7 +436,13 @@ export class Agent {
         if (response.calls.length === 0) break;
 
         for (const call of response.calls) {
-          if (runSignal.aborted) break;
+          // An abort mid-turn must still leave a tool result for every recorded
+          // tool_call — otherwise the next turn's history has an assistant tool_call
+          // with no matching tool message, which native provider APIs reject.
+          if (runSignal.aborted) {
+            await this.pushToolResult(call, "Tool call cancelled by the user.", true);
+            continue;
+          }
           await this.runToolCall(call, runSignal);
         }
       }

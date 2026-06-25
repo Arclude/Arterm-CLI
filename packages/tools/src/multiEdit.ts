@@ -90,9 +90,12 @@ export const multiEditTool: Tool = {
           isError: true,
         };
       }
+      // index+slice, not String.replace — replace() treats `$&`/`$1`/`$$` in
+      // new_string as patterns and would silently corrupt the write.
+      const idx = content.indexOf(edit.old_string);
       content = edit.replace_all
         ? content.split(edit.old_string).join(edit.new_string)
-        : content.replace(edit.old_string, edit.new_string);
+        : content.slice(0, idx) + edit.new_string + content.slice(idx + edit.old_string.length);
     }
     await fs.writeFile(abs, content, "utf8");
     return { output: `Applied ${edits.length} edit(s) to ${args.path}` };

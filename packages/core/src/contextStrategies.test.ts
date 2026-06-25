@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { ArtermConfig } from "./config.js";
+import { createContextStrategy } from "./contextRegistry.js";
 import { NoneStrategy, WindowStrategy, cleanCut, isCleanBoundary } from "./contextStrategies.js";
 import type { Message } from "./types.js";
 
@@ -84,5 +86,26 @@ describe("cleanCut", () => {
     const msgs = [user("u"), callMsg("c1"), toolMsg("c1")];
     // desiredStart = 2 (tool result) -> must snap back to 0 (the clean user msg).
     expect(cleanCut(msgs, 2)).toEqual(msgs);
+  });
+});
+
+describe("createContextStrategy", () => {
+  it("returns NoneStrategy for 'none'", () => {
+    const s = createContextStrategy({ context: { strategy: "none" } } as ArtermConfig);
+    expect(s).toBeInstanceOf(NoneStrategy);
+  });
+
+  it("falls back to WindowStrategy (does not throw) for the unimplemented 'summary'", () => {
+    const warn = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const s = createContextStrategy({ context: { strategy: "summary" } } as ArtermConfig);
+    expect(s).toBeInstanceOf(WindowStrategy);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("throws on an unknown strategy", () => {
+    expect(() =>
+      createContextStrategy({ context: { strategy: "bogus" } } as unknown as ArtermConfig),
+    ).toThrow(/Unknown context strategy/);
   });
 });

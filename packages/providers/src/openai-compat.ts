@@ -188,7 +188,15 @@ async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<unk
         if (line.startsWith("data:")) {
           const payload = line.slice(5).trim();
           if (payload === "[DONE]") return;
-          if (payload) yield JSON.parse(payload);
+          // Skip a malformed payload rather than killing the stream — some proxies
+          // (e.g. OpenRouter) emit non-JSON `data:` keep-alive lines mid-response.
+          if (payload) {
+            try {
+              yield JSON.parse(payload);
+            } catch {
+              // skip malformed payload
+            }
+          }
         }
         newline = buffer.indexOf("\n");
       }
@@ -196,7 +204,13 @@ async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<unk
     const tail = buffer.trim();
     if (tail.startsWith("data:")) {
       const payload = tail.slice(5).trim();
-      if (payload && payload !== "[DONE]") yield JSON.parse(payload);
+      if (payload && payload !== "[DONE]") {
+        try {
+          yield JSON.parse(payload);
+        } catch {
+          // skip malformed trailing payload
+        }
+      }
     }
   } finally {
     reader.releaseLock();

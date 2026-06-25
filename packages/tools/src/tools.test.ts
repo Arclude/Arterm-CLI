@@ -50,6 +50,17 @@ describe("editTool", () => {
     );
     expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("y y y");
   });
+
+  it("writes new_string literally, not as a $-replacement pattern", async () => {
+    await fs.writeFile(join(dir, "a.txt"), "value = OLD;");
+    const res = await editTool.execute(
+      { path: "a.txt", old_string: "OLD", new_string: "a ($&) and b ($$)" },
+      ctx(),
+    );
+    expect(res.isError).toBeFalsy();
+    // Buggy String.replace would expand $& → "OLD" and $$ → "$"; we want it literal.
+    expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("value = a ($&) and b ($$);");
+  });
 });
 
 describe("multiEditTool", () => {
@@ -109,6 +120,22 @@ describe("multiEditTool", () => {
     );
     expect(res.isError).toBeFalsy();
     expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("z z | w");
+  });
+
+  it("writes each new_string literally, not as a $-replacement pattern", async () => {
+    await fs.writeFile(join(dir, "a.txt"), "A B");
+    const res = await multiEditTool.execute(
+      {
+        path: "a.txt",
+        edits: [
+          { old_string: "A", new_string: "$&x" },
+          { old_string: "B", new_string: "$$y" },
+        ],
+      },
+      ctx(),
+    );
+    expect(res.isError).toBeFalsy();
+    expect(await fs.readFile(join(dir, "a.txt"), "utf8")).toBe("$&x $$y");
   });
 
   it("previews a -/+ diff (first line is the summary)", () => {

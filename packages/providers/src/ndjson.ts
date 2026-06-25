@@ -17,12 +17,26 @@ export async function* parseNdjson(stream: ReadableStream<Uint8Array>): AsyncGen
       while (newline !== -1) {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
-        if (line) yield JSON.parse(line);
+        // Skip a malformed line rather than killing the whole stream — proxies and
+        // keep-alives occasionally inject non-JSON lines mid-response.
+        if (line) {
+          try {
+            yield JSON.parse(line);
+          } catch {
+            // skip malformed line
+          }
+        }
         newline = buffer.indexOf("\n");
       }
     }
     const tail = buffer.trim();
-    if (tail) yield JSON.parse(tail);
+    if (tail) {
+      try {
+        yield JSON.parse(tail);
+      } catch {
+        // skip malformed trailing line
+      }
+    }
   } finally {
     reader.releaseLock();
   }
