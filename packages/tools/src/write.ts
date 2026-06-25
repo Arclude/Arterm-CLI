@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { type Tool, writePreview } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
+import { invalidateSearchIndex } from "./search.js";
 
 export const writeTool: Tool = {
   name: "write",
@@ -25,6 +26,7 @@ export const writeTool: Tool = {
     const content = requireString(args, "content");
     await fs.mkdir(dirname(abs), { recursive: true });
     await fs.writeFile(abs, content, "utf8");
+    invalidateSearchIndex(ctx.cwd);
     return { output: `Wrote ${content.length} bytes to ${args.path}` };
   },
 };

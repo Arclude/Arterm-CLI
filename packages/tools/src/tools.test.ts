@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveWithin } from "./paths.js";
-import { editTool, globTool, multiEditTool, readTool } from "./registry.js";
+import { editTool, globTool, multiEditTool, readTool, searchTool, writeTool } from "./registry.js";
 
 let dir: string;
 const ctx = () => ({ cwd: dir });
@@ -179,5 +179,18 @@ describe("resolveWithin", () => {
     }
     expect(() => resolveWithin(dir, "link/secret.txt")).toThrow(/symlink|escapes/);
     await fs.rm(outside, { recursive: true, force: true });
+  });
+});
+
+describe("searchTool index invalidation", () => {
+  it("re-indexes after a write so newly created files are found", async () => {
+    await fs.writeFile(join(dir, "alpha.txt"), "the quick brown fox");
+    // Prime the per-cwd index cache.
+    const first = await searchTool.execute({ query: "quick" }, ctx());
+    expect(first.output).toContain("alpha.txt");
+    // A file created via the tool must be searchable immediately (cache invalidated).
+    await writeTool.execute({ path: "bravo.txt", content: "lazy sleeping dog" }, ctx());
+    const second = await searchTool.execute({ query: "lazy" }, ctx());
+    expect(second.output).toContain("bravo.txt");
   });
 });

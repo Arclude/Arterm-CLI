@@ -950,7 +950,7 @@ export function App({
         inTok={inTok}
         outTok={outTok}
         ctxUsed={ctxUsed}
-        ctxWindow={DEFAULT_CTX}
+        ctxWindow={session.config.context?.window ?? DEFAULT_CTX}
         toolCount={session.toolCount}
         mode={mode}
         columns={columns}

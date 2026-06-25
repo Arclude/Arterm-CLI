@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { type Tool, editPreview } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
+import { invalidateSearchIndex } from "./search.js";
 
 export const editTool: Tool = {
   name: "edit",
@@ -52,6 +53,7 @@ export const editTool: Tool = {
       ? content.split(oldStr).join(newStr)
       : content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
     await fs.writeFile(abs, updated, "utf8");
+    invalidateSearchIndex(ctx.cwd);
     return { output: `Replaced ${replaceAll ? count : 1} occurrence(s) in ${args.path}` };
   },
 };

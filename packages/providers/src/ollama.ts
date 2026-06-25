@@ -13,19 +13,27 @@ import { streamIdleGuard } from "./timeout.js";
 /** Abort a streaming chat if no bytes arrive for this long — bounds a hung server. */
 const STREAM_IDLE_TIMEOUT_MS = 120_000;
 
-/** Model families known to handle Ollama's native tool-calling well. */
+/**
+ * Model families known to handle Ollama's native tool-calling well. Substrings, so
+ * "llama3" covers llama3.0–3.3 and "qwen2" covers qwen2 / qwen2.5. Kept conservative:
+ * a false positive here makes a non-tool model receive `tools` without the JSON
+ * fallback instructions, so only confirmed-capable families are listed.
+ */
 const TOOL_CAPABLE = [
-  "llama3.1",
-  "llama3.2",
-  "llama3.3",
-  "qwen2.5",
+  "llama3",
+  "llama4",
+  "qwen2",
   "qwen3",
   "mistral",
-  "mistral-nemo",
   "mixtral",
   "command-r",
+  "command-a",
   "firefunction",
   "hermes3",
+  "granite3",
+  "nemotron",
+  "athene",
+  "qwq",
 ];
 
 /** Max wait for metadata calls (tags/reachability) before giving up, in ms. */
@@ -38,7 +46,8 @@ interface OllamaTagsResponse {
 interface OllamaChatMessage {
   role: string;
   content?: string;
-  tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
+  // Most templates emit `arguments` as an object, but some emit a JSON string.
+  tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> | string } }>;
 }
 
 interface OllamaChatResponse {
@@ -50,6 +59,17 @@ interface OllamaChatResponse {
 
 export interface OllamaOptions {
   host: string;
+}
+
+/** Coerce tool-call arguments to an object — some templates emit a JSON string. */
+function normalizeToolArgs(raw: Record<string, unknown> | string): Record<string, unknown> {
+  if (typeof raw !== "string") return raw;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Talks to a running Ollama server over its HTTP API. */
@@ -144,7 +164,11 @@ export class OllamaProvider implements ChatProvider {
           for (const tc of msg.tool_calls) {
             yield {
               type: "tool_call",
-              call: { id: randomUUID(), name: tc.function.name, arguments: tc.function.arguments },
+              call: {
+                id: randomUUID(),
+                name: tc.function.name,
+                arguments: normalizeToolArgs(tc.function.arguments),
+              },
             };
           }
         }

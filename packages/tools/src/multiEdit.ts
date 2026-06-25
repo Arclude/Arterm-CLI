@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { type Tool, multiEditPreview } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
+import { invalidateSearchIndex } from "./search.js";
 
 interface OneEdit {
   old_string: string;
@@ -98,6 +99,7 @@ export const multiEditTool: Tool = {
         : content.slice(0, idx) + edit.new_string + content.slice(idx + edit.old_string.length);
     }
     await fs.writeFile(abs, content, "utf8");
+    invalidateSearchIndex(ctx.cwd);
     return { output: `Applied ${edits.length} edit(s) to ${args.path}` };
   },
 };

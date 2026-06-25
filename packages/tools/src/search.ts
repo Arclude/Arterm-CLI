@@ -16,6 +16,16 @@ async function getIndex(cwd: string): Promise<CodeIndex> {
   return index;
 }
 
+/**
+ * Drop the cached index for a cwd (or all of them) so the next `search` re-walks the
+ * tree. The file-mutating tools call this after a write, otherwise searches would
+ * return stale line numbers and miss code the agent just created mid-session.
+ */
+export function invalidateSearchIndex(cwd?: string): void {
+  if (cwd) indexCache.delete(cwd);
+  else indexCache.clear();
+}
+
 function optionalNumber(args: Record<string, unknown>, key: string): number | undefined {
   const v = args[key];
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
