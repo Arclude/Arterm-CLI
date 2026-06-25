@@ -66,6 +66,27 @@ function apiKeyFor(name: string, envVar: string): string | undefined {
 }
 
 /**
+ * Env var consulted for each key-based provider's API key (keystore name → env var).
+ * Anthropic plus every hosted OpenAI-compatible preset; the single map a key
+ * preflight needs to know which env var backs a given provider id.
+ */
+const KEY_ENV_VARS: Record<string, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  ...Object.fromEntries(Object.entries(OPENAI_COMPAT_PRESETS).map(([id, p]) => [id, p.envVar])),
+};
+
+/**
+ * True when a key-based provider has an API key configured (encrypted keystore or
+ * env var). Returns false for local providers (which need no key) and unknown ids.
+ * Used by the CLI's startup preflight to warn before the first turn fails.
+ */
+export function hasApiKey(providerId: string): boolean {
+  const envVar = KEY_ENV_VARS[providerId];
+  if (!envVar) return false;
+  return Boolean(apiKeyFor(providerId, envVar));
+}
+
+/**
  * Persist an API key for a provider (encrypted, AES-256-GCM), keeping the
  * in-process keystore cache fresh so a subsequent `createProvider` sees it
  * without a reload — used by the TUI login flow.

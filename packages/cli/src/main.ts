@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
   ARTERM_HOME,
+  type ArtermConfig,
   Keystore,
   createSessionStore,
   loadConfig,
@@ -8,7 +9,14 @@ import {
   readProjectRecords,
   retentionFromConfig,
 } from "@arterm/core";
-import { OllamaProvider, allProviders } from "@arterm/providers";
+import {
+  LlamaCppProvider,
+  OllamaProvider,
+  OpenAICompatProvider,
+  allProviders,
+  hasApiKey,
+  providerCatalog,
+} from "@arterm/providers";
 import { McpManager, PluginLoader, SkillRegistry, startMemoryMcpServer } from "@arterm/tools";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
@@ -25,18 +33,55 @@ interface GlobalOpts {
   goal?: string;
 }
 
+/**
+ * Startup preflight for the selected provider — warns (never blocks) before the
+ * first turn fails. Each backend fails differently, so the check branches by type:
+ * hosted/key-based providers need an API key (checked offline, no ping); local-server
+ * providers (Ollama, a custom OpenAI-compatible host) need a reachable endpoint;
+ * llama.cpp needs a .gguf in the models dir. Returns a warning line, or undefined.
+ */
+async function preflight(providerId: string, config: ArtermConfig): Promise<string | undefined> {
+  // Hosted, key-based backends: the common first-run failure is a missing key, not
+  // an unreachable host — so check the key (instant, offline) instead of pinging.
+  if (providerCatalog.find((p) => p.id === providerId)?.needsKey) {
+    return hasApiKey(providerId)
+      ? undefined
+      : `No API key for "${providerId}". Add one with \`arterm auth set ${providerId}\`, or set its *_API_KEY env var.`;
+  }
+
+  switch (providerId) {
+    case "ollama": {
+      const ok = await new OllamaProvider({ host: config.ollamaHost }).isReachable();
+      return ok
+        ? undefined
+        : `Ollama not reachable at ${config.ollamaHost}. Start it with \`ollama serve\`, or switch provider with --provider llamacpp.`;
+    }
+    case "openai-compat": {
+      const ok = await new OpenAICompatProvider({
+        baseUrl: config.openaiCompatHost,
+        apiKey: process.env.OPENAI_API_KEY,
+      }).isReachable();
+      return ok
+        ? undefined
+        : `OpenAI-compatible host not reachable at ${config.openaiCompatHost}. Check the host or that the server is running.`;
+    }
+    case "llamacpp": {
+      const models = await new LlamaCppProvider({ modelsDir: config.modelsDir }).listModels();
+      return models.length > 0
+        ? undefined
+        : `No .gguf models found in ${config.modelsDir}. Put a model file there, or switch provider with --provider ollama.`;
+    }
+    default:
+      return undefined;
+  }
+}
+
 async function startChat(globals: GlobalOpts): Promise<void> {
   const config = await loadConfig();
   const providerId = globals.provider ?? config.provider;
 
-  if (providerId === "ollama") {
-    const ok = await new OllamaProvider({ host: config.ollamaHost }).isReachable();
-    if (!ok) {
-      process.stdout.write(
-        `⚠ Ollama not reachable at ${config.ollamaHost}. Start it with \`ollama serve\`, or switch provider with --provider llamacpp.\n`,
-      );
-    }
-  }
+  const warning = await preflight(providerId, config);
+  if (warning) process.stdout.write(`⚠ ${warning}\n`);
 
   const { session, persist, digest } = buildSession({
     config,
