@@ -1,6 +1,6 @@
 {
   "name": "arterm-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local AI coding agent for your terminal — Ollama, llama.cpp, and OpenAI-compatible providers, a rich Ink TUI, and permission-gated file/shell tools.",
   "type": "module",
   "bin": {

@@ -1,6 +1,13 @@
 import { promises as fs } from "node:fs";
 import type { CompactionResult, ContextStrategy } from "./contextStrategy.js";
 import type { EventBus } from "./eventBus.js";
+import {
+  Container,
+  type PipelineRegistry,
+  RunController,
+  Tokens,
+  createPipelines,
+} from "./kernel/index.js";
 import type { PermissionManager } from "./permissions.js";
 import { estimateHistoryTokens } from "./tokenEstimate.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
@@ -43,6 +50,21 @@ export interface AgentOptions {
    * facts from previous sessions). Invoked fresh each turn; return "" for none.
    */
   recall?: () => Promise<string> | string;
+  /**
+   * Kernel DI container for this agent's run-scoped services (today: the
+   * RunController that owns each turn's lifecycle). The session supplies its root
+   * container so the agent shares the same graph; agents constructed standalone
+   * (sub-agents, tests) get an internal default — so this is always optional.
+   */
+  container?: Container;
+}
+
+/** The internal container for a standalone agent — binds just what `run()` needs. */
+function defaultAgentContainer(): Container {
+  const c = new Container();
+  c.bind(Tokens.Pipelines, () => createPipelines());
+  c.bind(Tokens.RunController, () => new RunController(c));
+  return c;
 }
 
 const DEFAULT_SYSTEM =
@@ -80,6 +102,12 @@ async function listProjectEntries(dir: string, limit = 200): Promise<string[]> {
 /**
  * Drives the conversation: streams model output, executes tool calls (gated by
  * permissions), and feeds results back until the model produces a final answer.
+ *
+ * The loop's seams run on the kernel: a `RunController` owns each turn's cancellation
+ * signal + teardown, and the loop's behavior is composed from named middleware stages on
+ * the `userInput`/`request`/`response`/`assistantOutput`/`toolCall`/`contextWindow`
+ * pipelines (installed by `installDefaultPipelines()`). To change loop behavior, add or
+ * replace a stage rather than editing `run()` — see CLAUDE.md "Kernel".
  */
 export class Agent {
   private messages: Message[] = [];
@@ -87,10 +115,133 @@ export class Agent {
   /** Prompt tokens reported by the provider on the last turn (compaction signal). */
   private lastPromptTokens?: number;
   readonly bus: EventBus;
+  /** Per-agent kernel container (session-supplied or an internal default). */
+  private readonly container: Container;
+  /** Owns each turn's cancellation signal + teardown; resolved from the container. */
+  private readonly runController: RunController;
+  /** Named middleware chains around the loop seams; resolved from the container. */
+  private readonly pipelines: PipelineRegistry;
 
   constructor(private opts: AgentOptions) {
     this.bus = opts.bus;
     this.toolMap = new Map(opts.tools.map((t) => [t.name, t]));
+    this.container = opts.container ?? defaultAgentContainer();
+    this.runController = this.container.resolve(Tokens.RunController);
+    this.pipelines = this.container.resolve(Tokens.Pipelines);
+    this.installDefaultPipelines();
+  }
+
+  /**
+   * Install this agent's built-in pipeline stages, skipping any a feature (or test)
+   * already registered on the shared container under the same name — so the default
+   * behavior is overridable without rewriting the loop. Today: the `autoCompact` stage
+   * on `contextWindow`, which holds the threshold check the loop used to inline.
+   */
+  private installDefaultPipelines(): void {
+    const cw = this.pipelines.contextWindow;
+    if (!cw.has("autoCompact")) {
+      cw.use("autoCompact", async (ctx, next) => {
+        if (this.shouldAutoCompact()) {
+          const result = await this.compact("auto");
+          ctx.before = result.before;
+          ctx.after = result.after;
+          ctx.messages = result.messages;
+        }
+        await next();
+      });
+    }
+
+    const tc = this.pipelines.toolCall;
+    if (!tc.has("permission")) {
+      // Resolve the tool and gate it. An unknown name or a denied decision short-circuits
+      // (no `next()`), leaving an error in `ctx` for the loop to record. This is the seam
+      // where the Brain Arbiter / risk-tier checks slot in as additional middleware.
+      tc.use("permission", async (ctx, next) => {
+        const tool = this.toolMap.get(ctx.call.name);
+        if (!tool) {
+          ctx.output = `Unknown tool: ${ctx.call.name}`;
+          ctx.isError = true;
+          return;
+        }
+        const decision = await this.opts.permissions.check(tool, ctx.call.arguments, this.opts.ask);
+        if (!decision.allowed) {
+          this.bus.emit({
+            type: "tool_denied",
+            callId: ctx.call.id,
+            name: ctx.call.name,
+            reason: decision.reason,
+          });
+          ctx.output = decision.reason ?? "Tool call denied by the user.";
+          ctx.isError = true;
+          return;
+        }
+        ctx.tool = tool;
+        await next();
+      });
+    }
+    if (!tc.has("execute")) {
+      tc.use("execute", async (ctx, next) => {
+        if (!ctx.tool) return; // gated out upstream
+        try {
+          const result = await ctx.tool.execute(ctx.call.arguments, {
+            cwd: this.opts.cwd,
+            signal: ctx.signal,
+          });
+          ctx.output = result.output;
+          ctx.isError = result.isError ?? false;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          ctx.output = `Tool error: ${msg}`;
+          ctx.isError = true;
+        }
+        await next();
+      });
+    }
+
+    const ui = this.pipelines.userInput;
+    if (!ui.has("record")) {
+      ui.use("record", async (ctx, next) => {
+        await this.record({ role: "user", content: ctx.input });
+        await next();
+      });
+    }
+
+    const req = this.pipelines.request;
+    if (!req.has("buildSystem")) {
+      req.use("buildSystem", async (ctx, next) => {
+        ctx.system = await this.buildSystem(ctx.native);
+        await next();
+      });
+    }
+
+    const res = this.pipelines.response;
+    if (!res.has("recoverToolCalls")) {
+      // Tool-call fallback: when the provider yielded no native calls, recover JSON tool
+      // calls from the text body (non-native models, and native ones that emit the call as
+      // text). Emits a tool_call event per recovered call, exactly as the stream path did.
+      res.use("recoverToolCalls", async (ctx, next) => {
+        if (this.opts.tools.length > 0 && ctx.calls.length === 0) {
+          const parsed = parseToolCalls(ctx.text);
+          if (parsed.calls.length > 0) {
+            ctx.text = parsed.cleaned;
+            for (const call of parsed.calls) {
+              ctx.calls.push(call);
+              this.bus.emit({ type: "tool_call", call });
+            }
+          }
+        }
+        await next();
+      });
+    }
+
+    const ao = this.pipelines.assistantOutput;
+    if (!ao.has("record")) {
+      ao.use("record", async (ctx, next) => {
+        await this.record(ctx.message);
+        this.bus.emit({ type: "assistant_message", message: ctx.message });
+        await next();
+      });
+    }
   }
 
   get history(): readonly Message[] {
@@ -242,38 +393,70 @@ export class Agent {
     const native = tools.length > 0 ? await provider.supportsNativeTools(model) : false;
     const maxIterations = this.opts.maxIterations ?? 12;
 
-    await this.record({ role: "user", content: userInput });
+    // The RunController owns this turn's lifecycle: one cancellation signal + LIFO
+    // teardown. The caller's `signal` (TUI Esc, autonomy pause/stop) is LINKED into
+    // the handle rather than threaded directly, so cancellation has a single source
+    // of truth while the public `run(input, signal?)` contract is unchanged.
+    const handle = this.runController.begin();
+    handle.iterationLimit(maxIterations);
+    const onExternalAbort = () => handle.abort("external");
+    if (signal) {
+      if (signal.aborted) handle.abort("external");
+      else signal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+    const runSignal = handle.signal;
+    handle.onTeardown(() => this.bus.emit({ type: "turn_end" }));
+
+    await this.pipelines.userInput.run({ input: userInput });
     this.bus.emit({ type: "turn_start" });
 
     try {
-      for (let i = 0; i < maxIterations; i++) {
-        if (signal?.aborted) break;
-        if (this.shouldAutoCompact()) await this.compact("auto");
+      const limit = handle.getIterationLimit() ?? maxIterations;
+      for (let i = 0; i < limit; i++) {
+        if (runSignal.aborted) break;
+        // Auto-compaction runs as the `contextWindow` pipeline's default stage, so the
+        // threshold policy is swappable without touching the loop.
+        await this.pipelines.contextWindow.run({ messages: this.messages, reason: "auto" });
 
-        const system = await this.buildSystem(native);
-        const { text, calls } = await this.streamOnce(system, native, signal);
+        // request → assemble the prompt (default stage builds the system message);
+        // streamRaw → call the provider; response → post-process (recovers JSON tool
+        // calls when none came natively); assistantOutput → record + announce the reply.
+        const request = await this.pipelines.request.run({
+          system: { role: "system", content: "" },
+          messages: this.messages,
+          native,
+        });
+        const raw = await this.streamRaw(request.system, request.messages, native, runSignal);
+        const response = await this.pipelines.response.run({ text: raw.text, calls: raw.calls });
 
-        const assistant: Message = { role: "assistant", content: text };
-        if (calls.length > 0) assistant.toolCalls = calls;
-        await this.record(assistant);
-        this.bus.emit({ type: "assistant_message", message: assistant });
+        const assistant: Message = { role: "assistant", content: response.text };
+        if (response.calls.length > 0) assistant.toolCalls = response.calls;
+        await this.pipelines.assistantOutput.run({ message: assistant });
 
-        if (calls.length === 0) break;
+        if (response.calls.length === 0) break;
 
-        for (const call of calls) {
-          if (signal?.aborted) break;
-          await this.runToolCall(call, signal);
+        for (const call of response.calls) {
+          if (runSignal.aborted) break;
+          await this.runToolCall(call, runSignal);
         }
       }
     } catch (err) {
       this.bus.emit({ type: "error", error: err instanceof Error ? err.message : String(err) });
     } finally {
-      this.bus.emit({ type: "turn_end" });
+      if (signal) signal.removeEventListener("abort", onExternalAbort);
+      // Teardown (LIFO) runs the turn_end emit; idempotent and never throws.
+      await handle.finish();
     }
   }
 
-  private async streamOnce(
+  /**
+   * Stream one model response: collect native text + tool calls and emit the
+   * text_delta / tool_call / usage events. The bare-JSON tool-call fallback now lives in
+   * the `response` pipeline's `recoverToolCalls` stage, not here.
+   */
+  private async streamRaw(
     system: Message,
+    messages: Message[],
     native: boolean,
     signal?: AbortSignal,
   ): Promise<{ text: string; calls: ToolCall[] }> {
@@ -283,7 +466,7 @@ export class Agent {
 
     const stream = provider.chat({
       model,
-      messages: [system, ...this.messages],
+      messages: [system, ...messages],
       tools: native && tools.length > 0 ? this.toolSchemas() : undefined,
       temperature,
       signal,
@@ -303,50 +486,15 @@ export class Agent {
       }
     }
 
-    // Fallback path: recover tool calls from the text body.
-    // Tool-call fallback: parse JSON tool calls from the text body whenever the
-    // provider yielded none natively. Covers non-native models *and* native ones
-    // (e.g. qwen on Ollama) that emit the call as JSON text with tool_calls=null.
-    if (tools.length > 0 && calls.length === 0) {
-      const parsed = parseToolCalls(text);
-      if (parsed.calls.length > 0) {
-        text = parsed.cleaned;
-        for (const call of parsed.calls) {
-          calls.push(call);
-          this.bus.emit({ type: "tool_call", call });
-        }
-      }
-    }
-
     return { text, calls };
   }
 
   private async runToolCall(call: ToolCall, signal?: AbortSignal): Promise<void> {
-    const tool = this.toolMap.get(call.name);
-    if (!tool) {
-      await this.pushToolResult(call, `Unknown tool: ${call.name}`, true);
-      return;
-    }
-
-    const decision = await this.opts.permissions.check(tool, call.arguments, this.opts.ask);
-    if (!decision.allowed) {
-      this.bus.emit({
-        type: "tool_denied",
-        callId: call.id,
-        name: call.name,
-        reason: decision.reason,
-      });
-      await this.pushToolResult(call, decision.reason ?? "Tool call denied by the user.", true);
-      return;
-    }
-
-    try {
-      const result = await tool.execute(call.arguments, { cwd: this.opts.cwd, signal });
-      await this.pushToolResult(call, result.output, result.isError ?? false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await this.pushToolResult(call, `Tool error: ${msg}`, true);
-    }
+    // Permission-check and execution live in the `toolCall` pipeline (default stages
+    // `permission` + `execute`); the agent owns only recording the outcome back into
+    // history, so a feature can re-gate or wrap execution without touching this method.
+    const ctx = await this.pipelines.toolCall.run({ call, signal });
+    await this.pushToolResult(call, ctx.output ?? "", ctx.isError ?? false);
   }
 
   private async pushToolResult(call: ToolCall, output: string, isError: boolean): Promise<void> {

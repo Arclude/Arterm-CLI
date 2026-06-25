@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from "../types.js";
+import type { Message, Tool, ToolCall } from "../types.js";
 
 /** Koa-style middleware: do work around `next()`, which runs the rest of the chain. */
 export type Middleware<Ctx> = (ctx: Ctx, next: () => Promise<void>) => Promise<void>;
@@ -79,6 +79,10 @@ export interface AssistantOutputCtx {
 }
 export interface ToolCallCtx {
   call: ToolCall;
+  /** Cancellation signal handed to the tool's execute(). */
+  signal?: AbortSignal;
+  /** The resolved tool, set by the permission stage; absent when the name is unknown. */
+  tool?: Tool;
   output?: string;
   isError?: boolean;
 }

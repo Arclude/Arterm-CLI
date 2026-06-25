@@ -84,3 +84,42 @@ filter).
    `createProvider()` and include it in `allProviders()`.
 5. If it needs config (host, paths, etc.), add fields to `ArtermConfig` in
    `packages/core/src/config.ts` with defaults in `defaultConfig()`.
+
+## Kernel: the agent loop is pipeline-driven
+
+`packages/core/src/kernel/` holds a tiny DI layer that the agent loop runs on:
+
+- **`Container`** — lazy, memoized typed DI (`bind`/`override`/`decorate`/`resolve`,
+  plus `createScope` for per-run children). `buildSession` (in `@arterm/cli`) is the
+  composition root: it builds the root container and binds the session's services
+  (`Tokens.Bus`, `PermissionPolicy`, `Compactor`, `Pipelines`, `RunController`, …) to
+  the instances it already creates, then hands that container to the `Agent`. An
+  `Agent` constructed without one (sub-agents, tests) falls back to an internal
+  `defaultAgentContainer()`.
+- **`RunController`** — owns each turn's lifecycle. `Agent.run()` calls
+  `runController.begin()` and uses the returned `RunHandle`'s `signal` everywhere; the
+  caller's `signal?` is **linked** into the handle (not threaded directly), so
+  `run(input, signal?)` is unchanged while cancellation has one source of truth.
+- **`Pipeline`** — named, ordered Koa-style middleware chains. The loop's seams are six
+  pipelines (`userInput`, `request`, `response`, `assistantOutput`, `toolCall`,
+  `contextWindow`). The `Agent` installs its built-in behavior as **named default
+  stages** in `installDefaultPipelines()` (e.g. `request.buildSystem`,
+  `response.recoverToolCalls`, `toolCall.permission` + `toolCall.execute`,
+  `contextWindow.autoCompact`). Each is guarded by `pipeline.has(name)`.
+
+### How-to: change or extend loop behavior
+
+Don't edit the `run()` loop. Instead add/replace a middleware stage:
+
+1. Pick the pipeline for the seam (e.g. `toolCall` to gate or wrap execution,
+   `request` to shape the prompt, `contextWindow` to change compaction policy).
+2. To **add** behavior, register a new named stage before the agent constructs (bind a
+   `Tokens.Pipelines` whose chain already `.use("yourStage", mw)`), or `before`/`replace`
+   an existing one. To **override** a default, register a stage with the SAME name the
+   agent uses — `installDefaultPipelines()` skips installing its own when `has(name)` is
+   true.
+3. A stage that omits `await next()` short-circuits the rest of the chain (this is how
+   `toolCall.permission` denies a call). Stages mutate the shared `Ctx` object; the
+   per-stage context shapes live in `kernel/pipeline.ts`.
+4. The Brain Arbiter / risk-tier checks are the canonical extension point: extra
+   `toolCall` middleware inserted `before` `execute`.

@@ -2,15 +2,20 @@ import {
   Agent,
   type ArtermConfig,
   AutonomyEngine,
+  Container,
   EventBus,
   MemoryRecorder,
   type PermissionAsker,
   PermissionManager,
   type PermissionMode,
   RiskArbiter,
+  RunController,
+  Tokens,
   createContextStrategy,
   createMemoryStore,
+  createPipelines,
   digest as digestObservations,
+  estimateTokens,
   formatMemorySection,
   runFleet,
   runSubagent,
@@ -70,6 +75,20 @@ export function buildSession(opts: SessionOptions): {
   );
   const bus = new EventBus();
 
+  // Composition root (kernel D1): the DI Container holds the session's service graph
+  // by token. For now it is bound to the SAME instances the wiring below already
+  // creates, and the agent resolves three of them (bus, permissions, compactor) out of
+  // it — so behavior is unchanged. Later phases let the agent loop and its pipelines
+  // resolve services from here instead of receiving them directly.
+  const contextStrategy = createContextStrategy(config);
+  const container = new Container()
+    .bind(Tokens.Bus, () => bus)
+    .bind(Tokens.PermissionPolicy, () => permissions)
+    .bind(Tokens.Compactor, () => contextStrategy)
+    .bind(Tokens.Pipelines, () => createPipelines())
+    .bind(Tokens.TokenCounter, () => ({ count: (text: string) => estimateTokens(text) }));
+  container.bind(Tokens.RunController, () => new RunController(container));
+
   // Persistent, project-scoped memory: capture this session's activity off the
   // bus, recall prior learnings into the system prompt, digest at session end.
   const memoryStore = createMemoryStore(config, cwd);
@@ -85,17 +104,18 @@ export function buildSession(opts: SessionOptions): {
     provider,
     model,
     tools: defaultTools(),
-    permissions,
+    permissions: container.resolve(Tokens.PermissionPolicy),
     ask: (tool, args) => asker(tool, args),
-    bus,
+    bus: container.resolve(Tokens.Bus),
     cwd,
     temperature: config.temperature,
-    context: createContextStrategy(config),
+    context: container.resolve(Tokens.Compactor),
     contextWindow: config.context?.window,
     compactAtPercent: config.context?.compactAtPercent,
     recall: memoryEnabled
       ? async () => formatMemorySection(await memoryStore.recent(maxInject))
       : undefined,
+    container,
   });
 
   // Sub-agent delegation: the main agent gets a `spawn` tool that runs a fresh
