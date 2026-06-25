@@ -8,6 +8,10 @@ import type {
   ToolSchema,
 } from "@arterm/core";
 import { parseNdjson } from "./ndjson.js";
+import { streamIdleGuard } from "./timeout.js";
+
+/** Abort a streaming chat if no bytes arrive for this long — bounds a hung server. */
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 /** Model families known to handle Ollama's native tool-calling well. */
 const TOOL_CAPABLE = [
@@ -113,49 +117,57 @@ export class OllamaProvider implements ChatProvider {
       tools: req.tools ? req.tools.map(toOllamaTool) : undefined,
     };
 
-    const res = await fetch(`${this.host}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: req.signal,
-    });
-    if (!res.ok || !res.body) {
-      const detail = await res.text().catch(() => "");
-      throw new Error(`Ollama /api/chat failed: ${res.status} ${detail}`);
-    }
+    // Bound the stream with an idle timeout (reset on each chunk) so a server that
+    // accepts the connection but never streams can't hang the turn forever.
+    const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
+    try {
+      const res = await fetch(`${this.host}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: guard.signal,
+      });
+      if (!res.ok || !res.body) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(`Ollama /api/chat failed: ${res.status} ${detail}`);
+      }
 
-    let promptTokens: number | undefined;
-    let completionTokens: number | undefined;
+      let promptTokens: number | undefined;
+      let completionTokens: number | undefined;
 
-    for await (const raw of parseNdjson(res.body)) {
-      const obj = raw as OllamaChatResponse;
-      const msg = obj.message;
-      if (msg?.content) yield { type: "text", delta: msg.content };
-      if (msg?.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          yield {
-            type: "tool_call",
-            call: { id: randomUUID(), name: tc.function.name, arguments: tc.function.arguments },
-          };
+      for await (const raw of parseNdjson(res.body)) {
+        guard.reset();
+        const obj = raw as OllamaChatResponse;
+        const msg = obj.message;
+        if (msg?.content) yield { type: "text", delta: msg.content };
+        if (msg?.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            yield {
+              type: "tool_call",
+              call: { id: randomUUID(), name: tc.function.name, arguments: tc.function.arguments },
+            };
+          }
+        }
+        if (obj.done) {
+          promptTokens = obj.prompt_eval_count;
+          completionTokens = obj.eval_count;
         }
       }
-      if (obj.done) {
-        promptTokens = obj.prompt_eval_count;
-        completionTokens = obj.eval_count;
-      }
-    }
 
-    yield {
-      type: "done",
-      usage: {
-        promptTokens,
-        completionTokens,
-        totalTokens:
-          promptTokens !== undefined && completionTokens !== undefined
-            ? promptTokens + completionTokens
-            : undefined,
-      },
-    };
+      yield {
+        type: "done",
+        usage: {
+          promptTokens,
+          completionTokens,
+          totalTokens:
+            promptTokens !== undefined && completionTokens !== undefined
+              ? promptTokens + completionTokens
+              : undefined,
+        },
+      };
+    } finally {
+      guard.clear();
+    }
   }
 }
 

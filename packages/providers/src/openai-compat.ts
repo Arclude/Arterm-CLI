@@ -8,9 +8,13 @@ import type {
   TokenUsage,
   ToolSchema,
 } from "@arterm/core";
+import { streamIdleGuard } from "./timeout.js";
 
 /** Max wait for metadata calls (model list/reachability) before giving up, in ms. */
 const METADATA_TIMEOUT_MS = 5000;
+
+/** Abort a streaming chat if no bytes arrive for this long — bounds a hung server. */
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 interface OpenAIModelsResponse {
   data?: Array<{ id: string }>;
@@ -107,58 +111,66 @@ export class OpenAICompatProvider implements ChatProvider {
       tools: req.tools ? req.tools.map(toOpenAITool) : undefined,
     };
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...this.headers() },
-      body: JSON.stringify(body),
-      signal: req.signal,
-    });
-    if (!res.ok || !res.body) {
-      const detail = await res.text().catch(() => "");
-      throw new Error(`OpenAI-compat /chat/completions failed: ${res.status} ${detail}`);
-    }
-
-    const pending = new Map<number, PendingToolCall>();
-    let usage: TokenUsage | undefined;
-
-    for await (const chunk of parseSse(res.body)) {
-      const obj = chunk as OpenAIStreamChunk;
-      const delta = obj.choices?.[0]?.delta;
-      if (typeof delta?.content === "string") {
-        yield { type: "text", delta: delta.content };
+    // Bound the stream with an idle timeout (reset on each chunk) so a server that
+    // accepts the connection but never streams can't hang the turn forever.
+    const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
+    try {
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...this.headers() },
+        body: JSON.stringify(body),
+        signal: guard.signal,
+      });
+      if (!res.ok || !res.body) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(`OpenAI-compat /chat/completions failed: ${res.status} ${detail}`);
       }
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const acc = pending.get(tc.index) ?? { name: "", arguments: "" };
-          if (tc.id) acc.id = tc.id;
-          if (tc.function?.name) acc.name += tc.function.name;
-          if (tc.function?.arguments) acc.arguments += tc.function.arguments;
-          pending.set(tc.index, acc);
+
+      const pending = new Map<number, PendingToolCall>();
+      let usage: TokenUsage | undefined;
+
+      for await (const chunk of parseSse(res.body)) {
+        guard.reset();
+        const obj = chunk as OpenAIStreamChunk;
+        const delta = obj.choices?.[0]?.delta;
+        if (typeof delta?.content === "string") {
+          yield { type: "text", delta: delta.content };
+        }
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const acc = pending.get(tc.index) ?? { name: "", arguments: "" };
+            if (tc.id) acc.id = tc.id;
+            if (tc.function?.name) acc.name += tc.function.name;
+            if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+            pending.set(tc.index, acc);
+          }
+        }
+        if (obj.usage) {
+          usage = {
+            promptTokens: obj.usage.prompt_tokens,
+            completionTokens: obj.usage.completion_tokens,
+            totalTokens: obj.usage.total_tokens,
+          };
         }
       }
-      if (obj.usage) {
-        usage = {
-          promptTokens: obj.usage.prompt_tokens,
-          completionTokens: obj.usage.completion_tokens,
-          totalTokens: obj.usage.total_tokens,
+
+      for (const tc of pending.values()) {
+        let args: Record<string, unknown>;
+        try {
+          args = tc.arguments ? (JSON.parse(tc.arguments) as Record<string, unknown>) : {};
+        } catch {
+          args = {};
+        }
+        yield {
+          type: "tool_call",
+          call: { id: tc.id ?? randomUUID(), name: tc.name, arguments: args },
         };
       }
-    }
 
-    for (const tc of pending.values()) {
-      let args: Record<string, unknown>;
-      try {
-        args = tc.arguments ? (JSON.parse(tc.arguments) as Record<string, unknown>) : {};
-      } catch {
-        args = {};
-      }
-      yield {
-        type: "tool_call",
-        call: { id: tc.id ?? randomUUID(), name: tc.name, arguments: args },
-      };
+      yield { type: "done", usage };
+    } finally {
+      guard.clear();
     }
-
-    yield { type: "done", usage };
   }
 
   private headers(): Record<string, string> {

@@ -169,4 +169,15 @@ describe("resolveWithin", () => {
   it("allows paths inside the working directory", () => {
     expect(() => resolveWithin(dir, "sub/file.txt")).not.toThrow();
   });
+  it("rejects a symlink inside cwd that points outside it", async () => {
+    const outside = await fs.mkdtemp(join(tmpdir(), "arterm-outside-"));
+    await fs.writeFile(join(outside, "secret.txt"), "secret");
+    try {
+      await fs.symlink(outside, join(dir, "link"), "dir");
+    } catch {
+      return; // no symlink privilege (e.g. Windows without dev mode) — skip
+    }
+    expect(() => resolveWithin(dir, "link/secret.txt")).toThrow(/symlink|escapes/);
+    await fs.rm(outside, { recursive: true, force: true });
+  });
 });

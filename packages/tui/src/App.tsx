@@ -193,6 +193,9 @@ export function App({
   const { exit } = useApp();
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
+  // Streamed assistant text for the current round, shown live below the committed
+  // transcript and cleared once the full message is recorded (assistant_message).
+  const [live, setLive] = useState("");
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<HistoryNav>(emptyHistory);
   const [model, setModel] = useState(session.agent.model);
@@ -259,12 +262,19 @@ export function App({
       switch (event.type) {
         case "turn_start":
           setStatus("thinking");
+          setLive("");
           turnStartRef.current = Date.now();
           turnRef.current = { inTok: 0, outTok: 0, rounds: 0 };
+          break;
+        case "text_delta":
+          // Accumulate streamed tokens for a live preview; replaced by the committed
+          // assistant_message once the round finishes.
+          setLive((s) => s + event.delta);
           break;
         case "assistant_message": {
           const text = event.message.content.trim();
           if (text) push({ kind: "assistant", text });
+          setLive("");
           turnRef.current.rounds += 1;
           break;
         }
@@ -379,6 +389,7 @@ export function App({
           break;
         case "turn_end":
           setStatus("idle");
+          setLive("");
           push({
             kind: "stats",
             inTok: turnRef.current.inTok,
@@ -863,6 +874,22 @@ export function App({
           <Static>, so the live (re-rendered) region below always stays within the
           viewport — no overflow corruption. Scroll history with your terminal. */}
       <Static items={items}>{(item, i) => <Item key={i} item={item} />}</Static>
+      {live ? (
+        <Box
+          flexDirection="column"
+          borderStyle="single"
+          borderColor="green"
+          borderTop={false}
+          borderRight={false}
+          borderBottom={false}
+          paddingLeft={1}
+        >
+          <Text color="green" bold>
+            ASSISTANT
+          </Text>
+          <Text>{live}</Text>
+        </Box>
+      ) : null}
       {pending ? (
         <PermissionPrompt pending={pending} />
       ) : pickerOpen ? (
@@ -885,11 +912,14 @@ export function App({
         />
       ) : (
         <Box marginTop={1}>
-          {busy ? (
+          {busy && autoState === "idle" ? (
+            // A normal turn shows a static spinner (Esc cancels). During an autonomous
+            // run the prompt stays live even while busy, so typed /pause /steer /stop
+            // (and plain-text steering) reach the engine between/within steps.
             <Text color="yellow">● working… (Esc to cancel)</Text>
           ) : (
             <InputLine
-              active={!busy}
+              active={!busy || autoState !== "idle"}
               value={input}
               commands={COMMANDS}
               columns={columns}
