@@ -2,11 +2,14 @@ import { join } from "node:path";
 import {
   ARTERM_HOME,
   type ArtermConfig,
+  type CatalogModel,
   Keystore,
   type Message,
   type SessionStore,
   type SessionSummary,
   createSessionStore,
+  fetchCatalog,
+  findModelById,
   loadConfig,
   projectKey,
   readProjectRecords,
@@ -143,6 +146,13 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   const providerId = globals.provider ?? config.provider;
   requireKnownProvider(providerId);
 
+  // Warm the models.dev cache in the background so `supportsNativeTools` can use
+  // authoritative tool-call data this session. Best-effort: cached/offline → no-op.
+  if (config.catalog?.enabled !== false) {
+    const ttlMs = (config.catalog?.maxAgeHours ?? 24) * 60 * 60 * 1000;
+    void fetchCatalog({ ttlMs }).catch(() => {});
+  }
+
   const warning = await preflight(providerId, config);
   if (warning) process.stdout.write(`⚠ ${warning}\n`);
 
@@ -270,8 +280,21 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   }
 }
 
+/** Format the catalog facts (context window, pricing) appended to a model line. */
+function catalogFacts(meta: CatalogModel | undefined): string {
+  if (!meta) return "";
+  const facts: string[] = [];
+  if (meta.contextWindow) facts.push(`${Math.round(meta.contextWindow / 1000)}k ctx`);
+  if (meta.inputCost !== undefined || meta.outputCost !== undefined) {
+    facts.push(`$${meta.inputCost ?? 0}/$${meta.outputCost ?? 0} per 1M`);
+  }
+  return facts.length ? `  ·  ${facts.join("  ·  ")}` : "";
+}
+
 async function listModels(): Promise<void> {
   const config = await loadConfig();
+  // Best-effort: enrich each model with models.dev metadata. Empty list when offline.
+  const catalog = await fetchCatalog().catch(() => [] as CatalogModel[]);
   for (const provider of allProviders(config)) {
     let models: Awaited<ReturnType<typeof provider.listModels>> = [];
     try {
@@ -283,8 +306,11 @@ async function listModels(): Promise<void> {
     process.stdout.write(`${provider.id}:\n`);
     if (models.length === 0) process.stdout.write("  (none)\n");
     for (const m of models) {
+      // The provider's own determination already folds in catalog tool data;
+      // the catalog meta is just for context-window / pricing facts.
+      const meta = findModelById(catalog, m.name, provider.id);
       const tools = m.supportsTools ? " [tools]" : "";
-      process.stdout.write(`  ${m.name}${tools}\n`);
+      process.stdout.write(`  ${m.name}${tools}${catalogFacts(meta)}\n`);
     }
   }
 }

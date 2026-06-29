@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type {
-  ChatChunk,
-  ChatProvider,
-  ChatRequest,
-  Message,
-  ModelInfo,
-  ToolSchema,
+import {
+  type ChatChunk,
+  type ChatProvider,
+  type ChatRequest,
+  type Message,
+  type ModelInfo,
+  type ToolSchema,
+  modelToolCall,
 } from "@arterm/core";
 import { parseNdjson } from "./ndjson.js";
 import { streamIdleGuard } from "./timeout.js";
@@ -82,8 +83,13 @@ export class OllamaProvider implements ChatProvider {
   }
 
   supportsNativeTools(model: string): boolean {
+    // The hand-maintained allowlist is authoritative for what it names (a known
+    // tool-capable family). The models.dev catalog only *adds* coverage for a
+    // capable family the list doesn't name yet — it never retracts a heuristic
+    // match, since the catalog's per-provider `tool_call` flags are unreliable.
     const lower = model.toLowerCase();
-    return TOOL_CAPABLE.some((fam) => lower.includes(fam));
+    if (TOOL_CAPABLE.some((fam) => lower.includes(fam))) return true;
+    return modelToolCall(model, "ollama") === true;
   }
 
   /** True if the Ollama server responds, used for auto-detection. */

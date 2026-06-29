@@ -70,6 +70,13 @@ export interface ArtermConfig {
   };
   /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
   arbiter: { enabled: boolean };
+  /** models.dev catalog: enrich model listing + native-tool detection from authoritative data. */
+  catalog?: {
+    /** Fetch/consult the catalog (default true). */
+    enabled?: boolean;
+    /** Cache freshness before a background refresh (default 24h). */
+    maxAgeHours?: number;
+  };
   /**
    * Re-prompt for tools tagged `riskTier: "destructive"` even in auto/yolo modes.
    * Off by default; enable with `--confirm-destructive`.
@@ -115,6 +122,7 @@ export function defaultConfig(): ArtermConfig {
     plugins: {},
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
     arbiter: { enabled: true },
+    catalog: { enabled: true, maxAgeHours: 24 },
     confirmDestructive: false,
     sdd: { maxQuestions: 4, maxTasks: 12 },
     memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20 },
