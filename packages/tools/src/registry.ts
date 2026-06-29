@@ -10,6 +10,7 @@ import { multiEditTool } from "./multiEdit.js";
 import { formatTool, lintTool, testTool } from "./project.js";
 import { readTool } from "./read.js";
 import { searchTool } from "./search.js";
+import { symbolsTool } from "./symbols.js";
 import { taskDoneTool } from "./taskDone.js";
 import { toolSearchTool } from "./toolSearch.js";
 import { webFetchTool } from "./webFetch.js";
@@ -24,6 +25,7 @@ export function defaultTools(): Tool[] {
     globTool,
     grepTool,
     searchTool,
+    symbolsTool,
     writeTool,
     editTool,
     multiEditTool,
@@ -48,6 +50,7 @@ export {
   globTool,
   grepTool,
   searchTool,
+  symbolsTool,
   writeTool,
   editTool,
   multiEditTool,

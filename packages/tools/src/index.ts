@@ -17,3 +17,10 @@ export {
 } from "./spawn.js";
 export { createMemorySearchTool, createRememberTool, formatLearning } from "./memoryTools.js";
 export { startMemoryMcpServer } from "./mcpMemoryServer.js";
+export {
+  type CodeSymbol,
+  extractSymbols,
+  SymbolIndex,
+  type SymbolKind,
+} from "./symbolIndex.js";
+export { invalidateSymbolIndex } from "./symbols.js";
