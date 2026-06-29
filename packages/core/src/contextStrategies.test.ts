@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ArtermConfig } from "./config.js";
 import { createContextStrategy } from "./contextRegistry.js";
-import { NoneStrategy, WindowStrategy, cleanCut, isCleanBoundary } from "./contextStrategies.js";
+import {
+  NoneStrategy,
+  SummaryStrategy,
+  WindowStrategy,
+  cleanCut,
+  isCleanBoundary,
+} from "./contextStrategies.js";
 import type { Message } from "./types.js";
 
 const ctx = { estimatedTokens: 0, model: "test", reason: "manual" as const };
@@ -89,13 +95,78 @@ describe("cleanCut", () => {
   });
 });
 
+describe("SummaryStrategy", () => {
+  it("leaves history untouched when under the limit", async () => {
+    const msgs = [user("a"), asst("b")];
+    const out = await new SummaryStrategy({ maxMessages: 10, summarize: async () => "x" }).compact(
+      msgs,
+      ctx,
+    );
+    expect(out.messages).toEqual(msgs);
+    expect(out.after).toBe(2);
+  });
+
+  it("replaces the dropped prefix with a single recap message", async () => {
+    const msgs = [user("1"), asst("2"), user("3"), asst("4"), user("5"), asst("6")];
+    const summarize = vi.fn(async () => "earlier recap");
+    const out = await new SummaryStrategy({ maxMessages: 2, summarize }).compact(msgs, ctx);
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(out.before).toBe(6);
+    // recap message + the kept tail (snapped to a clean boundary).
+    expect(out.messages[0]?.role).toBe("user");
+    expect(out.messages[0]?.content).toContain("earlier recap");
+    expect(out.after).toBe(out.messages.length);
+    expect(out.after).toBeLessThan(out.before);
+  });
+
+  it("passes the dropped messages (not the kept tail) to the summarizer", async () => {
+    const msgs = [user("oldest"), asst("old"), user("recent-1"), asst("recent-2")];
+    let captured = "";
+    const summarize = async (prompt: string) => {
+      captured = prompt;
+      return "ok";
+    };
+    await new SummaryStrategy({ maxMessages: 2, summarize }).compact(msgs, ctx);
+    expect(captured).toContain("oldest");
+    expect(captured).not.toContain("recent-2");
+  });
+
+  it("degrades to a plain window cut when the summarizer throws", async () => {
+    const msgs = [user("1"), asst("2"), user("3"), asst("4"), user("5"), asst("6")];
+    const summarize = async () => {
+      throw new Error("model down");
+    };
+    const out = await new SummaryStrategy({ maxMessages: 2, summarize }).compact(msgs, ctx);
+    expect(out.messages.length).toBeLessThan(msgs.length);
+    // No recap injected — first kept message is real history, not a summary.
+    expect(out.messages[0]?.content).not.toContain("Summary of earlier");
+  });
+
+  it("never orphans a tool result", async () => {
+    const msgs = [user("start"), callMsg("c1"), toolMsg("c1"), asst("done")];
+    const out = await new SummaryStrategy({ maxMessages: 2, summarize: async () => "r" }).compact(
+      msgs,
+      ctx,
+    );
+    expect(hasOrphanToolResult(out.messages)).toBe(false);
+  });
+});
+
 describe("createContextStrategy", () => {
   it("returns NoneStrategy for 'none'", () => {
     const s = createContextStrategy({ context: { strategy: "none" } } as ArtermConfig);
     expect(s).toBeInstanceOf(NoneStrategy);
   });
 
-  it("falls back to WindowStrategy (does not throw) for the unimplemented 'summary'", () => {
+  it("builds a SummaryStrategy for 'summary' when a summarizer is supplied", () => {
+    const s = createContextStrategy(
+      { context: { strategy: "summary" } } as ArtermConfig,
+      async () => "recap",
+    );
+    expect(s).toBeInstanceOf(SummaryStrategy);
+  });
+
+  it("falls back to WindowStrategy (with a warning) for 'summary' without a summarizer", () => {
     const warn = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     const s = createContextStrategy({ context: { strategy: "summary" } } as ArtermConfig);
     expect(s).toBeInstanceOf(WindowStrategy);

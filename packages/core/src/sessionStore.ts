@@ -1,5 +1,11 @@
 import { promises as fs } from "node:fs";
-import { SESSIONS_DIR, SessionLog, type SessionSummary, listSessions } from "./sessions.js";
+import {
+  SESSIONS_DIR,
+  SessionLog,
+  type SessionSummary,
+  listSessions,
+  loadSessionMessages,
+} from "./sessions.js";
 import type { Message } from "./types.js";
 
 /** A live, write-only handle to one recorded session. */
@@ -24,6 +30,8 @@ export interface SessionStore {
   readonly id: string;
   create(meta: { model: string; provider: string }): Promise<SessionHandle>;
   list(): Promise<SessionSummary[]>;
+  /** Read a recorded session's messages back. Returns [] for unknown ids. */
+  load(id: string): Promise<Message[]>;
   /** Delete sessions per policy; returns the removed ids. Best-effort, never throws. */
   prune(policy: RetentionPolicy): Promise<string[]>;
 }
@@ -39,6 +47,10 @@ export class NullSessionStore implements SessionStore {
   }
 
   async list(): Promise<SessionSummary[]> {
+    return [];
+  }
+
+  async load(_id: string): Promise<Message[]> {
     return [];
   }
 
@@ -60,6 +72,10 @@ export class JsonlSessionStore implements SessionStore {
 
   list(): Promise<SessionSummary[]> {
     return listSessions(this.dir);
+  }
+
+  load(id: string): Promise<Message[]> {
+    return loadSessionMessages(id, this.dir);
   }
 
   async prune(policy: RetentionPolicy): Promise<string[]> {

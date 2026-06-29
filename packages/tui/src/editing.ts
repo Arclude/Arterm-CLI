@@ -48,6 +48,17 @@ export function isPaste(input: string): boolean {
   return input.includes("[200~") || input.includes("[201~");
 }
 
+/**
+ * SGR mouse-event sequence (ESC[<b;x;y M|m) the terminal emits once mouse
+ * reporting is enabled. We turn reporting on solely to stop the wheel from being
+ * translated into ↑/↓ arrow keys (which the prompt would read as history recall);
+ * the events themselves carry no prompt meaning and are swallowed by reduceInput.
+ */
+const MOUSE_SGR = /\[<\d+;\d+;\d+[Mm]/;
+export function isMouseSequence(input: string): boolean {
+  return MOUSE_SGR.test(input);
+}
+
 /** Strips bracketed-paste markers and normalises newlines to plain pasted text. */
 function stripPaste(s: string): string {
   // The ESC byte that frames each marker is dropped first (avoiding a control
@@ -67,6 +78,11 @@ function stripPaste(s: string): string {
  * - `?` on an empty line opens help.
  */
 export function reduceInput(value: string, input: string, key: KeyLike): InputAction {
+  // Mouse-wheel / click events (mouse reporting is on) must never touch the prompt
+  // text — swallow them before anything else. This is what makes the wheel stop
+  // recalling old prompts: with reporting on it sends these instead of ↑/↓.
+  if (isMouseSequence(input)) return { type: "noop" };
+
   // Pasted text arrives as a single chunk (wrapped in bracketed-paste markers
   // when supported, otherwise just a multi-character string). Insert it as-is so
   // a newline inside the paste does not trigger an early submit.

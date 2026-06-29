@@ -63,6 +63,26 @@ function modeColor(mode: string): string {
   }
 }
 
+/**
+ * The permission-mode badge in the footer. YOLO disables every permission prompt,
+ * so it gets a filled warning badge (⚠) — unmistakably distinct from the plain
+ * bracketed ASK / AUTO / PLAN labels, which only differ by color.
+ */
+function ModeBadge({ mode }: { mode: string }): React.ReactElement {
+  if (mode === "YOLO") {
+    return (
+      <Text backgroundColor="red" color="whiteBright" bold>
+        {" ⚠ YOLO "}
+      </Text>
+    );
+  }
+  return (
+    <Text color={modeColor(mode)} bold>
+      [{mode}]
+    </Text>
+  );
+}
+
 export function StatusBar({
   provider,
   model,
@@ -111,13 +131,9 @@ export function StatusBar({
           {sepN}
           {dot}
           <Text color={statusColor}> {status}</Text>
-          {sepN}
-          <Text color={modeColor(mode)} bold>
-            {mode}
-          </Text>
         </Text>
-        <Text color="magenta" wrap="truncate">
-          {m}
+        <Text wrap="truncate">
+          <Text color="magenta">{m}</Text> <ModeBadge mode={mode} />
         </Text>
         <Text wrap="truncate">
           <Text color="gray">ctx </Text>
@@ -141,7 +157,7 @@ export function StatusBar({
           <Text color="gray">⏱ {clock}</Text>
         </Text>
         <Text color="gray" dimColor wrap="truncate">
-          ? help · Alt+P models · PgUp/PgDn scroll · ^C quit
+          ? help · Alt+P models · wheel scrolls chat · ^C quit
         </Text>
       </Box>
     );
@@ -160,7 +176,8 @@ export function StatusBar({
         {sepW}
         <Text color="magenta">
           {provider}/{model}
-        </Text>
+        </Text>{" "}
+        <ModeBadge mode={mode} />
         {sepW}
         <Text color="gray">ctx </Text>
         {meter}
@@ -181,11 +198,9 @@ export function StatusBar({
         <Text color="gray">🔧 {toolCount} tools</Text>
         {sepW}
         <Text color="gray">⏱ {clock}</Text>
-        {sepW}
-        <Text color={modeColor(mode)}>{mode}</Text>
       </Text>
       <Text color="gray" dimColor wrap="truncate">
-        Enter send · ? help · Alt+P models · PgUp/PgDn scroll · ^C quit
+        Enter send · ↑↓ input history · mouse-wheel scrolls chat · ? help · Alt+P models · ^C quit
       </Text>
     </Box>
   );

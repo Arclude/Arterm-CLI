@@ -3,6 +3,9 @@ import {
   ARTERM_HOME,
   type ArtermConfig,
   Keystore,
+  type Message,
+  type SessionStore,
+  type SessionSummary,
   createSessionStore,
   loadConfig,
   projectKey,
@@ -20,10 +23,61 @@ import {
 import { McpManager, PluginLoader, SkillRegistry, startMemoryMcpServer } from "@arterm/tools";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
+import { ArtermUserError } from "./errors.js";
+import { runHeadless } from "./headless.js";
 import { formatRecordsText, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
+import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
 const VERSION = "0.1.2";
+
+/** Provider ids the CLI can build — the single source of truth for `--provider`. */
+const PROVIDER_IDS: readonly string[] = providerCatalog.map((p) => p.id);
+
+/** Throw a clean error if `id` isn't a provider the CLI knows how to build. */
+function requireKnownProvider(id: string): void {
+  if (!isKnownProvider(id, PROVIDER_IDS)) {
+    throw new ArtermUserError(unknownProviderMessage(id, PROVIDER_IDS));
+  }
+}
+
+/** The most-recently-started session id from a list of summaries. */
+function newestSessionId(sessions: SessionSummary[]): string {
+  return [...sessions].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))[0]!.id;
+}
+
+/**
+ * Resolve the conversation to seed when `--resume`/`--continue` is given, or
+ * `undefined` for a fresh session. Errors actionably when there's nothing to
+ * resume (logging off, no sessions, or an unknown id).
+ */
+async function resolveResumeMessages(
+  store: SessionStore,
+  globals: GlobalOpts,
+): Promise<Message[] | undefined> {
+  if (!globals.resume && !globals.continue) return undefined;
+
+  let id = globals.resume;
+  if (!id) {
+    const sessions = await store.list();
+    if (sessions.length === 0) {
+      throw new ArtermUserError(
+        'No recorded sessions to continue. Enable logging with session.mode "jsonl" in your config.',
+      );
+    }
+    id = newestSessionId(sessions);
+  }
+
+  const messages = await store.load(id);
+  if (messages.length === 0) {
+    throw new ArtermUserError(
+      `No recorded session "${id}" (or it has no messages). Run \`arterm sessions\` to list ids.`,
+    );
+  }
+  // Status line on stderr so it never dirties stdout (esp. headless --json).
+  process.stderr.write(`↻ resumed session ${id} (${messages.length} messages)\n`);
+  return messages;
+}
 
 interface GlobalOpts {
   provider?: string;
@@ -31,6 +85,14 @@ interface GlobalOpts {
   yolo?: boolean;
   confirmDestructive?: boolean;
   goal?: string;
+  /** One-shot prompt; runs headlessly (no TUI) and prints the result. */
+  print?: string;
+  /** With --print/piped input, emit the result as a single JSON object. */
+  json?: boolean;
+  /** Resume a recorded session by id. */
+  resume?: string;
+  /** Resume the most recent recorded session. */
+  continue?: boolean;
 }
 
 /**
@@ -79,9 +141,15 @@ async function preflight(providerId: string, config: ArtermConfig): Promise<stri
 async function startChat(globals: GlobalOpts): Promise<void> {
   const config = await loadConfig();
   const providerId = globals.provider ?? config.provider;
+  requireKnownProvider(providerId);
 
   const warning = await preflight(providerId, config);
   if (warning) process.stdout.write(`⚠ ${warning}\n`);
+
+  // Open the transcript store first: resuming seeds the agent from a prior session.
+  // With session.mode "off" (the default) this stays empty and nothing hits disk.
+  const store = createSessionStore(config);
+  const initialMessages = await resolveResumeMessages(store, globals);
 
   const { session, persist, digest } = buildSession({
     config,
@@ -90,15 +158,17 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     yolo: globals.yolo,
     confirmDestructive: globals.confirmDestructive,
     cwd: process.cwd(),
+    initialMessages,
   });
 
   // Trim old transcripts (best-effort), then open this session's store handle.
-  // With session.mode "off" (the default) this is a no-op and nothing hits disk.
-  const store = createSessionStore(config);
   try {
     await store.prune(retentionFromConfig(config));
-  } catch {
-    // Pruning must never block startup.
+  } catch (err) {
+    // Pruning must never block startup; surface it only under ARTERM_DEBUG.
+    if (process.env.ARTERM_DEBUG) {
+      process.stderr.write(`⚠ session prune failed: ${(err as Error).message}\n`);
+    }
   }
   const handle = await store.create({ model: config.model, provider: providerId });
 
@@ -147,10 +217,57 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   // Digest this session's activity into persistent memory before exiting.
   try {
     await digest();
-  } catch {
-    // Memory digest must never block a clean shutdown.
+  } catch (err) {
+    // Memory digest must never block a clean shutdown; show it under ARTERM_DEBUG.
+    if (process.env.ARTERM_DEBUG) {
+      process.stderr.write(`⚠ memory digest failed: ${(err as Error).message}\n`);
+    }
   }
   await persist();
+}
+
+/**
+ * One-shot, non-interactive run for scripting/CI: take a prompt from --print or
+ * piped stdin, run it to completion without the TUI, print the result, and exit.
+ * Unlike `startChat` this skips the preflight banner (it would dirty stdout, and
+ * --json output especially) and external capability loading (MCP/plugins/skills)
+ * to stay fast and predictable — built-in tools + memory still apply.
+ */
+async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
+  const prompt = globals.print ?? (await readStdin());
+  const config = await loadConfig();
+  const providerId = globals.provider ?? config.provider;
+  requireKnownProvider(providerId);
+
+  const store = createSessionStore(config);
+  const initialMessages = await resolveResumeMessages(store, globals);
+
+  const { session, persist, digest } = buildSession({
+    config,
+    providerId: globals.provider,
+    model: globals.model,
+    yolo: globals.yolo,
+    confirmDestructive: globals.confirmDestructive,
+    cwd: process.cwd(),
+    initialMessages,
+  });
+
+  // Record this turn so it's resumable later (no-op when session.mode is "off").
+  const handle = await store.create({ model: config.model, provider: providerId });
+  session.agent.setOnMessage((message) => handle.logMessage(message));
+
+  try {
+    await runHeadless(session, prompt, { json: globals.json });
+  } finally {
+    try {
+      await digest();
+    } catch (err) {
+      if (process.env.ARTERM_DEBUG) {
+        process.stderr.write(`⚠ memory digest failed: ${(err as Error).message}\n`);
+      }
+    }
+    await persist();
+  }
 }
 
 async function listModels(): Promise<void> {
@@ -177,11 +294,18 @@ async function pullModel(model: string): Promise<void> {
   const provider = new OllamaProvider({ host: config.ollamaHost });
   process.stdout.write(`Pulling ${model} …\n`);
   let last = "";
-  for await (const status of provider.pull(model)) {
-    if (status !== last) {
-      process.stdout.write(`  ${status}\n`);
-      last = status;
+  try {
+    for await (const status of provider.pull(model)) {
+      if (status !== last) {
+        process.stdout.write(`  ${status}\n`);
+        last = status;
+      }
     }
+  } catch (err) {
+    throw new ArtermUserError(
+      `Failed to pull "${model}" from Ollama at ${config.ollamaHost} ` +
+        `(${(err as Error).message}). Is Ollama running? Start it with \`ollama serve\`.`,
+    );
   }
   process.stdout.write("Done.\n");
 }
@@ -228,7 +352,10 @@ async function openBrowser(url: string): Promise<void> {
 }
 
 async function memoryServe(opts: { port?: string; open?: boolean }): Promise<void> {
-  const port = opts.port ? Number(opts.port) : 7777;
+  const port = parsePort(opts.port, 7777);
+  if (port === null) {
+    throw new ArtermUserError(`Invalid --port "${opts.port}". Use an integer between 1 and 65535.`);
+  }
   const cwd = process.cwd();
   const server = await startMemoryServer({ cwd, port });
   process.stdout.write(
@@ -248,6 +375,24 @@ async function memoryList(): Promise<void> {
   process.stdout.write(`${formatRecordsText(records)}\n`);
 }
 
+async function listSessionsCmd(): Promise<void> {
+  const config = await loadConfig();
+  const store = createSessionStore(config);
+  const sessions = await store.list();
+  if (sessions.length === 0) {
+    process.stdout.write(
+      'No recorded sessions. Enable logging with session.mode "jsonl" in your config.\n',
+    );
+    return;
+  }
+  for (const s of [...sessions].sort((a, b) =>
+    (b.startedAt ?? "").localeCompare(a.startedAt ?? ""),
+  )) {
+    const when = s.startedAt ? new Date(s.startedAt).toLocaleString() : "unknown time";
+    process.stdout.write(`${s.id}  ${when}  ${s.provider ?? "?"}/${s.model ?? "?"}\n`);
+  }
+}
+
 async function main(): Promise<void> {
   const program = new Command();
   program
@@ -261,13 +406,24 @@ async function main(): Promise<void> {
     .option("-m, --model <name>", "model name or .gguf file")
     .option("--yolo", "skip permission prompts (still blocks critical/destructive calls)")
     .option("--confirm-destructive", "always re-prompt before destructive tools, even in auto/yolo")
-    .option("--goal <text>", "start an autonomous run toward this goal");
+    .option("--goal <text>", "start an autonomous run toward this goal")
+    .option("--print <prompt>", "run a single prompt headlessly (no TUI) and print the result")
+    .option("--json", "with --print or piped input, emit the result as JSON")
+    .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
+    .option("--continue", "resume the most recent recorded session");
 
   program
     .command("chat", { isDefault: true })
     .description("start an interactive chat session (default)")
     .action(async () => {
-      await startChat(program.opts());
+      const globals = program.opts<GlobalOpts>();
+      // Headless when an explicit prompt is given, or when stdin is piped (so
+      // `echo "…" | arterm` works for scripting); otherwise open the TUI.
+      if (globals.print !== undefined || !process.stdin.isTTY) {
+        await runHeadlessFlow(globals);
+      } else {
+        await startChat(globals);
+      }
     });
 
   program
@@ -276,6 +432,11 @@ async function main(): Promise<void> {
     .action(listModels);
 
   program.command("pull <model>").description("download a model via Ollama").action(pullModel);
+
+  program
+    .command("sessions")
+    .description("list recorded chat sessions (resume one with --resume <id>)")
+    .action(listSessionsCmd);
 
   const auth = program.command("auth").description("manage encrypted API keys (AES-256-GCM)");
   auth
@@ -318,6 +479,16 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  process.stderr.write(`${err instanceof Error ? err.stack : String(err)}\n`);
+  // Expected, actionable failures print just their message — the CLI shouldn't
+  // dump a stack for a bad flag or an unreachable service.
+  if (err instanceof ArtermUserError) {
+    process.stderr.write(`${err.message}\n`);
+  } else if (process.env.ARTERM_DEBUG) {
+    process.stderr.write(`${err instanceof Error ? err.stack : String(err)}\n`);
+  } else {
+    // Unexpected: show the message, and point at ARTERM_DEBUG for the full trace.
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write("(set ARTERM_DEBUG=1 for the full stack trace)\n");
+  }
   process.exit(1);
 });

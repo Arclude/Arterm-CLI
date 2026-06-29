@@ -9,6 +9,7 @@ import {
   historyDown,
   historyPush,
   historyUp,
+  isMouseSequence,
   matchCommands,
   reduceInput,
 } from "./editing.js";
@@ -70,9 +71,28 @@ describe("deleteWordBackward", () => {
   });
 });
 
+describe("isMouseSequence", () => {
+  it("matches SGR wheel/click events", () => {
+    expect(isMouseSequence("[<64;10;5M")).toBe(true); // wheel up
+    expect(isMouseSequence("[<65;10;5M")).toBe(true); // wheel down
+    expect(isMouseSequence("[<0;3;7m")).toBe(true); // button release
+  });
+
+  it("does not match normal typed input or pasted text", () => {
+    expect(isMouseSequence("a")).toBe(false);
+    expect(isMouseSequence("hello world")).toBe(false);
+    expect(isMouseSequence("[200~pasted[201~")).toBe(false);
+    expect(isMouseSequence("")).toBe(false);
+  });
+});
+
 describe("reduceInput", () => {
   it("submits on Enter", () => {
     expect(reduceInput("hi", "", { return: true })).toEqual({ type: "submit", value: "hi" });
+  });
+
+  it("swallows a mouse-wheel sequence (no prompt change, no history recall)", () => {
+    expect(reduceInput("draft", "[<64;10;5M", NONE)).toEqual({ type: "noop" });
   });
 
   it("appends a typed character", () => {

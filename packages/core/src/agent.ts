@@ -30,6 +30,8 @@ export interface AgentOptions {
   ask: PermissionAsker;
   bus: EventBus;
   cwd: string;
+  /** Seed the conversation with prior messages (e.g. resuming a recorded session). */
+  initialMessages?: Message[];
   temperature?: number;
   /** Hard cap on tool-call round-trips per user turn. */
   maxIterations?: number;
@@ -124,6 +126,7 @@ export class Agent {
 
   constructor(private opts: AgentOptions) {
     this.bus = opts.bus;
+    if (opts.initialMessages?.length) this.messages = [...opts.initialMessages];
     this.toolMap = new Map(opts.tools.map((t) => [t.name, t]));
     this.container = opts.container ?? defaultAgentContainer();
     this.runController = this.container.resolve(Tokens.RunController);
@@ -345,8 +348,21 @@ export class Agent {
   private async buildSystem(native: boolean): Promise<Message> {
     const base = this.opts.systemPrompt ?? DEFAULT_SYSTEM;
     const env = await this.environmentPrompt();
-    const toolHelp =
-      native || this.opts.tools.length === 0 ? "" : `\n\n${toolSystemPrompt(this.toolSchemas())}`;
+    let toolHelp = "";
+    if (this.opts.tools.length > 0) {
+      if (native) {
+        // Native models get tool schemas via the API, so we don't inject the JSON
+        // protocol. But small local models (e.g. qwen on Ollama) emit calls as TEXT
+        // and readily INVENT tool names (`count`, `length`, …) that don't exist.
+        // Listing the real tools and forbidding others curbs those hallucinated calls.
+        const roster = this.toolSchemas()
+          .map((t) => `- ${t.name}: ${t.description}`)
+          .join("\n");
+        toolHelp = `\n\nThese are the ONLY tools that exist — use exactly these names and never invent a tool. Call one tool at a time and wait for its result:\n${roster}`;
+      } else {
+        toolHelp = `\n\n${toolSystemPrompt(this.toolSchemas())}`;
+      }
+    }
     return { role: "system", content: `${base}\n\n${env}${toolHelp}` };
   }
 

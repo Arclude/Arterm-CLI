@@ -50,6 +50,31 @@ function makeAgent(provider: ChatProvider, bus: EventBus, tools: Tool[] = []): A
   });
 }
 
+describe("Agent initialMessages (resume)", () => {
+  it("seeds conversation history from initialMessages", () => {
+    const seeded: Message[] = [
+      { role: "user", content: "earlier question" },
+      { role: "assistant", content: "earlier answer" },
+    ];
+    const agent = new Agent({
+      provider: new StubProvider(),
+      model: "test-model",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus: new EventBus(),
+      cwd: process.cwd(),
+      initialMessages: seeded,
+    });
+    expect(agent.history).toEqual(seeded);
+  });
+
+  it("starts with empty history when no initialMessages are given", () => {
+    const agent = makeAgent(new StubProvider(), new EventBus());
+    expect(agent.history).toEqual([]);
+  });
+});
+
 describe("Agent run lifecycle (RunController)", () => {
   it("emits turn_start and exactly one turn_end on a clean run", async () => {
     const bus = new EventBus();

@@ -108,3 +108,37 @@ export async function listSessions(dir: string = SESSIONS_DIR): Promise<SessionS
   }
   return summaries;
 }
+
+/**
+ * Read a recorded session's conversation back into `Message[]` — the inverse of
+ * `logMessage`. Accepts a full `.jsonl` path or a bare session id (resolved under
+ * `dir`). The `meta` line is skipped; only `message` records are returned, with
+ * their `kind` tag stripped. Malformed lines are skipped (same tolerance as
+ * `listSessions`). Returns [] when the file doesn't exist.
+ */
+export async function loadSessionMessages(
+  idOrPath: string,
+  dir: string = SESSIONS_DIR,
+): Promise<Message[]> {
+  const path = idOrPath.endsWith(".jsonl") ? idOrPath : join(dir, `${idOrPath}.jsonl`);
+  let raw: string;
+  try {
+    raw = await fs.readFile(path, "utf8");
+  } catch {
+    return [];
+  }
+
+  const messages: Message[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { kind?: string } & Record<string, unknown>;
+      if (entry.kind !== "message") continue;
+      const { kind: _kind, ...message } = entry;
+      messages.push(message as unknown as Message);
+    } catch {
+      // Skip malformed lines rather than aborting the whole transcript.
+    }
+  }
+  return messages;
+}
