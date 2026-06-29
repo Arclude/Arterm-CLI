@@ -4,6 +4,14 @@ import type { ContextStrategy } from "./contextStrategy.js";
 import { EventBus } from "./eventBus.js";
 import type { PermissionManager } from "./permissions.js";
 import type { ChatProvider, PermissionAsker, Tool } from "./types.js";
+import {
+  type WorktreeHandle,
+  captureWorktree,
+  createWorktree,
+  isGitRepo,
+  pruneWorktrees,
+  removeWorktree,
+} from "./worktree.js";
 
 /** Preset sub-agent roles: a role prepends focused instructions to the task. */
 const ROLES: Record<string, string> = {
@@ -105,13 +113,22 @@ export interface FleetResult {
   task: string;
   role?: string;
   output: string;
+  /** Present when `isolation: "worktree"` produced changes for this task. */
+  worktree?: { branch: string; files: string[]; patch: string };
 }
+
+/** How concurrent fleet workers share (or isolate) the filesystem. */
+export type FleetIsolation = "none" | "worktree";
 
 export interface FleetOptions extends Omit<SubagentOptions, "role"> {
   /** Max sub-agents running at once (default 4). */
   concurrency?: number;
+  /** "none" (default) = shared cwd; "worktree" = each worker gets its own git worktree. */
+  isolation?: FleetIsolation;
   onStart?: (index: number, task: string, role?: string) => void;
   onDone?: (index: number, output: string) => void;
+  /** Fired when a worker's worktree is created (isolation active + git repo). */
+  onWorktree?: (index: number, info: { path: string; branch: string }) => void;
 }
 
 /**
@@ -128,23 +145,62 @@ export async function runFleet(
   const results: FleetResult[] = new Array(tasks.length);
   let next = 0;
 
+  // Worktree isolation only applies when requested AND the cwd is a git repo;
+  // otherwise we fall back to the shared cwd. `repoRoot` is resolved once.
+  const wantIsolation = opts.isolation === "worktree";
+  const isolate = wantIsolation && (await isGitRepo(opts.cwd, signal));
+  const live = new Set<WorktreeHandle>();
+
   const worker = async (): Promise<void> => {
     while (true) {
       const index = next++;
       if (index >= tasks.length) return;
       const t = tasks[index] as FleetTask;
       opts.onStart?.(index, t.task, t.role);
-      let output: string;
-      try {
-        output = await runSubagent(t.task, { ...opts, role: t.role }, signal);
-      } catch (err) {
-        output = `sub-agent failed: ${(err as Error).message}`;
+      let output = "";
+      let worktreeInfo: FleetResult["worktree"];
+
+      if (isolate) {
+        let wt: WorktreeHandle | undefined;
+        try {
+          wt = await createWorktree(opts.cwd, String(index), signal);
+          live.add(wt);
+          opts.onWorktree?.(index, { path: wt.path, branch: wt.branch });
+          output = await runSubagent(t.task, { ...opts, cwd: wt.path, role: t.role }, signal);
+        } catch (err) {
+          output = `sub-agent failed: ${(err as Error).message}`;
+        } finally {
+          if (wt) {
+            const changes = await captureWorktree(wt, signal);
+            if (changes.changed) {
+              worktreeInfo = { branch: wt.branch, files: changes.files, patch: changes.patch };
+              output = `${output}\n\n[worktree ${wt.branch}] changed ${changes.files.length} file(s):\n${changes.files.join("\n")}`;
+            }
+            await removeWorktree(wt, opts.cwd, { keepBranch: changes.changed });
+            live.delete(wt);
+          }
+        }
+      } else {
+        try {
+          output = await runSubagent(t.task, { ...opts, role: t.role }, signal);
+        } catch (err) {
+          output = `sub-agent failed: ${(err as Error).message}`;
+        }
       }
+
       opts.onDone?.(index, output);
-      results[index] = { task: t.task, role: t.role, output };
+      results[index] = { task: t.task, role: t.role, output, worktree: worktreeInfo };
     }
   };
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
+  try {
+    await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
+  } finally {
+    // Sweep any worktrees still live (abort/throw mid-round) so nothing leaks.
+    if (isolate) {
+      for (const wt of live) await removeWorktree(wt, opts.cwd, { keepBranch: false });
+      await pruneWorktrees(opts.cwd);
+    }
+  }
   return results;
 }

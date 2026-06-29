@@ -89,7 +89,7 @@ export type PermissionLevel = "allow" | "ask" | "deny";
  *   - "parallel": each round the leader decomposes the goal into concurrent subagent
  *                 tasks (fleet), aggregates the results, reflects, and repeats.
  */
-export type AutonomyMode = "once" | "eternal" | "parallel";
+export type AutonomyMode = "once" | "eternal" | "parallel" | "phased";
 
 /** Connection status of one configured MCP server (for the /mcp view). */
 export interface McpServerSummary {

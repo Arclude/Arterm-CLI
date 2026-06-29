@@ -28,6 +28,7 @@ class FakeAgent {
   tools: Tool[] = [writeTool];
   steps: string[][] = [];
   prompts: string[] = [];
+  history: { role: string; content: string }[] = [];
   assessVerdict = { done: false, note: "CONTINUE" };
   onRun?: (n: number) => void;
   private n = 0;
@@ -37,6 +38,9 @@ class FakeAgent {
   }
   async run(prompt: string): Promise<void> {
     this.prompts.push(prompt);
+    // Mirror the real Agent: a run appends an assistant message (echoed here so the
+    // phased handoff — read from history.at(-1) — carries the aggregated content).
+    this.history.push({ role: "assistant", content: prompt });
     const names = this.steps[this.n] ?? [];
     this.n += 1;
     for (const name of names) {
@@ -283,6 +287,71 @@ describe("AutonomyEngine (parallel mode)", () => {
     const agent = new FakeAgent(bus);
     const events = collect(bus);
     const engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5 });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("stopped");
+    expect(events.some((e) => e.type === "autonomy_stopped" && /fleet runner/.test(e.reason))).toBe(
+      true,
+    );
+  });
+});
+
+describe("AutonomyEngine (phased mode)", () => {
+  it("plans phases and runs them sequentially, threading the handoff forward", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      '[{"title":"plan","description":"design it","done":"designed"},{"title":"build","description":"build it","done":"built"}]',
+    ];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    const dispatched: AutonomyTask[][] = [];
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      dispatched.push(tasks);
+      return tasks.map((t) => ({ ...t, output: `OUT-${dispatched.length}` }));
+    };
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "phased", maxSteps: 5, runFleet });
+
+    await engine.start("ship the feature");
+
+    expect(engine.state).toBe("done");
+    // One fleet dispatch per phase, in order.
+    expect(dispatched).toHaveLength(2);
+    expect(dispatched[0]?.[0]?.task).toContain("design it");
+    // Phase 2's task carries the handoff from phase 1 (which embedded OUT-1).
+    expect(dispatched[1]?.[0]?.task).toContain("OUT-1");
+    expect(events.some((e) => e.type === "phase_plan")).toBe(true);
+    expect(events.filter((e) => e.type === "phase_start")).toHaveLength(2);
+    expect(events.filter((e) => e.type === "phase_done")).toHaveLength(2);
+  });
+
+  it("falls back to a single phase when the plan is malformed", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ["not json at all"];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    let phases = 0;
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      phases += 1;
+      return tasks.map((t) => ({ ...t, output: "" }));
+    };
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "phased", maxSteps: 5, runFleet });
+
+    await engine.start("just do it");
+
+    expect(phases).toBe(1);
+    const plan = events.find((e) => e.type === "phase_plan");
+    expect(plan && plan.type === "phase_plan" && plan.phases).toHaveLength(1);
+    expect(engine.state).toBe("done");
+  });
+
+  it("requires a fleet runner", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "phased", maxSteps: 5 });
 
     await engine.start("g");
 

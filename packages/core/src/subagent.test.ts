@@ -1,7 +1,23 @@
+import { execFile } from "node:child_process";
+import { promises as nodeFs, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { PermissionManager } from "./permissions.js";
 import { availableRoles, roleInstruction, runFleet, runSubagent } from "./subagent.js";
 import type { ChatProvider, Tool } from "./types.js";
+
+const runCmd = promisify(execFile);
+async function hasGit(): Promise<boolean> {
+  try {
+    await runCmd("git", ["--version"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+const gitAvailable = await hasGit();
 
 /** Stub provider that immediately calls task_done with a fixed summary. */
 function doneProvider(summary: string): ChatProvider {
@@ -145,5 +161,46 @@ describe("runFleet", () => {
     });
     expect(starts.sort()).toEqual([0, 1]);
     expect(dones.sort()).toEqual([0, 1]);
+  });
+
+  it("does not create worktrees when cwd is not a git repo (graceful fallback)", async () => {
+    const dir = realpathSync(await nodeFs.mkdtemp(join(tmpdir(), "arterm-nogit-")));
+    const worktrees: string[] = [];
+    const results = await runFleet([{ task: "A" }, { task: "B" }], {
+      ...base,
+      cwd: dir,
+      isolation: "worktree",
+      onWorktree: (_i, info) => worktrees.push(info.path),
+    });
+    // No git repo → isolation skipped; tasks still complete in the shared cwd.
+    expect(worktrees).toHaveLength(0);
+    expect(results.map((r) => r.task)).toEqual(["A", "B"]);
+    await nodeFs.rm(dir, { recursive: true, force: true });
+  });
+
+  it.skipIf(!gitAvailable)("gives each worker a distinct worktree under isolation", async () => {
+    const repo = realpathSync(await nodeFs.mkdtemp(join(tmpdir(), "arterm-fleet-git-")));
+    await runCmd("git", ["init"], { cwd: repo });
+    await runCmd("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+    await runCmd("git", ["config", "user.name", "Test"], { cwd: repo });
+    await nodeFs.writeFile(join(repo, "seed.txt"), "seed\n");
+    await runCmd("git", ["add", "-A"], { cwd: repo });
+    await runCmd("git", ["commit", "-m", "init"], { cwd: repo });
+
+    const worktrees: string[] = [];
+    await runFleet([{ task: "A" }, { task: "B" }], {
+      ...base,
+      cwd: repo,
+      isolation: "worktree",
+      onWorktree: (_i, info) => worktrees.push(info.path),
+    });
+
+    expect(worktrees).toHaveLength(2);
+    expect(new Set(worktrees).size).toBe(2); // distinct worktrees
+    expect(worktrees.every((p) => p !== repo)).toBe(true); // none is the base repo
+    // Worktrees were cleaned up (only the main worktree remains).
+    const { stdout } = await runCmd("git", ["worktree", "list"], { cwd: repo });
+    expect(stdout.split("\n").filter((l) => l.trim()).length).toBe(1);
+    await nodeFs.rm(repo, { recursive: true, force: true });
   });
 });

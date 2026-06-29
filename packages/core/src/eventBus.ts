@@ -26,9 +26,29 @@ export type AgentEvent =
   | { type: "subagent_done"; output: string }
   | { type: "fleet_start"; count: number }
   | { type: "fleet_done"; count: number }
+  | { type: "fleet_worktree"; path: string; branch: string }
   // Parallel-autonomy rounds (leader decomposes → fleet → aggregate).
   | { type: "autonomy_fleet_round"; round: number; tasks: { task: string; role?: string }[] }
-  | { type: "autonomy_aggregate"; round: number; count: number };
+  | { type: "autonomy_aggregate"; round: number; count: number }
+  // Phased coordinator (goal → ordered phases with handoff).
+  | {
+      type: "phase_plan";
+      phases: { id: string; title: string; description: string; done: string }[];
+    }
+  | { type: "phase_start"; id: string; index: number; total: number; title: string }
+  | { type: "phase_done"; id: string; index: number; title: string; summary: string }
+  // Spec-Driven Development (/sdd): interview → spec → task-DAG.
+  | { type: "sdd_interview"; questions: string[] }
+  | { type: "sdd_spec"; id: string; specPath: string; taskCount: number }
+  | {
+      type: "sdd_graph";
+      tasks: { id: string; title: string; dependsOn: string[]; state: SddTaskState }[];
+    }
+  | { type: "sdd_task_state"; id: string; title: string; state: SddTaskState }
+  | { type: "sdd_done"; id: string; done: number; failed: number };
+
+/** Lifecycle state of a single /sdd task. */
+export type SddTaskState = "pending" | "running" | "done" | "failed";
 
 type Listener = (event: AgentEvent) => void;
 

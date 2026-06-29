@@ -9,6 +9,7 @@ import type {
   PermissionAsker,
   PermissionMode,
   PluginSummary,
+  SddRunner,
   SkillInfo,
 } from "@arterm/core";
 
@@ -57,6 +58,8 @@ export interface Session {
   setMode(mode: PermissionMode): void;
   /** Autonomous goal-loop engine (/goal, /steer, /pause, /resume, /stop). */
   autonomy: AutonomyEngine;
+  /** Spec-Driven Development runner (/sdd). */
+  sdd: SddRunner;
   /** Connected MCP servers (for /mcp); populated after startup. */
   mcpServers: McpServerSummary[];
   /** Loaded plugins (for /plugins); populated after startup. */

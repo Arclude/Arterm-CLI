@@ -20,4 +20,8 @@ export * from "./toolProtocol.js";
 export * from "./agent.js";
 export * from "./autonomy.js";
 export * from "./subagent.js";
+export * from "./worktree.js";
+export * from "./runGate.js";
+export * from "./sdd.js";
+export * from "./sddStore.js";
 export * from "./kernel/index.js";

@@ -8,9 +8,9 @@ import {
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
-import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
+import { Box, type DOMElement, Text, measureElement, useApp, useInput, useStdout } from "ink";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoginOverlay } from "./LoginOverlay.js";
 import { Item } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
@@ -40,7 +40,8 @@ const HELP = [
   "  /catalog [query]      search the models.dev catalog (~5k models)",
   "  /clear                reset the conversation",
   "  /goal <text>          run autonomously toward a goal (decide→act→reflect→repeat)",
-  "  /autonomy <mode> <goal>  run a goal in once | eternal | parallel mode",
+  "  /autonomy <mode> <goal>  run a goal in once | eternal | parallel | phased mode",
+  "  /sdd <brief>          spec-driven dev: spec → task graph → parallel execution",
   "  /steer <text>         redirect the running goal · /pause /resume /stop",
   "  /compact              shrink the conversation context (auto when near full)",
   "  /mcp                  list connected MCP servers and their tools",
@@ -49,7 +50,8 @@ const HELP = [
   "  /mode [ask|auto|plan|yolo]  set permission mode (no arg cycles)",
   "  /auto /plan /ask /yolo      shortcuts for /mode",
   "  /exit                 quit (or Ctrl+C)",
-  "Keys:  Enter send · ↑/↓ history · scroll with your terminal · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
+  "Keys:  Enter send · ↑/↓ recall your previous prompts (input history) · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
+  "Scroll: the mouse wheel scrolls the chat in-app. Plain ↑/↓ recall your previous prompts (input history), not scroll.",
   "Modes: ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all",
   "Edit:  Backspace del char · Ctrl+W del word · Ctrl+U clear line",
 ].join("\n");
@@ -147,6 +149,7 @@ const COMMANDS = [
   "clear",
   "goal",
   "autonomy",
+  "sdd",
   "steer",
   "pause",
   "resume",
@@ -183,6 +186,89 @@ function useTermSize(): { rows: number; columns: number } {
   return size;
 }
 
+/**
+ * Managed, in-app scrollable transcript (replaces Ink's <Static>). Mouse reporting
+ * captures the wheel, so the chat can no longer ride the terminal's native scrollback
+ * — we scroll it ourselves. Technique (Ink-5, mirrors WrongStack's ScrollableHistory):
+ * a height-bounded `overflowY:"hidden"` + `justifyContent:"flex-end"` viewport bottom-
+ * aligns the content, so overflow clips off the TOP (newest visible) for free; a
+ * positive `marginBottom={scrollOffset}` then lifts the content to reveal older rows.
+ * (Negative marginTop does NOT clip reliably — it overlaps; do not use it.)
+ *
+ * Wrapped in React.memo so keystrokes in the prompt don't re-lay-out the whole
+ * transcript — only items/live/viewport/offset changes do.
+ */
+const Transcript = memo(function Transcript({
+  items,
+  live,
+  viewportRows,
+  marginBottom,
+  columns,
+  onMeasure,
+}: {
+  items: DisplayItem[];
+  live: string;
+  viewportRows: number;
+  marginBottom: number;
+  columns: number;
+  /** Reports the measured content height (rows) after each layout, so App can clamp
+   *  the scroll offset and keep the view anchored as content streams in. */
+  onMeasure: (totalLines: number) => void;
+}): React.ReactElement {
+  const contentRef = useRef<DOMElement>(null);
+  const lastReported = useRef(-1);
+  // The content's own height does not depend on viewportRows/marginBottom (margins
+  // and justify are layout-outside), so measuring here never feeds back into a loop.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on content change
+  useLayoutEffect(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    const { height } = measureElement(node);
+    if (height !== lastReported.current) {
+      lastReported.current = height;
+      onMeasure(height);
+    }
+  }, [items, live, columns, onMeasure]);
+
+  return (
+    <Box
+      width={columns}
+      height={Math.max(1, viewportRows)}
+      overflowY="hidden"
+      justifyContent="flex-end"
+      flexDirection="column"
+    >
+      <Box
+        ref={contentRef}
+        flexDirection="column"
+        marginBottom={Math.max(0, marginBottom)}
+        flexShrink={0}
+      >
+        {items.map((item, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: transcript is append-only
+          <Item key={i} item={item} />
+        ))}
+        {live ? (
+          <Box
+            flexDirection="column"
+            borderStyle="single"
+            borderColor="green"
+            borderTop={false}
+            borderRight={false}
+            borderBottom={false}
+            paddingLeft={1}
+          >
+            <Text color="green" bold>
+              ASSISTANT
+            </Text>
+            <Text>{live}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    </Box>
+  );
+});
+
 export function App({
   session,
   initialGoal,
@@ -191,8 +277,20 @@ export function App({
   initialGoal?: string;
 }): React.ReactElement {
   const { exit } = useApp();
+  const { rows, columns } = useTermSize();
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
+  // In-app transcript scrolling (see the Transcript component). `scrollOffset` is how
+  // many lines the view is lifted off the bottom (0 = pinned to newest). The mouse
+  // wheel drives it; ↑/↓ stay on prompt history. `totalLines`/`viewportRows` are
+  // measured so the offset can be clamped and the content kept put as it streams.
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [totalLines, setTotalLines] = useState(0);
+  const [viewportRows, setViewportRows] = useState(() => Math.max(1, rows - 8));
+  const bottomRef = useRef<DOMElement>(null);
+  const viewportRef = useRef(viewportRows);
+  const prevContentRef = useRef(0);
+  const maxOffsetRef = useRef(0);
   // Streamed assistant text for the current round, shown live below the committed
   // transcript and cleared once the full message is recorded (assistant_message).
   const [live, setLive] = useState("");
@@ -232,6 +330,69 @@ export function App({
 
   const push = useCallback((item: DisplayItem) => setItems((prev) => [...prev, item]), []);
 
+  // Stop the mouse wheel from recalling old prompts. On Windows Terminal a console
+  // app reading input has the wheel translated into ↑/↓ arrow keys, which the prompt
+  // reads as command-history navigation. Enabling SGR mouse reporting (1000 = button
+  // events, 1006 = SGR coords) makes the terminal send real mouse sequences instead
+  // of fake arrows — those are swallowed in reduceInput, so the wheel stays inert and
+  // only genuine ↑/↓ keypresses recall history. Scroll the chat with Shift+wheel or
+  // Ctrl+Shift+↑/↓ (these bypass the app's mouse capture in Windows Terminal).
+  const { stdout: rawStdout } = useStdout();
+  useEffect(() => {
+    if (!rawStdout) return;
+    const ESC = String.fromCharCode(27);
+    rawStdout.write(`${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
+    return () => {
+      rawStdout.write(`${ESC}[?1000l${ESC}[?1006l${ESC}[?1007h`);
+    };
+  }, [rawStdout]);
+
+  // Viewport height = terminal rows − the measured bottom region (input + overlays +
+  // goal + status bar). Runs every commit (no deps) so it self-corrects as the bottom
+  // region grows/shrinks; only dispatches when the value actually changes.
+  useLayoutEffect(() => {
+    if (!bottomRef.current) return;
+    const { height } = measureElement(bottomRef.current);
+    const vp = Math.max(1, rows - height);
+    viewportRef.current = vp;
+    setViewportRows((cur) => (cur === vp ? cur : vp));
+  });
+
+  // Receives the transcript's measured height from <Transcript>. When content grows
+  // while the user is scrolled up, bump the offset by the growth so their view stays
+  // anchored (instead of jumping); when pinned (offset 0) it stays at the bottom.
+  // Stable identity (reads refs only) so it doesn't thrash the memoized Transcript.
+  const handleMeasure = useCallback((height: number) => {
+    const prev = prevContentRef.current;
+    if (height === prev) return;
+    prevContentRef.current = height;
+    setTotalLines(height);
+    setScrollOffset((off) => {
+      const max = Math.max(0, height - viewportRef.current);
+      if (off > 0 && height > prev) return Math.min(max, off + (height - prev));
+      return Math.min(off, max);
+    });
+  }, []);
+
+  // Mouse wheel scrolls the transcript. With mouse reporting on, the wheel arrives as
+  // SGR mouse reports (button bit 64; low bits 0 = up, 1 = down) — a fast scroll batches
+  // several into one chunk, so sum them. reduceInput separately swallows these so they
+  // never touch the prompt text.
+  useInput(
+    (input) => {
+      let delta = 0;
+      for (const mm of input.matchAll(/\[<(\d+);\d+;\d+[Mm]/g)) {
+        const cb = Number(mm[1]);
+        if ((cb & 64) === 0) continue; // not a wheel event
+        const low = cb & 3;
+        delta += low === 0 ? 3 : low === 1 ? -3 : 0; // up reveals older (+), down newer (−)
+      }
+      if (delta !== 0)
+        setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + delta)));
+    },
+    { isActive: true },
+  );
+
   // Wire the permission prompt into the agent's permission flow (once).
   useEffect(() => {
     const asker: PermissionAsker = (tool, args) =>
@@ -263,6 +424,7 @@ export function App({
         case "turn_start":
           setStatus("thinking");
           setLive("");
+          setScrollOffset(0); // jump to the newest output when a turn begins
           turnStartRef.current = Date.now();
           turnRef.current = { inTok: 0, outTok: 0, rounds: 0 };
           break;
@@ -382,6 +544,64 @@ export function App({
           push({
             kind: "system",
             text: `◆ round ${event.round} aggregated (${event.count} result(s))`,
+          });
+          break;
+        case "fleet_worktree":
+          push({ kind: "system", text: `⑃ worktree ${event.branch}` });
+          break;
+        case "phase_plan":
+          push({
+            kind: "system",
+            text: `▤ plan: ${event.phases.map((p, i) => `${i + 1}. ${p.title}`).join("  ")}`,
+          });
+          break;
+        case "phase_start":
+          push({
+            kind: "system",
+            text: `▸ phase ${event.index + 1}/${event.total}: ${event.title}`,
+          });
+          break;
+        case "phase_done":
+          push({ kind: "system", text: `✓ phase ${event.title}: ${event.summary.slice(0, 160)}` });
+          break;
+        case "sdd_interview":
+          if (event.questions.length > 0) {
+            push({ kind: "system", text: `? ${event.questions.join("\n? ")}` });
+          }
+          break;
+        case "sdd_spec":
+          push({
+            kind: "system",
+            text: `📄 spec written (${event.taskCount} task(s)): ${event.specPath}`,
+          });
+          break;
+        case "sdd_graph":
+          push({
+            kind: "system",
+            text: `▤ tasks: ${event.tasks
+              .map(
+                (t) =>
+                  `${t.id}${t.dependsOn.length ? `←[${t.dependsOn.join(",")}]` : ""} ${t.title}`,
+              )
+              .join("  ·  ")}`,
+          });
+          break;
+        case "sdd_task_state": {
+          const mark =
+            event.state === "done"
+              ? "✓"
+              : event.state === "failed"
+                ? "✗"
+                : event.state === "running"
+                  ? "▸"
+                  : "·";
+          push({ kind: "system", text: `${mark} ${event.id} ${event.title} — ${event.state}` });
+          break;
+        }
+        case "sdd_done":
+          push({
+            kind: "system",
+            text: `■ /sdd complete — ${event.done} done, ${event.failed} failed`,
           });
           break;
         case "error":
@@ -615,6 +835,7 @@ export function App({
         case "clear":
           session.agent.reset();
           setItems([]);
+          setScrollOffset(0);
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -695,16 +916,34 @@ export function App({
         case "autonomy": {
           const [modeArg = "", ...goalParts] = rest.join(" ").trim().split(/\s+/);
           const mode = modeArg.toLowerCase();
-          const modes: AutonomyMode[] = ["once", "eternal", "parallel"];
+          const modes: AutonomyMode[] = ["once", "eternal", "parallel", "phased"];
           const g = goalParts.join(" ").trim();
           if (!modes.includes(mode as AutonomyMode) || !g) {
-            push({ kind: "system", text: "usage: /autonomy <once|eternal|parallel> <goal>" });
+            push({
+              kind: "system",
+              text: "usage: /autonomy <once|eternal|parallel|phased> <goal>",
+            });
           } else if (session.autonomy.state === "running" || session.autonomy.state === "paused") {
             push({ kind: "system", text: "a goal is already running — /stop it first" });
           } else if (!session.autonomy.setMode(mode as AutonomyMode)) {
             push({ kind: "system", text: "can't switch autonomy mode while a goal is active" });
           } else {
             void session.autonomy.start(g);
+          }
+          break;
+        }
+        case "sdd": {
+          const brief = rest
+            .join(" ")
+            .replace(/(^|\s)--yes\b/g, "")
+            .trim();
+          if (!brief) {
+            push({ kind: "system", text: "usage: /sdd <brief>" });
+          } else if (session.sdd.state === "running" || session.sdd.state === "paused") {
+            push({ kind: "system", text: "an /sdd run is already active — /stop it first" });
+          } else {
+            push({ kind: "system", text: `▸ /sdd: planning "${brief}"…` });
+            void session.sdd.run(brief);
           }
           break;
         }
@@ -716,12 +955,15 @@ export function App({
         }
         case "pause":
           session.autonomy.pause();
+          session.sdd.pause();
           break;
         case "resume":
           session.autonomy.resume();
+          session.sdd.resume();
           break;
         case "stop":
           session.autonomy.stop();
+          session.sdd.stop();
           break;
         case "mcp": {
           const servers = session.mcpServers;
@@ -827,6 +1069,7 @@ export function App({
       const text = value.trim();
       setInput("");
       if (!text) return;
+      setScrollOffset(0); // sending pins the view back to the latest
       setHistory((h) => historyPush(h, text));
       if (text === "?") {
         push({ kind: "system", text: HELP });
@@ -866,95 +1109,97 @@ export function App({
   const busy = status !== "idle";
   const mode = permMode.toUpperCase();
 
-  const { columns } = useTermSize();
+  // Clamp the scroll offset to the measured content and expose the max to the wheel
+  // handler (which runs outside render via a ref).
+  const maxOffset = Math.max(0, totalLines - viewportRows);
+  maxOffsetRef.current = maxOffset;
+  const clampedOffset = Math.min(scrollOffset, maxOffset);
 
   return (
     <Box flexDirection="column" width={columns}>
-      {/* Committed transcript is written ONCE to the terminal's native scrollback via
-          <Static>, so the live (re-rendered) region below always stays within the
-          viewport — no overflow corruption. Scroll history with your terminal. */}
-      <Static items={items}>{(item, i) => <Item key={i} item={item} />}</Static>
-      {live ? (
-        <Box
-          flexDirection="column"
-          borderStyle="single"
-          borderColor="green"
-          borderTop={false}
-          borderRight={false}
-          borderBottom={false}
-          paddingLeft={1}
-        >
-          <Text color="green" bold>
-            ASSISTANT
-          </Text>
-          <Text>{live}</Text>
-        </Box>
-      ) : null}
-      {pending ? (
-        <PermissionPrompt pending={pending} />
-      ) : pickerOpen ? (
-        <ModelPicker
-          models={filteredPickerModels}
-          index={pickerIndex}
-          current={model}
-          loading={pickerLoading}
-          query={pickerQuery}
-        />
-      ) : loginOpen ? (
-        <LoginOverlay
-          step={loginStep}
-          providers={session.loginProviders}
-          index={loginIndex}
-          current={providerLabel}
-          signedIn={signedIn}
-          selected={loginSel ?? undefined}
-          keyValue={loginKey}
-        />
-      ) : (
-        <Box marginTop={1}>
-          {busy && autoState === "idle" ? (
-            // A normal turn shows a static spinner (Esc cancels). During an autonomous
-            // run the prompt stays live even while busy, so typed /pause /steer /stop
-            // (and plain-text steering) reach the engine between/within steps.
-            <Text color="yellow">● working… (Esc to cancel)</Text>
-          ) : (
-            <InputLine
-              active={!busy || autoState !== "idle"}
-              value={input}
-              commands={COMMANDS}
-              columns={columns}
-              onChange={setInput}
-              onSubmit={submit}
-              onHelp={() => push({ kind: "system", text: HELP })}
-              onHistoryPrev={onHistoryPrev}
-              onHistoryNext={onHistoryNext}
-            />
-          )}
-        </Box>
-      )}
-      {autoState !== "idle" ? (
-        <Box>
-          <Text color="magenta" bold>
-            {autoState === "paused" ? "⏸ GOAL" : "◆ GOAL"}
-          </Text>
-          <Text color="gray">
-            {"  "}
-            step {autoStep} · {goalText.slice(0, 64)}
-          </Text>
-        </Box>
-      ) : null}
-      <StatusBar
-        provider={providerLabel}
-        model={model}
-        status={status}
-        inTok={inTok}
-        outTok={outTok}
-        ctxUsed={ctxUsed}
-        ctxWindow={session.config.context?.window ?? DEFAULT_CTX}
-        toolCount={session.toolCount}
-        mode={mode}
+      <Transcript
+        items={items}
+        live={live}
+        viewportRows={viewportRows}
+        marginBottom={clampedOffset}
         columns={columns}
+        onMeasure={handleMeasure}
       />
+      {/* Bottom region: measured (bottomRef) so the viewport height above can be
+          computed as terminal rows − this height. Holds the scroll affordance, the
+          input/overlays, the goal line, and the status bar. */}
+      <Box ref={bottomRef} flexDirection="column">
+        {clampedOffset > 0 ? (
+          <Text color="gray" dimColor>
+            ↑ {clampedOffset} satır yukarıda · tekerleği aşağı çevir / mesaj gönder = en alta dön
+          </Text>
+        ) : null}
+        {pending ? (
+          <PermissionPrompt pending={pending} />
+        ) : pickerOpen ? (
+          <ModelPicker
+            models={filteredPickerModels}
+            index={pickerIndex}
+            current={model}
+            loading={pickerLoading}
+            query={pickerQuery}
+          />
+        ) : loginOpen ? (
+          <LoginOverlay
+            step={loginStep}
+            providers={session.loginProviders}
+            index={loginIndex}
+            current={providerLabel}
+            signedIn={signedIn}
+            selected={loginSel ?? undefined}
+            keyValue={loginKey}
+          />
+        ) : (
+          <Box marginTop={1}>
+            {busy && autoState === "idle" ? (
+              // A normal turn shows a static spinner (Esc cancels). During an autonomous
+              // run the prompt stays live even while busy, so typed /pause /steer /stop
+              // (and plain-text steering) reach the engine between/within steps.
+              <Text color="yellow">● working… (Esc to cancel)</Text>
+            ) : (
+              <InputLine
+                active={!busy || autoState !== "idle"}
+                value={input}
+                commands={COMMANDS}
+                columns={columns}
+                onChange={setInput}
+                onSubmit={submit}
+                onHelp={() => push({ kind: "system", text: HELP })}
+                onHistoryPrev={onHistoryPrev}
+                onHistoryNext={onHistoryNext}
+              />
+            )}
+          </Box>
+        )}
+        {autoState !== "idle" ? (
+          <Box>
+            <Text color="magenta" bold>
+              {autoState === "paused" ? "⏸ GOAL" : "◆ GOAL"}
+            </Text>
+            <Text color="gray">
+              {"  "}
+              step {autoStep} · {goalText.slice(0, 64)}
+            </Text>
+          </Box>
+        ) : null}
+        <StatusBar
+          provider={providerLabel}
+          model={model}
+          status={status}
+          inTok={inTok}
+          outTok={outTok}
+          ctxUsed={ctxUsed}
+          ctxWindow={session.config.context?.window ?? DEFAULT_CTX}
+          toolCount={session.toolCount}
+          mode={mode}
+          columns={columns}
+        />
+      </Box>
     </Box>
   );
 }

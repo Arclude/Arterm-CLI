@@ -1,10 +1,12 @@
 import type { Tool } from "@arterm/core";
 import { bashTool } from "./bash.js";
 import { editTool } from "./edit.js";
+import { gitCommitTool, gitTool } from "./git.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
 import { multiEditTool } from "./multiEdit.js";
+import { formatTool, lintTool, testTool } from "./project.js";
 import { readTool } from "./read.js";
 import { searchTool } from "./search.js";
 import { taskDoneTool } from "./taskDone.js";
@@ -24,6 +26,11 @@ export function defaultTools(): Tool[] {
     multiEditTool,
     bashTool,
     webFetchTool,
+    gitTool,
+    gitCommitTool,
+    testTool,
+    lintTool,
+    formatTool,
   ];
 }
 
@@ -40,5 +47,10 @@ export {
   multiEditTool,
   bashTool,
   webFetchTool,
+  gitTool,
+  gitCommitTool,
+  testTool,
+  lintTool,
+  formatTool,
   taskDoneTool,
 };

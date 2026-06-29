@@ -5,15 +5,18 @@ import {
   Container,
   EventBus,
   MemoryRecorder,
+  type Message,
   type PermissionAsker,
   PermissionManager,
   type PermissionMode,
   RiskArbiter,
   RunController,
+  SddRunner,
   Tokens,
   createContextStrategy,
   createMemoryStore,
   createPipelines,
+  createSddStore,
   digest as digestObservations,
   estimateTokens,
   formatMemorySection,
@@ -47,6 +50,8 @@ export interface SessionOptions {
   /** Re-prompt for destructive tools even in auto/yolo (overrides config). */
   confirmDestructive?: boolean;
   cwd: string;
+  /** Seed the agent's history (e.g. resuming a recorded session). */
+  initialMessages?: Message[];
 }
 
 /** Builds the wired-up session (agent + provider + tools + permissions) for the TUI. */
@@ -80,7 +85,22 @@ export function buildSession(opts: SessionOptions): {
   // creates, and the agent resolves three of them (bus, permissions, compactor) out of
   // it — so behavior is unchanged. Later phases let the agent loop and its pipelines
   // resolve services from here instead of receiving them directly.
-  const contextStrategy = createContextStrategy(config);
+  // One-shot, tool-free model call shared by the digest worker and the "summary"
+  // context strategy. Reads the live `provider`/`config.model` bindings so a /login
+  // or model switch propagates here too.
+  const summarizeOneShot = async (prompt: string): Promise<string> => {
+    let text = "";
+    for await (const chunk of provider.chat({
+      model: config.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+    })) {
+      if (chunk.type === "text") text += chunk.delta;
+    }
+    return text;
+  };
+
+  const contextStrategy = createContextStrategy(config, summarizeOneShot);
   const container = new Container()
     .bind(Tokens.Bus, () => bus)
     .bind(Tokens.PermissionPolicy, () => permissions)
@@ -108,6 +128,7 @@ export function buildSession(opts: SessionOptions): {
     ask: (tool, args) => asker(tool, args),
     bus: container.resolve(Tokens.Bus),
     cwd,
+    initialMessages: opts.initialMessages,
     temperature: config.temperature,
     context: container.resolve(Tokens.Compactor),
     contextWindow: config.context?.window,
@@ -156,8 +177,10 @@ export function buildSession(opts: SessionOptions): {
         context: createContextStrategy(config),
         maxSteps: config.autonomy?.maxSteps,
         concurrency: config.fleet?.concurrency,
+        isolation: config.fleet?.isolation ?? "none",
         onStart: (_i, task, role) => bus.emit({ type: "subagent_start", task, role }),
         onDone: (_i, output) => bus.emit({ type: "subagent_done", output }),
+        onWorktree: (_i, info) => bus.emit({ type: "fleet_worktree", ...info }),
       },
       signal,
     );
@@ -179,18 +202,9 @@ export function buildSession(opts: SessionOptions): {
   ]);
 
   // End-of-session digest: compress buffered activity into durable learnings via
-  // a quiet, tool-free single-shot model call (Arterm's claude-mem "worker").
-  const summarize = async (prompt: string): Promise<string> => {
-    let text = "";
-    for await (const chunk of provider.chat({
-      model: agent.model,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0,
-    })) {
-      if (chunk.type === "text") text += chunk.delta;
-    }
-    return text;
-  };
+  // a quiet, tool-free single-shot model call (Arterm's claude-mem "worker"). Same
+  // one-shot the "summary" context strategy uses; see `summarizeOneShot` above.
+  const summarize = summarizeOneShot;
 
   // Single-flight: a periodic digest and the end-of-session digest must never run
   // concurrently (they share the buffer and the model).
@@ -222,8 +236,22 @@ export function buildSession(opts: SessionOptions): {
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
     mode: config.autonomy?.mode ?? "once",
     maxSteps: config.autonomy?.maxSteps,
+    maxPhases: config.autonomy?.maxPhases,
+    fanout: config.autonomy?.phasedFanout ?? config.fleet?.concurrency,
     runFleet: (tasks, signal) => runFleetTasks(tasks, signal),
   });
+
+  const sdd = new SddRunner(
+    agent,
+    bus,
+    (tasks, signal) => runFleetTasks(tasks, signal),
+    createSddStore(),
+    {
+      maxQuestions: config.sdd?.maxQuestions,
+      maxTasks: config.sdd?.maxTasks,
+      fanout: config.fleet?.concurrency,
+    },
+  );
 
   const session: Session = {
     agent,
@@ -270,6 +298,7 @@ export function buildSession(opts: SessionOptions): {
       config.mode = next;
     },
     autonomy,
+    sdd,
     mcpServers: [],
     plugins: [],
     skills: [],

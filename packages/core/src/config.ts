@@ -32,7 +32,7 @@ export interface ArtermConfig {
   };
   /** Conversation context-window compaction. */
   context: {
-    /** "none" = never compact; "window" = keep a recent slice; "summary" = (future). */
+    /** "none" = never compact; "window" = keep a recent slice; "summary" = recap older turns via the model. */
     strategy: "none" | "window" | "summary";
     /** Model context window in tokens, used to decide when to auto-compact. */
     window?: number;
@@ -47,13 +47,27 @@ export interface ArtermConfig {
     mode: AutonomyMode;
     /** Safety step cap for "once" mode. */
     maxSteps?: number;
+    /** Phased mode: cap on the number of sequential phases (default 8). */
+    maxPhases?: number;
+    /** Phased mode: max sub-agents per parallel phase (default = fleet.concurrency). */
+    phasedFanout?: number;
   };
   /** External MCP (Model Context Protocol) servers to connect over stdio. */
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   /** Per-plugin trust level (untrusted by default — tools forced to ask, execute blocked). */
   plugins: Record<string, { trust: TrustTier }>;
-  /** Parallel sub-agent fan-out (spawn_parallel). */
-  fleet: { concurrency?: number };
+  /**
+   * Parallel sub-agent fan-out (spawn_parallel, parallel/phased autonomy, /sdd).
+   * NOTE: `loadConfig` shallow-merges, so a user-supplied `fleet` object replaces
+   * this whole block — re-state every field you want to keep.
+   */
+  fleet: {
+    concurrency?: number;
+    /** "none" (default) = shared cwd; "worktree" = isolate each worker in its own git worktree. */
+    isolation?: "none" | "worktree";
+    /** How concurrent worktree branches are reconciled. "surface" (default) only reports diffs. */
+    mergeStrategy?: "surface" | "apply";
+  };
   /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
   arbiter: { enabled: boolean };
   /**
@@ -61,6 +75,13 @@ export interface ArtermConfig {
    * Off by default; enable with `--confirm-destructive`.
    */
   confirmDestructive: boolean;
+  /** Spec-Driven Development (/sdd): interview → spec → task-DAG → parallel execution. */
+  sdd: {
+    /** Max clarifying questions in the interview step (default 4). */
+    maxQuestions?: number;
+    /** Cap on generated tasks in the graph (default 12). */
+    maxTasks?: number;
+  };
   /** Persistent, project-scoped memory (claude-mem-style capture/digest/recall). */
   memory: {
     /** "jsonl" = persist learnings per project (default); "off" = disabled. */
@@ -89,22 +110,33 @@ export function defaultConfig(): ArtermConfig {
     mode: "ask",
     session: { mode: "off" },
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
-    autonomy: { mode: "once", maxSteps: 25 },
+    autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
     mcpServers: {},
     plugins: {},
-    fleet: { concurrency: 4 },
+    fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
     arbiter: { enabled: true },
     confirmDestructive: false,
+    sdd: { maxQuestions: 4, maxTasks: 12 },
     memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20 },
   };
 }
 
 export async function loadConfig(): Promise<ArtermConfig> {
+  let raw: string;
   try {
-    const raw = await fs.readFile(CONFIG_PATH, "utf8");
+    raw = await fs.readFile(CONFIG_PATH, "utf8");
+  } catch {
+    // No config file yet (first run): fall back to defaults silently.
+    return defaultConfig();
+  }
+  try {
     const parsed = JSON.parse(raw) as Partial<ArtermConfig>;
     return { ...defaultConfig(), ...parsed };
-  } catch {
+  } catch (err) {
+    // The file exists but is unreadable JSON — surface it so the user's edits
+    // aren't silently discarded, then carry on with defaults rather than crash.
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(`⚠ ${CONFIG_PATH} is invalid (${reason}); using defaults.`);
     return defaultConfig();
   }
 }

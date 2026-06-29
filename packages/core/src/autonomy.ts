@@ -22,13 +22,26 @@ export type AutonomyFleetRunner = (
   signal: AbortSignal,
 ) => Promise<AutonomyTaskResult[]>;
 
+/** One ordered phase of a "phased" run (plan → implement → verify, etc.). */
+export interface Phase {
+  id: string;
+  title: string;
+  description: string;
+  /** Done-criteria — used in the handoff and final assessment. */
+  done: string;
+  /** When true, the phase fans out into a sub-agent fleet; otherwise a single focused agent. */
+  parallel?: boolean;
+}
+
 export interface AutonomyOptions {
   mode?: AutonomyMode;
   /** Step (or parallel-round) cap (safety bound). Default 25. */
   maxSteps?: number;
   /** Max independent subtasks per round in "parallel" mode. Default 16 (hard cap 16). */
   fanout?: number;
-  /** Fleet runner required by "parallel" mode (injected so core stays decoupled). */
+  /** Max sequential phases in "phased" mode. Default 8. */
+  maxPhases?: number;
+  /** Fleet runner required by "parallel"/"phased" modes (injected so core stays decoupled). */
   runFleet?: AutonomyFleetRunner;
 }
 
@@ -43,6 +56,7 @@ export class AutonomyEngine {
   private mode: AutonomyMode;
   private maxSteps: number;
   private fanout: number;
+  private maxPhases: number;
   private readonly runFleet?: AutonomyFleetRunner;
   private goal = "";
   private step = 0;
@@ -62,6 +76,7 @@ export class AutonomyEngine {
     this.mode = opts.mode ?? "once";
     this.maxSteps = opts.maxSteps ?? 25;
     this.fanout = Math.min(16, Math.max(1, opts.fanout ?? 16));
+    this.maxPhases = Math.min(20, Math.max(1, opts.maxPhases ?? 8));
     this.runFleet = opts.runFleet;
   }
 
@@ -94,6 +109,15 @@ export class AutonomyEngine {
     if (this.mode === "parallel") {
       try {
         await this.runParallelLoop();
+      } finally {
+        if (this._state === "running") this._state = "stopped";
+      }
+      return;
+    }
+
+    if (this.mode === "phased") {
+      try {
+        await this.runPhasedLoop();
       } finally {
         if (this._state === "running") this._state = "stopped";
       }
@@ -253,6 +277,158 @@ export class AutonomyEngine {
       this._state = "stopped";
       this.bus.emit({ type: "autonomy_stopped", reason: `reached round limit (${this.maxSteps})` });
     }
+  }
+
+  /**
+   * Phased mode: the leader produces an ordered list of phases up front, then each
+   * phase runs sequentially (fanning out to the fleet when marked parallel). A running
+   * "handoff" summary is threaded between phases. Ends on /stop or after the last phase.
+   */
+  private async runPhasedLoop(): Promise<void> {
+    if (!this.runFleet) {
+      this._state = "stopped";
+      this.bus.emit({ type: "autonomy_stopped", reason: "phased mode needs a fleet runner" });
+      return;
+    }
+
+    this.current = new AbortController();
+    const phases = await this.planPhases();
+    if (this.stopped) return;
+    this.bus.emit({
+      type: "phase_plan",
+      phases: phases.map((p) => ({
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        done: p.done,
+      })),
+    });
+
+    let handoff = "";
+    for (let i = 0; i < phases.length; i++) {
+      const phase = phases[i] as Phase;
+      await this.gate();
+      if (this.stopped) return;
+
+      this.current = new AbortController();
+      this.bus.emit({
+        type: "phase_start",
+        id: phase.id,
+        index: i,
+        total: phases.length,
+        title: phase.title,
+      });
+
+      const summary = await this.runPhase(phase, i, phases.length, handoff);
+      if (this.stopped) return;
+
+      handoff = summary;
+      this.bus.emit({ type: "phase_done", id: phase.id, index: i, title: phase.title, summary });
+    }
+
+    const verdict = await this.agent.assess(this.goal, this.current?.signal);
+    this.finish(verdict.note || handoff || "all phases complete");
+  }
+
+  /** Ask the leader for an ordered phase plan, parsed tolerantly with a fallback. */
+  private async planPhases(): Promise<Phase[]> {
+    const steer = this.pendingSteer;
+    this.pendingSteer = undefined;
+    const steerLine = steer ? `\n\nSteering update from the user: "${steer}"` : "";
+    const jsonShape = '[{"title": "...", "description": "...", "done": "..."}]';
+    const prompt = `You are the DIRECTOR planning how to accomplish this GOAL:
+"${this.goal}"
+
+Break it into an ORDERED list of up to ${this.maxPhases} sequential phases (e.g. plan, implement, verify). Each phase runs after the previous one finishes.
+Reply with ONLY a JSON array shaped like ${jsonShape}, where "done" states how to know that phase is complete.${steerLine}`;
+    const raw = await this.agent.plan(prompt, this.current?.signal);
+    return this.parsePhases(raw);
+  }
+
+  /** Tolerant parse of the director's phase plan: first JSON array, capped; non-empty fallback. */
+  private parsePhases(raw: string): Phase[] {
+    const fallback: Phase[] = [
+      { id: "p1", title: "work", description: this.goal, done: "the goal is complete" },
+    ];
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (!match) return fallback;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      return fallback;
+    }
+    if (!Array.isArray(parsed)) return fallback;
+    const out: Phase[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const title = (item as { title?: unknown }).title;
+      if (typeof title !== "string" || !title.trim()) continue;
+      const description = (item as { description?: unknown }).description;
+      const done = (item as { done?: unknown }).done;
+      const parallel = (item as { parallel?: unknown }).parallel;
+      out.push({
+        id: `p${out.length + 1}`,
+        title: title.trim(),
+        description:
+          typeof description === "string" && description.trim() ? description.trim() : title.trim(),
+        done: typeof done === "string" && done.trim() ? done.trim() : title.trim(),
+        parallel: parallel === true,
+      });
+      if (out.length >= this.maxPhases) break;
+    }
+    return out.length > 0 ? out : fallback;
+  }
+
+  /** Run one phase (fleet-of-1 or fanned out) and fold results into a new handoff. */
+  private async runPhase(
+    phase: Phase,
+    index: number,
+    total: number,
+    handoff: string,
+  ): Promise<string> {
+    const runFleet = this.runFleet as AutonomyFleetRunner;
+    const steer = this.pendingSteer;
+    this.pendingSteer = undefined;
+    const steerLine = steer ? `\n\nSteering update from the user: "${steer}"` : "";
+    const carry = handoff ? `\n\nCarried forward from earlier phases:\n${handoff}` : "";
+    const context = `GOAL: "${this.goal}"\nPhase ${index + 1}/${total}: ${phase.title} — ${phase.description}\nDone when: ${phase.done}${carry}${steerLine}`;
+
+    let tasks: AutonomyTask[];
+    if (phase.parallel) {
+      const jsonShape = '[{"task": "...", "role": "<role>"}]';
+      const prompt = `${context}\n\nBreak THIS phase into up to ${this.fanout} INDEPENDENT subtasks that can run CONCURRENTLY.\nReply with ONLY a JSON array shaped like ${jsonShape} (role optional, one of: ${availableRoles().join(" | ")}).`;
+      const raw = await this.agent.plan(prompt, this.current?.signal);
+      tasks = this.parseTasks(raw);
+      if (tasks.length === 0) tasks = [{ task: context }];
+    } else {
+      // Single focused sub-agent gets the full phase context incl. the handoff.
+      tasks = [{ task: context }];
+    }
+
+    this.bus.emit({ type: "autonomy_fleet_round", round: index + 1, tasks });
+    let results: AutonomyTaskResult[];
+    try {
+      results = await runFleet(tasks, (this.current as AbortController).signal);
+    } catch (err) {
+      if (this.stopped) return handoff;
+      return `${handoff}\n[phase ${phase.title} failed: ${(err as Error).message}]`;
+    }
+    if (this.stopped) return handoff;
+
+    const body = results.map((r, i) => `### ${r.task}\n${r.output}`).join("\n\n");
+    const prompt = `Phase "${phase.title}" (toward GOAL "${this.goal}") produced:
+
+${body}
+
+Summarize concisely for the next phase: what is now DONE, what REMAINS, and any artifacts/paths to carry forward. Do not call any tools.`;
+    await this.agent.run(prompt, this.current?.signal);
+    this.bus.emit({ type: "autonomy_aggregate", round: index + 1, count: results.length });
+
+    // The leader's last assistant message is the handoff; fall back to raw results.
+    const last = this.agent.history.at(-1);
+    const summary = last && last.role === "assistant" ? last.content.trim() : "";
+    return summary || body;
   }
 
   /** Ask the leader to split the next chunk of work into ≤fanout independent subtasks. */
