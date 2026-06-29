@@ -42,8 +42,7 @@ function storeForKey(key: string): MemoryStore {
  */
 export async function startMemoryMcpServer(opts: { cwd: string }): Promise<void> {
   const defaultKey = projectKey(opts.cwd);
-  const resolveKey = (project?: string): string =>
-    project && project.trim() ? project.trim() : defaultKey;
+  const resolveKey = (project?: string): string => (project?.trim() ? project.trim() : defaultKey);
 
   const server = new McpServer({ name: "arterm-memory", version: "0.1.0" });
 

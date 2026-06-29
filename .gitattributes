@@ -1,0 +1,21 @@
+# Normalize line endings: LF in the repo and in working trees on all platforms.
+# Biome's formatter expects LF, so this keeps `biome check` green on Windows too.
+* text=auto eol=lf
+
+# Explicitly LF for source and config we lint/format.
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Binaries: never touch.
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.ico  binary
+*.gguf binary
