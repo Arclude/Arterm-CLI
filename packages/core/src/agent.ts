@@ -189,6 +189,7 @@ export class Agent {
           const result = await ctx.tool.execute(ctx.call.arguments, {
             cwd: this.opts.cwd,
             signal: ctx.signal,
+            tools: this.opts.tools,
           });
           ctx.output = result.output;
           ctx.isError = result.isError ?? false;

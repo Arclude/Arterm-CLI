@@ -153,6 +153,12 @@ export interface ToolContext {
   /** Working directory the agent operates within. */
   cwd: string;
   signal?: AbortSignal;
+  /**
+   * The agent's current tool roster, injected at execute time. Meta-tools use it:
+   * `tool_search` lists/searches it and `batch` dispatches to it. Optional so
+   * standalone tool calls and tests work without it.
+   */
+  tools?: readonly Tool[];
 }
 
 /** Callback the agent uses to ask the host (TUI/CLI) for permission. */
