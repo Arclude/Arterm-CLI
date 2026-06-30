@@ -4,7 +4,9 @@ import {
   PERMISSION_MODES,
   type PermissionAsker,
   type PermissionMode,
+  cachedCatalogSync,
   fetchCatalog,
+  findModelById,
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
@@ -44,6 +46,7 @@ const HELP = [
   "  /sdd <brief>          spec-driven dev: spec → task graph → parallel execution",
   "  /steer <text>         redirect the running goal · /pause /resume /stop",
   "  /compact              shrink the conversation context (auto when near full)",
+  "  /cost                 show this session's token usage + estimated cost",
   "  /mcp                  list connected MCP servers and their tools",
   "  /plugins              list loaded plugins (with trust + gating)",
   "  /skills · /skill <n>  list skills · run a skill by name",
@@ -155,6 +158,7 @@ const COMMANDS = [
   "resume",
   "stop",
   "compact",
+  "cost",
   "mcp",
   "plugins",
   "skills",
@@ -884,6 +888,28 @@ export function App({
           }
           break;
         }
+        case "cost": {
+          // Token totals accumulate from each turn's usage; pricing comes from the
+          // models.dev catalog (per-1M USD), so the dollar estimate only shows for
+          // listed hosted models — local backends have no published price.
+          const meta = findModelById(cachedCatalogSync(), model, providerLabel);
+          const win = session.agent.effectiveContextWindow();
+          const usd =
+            meta?.inputCost != null
+              ? (inTok / 1e6) * meta.inputCost + (outTok / 1e6) * (meta.outputCost ?? 0)
+              : undefined;
+          const lines = [
+            `model: ${providerLabel}/${model}`,
+            `tokens this session: in ${inTok.toLocaleString()} · out ${outTok.toLocaleString()}`,
+            win ? `context window: ${Math.round(win / 1000)}k` : "",
+            meta?.inputCost != null
+              ? `pricing: $${meta.inputCost}/$${meta.outputCost ?? "?"} per 1M tokens`
+              : "pricing: not in catalog (local or unlisted model)",
+            usd != null ? `estimated cost: $${usd.toFixed(4)}` : "",
+          ].filter(Boolean);
+          push({ kind: "system", text: lines.join("\n") });
+          break;
+        }
         case "mode": {
           const arg = rest.join(" ").trim().toLowerCase();
           if (!arg) {
@@ -1061,6 +1087,10 @@ export function App({
       pickerModels,
       applyMode,
       permMode,
+      inTok,
+      outTok,
+      model,
+      providerLabel,
     ],
   );
 
@@ -1194,7 +1224,7 @@ export function App({
           inTok={inTok}
           outTok={outTok}
           ctxUsed={ctxUsed}
-          ctxWindow={session.config.context?.window ?? DEFAULT_CTX}
+          ctxWindow={session.agent.effectiveContextWindow() ?? DEFAULT_CTX}
           toolCount={session.toolCount}
           mode={mode}
           columns={columns}

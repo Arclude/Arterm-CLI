@@ -8,6 +8,7 @@ import {
   Tokens,
   createPipelines,
 } from "./kernel/index.js";
+import { modelContextWindow } from "./modelsDev.js";
 import type { PermissionManager } from "./permissions.js";
 import { estimateHistoryTokens } from "./tokenEstimate.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
@@ -264,6 +265,16 @@ export class Agent {
   /** Switch the active model while preserving conversation history. */
   setModel(model: string): void {
     this.opts.model = model;
+  }
+
+  /**
+   * The active model's real context window: the models.dev catalog value for the
+   * current provider/model when known (e.g. 200k/1M for Claude), else the
+   * configured fallback. Used for both the auto-compaction threshold and the TUI
+   * gauge so they track whatever model is selected rather than a static default.
+   */
+  effectiveContextWindow(): number | undefined {
+    return modelContextWindow(this.opts.model, this.opts.provider.id) ?? this.opts.contextWindow;
   }
 
   /** Switch the active backend while preserving conversation history. */
@@ -538,7 +549,7 @@ export class Agent {
 
   /** True when the working history is close enough to the context window to compact. */
   private shouldAutoCompact(): boolean {
-    const window = this.opts.contextWindow;
+    const window = this.effectiveContextWindow();
     const strategy = this.opts.context;
     if (!window || !strategy || strategy.id === "none") return false;
     const used = this.lastPromptTokens ?? estimateHistoryTokens(this.messages);

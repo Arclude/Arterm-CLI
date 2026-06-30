@@ -2,6 +2,15 @@ import type { ChatChunk } from "@arterm/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OllamaProvider } from "./ollama.js";
 
+// Isolate the allowlist heuristic from the on-disk models.dev catalog cache:
+// once that cache is populated (after a real run), it would otherwise flip
+// catalog-listed families like gemma2 to tool-capable and make these unit
+// assertions environment-dependent.
+vi.mock("@arterm/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@arterm/core")>()),
+  modelToolCall: () => undefined,
+}));
+
 function ndjsonResponse(lines: object[]): Response {
   const body = lines.map((l) => JSON.stringify(l)).join("\n");
   return new Response(body, { status: 200 });
