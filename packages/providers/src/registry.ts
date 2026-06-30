@@ -2,6 +2,13 @@ import type { ArtermConfig, ChatProvider } from "@arterm/core";
 import { Keystore } from "@arterm/core";
 import { AnthropicProvider } from "./anthropic.js";
 import { LlamaCppProvider } from "./llamacpp.js";
+import {
+  ANTHROPIC_OAUTH,
+  type OAuthConfig,
+  type OAuthTokens,
+  refreshTokens,
+  tokensExpired,
+} from "./oauth.js";
 import { OllamaProvider } from "./ollama.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
 
@@ -33,6 +40,21 @@ export interface ProviderDescriptor {
   label: string;
   /** True when the provider authenticates with an API key (stored via Keystore). */
   needsKey: boolean;
+  /** True when the provider also supports subscription login (OAuth, via `arterm login`). */
+  supportsOAuth?: boolean;
+}
+
+/** Providers that support subscription (OAuth) login, mapped to their endpoints. */
+const OAUTH_CONFIGS: Record<string, OAuthConfig> = {
+  anthropic: ANTHROPIC_OAUTH,
+};
+
+/** Provider ids that support subscription (OAuth) login. */
+export const oauthProviderIds: readonly string[] = Object.keys(OAUTH_CONFIGS);
+
+/** Keystore entry name holding a provider's encrypted OAuth token blob. */
+function oauthKey(id: string): string {
+  return `${id}-oauth`;
 }
 
 /**
@@ -43,7 +65,7 @@ export const providerCatalog: readonly ProviderDescriptor[] = [
   { id: "ollama", label: "Ollama — local server", needsKey: false },
   { id: "llamacpp", label: "llama.cpp — local .gguf", needsKey: false },
   { id: "openai-compat", label: "OpenAI-compatible — custom host", needsKey: false },
-  { id: "anthropic", label: "Anthropic — Claude", needsKey: true },
+  { id: "anthropic", label: "Anthropic — Claude", needsKey: true, supportsOAuth: true },
   { id: "openai", label: "OpenAI — ChatGPT", needsKey: true },
   { id: "gemini", label: "Google — Gemini", needsKey: true },
   { id: "xai", label: "xAI — Grok", needsKey: true },
@@ -87,6 +109,15 @@ export function hasApiKey(providerId: string): boolean {
 }
 
 /**
+ * True when a provider has *any* usable credential — an API key (keystore/env)
+ * or a stored subscription (OAuth) session. The startup preflight uses this so a
+ * user who ran `arterm login` isn't warned about a missing key.
+ */
+export function hasCredentials(providerId: string): boolean {
+  return hasApiKey(providerId) || getOAuthTokens(providerId) !== undefined;
+}
+
+/**
  * Persist an API key for a provider (encrypted, AES-256-GCM), keeping the
  * in-process keystore cache fresh so a subsequent `createProvider` sees it
  * without a reload — used by the TUI login flow.
@@ -116,6 +147,67 @@ export function removeApiKey(name: string): boolean {
   }
 }
 
+/** The OAuth endpoint config for a provider id, or undefined if it has none. */
+export function oauthConfigFor(id: string): OAuthConfig | undefined {
+  return OAUTH_CONFIGS[id];
+}
+
+/** Read a provider's stored OAuth tokens (decrypted), or undefined if absent/corrupt. */
+export function getOAuthTokens(id: string): OAuthTokens | undefined {
+  try {
+    cachedKeystore ??= Keystore.open();
+    const raw = cachedKeystore.get(oauthKey(id));
+    if (!raw) return undefined;
+    const t = JSON.parse(raw) as OAuthTokens;
+    if (!t.accessToken || !t.refreshToken) return undefined;
+    return t;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist a provider's OAuth tokens (encrypted), keeping the cache fresh. */
+export function setOAuthTokens(id: string, tokens: OAuthTokens): void {
+  cachedKeystore ??= Keystore.open();
+  cachedKeystore.set(oauthKey(id), JSON.stringify(tokens));
+}
+
+/** Forget a provider's OAuth tokens; returns whether any existed. */
+export function removeOAuthTokens(id: string): boolean {
+  try {
+    cachedKeystore ??= Keystore.open();
+    return cachedKeystore.remove(oauthKey(id));
+  } catch {
+    return false;
+  }
+}
+
+/** Provider ids the user has a stored OAuth session for (shown as signed-in). */
+export function oauthSignedIn(): string[] {
+  return oauthProviderIds.filter((id) => getOAuthTokens(id) !== undefined);
+}
+
+/**
+ * Build a per-request access-token resolver for an OAuth provider: returns the
+ * stored access token, transparently refreshing (and re-persisting) it when it's
+ * within the expiry skew. Returns undefined when the user isn't signed in.
+ */
+function accessTokenResolver(id: string): (() => Promise<string>) | undefined {
+  const config = OAUTH_CONFIGS[id];
+  if (!config) return undefined;
+  if (!getOAuthTokens(id)) return undefined;
+  return async () => {
+    const tokens = getOAuthTokens(id);
+    if (!tokens) {
+      throw new Error(`Not signed in to ${id}. Run \`arterm login ${id}\`.`);
+    }
+    if (!tokensExpired(tokens)) return tokens.accessToken;
+    const refreshed = await refreshTokens(config, tokens.refreshToken);
+    setOAuthTokens(id, refreshed);
+    return refreshed.accessToken;
+  };
+}
+
 /** Builds the provider instance selected by config. */
 export function createProvider(config: ArtermConfig, providerId?: string): ChatProvider {
   const id = providerId ?? config.provider;
@@ -139,8 +231,12 @@ export function createProvider(config: ArtermConfig, providerId?: string): ChatP
         baseUrl: config.openaiCompatHost,
         apiKey: apiKeyFor("openai-compat", "OPENAI_API_KEY"),
       });
-    case "anthropic":
+    case "anthropic": {
+      // Prefer an explicit subscription login (OAuth) when present; otherwise API key.
+      const getAccessToken = accessTokenResolver("anthropic");
+      if (getAccessToken) return new AnthropicProvider({ getAccessToken });
       return new AnthropicProvider({ apiKey: apiKeyFor("anthropic", "ANTHROPIC_API_KEY") });
+    }
     default:
       throw new Error(`Unknown provider: ${id}`);
   }
@@ -161,10 +257,13 @@ export function allProviders(config: ArtermConfig): ChatProvider[] {
     }),
   ];
 
-  // Anthropic's model list is static, so gate it on a key — otherwise it would
-  // surface in `arterm models` / the picker even when the user can't use it.
+  // Anthropic's model list is static, so gate it on credentials — otherwise it
+  // would surface in `arterm models` / the picker even when the user can't use it.
+  // A subscription login (OAuth) counts just like an API key.
+  const anthropicOAuth = accessTokenResolver("anthropic");
   const anthropicKey = apiKeyFor("anthropic", "ANTHROPIC_API_KEY");
-  if (anthropicKey) providers.push(new AnthropicProvider({ apiKey: anthropicKey }));
+  if (anthropicOAuth) providers.push(new AnthropicProvider({ getAccessToken: anthropicOAuth }));
+  else if (anthropicKey) providers.push(new AnthropicProvider({ apiKey: anthropicKey }));
 
   for (const [id, preset] of Object.entries(OPENAI_COMPAT_PRESETS)) {
     const apiKey = apiKeyFor(id, preset.envVar);

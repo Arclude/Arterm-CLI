@@ -19,6 +19,8 @@ export interface LoginProvider {
   label: string;
   /** True when the provider needs an API key (the overlay then prompts for one). */
   needsKey: boolean;
+  /** True when the provider also supports subscription login (OAuth, via `arterm login`). */
+  supportsOAuth?: boolean;
 }
 
 /** Everything the TUI needs from the host (CLI), kept behind one interface. */

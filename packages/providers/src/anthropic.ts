@@ -11,6 +11,16 @@ import type {
 /** Anthropic requires `max_tokens`; this is the default per-response output cap. */
 const DEFAULT_MAX_TOKENS = 8192;
 
+/** Beta header that opts a request into subscription (OAuth) inference. */
+const OAUTH_BETA = "oauth-2025-04-20";
+
+/**
+ * Required leading system block when authenticating with a Claude subscription
+ * token: the OAuth inference scope only serves requests that identify as the
+ * Claude Code client, so this exact line must be the first system block.
+ */
+const OAUTH_SYSTEM_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
+
 /** Current Claude models surfaced in the picker (no network/key required). */
 const KNOWN_MODELS = [
   "claude-opus-4-8",
@@ -22,6 +32,13 @@ const KNOWN_MODELS = [
 
 export interface AnthropicOptions {
   apiKey?: string;
+  /**
+   * Resolve a fresh subscription (OAuth) access token per request. When set, the
+   * provider authenticates with a Bearer token + the OAuth beta header instead of
+   * an API key, and prepends the required Claude Code system identity. The caller
+   * owns refresh/persistence — this is invoked once at the start of every `chat`.
+   */
+  getAccessToken?: () => Promise<string>;
   /** Override the API base URL (e.g. a proxy). */
   baseUrl?: string;
   /** Per-response output token cap. */
@@ -81,17 +98,37 @@ export function toAnthropicTools(tools: ToolSchema[]): Anthropic.Tool[] {
 /** Talks to the Anthropic Messages API via the official SDK (streaming + tools). */
 export class AnthropicProvider implements ChatProvider {
   readonly id = "anthropic";
-  private readonly client: Anthropic;
   private readonly maxTokens: number;
   private readonly apiKey: string | undefined;
+  private readonly baseUrl: string | undefined;
+  private readonly getAccessToken: (() => Promise<string>) | undefined;
 
   constructor(opts: AnthropicOptions = {}) {
     this.apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
-    this.client = new Anthropic({
-      apiKey: this.apiKey,
-      ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
-    });
+    this.getAccessToken = opts.getAccessToken;
+    this.baseUrl = opts.baseUrl;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
+  }
+
+  /** Whether this provider authenticates with a subscription (OAuth) token. */
+  private get usesOauth(): boolean {
+    return this.getAccessToken !== undefined;
+  }
+
+  /** Build the SDK client for a request — Bearer (OAuth) or API key. */
+  private async resolveClient(): Promise<Anthropic> {
+    if (this.getAccessToken) {
+      const token = await this.getAccessToken();
+      return new Anthropic({
+        authToken: token,
+        defaultHeaders: { "anthropic-beta": OAUTH_BETA },
+        ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
+      });
+    }
+    return new Anthropic({
+      apiKey: this.apiKey,
+      ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
+    });
   }
 
   supportsNativeTools(): boolean {
@@ -103,19 +140,29 @@ export class AnthropicProvider implements ChatProvider {
   }
 
   async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {
-    if (!this.apiKey) {
+    if (!this.usesOauth && !this.apiKey) {
       throw new Error(
-        "No Anthropic API key. Run `arterm auth set anthropic`, or sign in with /login.",
+        "No Anthropic credentials. Run `arterm login` to sign in with a Claude " +
+          "subscription, or `arterm auth set anthropic` for an API key.",
       );
     }
+    const client = await this.resolveClient();
     const { system, messages } = toAnthropicConversation(req.messages);
+    // OAuth inference only serves requests that lead with the Claude Code identity,
+    // so under a subscription token send `system` as blocks with that line first.
+    const systemParam = this.usesOauth
+      ? [
+          { type: "text" as const, text: OAUTH_SYSTEM_IDENTITY },
+          ...(system ? [{ type: "text" as const, text: system }] : []),
+        ]
+      : system;
     // `temperature` is intentionally omitted — current Claude models (Opus
     // 4.8/4.7, Fable 5) reject sampling parameters with a 400.
-    const stream = this.client.messages.stream(
+    const stream = client.messages.stream(
       {
         model: req.model,
         max_tokens: this.maxTokens,
-        ...(system ? { system } : {}),
+        ...(systemParam ? { system: systemParam } : {}),
         messages,
         ...(req.tools && req.tools.length > 0 ? { tools: toAnthropicTools(req.tools) } : {}),
       },

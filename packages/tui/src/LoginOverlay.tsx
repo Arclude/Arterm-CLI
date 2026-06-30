@@ -47,6 +47,11 @@ export function LoginOverlay({
         <Text color="gray" dimColor>
           {`  stored encrypted as "${selected.id}" in ~/.arterm/secrets.json`}
         </Text>
+        {selected.supportsOAuth ? (
+          <Text color="gray" dimColor>
+            {`  or sign in with your subscription: run \`arterm login ${selected.id}\` in a terminal`}
+          </Text>
+        ) : null}
       </Box>
     );
   }

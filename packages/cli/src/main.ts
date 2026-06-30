@@ -20,8 +20,17 @@ import {
   OllamaProvider,
   OpenAICompatProvider,
   allProviders,
-  hasApiKey,
+  buildAuthorizeUrl,
+  createPkce,
+  createState,
+  exchangeCode,
+  hasCredentials,
+  oauthConfigFor,
+  oauthProviderIds,
+  parseCallbackCode,
   providerCatalog,
+  removeOAuthTokens,
+  setOAuthTokens,
 } from "@arterm/providers";
 import { McpManager, PluginLoader, SkillRegistry, startMemoryMcpServer } from "@arterm/tools";
 import { runTui } from "@arterm/tui";
@@ -109,9 +118,11 @@ async function preflight(providerId: string, config: ArtermConfig): Promise<stri
   // Hosted, key-based backends: the common first-run failure is a missing key, not
   // an unreachable host — so check the key (instant, offline) instead of pinging.
   if (providerCatalog.find((p) => p.id === providerId)?.needsKey) {
-    return hasApiKey(providerId)
-      ? undefined
-      : `No API key for "${providerId}". Add one with \`arterm auth set ${providerId}\`, or set its *_API_KEY env var.`;
+    if (hasCredentials(providerId)) return undefined;
+    const oauthHint = oauthProviderIds.includes(providerId)
+      ? `, or sign in with \`arterm login ${providerId}\``
+      : "";
+    return `No credentials for "${providerId}". Add a key with \`arterm auth set ${providerId}\`${oauthHint}, or set its *_API_KEY env var.`;
   }
 
   switch (providerId) {
@@ -365,6 +376,65 @@ function authRemove(name: string): void {
   process.stdout.write(removed ? `✓ removed "${name}"\n` : `no key named "${name}"\n`);
 }
 
+/** Read one line from stdin interactively (for the login code paste). */
+async function promptLine(prompt: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(prompt);
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Subscription (OAuth/PKCE) login: open the provider's authorize page, take the
+ * `code#state` the callback hands back, exchange it for tokens, and store them
+ * encrypted. Defaults to Anthropic (Claude Pro/Max). The access token is then
+ * used as a Bearer credential, auto-refreshed when it expires.
+ */
+async function runLogin(providerArg?: string): Promise<void> {
+  const id = providerArg ?? "anthropic";
+  const config = oauthConfigFor(id);
+  if (!config) {
+    const list = oauthProviderIds.length ? oauthProviderIds.join(", ") : "(none)";
+    throw new ArtermUserError(
+      `Provider "${id}" doesn't support subscription login. OAuth providers: ${list}. ` +
+        `For an API key use \`arterm auth set ${id}\`.`,
+    );
+  }
+  const { verifier, challenge } = createPkce();
+  const state = createState();
+  const url = buildAuthorizeUrl(config, { challenge, state });
+  process.stdout.write(`Opening your browser to sign in to ${id}…\n\n  ${url}\n\n`);
+  await openBrowser(url);
+  process.stdout.write(
+    "After approving, paste the code from the callback page (it looks like `code#state`).\n",
+  );
+  const pasted = await promptLine("code: ");
+  if (!pasted.trim()) throw new ArtermUserError("No code entered; login cancelled.");
+
+  const { code, state: returnedState } = parseCallbackCode(pasted);
+  if (returnedState && returnedState !== state) {
+    throw new ArtermUserError("State mismatch — login aborted for safety. Please try again.");
+  }
+  let tokens: Awaited<ReturnType<typeof exchangeCode>>;
+  try {
+    tokens = await exchangeCode(config, { code, verifier, state: returnedState ?? state });
+  } catch (err) {
+    throw new ArtermUserError(`Login failed: ${(err as Error).message}`);
+  }
+  setOAuthTokens(id, tokens);
+  process.stdout.write(`✓ signed in to ${id} (subscription) — tokens stored encrypted.\n`);
+}
+
+/** Clear a stored subscription (OAuth) session. */
+function runLogout(providerArg?: string): void {
+  const id = providerArg ?? "anthropic";
+  const removed = removeOAuthTokens(id);
+  process.stdout.write(removed ? `✓ signed out of ${id}\n` : `not signed in to ${id}\n`);
+}
+
 async function openBrowser(url: string): Promise<void> {
   try {
     const { spawn } = await import("node:child_process");
@@ -463,6 +533,20 @@ async function main(): Promise<void> {
     .command("sessions")
     .description("list recorded chat sessions (resume one with --resume <id>)")
     .action(listSessionsCmd);
+
+  program
+    .command("login [provider]")
+    .description("sign in with a provider subscription via OAuth (default: anthropic)")
+    .action(async (provider?: string) => {
+      await runLogin(provider);
+    });
+
+  program
+    .command("logout [provider]")
+    .description("clear a stored subscription (OAuth) session (default: anthropic)")
+    .action((provider?: string) => {
+      runLogout(provider);
+    });
 
   const auth = program.command("auth").description("manage encrypted API keys (AES-256-GCM)");
   auth
