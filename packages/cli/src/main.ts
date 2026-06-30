@@ -438,10 +438,19 @@ function runLogout(providerArg?: string): void {
 async function openBrowser(url: string): Promise<void> {
   try {
     const { spawn } = await import("node:child_process");
-    const cmd =
-      process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
-    const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+    if (process.platform === "win32") {
+      // NOT `cmd /c start`: cmd treats `&` in the URL as a command separator, so a
+      // multi-param OAuth URL gets truncated at the first `&` (dropping client_id).
+      // rundll32 receives the whole URL as a single argument and hands it to the
+      // default browser intact.
+      spawn("rundll32", ["url.dll,FileProtocolHandler", url], {
+        detached: true,
+        stdio: "ignore",
+      }).unref();
+    } else {
+      const cmd = process.platform === "darwin" ? "open" : "xdg-open";
+      spawn(cmd, [url], { detached: true, stdio: "ignore" }).unref();
+    }
   } catch {
     // Opening a browser is best-effort.
   }
