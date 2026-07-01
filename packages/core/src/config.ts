@@ -99,6 +99,19 @@ export interface ArtermConfig {
     autoDigest?: boolean;
     /** Also digest mid-session after every N captured observations (default 20; 0 = off). */
     digestEvery?: number;
+    /**
+     * Which memory engine to run. "legacy" (default) = the built-in flat-learning
+     * pipeline; "cmem" = the richer `@arterm/memory` engine (typed observations,
+     * progressive-disclosure legend, SQLite/FTS5, semantic search). Mutually
+     * exclusive per session, so recall/tools are never doubled.
+     */
+    engine?: "legacy" | "cmem";
+    /** cmem only: use Ollama embeddings for semantic search (default true; false = offline hash). */
+    embeddings?: boolean;
+    /** cmem only: Ollama embedding model (default "nomic-embed-text"). */
+    embedModel?: string;
+    /** cmem only: how many observations to list in the session-start legend (default 12). */
+    legendLimit?: number;
   };
 }
 
@@ -125,7 +138,7 @@ export function defaultConfig(): ArtermConfig {
     catalog: { enabled: true, maxAgeHours: 24 },
     confirmDestructive: false,
     sdd: { maxQuestions: 4, maxTasks: 12 },
-    memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20 },
+    memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20, engine: "legacy" },
   };
 }
 

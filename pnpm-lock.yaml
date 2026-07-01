@@ -48,6 +48,9 @@ importers:
       '@arterm/core':
         specifier: workspace:*
         version: link:../core
+      '@arterm/memory':
+        specifier: workspace:*
+        version: link:../memory
       '@arterm/providers':
         specifier: workspace:*
         version: link:../providers
@@ -62,6 +65,18 @@ importers:
     dependencies:
       zod:
         specifier: ^3.24.1
+        version: 3.25.76
+
+  packages/memory:
+    dependencies:
+      '@arterm/core':
+        specifier: workspace:*
+        version: link:../core
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
+      zod:
+        specifier: ^3.25.76
         version: 3.25.76
 
   packages/providers:

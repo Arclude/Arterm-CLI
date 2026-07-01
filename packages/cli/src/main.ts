@@ -15,6 +15,7 @@ import {
   readProjectRecords,
   retentionFromConfig,
 } from "@arterm/core";
+import { formatObservationsText, openMemStore, startCmemMcpServer } from "@arterm/memory";
 import {
   LlamaCppProvider,
   OllamaProvider,
@@ -37,7 +38,7 @@ import { runTui } from "@arterm/tui";
 import { Command } from "commander";
 import { ArtermUserError } from "./errors.js";
 import { runHeadless } from "./headless.js";
-import { formatRecordsText, startMemoryServer } from "./memoryServer.js";
+import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
@@ -172,7 +173,7 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   const store = createSessionStore(config);
   const initialMessages = await resolveResumeMessages(store, globals);
 
-  const { session, persist, digest } = buildSession({
+  const { session, persist, digest } = await buildSession({
     config,
     providerId: globals.provider,
     model: globals.model,
@@ -263,7 +264,7 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   const store = createSessionStore(config);
   const initialMessages = await resolveResumeMessages(store, globals);
 
-  const { session, persist, digest } = buildSession({
+  const { session, persist, digest } = await buildSession({
     config,
     providerId: globals.provider,
     model: globals.model,
@@ -462,9 +463,11 @@ async function memoryServe(opts: { port?: string; open?: boolean }): Promise<voi
     throw new ArtermUserError(`Invalid --port "${opts.port}". Use an integer between 1 and 65535.`);
   }
   const cwd = process.cwd();
-  const server = await startMemoryServer({ cwd, port });
+  const config = await loadConfig();
+  const cmem = config.memory?.engine === "cmem" && config.memory?.mode !== "off";
+  const server = await (cmem ? startCmemServer : startMemoryServer)({ cwd, port });
   process.stdout.write(
-    `Arterm memory viewer → ${server.url}\nProject: ${cwd}\nPress Ctrl+C to stop.\n`,
+    `Arterm ${cmem ? "cmem" : "memory"} viewer → ${server.url}\nProject: ${cwd}\nPress Ctrl+C to stop.\n`,
   );
   if (opts.open) await openBrowser(server.url);
   await new Promise<void>((resolve) => {
@@ -476,7 +479,18 @@ async function memoryServe(opts: { port?: string; open?: boolean }): Promise<voi
 }
 
 async function memoryList(): Promise<void> {
-  const records = await readProjectRecords(projectKey(process.cwd()));
+  const cwd = process.cwd();
+  const config = await loadConfig();
+  if (config.memory?.engine === "cmem" && config.memory?.mode !== "off") {
+    const store = await openMemStore(cwd);
+    try {
+      process.stdout.write(`${formatObservationsText(await store.all())}\n`);
+    } finally {
+      store.close();
+    }
+    return;
+  }
+  const records = await readProjectRecords(projectKey(cwd));
   process.stdout.write(`${formatRecordsText(records)}\n`);
 }
 
@@ -590,8 +604,14 @@ async function main(): Promise<void> {
     .command("mcp")
     .description("expose this project's memory as a stdio MCP server (like claude-mem)")
     .action(async () => {
+      const cwd = process.cwd();
+      const config = await loadConfig();
       // stdout is the MCP transport — keep it clean; the server logs to stderr.
-      await startMemoryMcpServer({ cwd: process.cwd() });
+      if (config.memory?.engine === "cmem" && config.memory?.mode !== "off") {
+        await startCmemMcpServer({ cwd, config });
+      } else {
+        await startMemoryMcpServer({ cwd });
+      }
     });
 
   await program.parseAsync(process.argv);

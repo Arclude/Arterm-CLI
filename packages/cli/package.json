@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@arterm/core": "workspace:*",
+    "@arterm/memory": "workspace:*",
     "@arterm/providers": "workspace:*",
     "@arterm/tools": "workspace:*",
     "@arterm/tui": "workspace:*"

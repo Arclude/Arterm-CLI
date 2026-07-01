@@ -413,12 +413,15 @@ export function App({
     session.setAsker(asker);
   }, [session]);
 
-  // Welcome banner (once).
+  // Welcome banner (once), followed by the project-memory legend when present.
   useEffect(() => {
     push({
       kind: "system",
       text: `Welcome to Arterm. Provider: ${session.providerLabel} · Model: ${session.agent.model}\n${HELP}`,
     });
+    if (session.memoryBanner) {
+      push({ kind: "system", text: session.memoryBanner });
+    }
   }, [session, push]);
 
   // Subscribe to agent events (once).

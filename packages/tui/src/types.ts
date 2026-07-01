@@ -70,6 +70,11 @@ export interface Session {
   skills: SkillInfo[];
   /** Returns a skill's instruction body to run it (for /skill <name>). */
   getSkillBody(name: string): string | undefined;
+  /**
+   * Project-memory legend to show at session start (claude-mem-style), or "" when
+   * there's nothing to recall. Rendered once as a system block above the prompt.
+   */
+  memoryBanner?: string;
 }
 
 /** A rendered transcript entry. */

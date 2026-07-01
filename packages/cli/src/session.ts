@@ -24,6 +24,7 @@ import {
   runSubagent,
   saveConfig,
 } from "@arterm/core";
+import { type CmemEngine, createCmemEngine } from "@arterm/memory";
 import {
   allProviders,
   createProvider,
@@ -55,12 +56,12 @@ export interface SessionOptions {
 }
 
 /** Builds the wired-up session (agent + provider + tools + permissions) for the TUI. */
-export function buildSession(opts: SessionOptions): {
+export async function buildSession(opts: SessionOptions): Promise<{
   session: Session;
   persist: () => Promise<void>;
   /** Digest this session's activity into persistent memory (call at session end). */
   digest: () => Promise<void>;
-} {
+}> {
   const { config, cwd } = opts;
   const providerId = opts.providerId ?? config.provider;
   const model = opts.model ?? config.model;
@@ -111,11 +112,36 @@ export function buildSession(opts: SessionOptions): {
 
   // Persistent, project-scoped memory: capture this session's activity off the
   // bus, recall prior learnings into the system prompt, digest at session end.
+  // Two mutually-exclusive engines: the legacy flat-learning pipeline, or the
+  // richer `@arterm/memory` ("cmem") engine when config.memory.engine === "cmem".
+  // Exactly one is wired per session, so recall is never double-injected and the
+  // memory tools are never double-registered.
+  const cmemActive = config.memory?.mode !== "off" && config.memory?.engine === "cmem";
+  let cmem: CmemEngine | undefined;
+  if (cmemActive) {
+    cmem = await createCmemEngine({
+      cwd,
+      config,
+      summarize: summarizeOneShot,
+      embedHost: config.ollamaHost,
+    });
+    cmem.attach(bus);
+  }
+
   const memoryStore = createMemoryStore(config, cwd);
-  const memoryEnabled = memoryStore.id !== "off";
+  const memoryEnabled = !cmemActive && memoryStore.id !== "off";
   const recorder = new MemoryRecorder();
   if (memoryEnabled) recorder.attach(bus);
   const maxInject = config.memory?.maxInject ?? 12;
+
+  // Single source of truth for "what prior memory to surface": the cmem legend
+  // when the rich engine is active, else the legacy learnings section. Feeds both
+  // the agent's system-prompt `recall` hook and the visible session-start banner.
+  const recallFn: (() => Promise<string> | string) | undefined = cmem
+    ? () => cmem!.recall()
+    : memoryEnabled
+      ? async () => formatMemorySection(await memoryStore.recent(maxInject))
+      : undefined;
 
   // The TUI installs the real asker; until then deny by default.
   let asker: PermissionAsker = async () => "deny";
@@ -133,9 +159,7 @@ export function buildSession(opts: SessionOptions): {
     context: container.resolve(Tokens.Compactor),
     contextWindow: config.context?.window,
     compactAtPercent: config.context?.compactAtPercent,
-    recall: memoryEnabled
-      ? async () => formatMemorySection(await memoryStore.recent(maxInject))
-      : undefined,
+    recall: recallFn,
     container,
   });
 
@@ -196,9 +220,11 @@ export function buildSession(opts: SessionOptions): {
     ...agent.tools,
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
-    ...(memoryEnabled
-      ? [createMemorySearchTool(memoryStore), createRememberTool(memoryStore)]
-      : []),
+    ...(cmem
+      ? cmem.tools()
+      : memoryEnabled
+        ? [createMemorySearchTool(memoryStore), createRememberTool(memoryStore)]
+        : []),
   ]);
 
   // End-of-session digest: compress buffered activity into durable learnings via
@@ -207,10 +233,22 @@ export function buildSession(opts: SessionOptions): {
   const summarize = summarizeOneShot;
 
   // Single-flight: a periodic digest and the end-of-session digest must never run
-  // concurrently (they share the buffer and the model).
+  // concurrently (they share the buffer and the model). The same `digest` name is
+  // returned for both engines so `main.ts`'s shutdown call is engine-agnostic.
   let digesting = false;
   const digest = async (): Promise<void> => {
-    if (!memoryEnabled || config.memory?.autoDigest === false || digesting) return;
+    if (digesting) return;
+    if (cmem) {
+      // cmem engine: run the observer over buffered activity.
+      digesting = true;
+      try {
+        await cmem.observe();
+      } finally {
+        digesting = false;
+      }
+      return;
+    }
+    if (!memoryEnabled || config.memory?.autoDigest === false) return;
     const observations = recorder.observations();
     if (observations.length === 0) return;
     digesting = true;
@@ -227,7 +265,11 @@ export function buildSession(opts: SessionOptions): {
 
   // Periodic, claude-mem-style digest: fire after every N captured observations.
   const digestEvery = config.memory?.digestEvery ?? 20;
-  if (memoryEnabled && config.memory?.autoDigest !== false && digestEvery > 0) {
+  if (cmem && digestEvery > 0) {
+    cmem.recorder.setAutoFlush(digestEvery, () => {
+      void digest();
+    });
+  } else if (memoryEnabled && config.memory?.autoDigest !== false && digestEvery > 0) {
     recorder.setAutoFlush(digestEvery, () => {
       void digest();
     });
@@ -252,6 +294,17 @@ export function buildSession(opts: SessionOptions): {
       fanout: config.fleet?.concurrency,
     },
   );
+
+  // One-time snapshot of prior memory to display at startup (claude-mem-style).
+  // Never let a memory read block session startup.
+  let memoryBanner = "";
+  if (recallFn) {
+    try {
+      memoryBanner = (await recallFn()).trim();
+    } catch {
+      memoryBanner = "";
+    }
+  }
 
   const session: Session = {
     agent,
@@ -303,6 +356,7 @@ export function buildSession(opts: SessionOptions): {
     plugins: [],
     skills: [],
     getSkillBody: () => undefined,
+    memoryBanner,
   };
 
   const persist = async () => {
