@@ -107,6 +107,23 @@ export async function buildSession(opts: SessionOptions): Promise<{
     };
   const summarizeOneShot = summarizeWith();
 
+  // Memory-digest summarizer: prefer `config.memory.summarizeModel`, but fall back to
+  // the main model if that override fails or yields nothing — otherwise a stale override
+  // (e.g. an Ollama model name left set after switching to Anthropic) silently kills all
+  // observation capture, since the observer treats a failed summarize as best-effort.
+  const memorySummarize = async (prompt: string): Promise<string> => {
+    const override = config.memory?.summarizeModel;
+    if (override && override !== config.model) {
+      try {
+        const text = await summarizeWith(override)(prompt);
+        if (text.trim()) return text;
+      } catch {
+        // Override model isn't valid for the active provider — fall through.
+      }
+    }
+    return summarizeOneShot(prompt);
+  };
+
   const contextStrategy = createContextStrategy(config, summarizeOneShot);
   const container = new Container()
     .bind(Tokens.Bus, () => bus)
@@ -128,7 +145,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     cmem = await createCmemEngine({
       cwd,
       config,
-      summarize: summarizeWith(config.memory?.summarizeModel),
+      summarize: memorySummarize,
       embedHost: config.ollamaHost,
     });
     cmem.attach(bus);
