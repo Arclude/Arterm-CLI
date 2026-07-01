@@ -112,6 +112,12 @@ export interface ArtermConfig {
     embedModel?: string;
     /** cmem only: how many observations to list in the session-start legend (default 12). */
     legendLimit?: number;
+    /**
+     * Model used for the digest/observation step only (falls back to the main
+     * `model` when unset). Useful when the main model is a code model that can't
+     * follow the observation format — point this at an instruct model instead.
+     */
+    summarizeModel?: string;
   };
 }
 

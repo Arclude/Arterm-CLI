@@ -89,17 +89,20 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // One-shot, tool-free model call shared by the digest worker and the "summary"
   // context strategy. Reads the live `provider`/`config.model` bindings so a /login
   // or model switch propagates here too.
-  const summarizeOneShot = async (prompt: string): Promise<string> => {
-    let text = "";
-    for await (const chunk of provider.chat({
-      model: config.model,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0,
-    })) {
-      if (chunk.type === "text") text += chunk.delta;
-    }
-    return text;
-  };
+  const summarizeWith =
+    (modelOverride?: string) =>
+    async (prompt: string): Promise<string> => {
+      let text = "";
+      for await (const chunk of provider.chat({
+        model: modelOverride ?? config.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+      })) {
+        if (chunk.type === "text") text += chunk.delta;
+      }
+      return text;
+    };
+  const summarizeOneShot = summarizeWith();
 
   const contextStrategy = createContextStrategy(config, summarizeOneShot);
   const container = new Container()
@@ -122,7 +125,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     cmem = await createCmemEngine({
       cwd,
       config,
-      summarize: summarizeOneShot,
+      summarize: summarizeWith(config.memory?.summarizeModel),
       embedHost: config.ollamaHost,
     });
     cmem.attach(bus);
