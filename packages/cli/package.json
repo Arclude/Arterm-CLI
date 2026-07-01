@@ -49,13 +49,15 @@
     "fast-glob": "^3.3.2",
     "ink": "^5.1.0",
     "ink-spinner": "^5.0.0",
-    "react": "^18.3.1"
+    "react": "^18.3.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@arterm/core": "workspace:*",
     "@arterm/memory": "workspace:*",
     "@arterm/providers": "workspace:*",
     "@arterm/tools": "workspace:*",
-    "@arterm/tui": "workspace:*"
+    "@arterm/tui": "workspace:*",
+    "@types/ws": "^8.18.1"
   }
 }

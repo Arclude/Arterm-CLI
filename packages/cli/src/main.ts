@@ -39,6 +39,9 @@ import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
 import { runHeadless } from "./headless.js";
+import { startHqAggregator } from "./hqAggregator.js";
+import { HQ_AGGREGATOR_PORT } from "./hqProtocol.js";
+import { connectHqReporter } from "./hqReporter.js";
 import { startHqServer } from "./hqServer.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
@@ -112,6 +115,8 @@ interface GlobalOpts {
   hq?: boolean;
   /** Port for the HQ dashboard (default 7777). */
   hqPort?: string;
+  /** Report this session to a multi-agent HQ aggregator at this URL. */
+  hqConnect?: string;
 }
 
 /**
@@ -257,8 +262,17 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
 
+  // Report to a multi-agent HQ aggregator, if one was given. Best-effort: it
+  // reconnects on its own and never blocks the session.
+  let reporter: { close(): void } | undefined;
+  if (globals.hqConnect) {
+    reporter = connectHqReporter({ session, url: globals.hqConnect, cwd: process.cwd() });
+    process.stderr.write(`HQ reporting → ${globals.hqConnect}\n`);
+  }
+
   await runTui(session, { goal: globals.goal });
 
+  reporter?.close();
   await hq?.close();
   await mcp.close();
   // Digest this session's activity into persistent memory before exiting.
@@ -482,6 +496,25 @@ async function memoryServe(opts: { port?: string; open?: boolean }): Promise<voi
   });
 }
 
+/** `arterm hq` — the long-lived multi-agent aggregator + web app host. */
+async function hqServe(opts: { port?: string; web?: string; open?: boolean }): Promise<void> {
+  const port = parsePort(opts.port, HQ_AGGREGATOR_PORT);
+  if (port === null) {
+    throw new ArtermUserError(`Invalid --port "${opts.port}". Use an integer between 1 and 65535.`);
+  }
+  const server = await startHqAggregator({ port, webDir: opts.web });
+  process.stdout.write(
+    `Arterm HQ aggregator → ${server.url}\nAgents connect with: arterm --hq-connect ${server.url}\nPress Ctrl+C to stop.\n`,
+  );
+  if (opts.open) await openBrowser(server.url);
+  await new Promise<void>((resolve) => {
+    process.on("SIGINT", () => {
+      process.stdout.write("\nStopping HQ aggregator.\n");
+      void server.close().then(resolve);
+    });
+  });
+}
+
 async function memoryList(): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig();
@@ -535,7 +568,8 @@ async function main(): Promise<void> {
     .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
     .option("--continue", "resume the most recent recorded session")
     .option("--hq", "start the live monitoring dashboard (web) for this session")
-    .option("--hq-port <n>", "port for the HQ dashboard (default 7777)");
+    .option("--hq-port <n>", "port for the HQ dashboard (default 7777)")
+    .option("--hq-connect <url>", "report this session to a multi-agent HQ aggregator");
 
   program
     .command("chat", { isDefault: true })
@@ -605,6 +639,16 @@ async function main(): Promise<void> {
     .command("ls")
     .description("print this project's memory to the terminal")
     .action(memoryList);
+
+  program
+    .command("hq")
+    .description("run the multi-agent HQ aggregator + web dashboard")
+    .option("--port <n>", `port to listen on (default ${HQ_AGGREGATOR_PORT})`)
+    .option("--web <dir>", "directory of the built web app to serve (static export)")
+    .option("--open", "open the dashboard in your browser")
+    .action(async (opts: { port?: string; web?: string; open?: boolean }) => {
+      await hqServe(opts);
+    });
 
   program
     .command("mcp")
