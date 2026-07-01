@@ -1,4 +1,6 @@
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ARTERM_HOME,
   type ArtermConfig,
@@ -496,13 +498,25 @@ async function memoryServe(opts: { port?: string; open?: boolean }): Promise<voi
   });
 }
 
+/** Locate the built web app (`web/out`) relative to the installed CLI, if present. */
+function defaultWebDir(): string | undefined {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url)); // packages/cli/dist
+    const candidate = join(here, "..", "..", "..", "web", "out");
+    return existsSync(join(candidate, "index.html")) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** `arterm hq` — the long-lived multi-agent aggregator + web app host. */
 async function hqServe(opts: { port?: string; web?: string; open?: boolean }): Promise<void> {
   const port = parsePort(opts.port, HQ_AGGREGATOR_PORT);
   if (port === null) {
     throw new ArtermUserError(`Invalid --port "${opts.port}". Use an integer between 1 and 65535.`);
   }
-  const server = await startHqAggregator({ port, webDir: opts.web });
+  const webDir = opts.web ?? defaultWebDir();
+  const server = await startHqAggregator({ port, webDir });
   process.stdout.write(
     `Arterm HQ aggregator → ${server.url}\nAgents connect with: arterm --hq-connect ${server.url}\nPress Ctrl+C to stop.\n`,
   );
