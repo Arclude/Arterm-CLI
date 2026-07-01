@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { promises as fs, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { ARTERM_HOME } from "./config.js";
 
 /**
@@ -67,9 +67,26 @@ export class NullMemoryStore implements MemoryStore {
   }
 }
 
+/**
+ * Resolve the enclosing git repo root by walking up from `cwd` until a `.git`
+ * entry is found (a directory for a normal repo, or a file for a worktree/submodule);
+ * falls back to `cwd` when none exists. This scopes memory to the whole repo rather
+ * than each subdirectory, so launching `arterm` from any folder inside a project
+ * (e.g. `packages/cli`) sees the same project memory — claude-mem-style.
+ */
+export function repoRootOf(cwd: string): string {
+  let dir = cwd;
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return cwd;
+    dir = parent;
+  }
+}
+
 /** Stable per-project key from a working directory (matches across sessions). */
 export function projectKey(cwd: string): string {
-  return createHash("sha1").update(cwd).digest("hex").slice(0, 16);
+  return createHash("sha1").update(repoRootOf(cwd)).digest("hex").slice(0, 16);
 }
 
 /** Directory holding all project memory files. */
@@ -166,7 +183,7 @@ export async function registerProject(
   try {
     await fs.mkdir(dir, { recursive: true });
     const index = await readIndex(dir);
-    index[projectKey(cwd)] = { cwd, updatedAt };
+    index[projectKey(cwd)] = { cwd: repoRootOf(cwd), updatedAt };
     await fs.writeFile(join(dir, "index.json"), `${JSON.stringify(index, null, 2)}\n`, "utf8");
   } catch {
     // Indexing is best-effort; memory still works without it.
