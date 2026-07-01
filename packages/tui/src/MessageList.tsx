@@ -53,6 +53,119 @@ function diffLineColor(line: string): string {
   return "gray";
 }
 
+/** Grouped command reference, rendered by the `help` item. */
+const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
+  {
+    title: "Chat & models",
+    items: [
+      ["/help", "show this help  (or press ?)"],
+      ["/model [name|N]", "model picker, or switch directly (Alt+P)"],
+      ["/models", "open the model picker (type to filter)"],
+      ["/login", "sign in to a provider (provider + API key)"],
+      ["/catalog [query]", "search the models.dev catalog (~5k)"],
+      ["/clear", "reset the conversation"],
+      ["/exit", "quit  (or Ctrl+C)"],
+    ],
+  },
+  {
+    title: "Autonomy",
+    items: [
+      ["/goal <text>", "run autonomously toward a goal"],
+      ["/autonomy <mode> <goal>", "once | eternal | parallel | phased"],
+      ["/sdd <brief>", "spec → task graph → parallel execution"],
+      ["/steer <text>", "redirect the goal · /pause /resume /stop"],
+    ],
+  },
+  {
+    title: "Context",
+    items: [
+      ["/compact", "shrink context (auto when near full)"],
+      ["/cost", "token usage + estimated cost"],
+    ],
+  },
+  {
+    title: "Extensions",
+    items: [
+      ["/mcp", "connected MCP servers + tools"],
+      ["/plugins", "loaded plugins (trust + gating)"],
+      ["/skills · /skill <n>", "list skills · run one by name"],
+    ],
+  },
+  {
+    title: "Permissions",
+    items: [
+      ["/mode [ask|auto|plan|yolo]", "set mode (no arg cycles)"],
+      ["/auto /plan /ask /yolo", "shortcuts for /mode"],
+    ],
+  },
+];
+
+const HELP_FOOTER: [string, string][] = [
+  [
+    "Keys",
+    "Enter send · ↑/↓ history · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
+  ],
+  ["Modes", "ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all"],
+  ["Edit", "Backspace del char · Ctrl+W del word · Ctrl+U clear line"],
+];
+
+const CMD_COL = 27;
+
+/** Styled welcome banner (once, at startup). */
+function BannerBlock({ provider, model }: { provider: string; model: string }): React.ReactElement {
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Box>
+        <Text color="cyan" bold>
+          Arterm
+        </Text>
+        <Text color="gray"> · terminal AI coding agent</Text>
+      </Box>
+      <Text color="gray">
+        provider <Text color="white">{provider}</Text> · model <Text color="white">{model}</Text>
+      </Text>
+      <Text color="gray">
+        Type <Text color="cyan">/help</Text> or <Text color="cyan">?</Text> for commands ·{" "}
+        <Text color="cyan">Shift+Tab</Text> cycles permission mode
+      </Text>
+    </Box>
+  );
+}
+
+/** Styled, grouped command reference (on /help or `?`). */
+function HelpPanel(): React.ReactElement {
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text color="cyan" bold>
+        Commands
+      </Text>
+      {HELP_GROUPS.map((group) => (
+        <Box key={group.title} flexDirection="column" marginTop={1}>
+          <Text color="magenta" bold>
+            {group.title}
+          </Text>
+          {group.items.map(([cmd, desc]) => (
+            <Box key={cmd}>
+              <Text color="cyan">{cmd.padEnd(CMD_COL)}</Text>
+              <Text color="gray">{desc}</Text>
+            </Box>
+          ))}
+        </Box>
+      ))}
+      <Box flexDirection="column" marginTop={1}>
+        {HELP_FOOTER.map(([label, text]) => (
+          <Box key={label}>
+            <Text color="yellow">{label.padEnd(7)}</Text>
+            <Text color="gray" dimColor>
+              {text}
+            </Text>
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
 export function Item({ item }: { item: DisplayItem }): React.ReactElement {
   switch (item.kind) {
     case "user":
@@ -114,6 +227,10 @@ export function Item({ item }: { item: DisplayItem }): React.ReactElement {
           <Text color="gray">{item.text}</Text>
         </Box>
       );
+    case "banner":
+      return <BannerBlock provider={item.provider} model={item.model} />;
+    case "help":
+      return <HelpPanel />;
     case "stats":
       return (
         <Box>

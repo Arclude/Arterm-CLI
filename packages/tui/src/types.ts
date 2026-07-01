@@ -94,4 +94,8 @@ export type DisplayItem =
       tok?: number;
     }
   | { kind: "system"; text: string }
+  /** Styled welcome banner shown once at startup. */
+  | { kind: "banner"; provider: string; model: string }
+  /** Styled command reference, shown on /help or `?`. */
+  | { kind: "help" }
   | { kind: "stats"; inTok: number; outTok: number; rounds: number; ms: number };

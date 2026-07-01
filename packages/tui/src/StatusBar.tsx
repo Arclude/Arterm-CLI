@@ -148,7 +148,9 @@ export function StatusBar({
           </Text>
         </Text>
         <Text wrap="truncate">
-          <Text color="yellow">📁 {cwd}</Text>
+          <Text color="yellow" bold>
+            📁 {cwd}
+          </Text>
           {sepN}
           <Text color="green">⇡ {branch}</Text>
           {sepN}
@@ -191,7 +193,9 @@ export function StatusBar({
         </Text>
       </Text>
       <Text wrap="truncate">
-        <Text color="yellow">📁 {cwd}</Text>
+        <Text color="yellow" bold>
+          📁 {cwd}
+        </Text>
         {sepW}
         <Text color="green">⇡ {branch}</Text>
         {sepW}

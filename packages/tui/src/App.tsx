@@ -32,33 +32,6 @@ import type { DisplayItem, LoginProvider, Session } from "./types.js";
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
 const DEFAULT_CTX = 32768;
 
-const HELP = [
-  "Commands (type and press Enter):",
-  "  /help                 show this help        (or press ? )",
-  "  /model                open the model picker (or press Alt+P)",
-  "  /model <name|N>       switch model directly",
-  "  /models               open the model picker (type to filter)",
-  "  /login                sign in to a provider (pick provider + API key)",
-  "  /catalog [query]      search the models.dev catalog (~5k models)",
-  "  /clear                reset the conversation",
-  "  /goal <text>          run autonomously toward a goal (decide→act→reflect→repeat)",
-  "  /autonomy <mode> <goal>  run a goal in once | eternal | parallel | phased mode",
-  "  /sdd <brief>          spec-driven dev: spec → task graph → parallel execution",
-  "  /steer <text>         redirect the running goal · /pause /resume /stop",
-  "  /compact              shrink the conversation context (auto when near full)",
-  "  /cost                 show this session's token usage + estimated cost",
-  "  /mcp                  list connected MCP servers and their tools",
-  "  /plugins              list loaded plugins (with trust + gating)",
-  "  /skills · /skill <n>  list skills · run a skill by name",
-  "  /mode [ask|auto|plan|yolo]  set permission mode (no arg cycles)",
-  "  /auto /plan /ask /yolo      shortcuts for /mode",
-  "  /exit                 quit (or Ctrl+C)",
-  "Keys:  Enter send · ↑/↓ recall your previous prompts (input history) · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
-  "Scroll: the mouse wheel scrolls the chat in-app. Plain ↑/↓ recall your previous prompts (input history), not scroll.",
-  "Modes: ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all",
-  "Edit:  Backspace del char · Ctrl+W del word · Ctrl+U clear line",
-].join("\n");
-
 /** Custom single-line input so `?` on an empty line opens help. */
 function InputLine({
   active,
@@ -415,10 +388,7 @@ export function App({
 
   // Welcome banner (once), followed by the project-memory legend when present.
   useEffect(() => {
-    push({
-      kind: "system",
-      text: `Welcome to Arterm. Provider: ${session.providerLabel} · Model: ${session.agent.model}\n${HELP}`,
-    });
+    push({ kind: "banner", provider: session.providerLabel, model: session.agent.model });
     if (session.memoryBanner) {
       push({ kind: "system", text: session.memoryBanner });
     }
@@ -837,7 +807,7 @@ export function App({
       switch (cmd) {
         case "help":
         case "?":
-          push({ kind: "system", text: HELP });
+          push({ kind: "help" });
           break;
         case "clear":
           session.agent.reset();
@@ -1105,7 +1075,7 @@ export function App({
       setScrollOffset(0); // sending pins the view back to the latest
       setHistory((h) => historyPush(h, text));
       if (text === "?") {
-        push({ kind: "system", text: HELP });
+        push({ kind: "help" });
         return;
       }
       if (text.startsWith("/")) {
@@ -1202,7 +1172,7 @@ export function App({
                 columns={columns}
                 onChange={setInput}
                 onSubmit={submit}
-                onHelp={() => push({ kind: "system", text: HELP })}
+                onHelp={() => push({ kind: "help" })}
                 onHistoryPrev={onHistoryPrev}
                 onHistoryNext={onHistoryNext}
               />
