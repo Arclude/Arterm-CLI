@@ -364,7 +364,7 @@ export function App({
         const cb = Number(mm[1]);
         if ((cb & 64) === 0) continue; // not a wheel event
         const low = cb & 3;
-        delta += low === 0 ? 3 : low === 1 ? -3 : 0; // up reveals older (+), down newer (−)
+        delta += low === 0 ? -3 : low === 1 ? 3 : 0; // wheel up → newer (−), down → older (+)
       }
       if (delta !== 0)
         setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + delta)));
