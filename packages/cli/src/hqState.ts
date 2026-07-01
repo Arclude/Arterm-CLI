@@ -2,8 +2,7 @@ import type { AgentEvent } from "@arterm/core";
 import type { Session } from "@arterm/tui";
 
 /**
- * Shared live-state accumulator for the HQ dashboard, used by BOTH the single-agent
- * in-process server (`hqServer.ts`) and the multi-agent aggregator reporter
+ * Shared live-state accumulator for the HQ dashboard, used by the agent reporter
  * (`hqReporter.ts`). Subscribes ONCE to `session.bus`, stamps each event with a
  * monotonic seq + wall-clock time (events carry neither), keeps a bounded ring, and
  * derives a live snapshot mirroring the TUI's App.tsx event→state mapping.

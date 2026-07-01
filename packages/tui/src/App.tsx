@@ -130,6 +130,7 @@ const COMMANDS = [
   "pause",
   "resume",
   "stop",
+  "web",
   "hq",
   "compact",
   "cost",
@@ -965,23 +966,27 @@ export function App({
           session.autonomy.stop();
           session.sdd.stop();
           break;
-        case "hq": {
+        case "hq":
+        case "web": {
           const port = rest[0] ? Number(rest[0]) : undefined;
           if (
             rest[0] &&
             (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535)
           ) {
-            push({ kind: "system", text: "usage: /hq [port]" });
+            push({ kind: "system", text: "usage: /web [port]" });
             break;
           }
           if (!session.startHq) {
-            push({ kind: "system", text: "HQ dashboard unavailable in this session" });
+            push({ kind: "system", text: "web dashboard unavailable in this session" });
             break;
           }
+          push({ kind: "system", text: "starting web dashboard…" });
           session
             .startHq({ port })
-            .then(({ url }) => push({ kind: "system", text: `▸ HQ dashboard → ${url}` }))
-            .catch((e) => push({ kind: "system", text: `HQ failed: ${(e as Error).message}` }));
+            .then(({ url }) => push({ kind: "system", text: `▸ web dashboard → ${url}` }))
+            .catch((e) =>
+              push({ kind: "system", text: `web dashboard failed: ${(e as Error).message}` }),
+            );
           break;
         }
         case "mcp": {

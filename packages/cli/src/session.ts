@@ -42,7 +42,9 @@ import {
   taskDoneTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
-import { startHqServer } from "./hqServer.js";
+import { ensureAggregator } from "./hqAutostart.js";
+import { HQ_AGGREGATOR_PORT } from "./hqProtocol.js";
+import { connectHqReporter } from "./hqReporter.js";
 
 export interface SessionOptions {
   config: ArtermConfig;
@@ -363,13 +365,16 @@ export async function buildSession(opts: SessionOptions): Promise<{
     memoryBanner,
   };
 
-  // Live monitoring dashboard (web), started lazily on `/hq` or `--hq`. The closure
-  // captures the fully-populated `session`; a single-instance guard means repeated
-  // `/hq` returns the running server instead of leaking another port.
+  // Live monitoring dashboard (web), activated on demand by `/hq` / `/web`. Ensures a
+  // shared aggregator is up (auto-picking a free port if the default is taken) and
+  // reports THIS session to it. A single-instance guard means repeated commands reuse
+  // the same connection instead of spawning again.
   let hq: { url: string; close(): Promise<void> } | undefined;
   session.startHq = async (opts) => {
     if (hq) return hq;
-    hq = await startHqServer({ session, port: opts?.port, open: opts?.open });
+    const url = await ensureAggregator(opts?.port ?? config.hq?.port ?? HQ_AGGREGATOR_PORT);
+    const reporter = connectHqReporter({ session, url, cwd });
+    hq = { url, close: async () => reporter.close() };
     return hq;
   };
 

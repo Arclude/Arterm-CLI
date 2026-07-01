@@ -42,9 +42,9 @@ import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
 import { runHeadless } from "./headless.js";
 import { startHqAggregator } from "./hqAggregator.js";
+import { ensureAggregator } from "./hqAutostart.js";
 import { HQ_AGGREGATOR_PORT } from "./hqProtocol.js";
 import { connectHqReporter } from "./hqReporter.js";
-import { startHqServer } from "./hqServer.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
@@ -113,11 +113,11 @@ interface GlobalOpts {
   resume?: string;
   /** Resume the most recent recorded session. */
   continue?: boolean;
-  /** Start the live monitoring dashboard (web) for this session. */
+  /** Open the multi-agent HQ dashboard and report this session to it. */
   hq?: boolean;
-  /** Port for the HQ dashboard (default 7777). */
+  /** Preferred HQ aggregator port to use/spawn (default 7788; auto-falls-back if taken). */
   hqPort?: string;
-  /** Report this session to a multi-agent HQ aggregator at this URL. */
+  /** Report this session to an existing HQ aggregator at this URL. */
   hqConnect?: string;
 }
 
@@ -502,41 +502,6 @@ function defaultWebDir(): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/**
- * Ensure an HQ aggregator is reachable at `port`, spawning a **detached background**
- * one (via `arterm hq`) if not. Returns the aggregator base URL. The background
- * aggregator outlives this session on purpose, so every `arterm --hq` shares one
- * dashboard. Best-effort — throws only if it can't come up in time.
- */
-async function ensureAggregator(port: number): Promise<string> {
-  const url = `http://127.0.0.1:${port}`;
-  const healthy = async (): Promise<boolean> => {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 500);
-      const res = await fetch(`${url}/api/agents`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      return res.ok;
-    } catch {
-      return false;
-    }
-  };
-  if (await healthy()) return url;
-
-  const { spawn } = await import("node:child_process");
-  const mainJs = fileURLToPath(import.meta.url);
-  spawn(process.execPath, [mainJs, "hq", "--port", String(port)], {
-    detached: true,
-    stdio: "ignore",
-  }).unref();
-
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 200));
-    if (await healthy()) return url;
-  }
-  throw new Error(`aggregator did not start on ${url} — try running \`arterm hq\` manually`);
 }
 
 /** `arterm hq` — the long-lived multi-agent aggregator + web app host. */

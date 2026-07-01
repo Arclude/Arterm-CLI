@@ -1,8 +1,8 @@
 /**
  * Open a URL in the user's default browser — best-effort, non-blocking.
  *
- * Lifted out of `main.ts` so import-safe modules (e.g. `hqServer.ts`) can reuse it
- * without dragging `main.ts`'s top-level `main()` side-effect into their graph.
+ * Lifted out of `main.ts` so import-safe modules can reuse it without dragging
+ * `main.ts`'s top-level `main()` side-effect into their graph.
  */
 export async function openBrowser(url: string): Promise<void> {
   try {
