@@ -42,6 +42,7 @@ import {
   taskDoneTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
+import { startHqServer } from "./hqServer.js";
 
 export interface SessionOptions {
   config: ArtermConfig;
@@ -360,6 +361,16 @@ export async function buildSession(opts: SessionOptions): Promise<{
     skills: [],
     getSkillBody: () => undefined,
     memoryBanner,
+  };
+
+  // Live monitoring dashboard (web), started lazily on `/hq` or `--hq`. The closure
+  // captures the fully-populated `session`; a single-instance guard means repeated
+  // `/hq` returns the running server instead of leaking another port.
+  let hq: { url: string; close(): Promise<void> } | undefined;
+  session.startHq = async (opts) => {
+    if (hq) return hq;
+    hq = await startHqServer({ session, port: opts?.port, open: opts?.open });
+    return hq;
   };
 
   const persist = async () => {

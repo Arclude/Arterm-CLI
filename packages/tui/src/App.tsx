@@ -130,6 +130,7 @@ const COMMANDS = [
   "pause",
   "resume",
   "stop",
+  "hq",
   "compact",
   "cost",
   "mcp",
@@ -964,6 +965,25 @@ export function App({
           session.autonomy.stop();
           session.sdd.stop();
           break;
+        case "hq": {
+          const port = rest[0] ? Number(rest[0]) : undefined;
+          if (
+            rest[0] &&
+            (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535)
+          ) {
+            push({ kind: "system", text: "usage: /hq [port]" });
+            break;
+          }
+          if (!session.startHq) {
+            push({ kind: "system", text: "HQ dashboard unavailable in this session" });
+            break;
+          }
+          session
+            .startHq({ port })
+            .then(({ url }) => push({ kind: "system", text: `▸ HQ dashboard → ${url}` }))
+            .catch((e) => push({ kind: "system", text: `HQ failed: ${(e as Error).message}` }));
+          break;
+        }
         case "mcp": {
           const servers = session.mcpServers;
           if (servers.length === 0) {

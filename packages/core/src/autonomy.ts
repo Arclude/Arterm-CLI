@@ -66,6 +66,8 @@ export class AutonomyEngine {
   private current?: AbortController;
   private resumeGate: Promise<void> = Promise.resolve();
   private resumeResolve?: () => void;
+  /** Latest planned phases (phased mode) — surfaced read-only via `snapshot()`. */
+  private _phases: Phase[] = [];
 
   constructor(
     private readonly agent: Agent,
@@ -95,6 +97,31 @@ export class AutonomyEngine {
     return this.mode;
   }
 
+  /**
+   * Atomic read-only view of the engine's live state — for external monitors
+   * (e.g. the HQ dashboard) that can't reach the private goal/step/phase fields.
+   */
+  snapshot(): {
+    state: AutonomyState;
+    mode: AutonomyMode;
+    goal: string;
+    step: number;
+    phases: { id: string; title: string; done: string; parallel?: boolean }[];
+  } {
+    return {
+      state: this._state,
+      mode: this.mode,
+      goal: this.goal,
+      step: this.step,
+      phases: this._phases.map((p) => ({
+        id: p.id,
+        title: p.title,
+        done: p.done,
+        ...(p.parallel ? { parallel: true } : {}),
+      })),
+    };
+  }
+
   /** Locks in a goal and runs the autonomous loop to completion (or stop). */
   async start(goal: string): Promise<void> {
     if (this._state === "running" || this._state === "paused") return;
@@ -103,6 +130,7 @@ export class AutonomyEngine {
     this.idleStreak = 0;
     this.stopped = false;
     this.pendingSteer = undefined;
+    this._phases = [];
     this._state = "running";
     this.bus.emit({ type: "goal_set", goal: this.goal, mode: this.mode });
 
@@ -293,6 +321,7 @@ export class AutonomyEngine {
 
     this.current = new AbortController();
     const phases = await this.planPhases();
+    this._phases = phases;
     if (this.stopped) return;
     this.bus.emit({
       type: "phase_plan",

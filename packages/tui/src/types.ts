@@ -71,6 +71,15 @@ export interface Session {
   /** Returns a skill's instruction body to run it (for /skill <name>). */
   getSkillBody(name: string): string | undefined;
   /**
+   * Start the live monitoring dashboard (web) against this session. Injected by the
+   * CLI (the TUI can't import the cli-side server); absent in headless/test sessions.
+   * Returns the running server so the TUI can print/close it.
+   */
+  startHq?(opts?: { port?: number; open?: boolean }): Promise<{
+    url: string;
+    close(): Promise<void>;
+  }>;
+  /**
    * Project-memory legend to show at session start (claude-mem-style), or "" when
    * there's nothing to recall. Rendered once as a system block above the prompt.
    */

@@ -36,8 +36,10 @@ import {
 import { McpManager, PluginLoader, SkillRegistry, startMemoryMcpServer } from "@arterm/tools";
 import { runTui } from "@arterm/tui";
 import { Command } from "commander";
+import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
 import { runHeadless } from "./headless.js";
+import { startHqServer } from "./hqServer.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
@@ -106,6 +108,10 @@ interface GlobalOpts {
   resume?: string;
   /** Resume the most recent recorded session. */
   continue?: boolean;
+  /** Start the live monitoring dashboard (web) for this session. */
+  hq?: boolean;
+  /** Port for the HQ dashboard (default 7777). */
+  hqPort?: string;
 }
 
 /**
@@ -233,8 +239,27 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
 
+  // Optionally start the live monitoring dashboard for this session. Bind failures
+  // must never kill the session — warn and carry on. Printed to stderr so it never
+  // dirties stdout and lands before the TUI takes the alt-screen.
+  let hq: { close(): Promise<void> } | undefined;
+  if (globals.hq) {
+    const port = parsePort(globals.hqPort, 7777);
+    if (port === null) {
+      throw new ArtermUserError(`Invalid --hq-port "${globals.hqPort}". Use a port in 1–65535.`);
+    }
+    try {
+      const server = await startHqServer({ session, port });
+      hq = server;
+      process.stderr.write(`HQ dashboard → ${server.url}\n`);
+    } catch (err) {
+      process.stderr.write(`⚠ HQ dashboard failed to start: ${(err as Error).message}\n`);
+    }
+  }
+
   await runTui(session, { goal: globals.goal });
 
+  await hq?.close();
   await mcp.close();
   // Digest this session's activity into persistent memory before exiting.
   try {
@@ -436,27 +461,6 @@ function runLogout(providerArg?: string): void {
   process.stdout.write(removed ? `✓ signed out of ${id}\n` : `not signed in to ${id}\n`);
 }
 
-async function openBrowser(url: string): Promise<void> {
-  try {
-    const { spawn } = await import("node:child_process");
-    if (process.platform === "win32") {
-      // NOT `cmd /c start`: cmd treats `&` in the URL as a command separator, so a
-      // multi-param OAuth URL gets truncated at the first `&` (dropping client_id).
-      // rundll32 receives the whole URL as a single argument and hands it to the
-      // default browser intact.
-      spawn("rundll32", ["url.dll,FileProtocolHandler", url], {
-        detached: true,
-        stdio: "ignore",
-      }).unref();
-    } else {
-      const cmd = process.platform === "darwin" ? "open" : "xdg-open";
-      spawn(cmd, [url], { detached: true, stdio: "ignore" }).unref();
-    }
-  } catch {
-    // Opening a browser is best-effort.
-  }
-}
-
 async function memoryServe(opts: { port?: string; open?: boolean }): Promise<void> {
   const port = parsePort(opts.port, 7777);
   if (port === null) {
@@ -529,7 +533,9 @@ async function main(): Promise<void> {
     .option("--print <prompt>", "run a single prompt headlessly (no TUI) and print the result")
     .option("--json", "with --print or piped input, emit the result as JSON")
     .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
-    .option("--continue", "resume the most recent recorded session");
+    .option("--continue", "resume the most recent recorded session")
+    .option("--hq", "start the live monitoring dashboard (web) for this session")
+    .option("--hq-port <n>", "port for the HQ dashboard (default 7777)");
 
   program
     .command("chat", { isDefault: true })

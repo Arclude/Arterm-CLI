@@ -89,6 +89,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
       ["/mcp", "connected MCP servers + tools"],
       ["/plugins", "loaded plugins (trust + gating)"],
       ["/skills · /skill <n>", "list skills · run one by name"],
+      ["/hq [port]", "live monitoring dashboard (web)"],
     ],
   },
   {
