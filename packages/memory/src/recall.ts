@@ -38,7 +38,7 @@ function hhmm(ts: number): string {
 
 /** Render one compact legend/search row: `#id HH:MM icon title  ~Nt`. */
 export function formatRow(row: LegendRow): string {
-  return `#${row.id} ${hhmm(row.ts)} ${TYPE_ICON[row.type]} ${row.title}  ~${row.readTokens}t`;
+  return `#${row.id} ${hhmm(row.ts)} ${TYPE_ICON[row.type]}  ${row.title}  ~${row.readTokens}t`;
 }
 
 /** Plain-text dump of full observations for the terminal (`arterm memory ls`). */
@@ -46,7 +46,7 @@ export function formatObservationsText(observations: Observation[]): string {
   if (observations.length === 0) return "(no observations for this project yet)";
   const lines = observations.map((o) => {
     const when = new Date(o.ts).toISOString().slice(0, 16).replace("T", " ");
-    const head = `${when}  ${TYPE_ICON[o.type]} #${o.id} [${o.type}] ${o.title}`;
+    const head = `${when}  ${TYPE_ICON[o.type]}  #${o.id} [${o.type}] ${o.title}`;
     const sub = o.subtitle ? `\n      ${o.subtitle}` : "";
     const facts = o.facts.length ? `\n      · ${o.facts.join("\n      · ")}` : "";
     const files = [...o.filesModified, ...o.filesRead];
@@ -61,7 +61,7 @@ export function formatObservationsText(observations: Observation[]): string {
 /** Render the full session-start legend block (empty string when no rows). */
 export function renderLegend(rows: LegendRow[], savings: SavingsInfo): string {
   if (rows.length === 0) return "";
-  const legend = OBS_TYPES.map((t) => `${TYPE_ICON[t]}${t}`).join(" ");
+  const legend = OBS_TYPES.map((t) => `${TYPE_ICON[t]} ${t}`).join("  ");
   const header = [
     "Project memory — observations from previous sessions (most recent last).",
     `Legend: ${legend}`,
