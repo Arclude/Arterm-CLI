@@ -108,12 +108,12 @@ export function StatusBar({
   const meter = <Text color={pct > 80 ? "red" : "blueBright"}>{bar(pct, meterW)}</Text>;
   const sepW = (
     <Text color="gray" dimColor>
-      {"  │  "}
+      {"   │   "}
     </Text>
   );
   const sepN = (
     <Text color="gray" dimColor>
-      {" · "}
+      {"   ·   "}
     </Text>
   );
 
@@ -149,14 +149,14 @@ export function StatusBar({
         </Text>
         <Text wrap="truncate">
           <Text color="yellow" bold>
-            📁 {cwd}
+            📁  {cwd}
           </Text>
           {sepN}
-          <Text color="green">⇡ {branch}</Text>
+          <Text color="green">⇡  {branch}</Text>
           {sepN}
-          <Text color="gray">🔧 {toolCount}</Text>
+          <Text color="gray">🔧  {toolCount}</Text>
           {sepN}
-          <Text color="gray">⏱ {clock}</Text>
+          <Text color="gray">⏱  {clock}</Text>
         </Text>
         <Text color="gray" dimColor wrap="truncate">
           ? help · Alt+P models · wheel scrolls chat · ^C quit
@@ -194,14 +194,14 @@ export function StatusBar({
       </Text>
       <Text wrap="truncate">
         <Text color="yellow" bold>
-          📁 {cwd}
+          📁  {cwd}
         </Text>
         {sepW}
-        <Text color="green">⇡ {branch}</Text>
+        <Text color="green">⇡  {branch}</Text>
         {sepW}
-        <Text color="gray">🔧 {toolCount} tools</Text>
+        <Text color="gray">🔧  {toolCount} tools</Text>
         {sepW}
-        <Text color="gray">⏱ {clock}</Text>
+        <Text color="gray">⏱  {clock}</Text>
       </Text>
       <Text color="gray" dimColor wrap="truncate">
         Enter send · ↑↓ input history · mouse-wheel scrolls chat · ? help · Alt+P models · ^C quit
