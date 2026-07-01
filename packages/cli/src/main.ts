@@ -246,36 +246,31 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
 
-  // Optionally start the live monitoring dashboard for this session. Bind failures
-  // must never kill the session — warn and carry on. Printed to stderr so it never
-  // dirties stdout and lands before the TUI takes the alt-screen.
-  let hq: { close(): Promise<void> } | undefined;
-  if (globals.hq) {
-    const port = parsePort(globals.hqPort, 7777);
-    if (port === null) {
-      throw new ArtermUserError(`Invalid --hq-port "${globals.hqPort}". Use a port in 1–65535.`);
-    }
-    try {
-      const server = await startHqServer({ session, port });
-      hq = server;
-      process.stderr.write(`HQ dashboard → ${server.url}\n`);
-    } catch (err) {
-      process.stderr.write(`⚠ HQ dashboard failed to start: ${(err as Error).message}\n`);
-    }
-  }
-
-  // Report to a multi-agent HQ aggregator, if one was given. Best-effort: it
-  // reconnects on its own and never blocks the session.
+  // Live monitoring dashboard. `--hq` (or config.hq.autostart) auto-ensures a shared
+  // multi-agent aggregator is running and reports THIS session to it; `--hq-connect`
+  // targets a specific aggregator instead. Best-effort — never blocks or kills the
+  // session; messages go to stderr (before the TUI takes the alt-screen).
   let reporter: { close(): void } | undefined;
   if (globals.hqConnect) {
     reporter = connectHqReporter({ session, url: globals.hqConnect, cwd: process.cwd() });
     process.stderr.write(`HQ reporting → ${globals.hqConnect}\n`);
+  } else if (globals.hq || config.hq?.autostart) {
+    const port = parsePort(globals.hqPort, config.hq?.port ?? HQ_AGGREGATOR_PORT);
+    if (port === null) {
+      throw new ArtermUserError(`Invalid --hq-port "${globals.hqPort}". Use a port in 1–65535.`);
+    }
+    try {
+      const url = await ensureAggregator(port);
+      reporter = connectHqReporter({ session, url, cwd: process.cwd() });
+      process.stderr.write(`HQ dashboard → ${url}  (this session is now visible there)\n`);
+    } catch (err) {
+      process.stderr.write(`⚠ HQ dashboard unavailable: ${(err as Error).message}\n`);
+    }
   }
 
   await runTui(session, { goal: globals.goal });
 
   reporter?.close();
-  await hq?.close();
   await mcp.close();
   // Digest this session's activity into persistent memory before exiting.
   try {
@@ -509,6 +504,41 @@ function defaultWebDir(): string | undefined {
   }
 }
 
+/**
+ * Ensure an HQ aggregator is reachable at `port`, spawning a **detached background**
+ * one (via `arterm hq`) if not. Returns the aggregator base URL. The background
+ * aggregator outlives this session on purpose, so every `arterm --hq` shares one
+ * dashboard. Best-effort — throws only if it can't come up in time.
+ */
+async function ensureAggregator(port: number): Promise<string> {
+  const url = `http://127.0.0.1:${port}`;
+  const healthy = async (): Promise<boolean> => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 500);
+      const res = await fetch(`${url}/api/agents`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+  if (await healthy()) return url;
+
+  const { spawn } = await import("node:child_process");
+  const mainJs = fileURLToPath(import.meta.url);
+  spawn(process.execPath, [mainJs, "hq", "--port", String(port)], {
+    detached: true,
+    stdio: "ignore",
+  }).unref();
+
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    if (await healthy()) return url;
+  }
+  throw new Error(`aggregator did not start on ${url} — try running \`arterm hq\` manually`);
+}
+
 /** `arterm hq` — the long-lived multi-agent aggregator + web app host. */
 async function hqServe(opts: { port?: string; web?: string; open?: boolean }): Promise<void> {
   const port = parsePort(opts.port, HQ_AGGREGATOR_PORT);
@@ -581,9 +611,9 @@ async function main(): Promise<void> {
     .option("--json", "with --print or piped input, emit the result as JSON")
     .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
     .option("--continue", "resume the most recent recorded session")
-    .option("--hq", "start the live monitoring dashboard (web) for this session")
-    .option("--hq-port <n>", "port for the HQ dashboard (default 7777)")
-    .option("--hq-connect <url>", "report this session to a multi-agent HQ aggregator");
+    .option("--hq", "open the multi-agent HQ dashboard and report this session to it")
+    .option("--hq-port <n>", "HQ aggregator port to use/spawn (default 7788)")
+    .option("--hq-connect <url>", "report this session to an existing HQ aggregator at this URL");
 
   program
     .command("chat", { isDefault: true })

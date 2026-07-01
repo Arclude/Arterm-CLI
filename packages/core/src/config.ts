@@ -89,6 +89,16 @@ export interface ArtermConfig {
     /** Cap on generated tasks in the graph (default 12). */
     maxTasks?: number;
   };
+  /** Multi-agent HQ dashboard. */
+  hq?: {
+    /**
+     * When true, every `arterm` session auto-connects to the HQ dashboard (starting a
+     * background aggregator if one isn't already running) — same as passing `--hq`.
+     */
+    autostart?: boolean;
+    /** Aggregator port to use/spawn (default 7788). */
+    port?: number;
+  };
   /** Persistent, project-scoped memory (claude-mem-style capture/digest/recall). */
   memory: {
     /** "jsonl" = persist learnings per project (default); "off" = disabled. */
