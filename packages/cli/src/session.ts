@@ -20,6 +20,7 @@ import {
   digest as digestObservations,
   estimateTokens,
   formatMemorySection,
+  loadConfig,
   runFleet,
   runSubagent,
   saveConfig,
@@ -27,10 +28,17 @@ import {
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
 import {
   allProviders,
+  buildAuthorizeUrl,
+  createPkce,
   createProvider,
+  createState,
+  exchangeCode,
+  oauthConfigFor,
+  parseCallbackCode,
   setApiKey as persistApiKey,
   providerCatalog,
   removeApiKey,
+  setOAuthTokens,
   storedKeyNames,
 } from "@arterm/providers";
 import {
@@ -362,10 +370,34 @@ export async function buildSession(opts: SessionOptions): Promise<{
     setApiKey(name, key) {
       persistApiKey(name, key);
     },
+    async configureOpenAICompat({ host, key }) {
+      const trimmed = host.trim();
+      config.openaiCompatHost = trimmed;
+      // Gateways like agentrouter.org reject unknown clients by User-Agent; send
+      // the CLI UA that passes so a pasted host+key just works out of the box.
+      if (/agentrouter\.org/i.test(trimmed)) {
+        config.openaiCompatHeaders = { "user-agent": "claude-cli/2.0.0 (external, cli)" };
+      }
+      if (key) persistApiKey("openai-compat", key);
+      config.provider = "openai-compat";
+      provider = createProvider(config, "openai-compat");
+      agent.setProvider(provider);
+      // Persist host + headers now — a deliberate login action, so it's safe to
+      // write these fields (the generic persist() overlay doesn't include them).
+      const disk = await loadConfig();
+      await saveConfig({
+        ...disk,
+        provider: "openai-compat",
+        openaiCompatHost: config.openaiCompatHost,
+        openaiCompatHeaders: config.openaiCompatHeaders,
+      });
+    },
     removeApiKey(name) {
       removeApiKey(name);
     },
-    signedInProviders: () => storedKeyNames(),
+    // OAuth tokens are stored as "<id>-oauth" — normalize so the overlay marks
+    // e.g. anthropic as signed in after a subscription login too.
+    signedInProviders: () => [...new Set(storedKeyNames().map((n) => n.replace(/-oauth$/, "")))],
     loginProviders: [...providerCatalog],
     compact: () => agent.compact("manual"),
     permissionMode: initialMode,
@@ -401,7 +433,53 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // Persist auto/plan/ask as the default, but never make yolo sticky.
     const current = permissions.getMode();
     config.mode = current === "yolo" ? "ask" : current;
-    await saveConfig(config);
+    // Overlay only the fields this session owns onto the on-disk config, so a
+    // long-running session doesn't clobber edits made outside it (hosts,
+    // headers, keys-adjacent settings) with its stale in-memory snapshot.
+    const disk = await loadConfig();
+    await saveConfig({
+      ...disk,
+      provider: config.provider,
+      model: config.model,
+      permissions: config.permissions,
+      mode: config.mode,
+    });
+  };
+  // Let the TUI persist a model/provider/login choice immediately instead of
+  // only on clean exit, so it survives a crash and becomes the next default.
+  session.persistNow = persist;
+
+  // Subscription (OAuth/PKCE) login driven from the TUI's /login overlay — the
+  // same flow as `arterm login`, but the code is pasted into the overlay instead
+  // of stdin. The PKCE verifier/state live here between start and complete.
+  const pendingOAuth = new Map<string, { verifier: string; state: string }>();
+  session.startOAuth = async (id) => {
+    const oauthConfig = oauthConfigFor(id);
+    if (!oauthConfig) throw new Error(`${id} doesn't support subscription login`);
+    const { verifier, challenge } = createPkce();
+    const state = createState();
+    pendingOAuth.set(id, { verifier, state });
+    const url = buildAuthorizeUrl(oauthConfig, { challenge, state });
+    // Best-effort: if the browser can't be spawned the overlay still shows the URL.
+    const { openBrowser } = await import("./browser.js");
+    await openBrowser(url).catch(() => {});
+    return url;
+  };
+  session.completeOAuth = async (id, pastedCode) => {
+    const oauthConfig = oauthConfigFor(id);
+    const pending = pendingOAuth.get(id);
+    if (!oauthConfig || !pending) throw new Error("no subscription login in progress");
+    const { code, state: returned } = parseCallbackCode(pastedCode);
+    if (returned && returned !== pending.state) {
+      throw new Error("state mismatch — login aborted for safety, try again");
+    }
+    const tokens = await exchangeCode(oauthConfig, {
+      code,
+      verifier: pending.verifier,
+      state: returned ?? pending.state,
+    });
+    setOAuthTokens(id, tokens);
+    pendingOAuth.delete(id);
   };
 
   return { session, persist, digest };

@@ -4,6 +4,7 @@ import {
   PERMISSION_MODES,
   type PermissionAsker,
   type PermissionMode,
+  type SddTaskState,
   cachedCatalogSync,
   fetchCatalog,
   findModelById,
@@ -17,6 +18,8 @@ import { LoginOverlay } from "./LoginOverlay.js";
 import { Item } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
+import { SddBoard, type SddBoardTask } from "./SddBoard.js";
+import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import {
   type HistoryNav,
@@ -27,6 +30,7 @@ import {
   historyUp,
   reduceInput,
 } from "./editing.js";
+import { Markdown } from "./markdown.js";
 import type { DisplayItem, LoginProvider, Session } from "./types.js";
 
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
@@ -134,6 +138,7 @@ const COMMANDS = [
   "hq",
   "compact",
   "cost",
+  "config",
   "mcp",
   "plugins",
   "skills",
@@ -240,7 +245,7 @@ const Transcript = memo(function Transcript({
             <Text color="green" bold>
               ASSISTANT
             </Text>
-            <Text>{live}</Text>
+            <Markdown text={live} />
           </Box>
         ) : null}
       </Box>
@@ -293,11 +298,23 @@ export function App({
   const [pickerQuery, setPickerQuery] = useState("");
   const [providerLabel, setProviderLabel] = useState(session.providerLabel);
   const [loginOpen, setLoginOpen] = useState(false);
-  const [loginStep, setLoginStep] = useState<"provider" | "key">("provider");
+  const [loginStep, setLoginStep] = useState<"provider" | "host" | "key" | "oauth">("provider");
+  const [loginUrl, setLoginUrl] = useState("");
   const [loginIndex, setLoginIndex] = useState(0);
   const [loginSel, setLoginSel] = useState<LoginProvider | null>(null);
   const [loginKey, setLoginKey] = useState("");
+  const [loginHost, setLoginHost] = useState("");
   const [signedIn, setSignedIn] = useState<string[]>(() => session.signedInProviders());
+  // /sdd interactive interview: the promise from `ask` is held open until the user
+  // finishes answering (or presses Esc). `interviewInput` is the answer being typed.
+  const [interview, setInterview] = useState<{
+    questions: string[];
+    answers: string[];
+    resolve: (answers: string[]) => void;
+  } | null>(null);
+  const [interviewInput, setInterviewInput] = useState("");
+  // Live /sdd kanban board — seeded from `sdd_graph`, updated per `sdd_task_state`.
+  const [sddTasks, setSddTasks] = useState<SddBoardTask[]>([]);
   const filteredPickerModels = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase();
     return q ? pickerModels.filter((m) => m.name.toLowerCase().includes(q)) : pickerModels;
@@ -544,9 +561,8 @@ export function App({
           push({ kind: "system", text: `✓ phase ${event.title}: ${event.summary.slice(0, 160)}` });
           break;
         case "sdd_interview":
-          if (event.questions.length > 0) {
-            push({ kind: "system", text: `? ${event.questions.join("\n? ")}` });
-          }
+          // The interactive interview overlay (driven by `askInterview`) renders the
+          // questions and logs the finished Q&A, so nothing to push here.
           break;
         case "sdd_spec":
           push({
@@ -555,6 +571,15 @@ export function App({
           });
           break;
         case "sdd_graph":
+          // Seed the live kanban board; the transcript keeps a one-line plan record.
+          setSddTasks(
+            event.tasks.map((t) => ({
+              id: t.id,
+              title: t.title,
+              dependsOn: t.dependsOn,
+              state: t.state,
+            })),
+          );
           push({
             kind: "system",
             text: `▤ tasks: ${event.tasks
@@ -565,18 +590,12 @@ export function App({
               .join("  ·  ")}`,
           });
           break;
-        case "sdd_task_state": {
-          const mark =
-            event.state === "done"
-              ? "✓"
-              : event.state === "failed"
-                ? "✗"
-                : event.state === "running"
-                  ? "▸"
-                  : "·";
-          push({ kind: "system", text: `${mark} ${event.id} ${event.title} — ${event.state}` });
+        case "sdd_task_state":
+          // Update the board in place — it is the live view, so no per-state log line.
+          setSddTasks((prev) =>
+            prev.map((t) => (t.id === event.id ? { ...t, state: event.state } : t)),
+          );
           break;
-        }
         case "sdd_done":
           push({
             kind: "system",
@@ -616,34 +635,42 @@ export function App({
     { isActive: (status !== "idle" || autoState === "running") && !pending },
   );
 
-  const openPicker = useCallback(async () => {
-    setPickerOpen(true);
-    setPickerLoading(true);
-    setPickerQuery("");
-    try {
-      const models = await session.listAllModels();
-      setPickerModels(models);
-      const cur = models.findIndex(
-        (m) => m.name === session.agent.model && m.provider === session.providerLabel,
-      );
-      setPickerIndex(cur >= 0 ? cur : 0);
-    } catch (err) {
-      setPickerModels([]);
-      setPickerOpen(false);
-      push({
-        kind: "system",
-        text: `✗ model list failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
-    } finally {
-      setPickerLoading(false);
-    }
-  }, [session, push]);
+  const openPicker = useCallback(
+    async (onlyProvider?: string) => {
+      setPickerOpen(true);
+      setPickerLoading(true);
+      setPickerQuery("");
+      try {
+        const all = await session.listAllModels();
+        // A just-signed-in provider gets a focused list; fall back to everything
+        // if it returned nothing (bad key, empty account) so the picker stays useful.
+        const scoped = onlyProvider ? all.filter((m) => m.provider === onlyProvider) : all;
+        const models = scoped.length > 0 ? scoped : all;
+        setPickerModels(models);
+        const cur = models.findIndex(
+          (m) => m.name === session.agent.model && m.provider === session.providerLabel,
+        );
+        setPickerIndex(cur >= 0 ? cur : 0);
+      } catch (err) {
+        setPickerModels([]);
+        setPickerOpen(false);
+        push({
+          kind: "system",
+          text: `✗ model list failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      } finally {
+        setPickerLoading(false);
+      }
+    },
+    [session, push],
+  );
 
   const choose = useCallback(
     (name: string) => {
       session.switchModel(name);
       setModel(name);
-      push({ kind: "system", text: `✓ model → ${name}` });
+      void session.persistNow?.();
+      push({ kind: "system", text: `✓ model → ${name} (saved as default)` });
     },
     [session, push],
   );
@@ -659,7 +686,8 @@ export function App({
         }
         session.switchModel(m.name);
         setModel(m.name);
-        push({ kind: "system", text: `✓ ${session.providerLabel} / ${m.name}` });
+        void session.persistNow?.();
+        push({ kind: "system", text: `✓ ${session.providerLabel} / ${m.name} (saved as default)` });
       } catch (err) {
         push({
           kind: "system",
@@ -686,6 +714,7 @@ export function App({
     setLoginIndex(0);
     setLoginSel(null);
     setLoginKey("");
+    setLoginHost("");
     setLoginOpen(true);
   }, [session]);
 
@@ -700,8 +729,11 @@ export function App({
         setModel(session.agent.model);
         push({
           kind: "system",
-          text: `✓ provider → ${p.id}${key ? " · key saved" : ""} — run /model to pick a model`,
+          text: `✓ provider → ${p.id}${key ? " · key saved (encrypted)" : ""} — pick a model:`,
         });
+        // Continue the flow visually: key accepted → straight into that
+        // provider's model list; the selection is persisted as the default.
+        void openPicker(p.id);
       } catch (err) {
         push({
           kind: "system",
@@ -709,7 +741,52 @@ export function App({
         });
       }
     },
-    [session, push],
+    [session, push, openPicker],
+  );
+
+  // openai-compat login: apply the pasted host + optional key, activate the
+  // provider, persist to disk, then continue into that host's model list.
+  const finishOpenAICompat = useCallback(
+    (host: string, apiKey?: string) => {
+      setLoginOpen(false);
+      const trimmed = host.trim();
+      session.configureOpenAICompat({ host: trimmed, key: apiKey }).then(
+        () => {
+          setSignedIn(session.signedInProviders());
+          setProviderLabel(session.providerLabel);
+          setModel(session.agent.model);
+          push({
+            kind: "system",
+            text: `✓ provider → openai-compat · ${trimmed}${apiKey ? " · key saved (encrypted)" : ""} — pick a model:`,
+          });
+          void openPicker("openai-compat");
+        },
+        (err: unknown) => {
+          push({
+            kind: "system",
+            text: `✗ login failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        },
+      );
+    },
+    [session, push, openPicker],
+  );
+
+  // /sdd interview bridge: the SddRunner calls this with the model's clarifying
+  // questions and awaits the returned promise, which we resolve once the user has
+  // answered them all (or skipped with Esc). Opening the overlay is all we do here;
+  // the "interview" useInput below drives it.
+  const askInterview = useCallback(
+    (questions: string[]): Promise<string[]> =>
+      new Promise<string[]>((resolve) => {
+        if (questions.length === 0) {
+          resolve([]);
+          return;
+        }
+        setInterviewInput("");
+        setInterview({ questions, answers: [], resolve });
+      }),
+    [],
   );
 
   // Alt+P (or Ctrl+P) opens the model picker.
@@ -717,7 +794,7 @@ export function App({
     (input2, key) => {
       if ((key.meta || key.ctrl) && (input2 === "p" || input2 === "P")) void openPicker();
     },
-    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending },
+    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending && !interview },
   );
 
   // Shift+Tab cycles the permission mode (ASK → AUTO → PLAN).
@@ -728,7 +805,7 @@ export function App({
         applyMode(MODE_CYCLE[(i + 1) % MODE_CYCLE.length] ?? "ask");
       }
     },
-    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending },
+    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending && !interview },
   );
 
   // Picker navigation + type-to-search filtering.
@@ -768,9 +845,16 @@ export function App({
         else if (key.downArrow) setLoginIndex((i) => Math.min(list.length - 1, i + 1));
         else if (key.return) {
           if (!p) return;
-          // No key needed, or already signed in → switch straight away using the
-          // stored key. Otherwise collect a key first.
-          if (!p.needsKey || signedIn.includes(p.id)) {
+          if (p.needsHost) {
+            // openai-compat: collect the base URL first (prefilled with the
+            // current host), then an optional API key.
+            setLoginSel(p);
+            setLoginHost(session.config.openaiCompatHost ?? "");
+            setLoginKey("");
+            setLoginStep("host");
+          } else if (!p.needsKey || signedIn.includes(p.id)) {
+            // No key needed, or already signed in → switch straight away using
+            // the stored key. Otherwise collect a key first.
             switchTo(p);
             setLoginOpen(false);
           } else {
@@ -778,11 +862,34 @@ export function App({
             setLoginKey("");
             setLoginStep("key");
           }
+        } else if (input2 === "r" && p?.needsHost) {
+          // Re-enter host + key for openai-compat.
+          setLoginSel(p);
+          setLoginHost(session.config.openaiCompatHost ?? "");
+          setLoginKey("");
+          setLoginStep("host");
         } else if (input2 === "r" && p?.needsKey) {
           // Replace a stored key: jump to key entry even if already signed in.
           setLoginSel(p);
           setLoginKey("");
           setLoginStep("key");
+        } else if (input2 === "o" && p?.supportsOAuth && session.startOAuth) {
+          // Subscription (OAuth) login: open the browser, then collect the
+          // pasted callback code in the "oauth" step.
+          setLoginSel(p);
+          setLoginKey("");
+          setLoginUrl("");
+          setLoginStep("oauth");
+          session.startOAuth(p.id).then(
+            (url) => setLoginUrl(url),
+            (err: unknown) => {
+              setLoginOpen(false);
+              push({
+                kind: "system",
+                text: `✗ login failed: ${err instanceof Error ? err.message : String(err)}`,
+              });
+            },
+          );
         } else if (input2 === "x" && p && signedIn.includes(p.id)) {
           // Forget this provider's stored key.
           session.removeApiKey(p.id);
@@ -790,10 +897,57 @@ export function App({
         }
         return;
       }
+      if (loginStep === "host") {
+        // Type/paste the base URL (e.g. https://agentrouter.org/v1), then Enter
+        // to move on to the optional API key.
+        if (key.return) {
+          if (loginHost.trim()) {
+            setLoginKey("");
+            setLoginStep("key");
+          }
+        } else if (key.backspace || key.delete) {
+          setLoginHost((h) => h.slice(0, -1));
+        } else if (input2 && !key.ctrl && !key.meta) {
+          setLoginHost((h) => h + input2);
+        }
+        return;
+      }
+      if (loginStep === "oauth") {
+        // Collect the pasted `code#state` from the browser's callback page.
+        if (key.return) {
+          const pasted = loginKey.trim();
+          const p = loginSel;
+          setLoginOpen(false);
+          if (p && pasted && session.completeOAuth) {
+            session.completeOAuth(p.id, pasted).then(
+              () => {
+                push({ kind: "system", text: `✓ signed in to ${p.id} (subscription)` });
+                switchTo(p); // no key: tokens are stored — continues into the model picker
+              },
+              (err: unknown) => {
+                push({
+                  kind: "system",
+                  text: `✗ login failed: ${err instanceof Error ? err.message : String(err)}`,
+                });
+              },
+            );
+          }
+        } else if (key.backspace || key.delete) {
+          setLoginKey((k) => k.slice(0, -1));
+        } else if (input2 && !key.ctrl && !key.meta) {
+          setLoginKey((k) => k + input2);
+        }
+        return;
+      }
       // step === "key": collect the secret, masked in the overlay.
       if (key.return) {
-        if (loginSel && loginKey.trim()) switchTo(loginSel, loginKey.trim());
-        setLoginOpen(false);
+        if (loginSel?.needsHost) {
+          // openai-compat: key is optional (local hosts need none); host is set.
+          finishOpenAICompat(loginHost, loginKey.trim() || undefined);
+        } else {
+          if (loginSel && loginKey.trim()) switchTo(loginSel, loginKey.trim());
+          setLoginOpen(false);
+        }
       } else if (key.backspace || key.delete) {
         setLoginKey((k) => k.slice(0, -1));
       } else if (input2 && !key.ctrl && !key.meta) {
@@ -801,6 +955,41 @@ export function App({
       }
     },
     { isActive: loginOpen },
+  );
+
+  // /sdd interview overlay: type an answer, Enter advances to the next question, and
+  // the last Enter resolves the awaited `ask` promise so the spec build continues.
+  // Esc resolves early, padding the remaining answers as blank ("proceed with what
+  // you gave"). Both paths log the finished Q&A to the transcript.
+  useInput(
+    (input2, key) => {
+      if (!interview) return;
+      const finish = (answers: string[]): void => {
+        const qa = interview.questions.map(
+          (q, i) => `  ✓ ${q} → ${answers[i]?.trim() || "(skipped)"}`,
+        );
+        push({ kind: "system", text: `▸ /sdd interview:\n${qa.join("\n")}` });
+        interview.resolve(answers);
+        setInterview(null);
+        setInterviewInput("");
+      };
+      if (key.escape) {
+        finish(interview.questions.map((_, i) => interview.answers[i] ?? ""));
+        return;
+      }
+      if (key.return) {
+        const answers = [...interview.answers, interviewInput.trim()];
+        if (answers.length >= interview.questions.length) finish(answers);
+        else {
+          setInterview({ ...interview, answers });
+          setInterviewInput("");
+        }
+        return;
+      }
+      if (key.backspace || key.delete) setInterviewInput((s) => s.slice(0, -1));
+      else if (input2 && !key.ctrl && !key.meta) setInterviewInput((s) => s + input2);
+    },
+    { isActive: interview !== null },
   );
 
   const handleSlash = useCallback(
@@ -818,6 +1007,7 @@ export function App({
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
+          setSddTasks([]);
           break;
         case "exit":
         case "quit":
@@ -885,6 +1075,34 @@ export function App({
           push({ kind: "system", text: lines.join("\n") });
           break;
         }
+        case "config": {
+          const c = session.config;
+          const win = c.context.window;
+          const lines = [
+            "config file: ~/.arterm/config.json  (edit basics with `arterm init`)",
+            `provider: ${c.provider} · model: ${c.model} · temperature: ${c.temperature}`,
+            `permission mode: ${permMode}${c.confirmDestructive ? " · confirm-destructive" : ""}`,
+            `session log: ${c.session.mode}${
+              c.session.mode !== "off" && c.session.maxSessions
+                ? ` (keep ${c.session.maxSessions})`
+                : ""
+            }`,
+            `context: ${c.context.strategy}${win ? ` · window ${Math.round(win / 1000)}k` : ""}${
+              c.context.compactAtPercent
+                ? ` · compact @${Math.round(c.context.compactAtPercent * 100)}%`
+                : ""
+            }`,
+            `memory: ${c.memory.mode}${
+              c.memory.mode !== "off" ? ` · engine ${c.memory.engine ?? "legacy"}` : ""
+            }`,
+            `fleet: concurrency ${c.fleet.concurrency ?? 4} · isolation ${c.fleet.isolation ?? "none"}`,
+            `arbiter: ${c.arbiter.enabled ? "on" : "off"} · catalog: ${
+              c.catalog?.enabled === false ? "off" : "on"
+            }`,
+          ];
+          push({ kind: "system", text: lines.join("\n") });
+          break;
+        }
         case "mode": {
           const arg = rest.join(" ").trim().toLowerCase();
           if (!arg) {
@@ -934,17 +1152,24 @@ export function App({
           break;
         }
         case "sdd": {
+          const skipInterview = /(^|\s)--yes\b/.test(` ${rest.join(" ")}`);
           const brief = rest
             .join(" ")
             .replace(/(^|\s)--yes\b/g, "")
             .trim();
           if (!brief) {
-            push({ kind: "system", text: "usage: /sdd <brief>" });
+            push({
+              kind: "system",
+              text: "usage: /sdd <brief>  (add --yes to skip the interview)",
+            });
           } else if (session.sdd.state === "running" || session.sdd.state === "paused") {
             push({ kind: "system", text: "an /sdd run is already active — /stop it first" });
           } else {
+            // Fresh board for this run; pass the interactive interview unless --yes.
+            setSddTasks([]);
+            setInterview(null);
             push({ kind: "system", text: `▸ /sdd: planning "${brief}"…` });
-            void session.sdd.run(brief);
+            void session.sdd.run(brief, skipInterview ? undefined : askInterview);
           }
           break;
         }
@@ -1089,6 +1314,7 @@ export function App({
       outTok,
       model,
       providerLabel,
+      askInterview,
     ],
   );
 
@@ -1162,7 +1388,14 @@ export function App({
             ↑ {clampedOffset} satır yukarıda · tekerleği aşağı çevir / mesaj gönder = en alta dön
           </Text>
         ) : null}
-        {pending ? (
+        {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
+        {interview ? (
+          <SddInterview
+            questions={interview.questions}
+            answers={interview.answers}
+            current={interviewInput}
+          />
+        ) : pending ? (
           <PermissionPrompt pending={pending} />
         ) : pickerOpen ? (
           <ModelPicker
@@ -1181,6 +1414,8 @@ export function App({
             signedIn={signedIn}
             selected={loginSel ?? undefined}
             keyValue={loginKey}
+            hostValue={loginHost}
+            oauthUrl={loginUrl}
           />
         ) : (
           <Box marginTop={1}>

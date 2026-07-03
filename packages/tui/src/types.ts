@@ -19,6 +19,8 @@ export interface LoginProvider {
   label: string;
   /** True when the provider needs an API key (the overlay then prompts for one). */
   needsKey: boolean;
+  /** True when the provider needs a custom base URL (the overlay prompts for a host). */
+  needsHost?: boolean;
   /** True when the provider also supports subscription login (OAuth, via `arterm login`). */
   supportsOAuth?: boolean;
 }
@@ -46,6 +48,12 @@ export interface Session {
   switchProvider(id: string): void;
   /** Store an API key for a provider (encrypted) — used by /login. */
   setApiKey(provider: string, key: string): void;
+  /**
+   * Configure and activate the openai-compat provider from the TUI /login flow:
+   * set the base URL (host), store the optional API key encrypted, apply any
+   * gateway-specific headers, switch to it, and persist the config to disk.
+   */
+  configureOpenAICompat(opts: { host: string; key?: string }): Promise<void>;
   /** Forget a provider's stored API key — used by /login (remove). */
   removeApiKey(provider: string): void;
   /** Provider ids the user has stored a key for (shown as ✓ in the login overlay). */
@@ -58,6 +66,20 @@ export interface Session {
   permissionMode: PermissionMode;
   /** Change the permission mode (Shift+Tab / /mode). */
   setMode(mode: PermissionMode): void;
+  /**
+   * Persist the current provider/model/mode to ~/.arterm/config.json right away
+   * (normally that happens only on clean exit). Injected by the CLI; absent in
+   * tests. Lets a TUI model/login choice survive a crash and become the default.
+   */
+  persistNow?(): Promise<void>;
+  /**
+   * Subscription (OAuth/PKCE) login, for providers with `supportsOAuth`. Injected
+   * by the CLI. `startOAuth` opens the browser and returns the authorize URL;
+   * `completeOAuth` takes the pasted `code#state` callback value, exchanges it,
+   * and stores the tokens encrypted.
+   */
+  startOAuth?(providerId: string): Promise<string>;
+  completeOAuth?(providerId: string, pastedCode: string): Promise<void>;
   /** Autonomous goal-loop engine (/goal, /steer, /pause, /resume, /stop). */
   autonomy: AutonomyEngine;
   /** Spec-Driven Development runner (/sdd). */

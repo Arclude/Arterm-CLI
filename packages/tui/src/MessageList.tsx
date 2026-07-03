@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type React from "react";
+import { Markdown } from "./markdown.js";
 import type { DisplayItem } from "./types.js";
 
 interface Props {
@@ -81,6 +82,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ["/compact", "shrink context (auto when near full)"],
       ["/cost", "token usage + estimated cost"],
+      ["/config", "show the resolved configuration"],
     ],
   },
   {
@@ -178,7 +180,7 @@ export function Item({ item }: { item: DisplayItem }): React.ReactElement {
     case "assistant":
       return (
         <MessageBlock label="ASSISTANT" color="green">
-          <Text>{item.text}</Text>
+          <Markdown text={item.text} />
         </MessageBlock>
       );
     case "tool": {
@@ -264,7 +266,7 @@ export function MessageList({ items, live }: Props): React.ReactElement {
           <Text color="green" bold>
             ASSISTANT
           </Text>
-          <Text>{live}</Text>
+          <Markdown text={live} />
         </Box>
       ) : null}
     </Box>

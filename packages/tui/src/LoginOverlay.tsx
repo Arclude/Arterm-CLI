@@ -14,8 +14,10 @@ export function LoginOverlay({
   signedIn,
   selected,
   keyValue,
+  hostValue,
+  oauthUrl,
 }: {
-  step: "provider" | "key";
+  step: "provider" | "host" | "key" | "oauth";
   providers: LoginProvider[];
   index: number;
   /** Active provider id, marked in the list. */
@@ -24,9 +26,67 @@ export function LoginOverlay({
   signedIn: string[];
   /** The provider chosen on the first step (set once step === "key"). */
   selected?: LoginProvider;
-  /** The key typed so far (rendered masked). */
+  /** The key typed so far (rendered masked); on the oauth step, the pasted code. */
   keyValue?: string;
+  /** The base URL typed so far (host step, shown in the clear — it's not a secret). */
+  hostValue?: string;
+  /** The authorize URL for the oauth step ("" while it is being built). */
+  oauthUrl?: string;
 }): React.ReactElement {
+  if (step === "host" && selected) {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box>
+          <Text color="cyan" bold>
+            ── Sign in to {selected.label} ──
+          </Text>
+        </Box>
+        <Text color="gray" dimColor>
+          {"  paste the base URL (OpenAI-compatible /v1 endpoint) · Enter next · Esc cancel"}
+        </Text>
+        <Box>
+          <Text color="cyan">{"🌐 "}</Text>
+          <Text>{hostValue ?? ""}</Text>
+          <Text color="cyan">▏</Text>
+        </Box>
+        <Text color="gray" dimColor>
+          {"  e.g. https://agentrouter.org/v1  ·  http://localhost:1234/v1"}
+        </Text>
+      </Box>
+    );
+  }
+  if (step === "oauth" && selected) {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box>
+          <Text color="cyan" bold>
+            ── Sign in to {selected.label} (subscription) ──
+          </Text>
+        </Box>
+        <Text color="gray" dimColor>
+          {oauthUrl
+            ? "  browser opened — approve, then paste the code from the callback page"
+            : "  building sign-in link…"}
+        </Text>
+        {oauthUrl ? (
+          <Box paddingLeft={2}>
+            <Text color="blue" wrap="wrap">
+              {oauthUrl}
+            </Text>
+          </Box>
+        ) : null}
+        <Box>
+          <Text color="cyan">{"🔗 "}</Text>
+          <Text>{keyValue ?? ""}</Text>
+          <Text color="cyan">▏</Text>
+        </Box>
+        <Text color="gray" dimColor>
+          {"  paste `code#state` · Enter sign in · Esc cancel"}
+        </Text>
+      </Box>
+    );
+  }
+
   if (step === "key" && selected) {
     const masked = "•".repeat((keyValue ?? "").length);
     return (
@@ -37,7 +97,9 @@ export function LoginOverlay({
           </Text>
         </Box>
         <Text color="gray" dimColor>
-          {"  paste your API key · Enter save · Esc cancel"}
+          {selected.needsHost
+            ? "  paste your API key (leave blank if the host needs none) · Enter save · Esc cancel"
+            : "  paste your API key · Enter save · Esc cancel"}
         </Text>
         <Box>
           <Text color="cyan">{"🔑 "}</Text>
@@ -49,7 +111,7 @@ export function LoginOverlay({
         </Text>
         {selected.supportsOAuth ? (
           <Text color="gray" dimColor>
-            {`  or sign in with your subscription: run \`arterm login ${selected.id}\` in a terminal`}
+            {"  or use your subscription instead: Esc, then press o on this provider"}
           </Text>
         ) : null}
       </Box>
@@ -63,7 +125,7 @@ export function LoginOverlay({
           ── Choose a provider ──
         </Text>
         <Text color="gray" dimColor>
-          {"   ↑/↓ move · Enter select · r re-key · x remove · Esc close"}
+          {"   ↑/↓ move · Enter select · o subscription · r re-key · x remove · Esc close"}
         </Text>
       </Box>
       {providers.map((p, i) => {
@@ -83,7 +145,14 @@ export function LoginOverlay({
             <Text color="gray">
               {"  "}
               {p.label}
-              {isIn ? " · signed in" : p.needsKey ? " · needs key" : " · local"}
+              {isIn
+                ? " · signed in"
+                : p.needsHost
+                  ? " · host + key"
+                  : p.needsKey
+                    ? " · needs key"
+                    : " · local"}
+              {p.supportsOAuth ? " · o = subscription" : ""}
               {p.id === current ? "  ← current" : ""}
             </Text>
           </Box>
