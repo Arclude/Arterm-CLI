@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { z } from "zod";
 import type { PermissionMode } from "./permissions.js";
 import type { AutonomyMode, PermissionLevel, TrustTier } from "./types.js";
 
@@ -13,6 +14,11 @@ export interface ArtermConfig {
   ollamaHost: string;
   /** Base URL (including /v1) for an OpenAI-compatible server (LM Studio, vLLM, ...). */
   openaiCompatHost: string;
+  /**
+   * Extra headers for the openai-compat provider (e.g. a User-Agent for relay
+   * gateways that gate on a recognized client).
+   */
+  openaiCompatHeaders: Record<string, string>;
   /** Directory holding .gguf files for direct loading. */
   modelsDir: string;
   /** Sampling temperature. */
@@ -56,11 +62,7 @@ export interface ArtermConfig {
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   /** Per-plugin trust level (untrusted by default — tools forced to ask, execute blocked). */
   plugins: Record<string, { trust: TrustTier }>;
-  /**
-   * Parallel sub-agent fan-out (spawn_parallel, parallel/phased autonomy, /sdd).
-   * NOTE: `loadConfig` shallow-merges, so a user-supplied `fleet` object replaces
-   * this whole block — re-state every field you want to keep.
-   */
+  /** Parallel sub-agent fan-out (spawn_parallel, parallel/phased autonomy, /sdd). */
   fleet: {
     concurrency?: number;
     /** "none" (default) = shared cwd; "worktree" = isolate each worker in its own git worktree. */
@@ -140,11 +142,14 @@ export function defaultConfig(): ArtermConfig {
     model: "llama3.2",
     ollamaHost: process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434",
     openaiCompatHost: process.env.OPENAI_COMPAT_HOST ?? "http://localhost:1234/v1",
+    openaiCompatHeaders: {},
     modelsDir: join(ARTERM_HOME, "models"),
     temperature: 0.7,
     permissions: {},
     mode: "ask",
-    session: { mode: "off" },
+    // Persist transcripts by default so --resume/--continue work out of the box;
+    // maxSessions bounds disk usage. Set `session.mode: "off"` to disable.
+    session: { mode: "jsonl", maxSessions: 100 },
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
     autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
     mcpServers: {},
@@ -158,6 +163,158 @@ export function defaultConfig(): ArtermConfig {
   };
 }
 
+/**
+ * Schema for the user-editable config file. Every field is optional (the file
+ * is a partial overlay on `defaultConfig()`); unknown keys pass through so an
+ * older binary doesn't strip a newer config. Enum/type mismatches are reported
+ * per-field and that field falls back to its default instead of misbehaving
+ * deep inside the session.
+ */
+const configFileSchema = z
+  .object({
+    provider: z.string(),
+    model: z.string(),
+    ollamaHost: z.string(),
+    openaiCompatHost: z.string(),
+    openaiCompatHeaders: z.record(z.string()),
+    modelsDir: z.string(),
+    temperature: z.number().min(0).max(2),
+    permissions: z.record(z.enum(["allow", "ask", "deny"])),
+    mode: z.enum(["ask", "auto", "plan", "yolo"]),
+    session: z
+      .object({
+        mode: z.enum(["off", "jsonl"]),
+        maxSessions: z.number().int().positive().optional(),
+        maxAgeDays: z.number().positive().optional(),
+      })
+      .partial(),
+    context: z
+      .object({
+        strategy: z.enum(["none", "window", "summary"]),
+        window: z.number().int().positive().optional(),
+        compactAtPercent: z.number().min(0).max(1).optional(),
+        maxMessages: z.number().int().positive().optional(),
+      })
+      .partial(),
+    autonomy: z
+      .object({
+        mode: z.enum(["once", "eternal", "parallel", "phased"]),
+        maxSteps: z.number().int().positive().optional(),
+        maxPhases: z.number().int().positive().optional(),
+        phasedFanout: z.number().int().positive().optional(),
+      })
+      .partial(),
+    mcpServers: z.record(
+      z.object({
+        command: z.string(),
+        args: z.array(z.string()).optional(),
+        env: z.record(z.string()).optional(),
+      }),
+    ),
+    plugins: z.record(z.object({ trust: z.enum(["untrusted", "trusted"]) })),
+    fleet: z
+      .object({
+        concurrency: z.number().int().positive().optional(),
+        isolation: z.enum(["none", "worktree"]).optional(),
+        mergeStrategy: z.enum(["surface", "apply"]).optional(),
+      })
+      .partial(),
+    arbiter: z.object({ enabled: z.boolean() }).partial(),
+    catalog: z
+      .object({
+        enabled: z.boolean().optional(),
+        maxAgeHours: z.number().positive().optional(),
+      })
+      .partial(),
+    confirmDestructive: z.boolean(),
+    sdd: z
+      .object({
+        maxQuestions: z.number().int().positive().optional(),
+        maxTasks: z.number().int().positive().optional(),
+      })
+      .partial(),
+    hq: z
+      .object({
+        autostart: z.boolean().optional(),
+        port: z.number().int().positive().optional(),
+      })
+      .partial(),
+    memory: z
+      .object({
+        mode: z.enum(["off", "jsonl"]),
+        maxInject: z.number().int().nonnegative().optional(),
+        autoDigest: z.boolean().optional(),
+        digestEvery: z.number().int().nonnegative().optional(),
+        engine: z.enum(["legacy", "cmem"]).optional(),
+        embeddings: z.boolean().optional(),
+        embedModel: z.string().optional(),
+        legendLimit: z.number().int().positive().optional(),
+        summarizeModel: z.string().optional(),
+      })
+      .partial(),
+  })
+  .partial()
+  .passthrough();
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Recursively merge a partial user config over the defaults. Nested objects
+ * merge key-by-key (so `session: { mode: "off" }` keeps the block's other
+ * defaults); scalars and arrays replace.
+ */
+export function mergeConfig<T>(defaults: T, overlay: unknown): T {
+  if (!isPlainObject(defaults) || !isPlainObject(overlay)) {
+    return (overlay === undefined ? defaults : overlay) as T;
+  }
+  const out: Record<string, unknown> = { ...defaults };
+  for (const [key, value] of Object.entries(overlay)) {
+    if (value === undefined) continue;
+    out[key] =
+      isPlainObject(out[key]) && isPlainObject(value) ? mergeConfig(out[key], value) : value;
+  }
+  return out as T;
+}
+
+/** Remove the value at a (possibly nested) issue path so the default applies. */
+function deleteAtPath(obj: Record<string, unknown>, path: readonly (string | number)[]): void {
+  if (path.length === 0) return;
+  let cursor: unknown = obj;
+  for (const seg of path.slice(0, -1)) {
+    if (!isPlainObject(cursor)) return;
+    cursor = cursor[String(seg)];
+  }
+  if (isPlainObject(cursor)) delete cursor[String(path[path.length - 1])];
+}
+
+/**
+ * Validate a parsed config-file object. Invalid fields are dropped (falling
+ * back to defaults) and reported via `warn`; valid fields survive untouched.
+ */
+export function validateConfigFile(
+  parsed: unknown,
+  warn: (msg: string) => void = (msg) => console.warn(msg),
+): Partial<ArtermConfig> {
+  if (!isPlainObject(parsed)) {
+    warn(`⚠ ${CONFIG_PATH} must contain a JSON object; using defaults.`);
+    return {};
+  }
+  const result = configFileSchema.safeParse(parsed);
+  if (result.success) return result.data as Partial<ArtermConfig>;
+
+  const cleaned = structuredClone(parsed);
+  for (const issue of result.error.issues) {
+    warn(`⚠ ${CONFIG_PATH}: ignoring invalid "${issue.path.join(".")}" (${issue.message}).`);
+    deleteAtPath(cleaned, issue.path);
+  }
+  const second = configFileSchema.safeParse(cleaned);
+  if (second.success) return second.data as Partial<ArtermConfig>;
+  warn(`⚠ ${CONFIG_PATH} could not be validated; using defaults.`);
+  return {};
+}
+
 export async function loadConfig(): Promise<ArtermConfig> {
   let raw: string;
   try {
@@ -167,8 +324,8 @@ export async function loadConfig(): Promise<ArtermConfig> {
     return defaultConfig();
   }
   try {
-    const parsed = JSON.parse(raw) as Partial<ArtermConfig>;
-    return { ...defaultConfig(), ...parsed };
+    const parsed: unknown = JSON.parse(raw);
+    return mergeConfig(defaultConfig(), validateConfigFile(parsed));
   } catch (err) {
     // The file exists but is unreadable JSON — surface it so the user's edits
     // aren't silently discarded, then carry on with defaults rather than crash.

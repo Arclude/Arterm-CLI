@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ChatChunk, ChatProvider, ChatRequest, Message, ModelInfo } from "@arterm/core";
+import { streamIdleGuard } from "./timeout.js";
+
+/** Abort a generation if no tokens arrive for this long — bounds a wedged model. */
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 /**
  * Runs a GGUF model directly in-process via node-llama-cpp — no server needed.
@@ -97,17 +101,27 @@ export class LlamaCppProvider implements ChatProvider {
       const queue = new ChunkQueue();
       const promptText = lastPromptText(req.messages);
 
-      const done = session
-        .prompt(promptText, {
-          temperature: req.temperature,
-          signal: req.signal,
-          onTextChunk: (text: string) => queue.push({ type: "text", delta: text }),
-        })
-        .then(() => queue.close())
-        .catch((err: unknown) => queue.fail(err));
+      // Idle-bound the generation (reset on each token) so a wedged in-process
+      // model can't hang the turn forever — parity with the HTTP providers.
+      const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
+      try {
+        const done = session
+          .prompt(promptText, {
+            temperature: req.temperature,
+            signal: guard.signal,
+            onTextChunk: (text: string) => {
+              guard.reset();
+              queue.push({ type: "text", delta: text });
+            },
+          })
+          .then(() => queue.close())
+          .catch((err: unknown) => queue.fail(err));
 
-      yield* queue.drain();
-      await done;
+        yield* queue.drain();
+        await done;
+      } finally {
+        guard.clear();
+      }
       yield { type: "done" };
     } finally {
       await context.dispose?.();

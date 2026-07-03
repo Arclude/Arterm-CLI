@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: build · typecheck · test · lint (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Lint & format check
+        run: pnpm exec biome check .
+
+  publish-dry-run:
+    name: npm pack sanity (arterm-cli)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm -r build
+
+      # Verifies the publishable tarball is self-contained: install it into a
+      # scratch project outside the workspace and make sure the bin resolves,
+      # since workspace:* deps are not on npm.
+      - name: Pack & smoke-install
+        run: |
+          cd packages/cli
+          pnpm pack
+          TARBALL=$(ls arterm-cli-*.tgz)
+          mkdir /tmp/smoke && cd /tmp/smoke
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE/packages/cli/$TARBALL"
+          ./node_modules/.bin/arterm --version

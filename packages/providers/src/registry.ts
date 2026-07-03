@@ -40,6 +40,8 @@ export interface ProviderDescriptor {
   label: string;
   /** True when the provider authenticates with an API key (stored via Keystore). */
   needsKey: boolean;
+  /** True when the provider needs a custom base URL (the login overlay prompts for one). */
+  needsHost?: boolean;
   /** True when the provider also supports subscription login (OAuth, via `arterm login`). */
   supportsOAuth?: boolean;
 }
@@ -64,7 +66,12 @@ function oauthKey(id: string): string {
 export const providerCatalog: readonly ProviderDescriptor[] = [
   { id: "ollama", label: "Ollama — local server", needsKey: false },
   { id: "llamacpp", label: "llama.cpp — local .gguf", needsKey: false },
-  { id: "openai-compat", label: "OpenAI-compatible — custom host", needsKey: false },
+  {
+    id: "openai-compat",
+    label: "OpenAI-compatible — custom host",
+    needsKey: false,
+    needsHost: true,
+  },
   { id: "anthropic", label: "Anthropic — Claude", needsKey: true, supportsOAuth: true },
   { id: "openai", label: "OpenAI — ChatGPT", needsKey: true },
   { id: "gemini", label: "Google — Gemini", needsKey: true },
@@ -230,6 +237,7 @@ export function createProvider(config: ArtermConfig, providerId?: string): ChatP
       return new OpenAICompatProvider({
         baseUrl: config.openaiCompatHost,
         apiKey: apiKeyFor("openai-compat", "OPENAI_API_KEY"),
+        headers: config.openaiCompatHeaders,
       });
     case "anthropic": {
       // Prefer an explicit subscription login (OAuth) when present; otherwise API key.
@@ -254,6 +262,7 @@ export function allProviders(config: ArtermConfig): ChatProvider[] {
     new OpenAICompatProvider({
       baseUrl: config.openaiCompatHost,
       apiKey: apiKeyFor("openai-compat", "OPENAI_API_KEY"),
+      headers: config.openaiCompatHeaders,
     }),
   ];
 

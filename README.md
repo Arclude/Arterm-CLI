@@ -1,15 +1,18 @@
 # Arterm-CLI
 
-A terminal AI coding agent that runs **local** models. Connect to a running
-[Ollama](https://ollama.com) server, point it at any **OpenAI-compatible**
-endpoint (LM Studio, vLLM, llama.cpp server, …), or load a `.gguf` file directly
-in-process via [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp) —
-no cloud, no API keys required. Arterm streams chat into a rich
+A terminal AI coding agent that runs **local models first** — connect to a
+running [Ollama](https://ollama.com) server, point it at any
+**OpenAI-compatible** endpoint (LM Studio, vLLM, llama.cpp server, …), or load a
+`.gguf` file directly in-process via
+[`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp), with no cloud
+and no API keys required. Hosted providers are also supported when you want
+them: Claude (API key or subscription login), OpenAI, Gemini, and more, with
+keys stored encrypted. Arterm streams chat into a rich
 [Ink](https://github.com/vadimdemedes/ink) TUI and can read, search, and edit
 your files and run shell commands through a permission-gated tool set.
 
 ```
-▌ARTERM v0.1.0  │  ● idle  │  ollama/qwen2.5:7b  │  ctx ██░░░░░░░░ 12%/32k  │  ↑1.2k ↓340
+▌ARTERM v0.1.2  │  ● idle  │  ollama/qwen2.5:7b  │  ctx ██░░░░░░░░ 12%/32k  │  ↑1.2k ↓340
 📁 my-project  │  ⎇ main  │  🔧 7 tools  │  ⏱ 15:45:27  │  ASK
 Enter send   ? help   Alt+P models   Esc cancel   ^C quit
 ```
@@ -21,13 +24,27 @@ Enter send   ? help   Alt+P models   Esc cancel   ^C quit
   status bar (provider, model, context gauge, token counts, branch, clock).
 - **Interactive model picker** — press **Alt+P** (or `/model`) for an arrow-key
   selectable list of available models with sizes; `?` opens help.
-- **File & shell tools** — `read`, `ls`, `glob`, `grep`, `write`, `edit`, and
-  `bash`, all sandboxed to the working directory.
+- **File & shell tools** — `read`, `ls`, `glob`, `grep`, `write`, `edit`,
+  `multi_edit`, `web_fetch`, `web_search`, git/test/lint helpers, and `bash`.
+  The file tools are sandboxed to the working directory; `bash` is **not**
+  sandboxed (it runs real shell commands) and is guarded by the permission
+  prompt instead.
 - **Permission system** — read-only tools auto-allow; tools that mutate state or
   run commands prompt before each call, with an "always allow" that persists.
-  `--yolo` skips prompts.
-- **Multiple providers** — Ollama over HTTP, any OpenAI-compatible server, or a
-  GGUF loaded directly with `node-llama-cpp`.
+  Four modes (`ask`/`auto`/`plan`/`yolo`) cycle with **Shift+Tab**.
+- **Multiple providers** — local: Ollama over HTTP, any OpenAI-compatible
+  server, or a GGUF loaded directly with `node-llama-cpp`. Hosted: Anthropic
+  (API key or `arterm login` subscription OAuth), OpenAI, Gemini, xAI, DeepSeek,
+  Groq, OpenRouter, Mistral.
+- **Autonomy & sub-agents** — `/goal` runs a decide→act→reflect loop;
+  `/autonomy` modes (`once`/`eternal`/`parallel`/`phased`) and `/sdd`
+  spec-driven fleets delegate to sub-agents in isolated git worktrees.
+- **Persistent memory** — a claude-mem-style pipeline captures observations per
+  project and recalls them into new sessions (`arterm memory serve` to browse).
+- **Multi-agent HQ dashboard** — `arterm --hq` or `/web` starts a local web
+  dashboard that live-monitors and steers every connected Arterm agent.
+- **Headless mode** — `arterm --print "prompt"` (or piped stdin) for scripts;
+  `--json` for structured output; `--resume`/`--continue` to pick up a session.
 - **Native + JSON-fallback tool-calling** — uses a backend's native
   function-calling API when the model supports it, and falls back to a
   model-agnostic JSON protocol parsed from the text when it doesn't.
@@ -77,6 +94,10 @@ arterm pull <model>          # download a model via Ollama
 | `-p, --provider <id>` | Provider: `ollama`, `llamacpp`, `openai-compat`, `anthropic`, or a hosted preset (`openai`, `gemini`, `xai`, `deepseek`, `groq`, `openrouter`, `mistral`). |
 | `-m, --model <name>`  | Model name (Ollama tag) or `.gguf` filename.          |
 | `--yolo`              | Skip all permission prompts for the session.          |
+| `--print <prompt>`    | Headless: run one prompt, print the reply, exit (add `--json` for structured output). |
+| `--resume <id>` / `--continue` | Resume a recorded session / the most recent one. |
+| `--goal <text>`       | Start in autonomy mode with this goal.                |
+| `--hq` / `--hq-port <n>` / `--hq-connect <url>` | Start or join the multi-agent HQ dashboard. |
 
 ### Inside the TUI
 
@@ -144,15 +165,22 @@ arterm --provider llamacpp --model <file.gguf>
 Arterm runs models that can read your files and execute shell commands, so it is
 built to be safe by default:
 
-- **Directory sandbox** — `read`, `write`, `edit`, `ls`, `glob`, and `grep` are
-  confined to the working directory; paths and glob patterns that escape it
-  (absolute paths, `..` segments) are refused — even the auto-allowed search
-  tools cannot read e.g. `~/.ssh` or `/etc`.
+- **Directory sandbox (file tools)** — `read`, `write`, `edit`, `ls`, `glob`,
+  and `grep` are confined to the working directory; paths and glob patterns that
+  escape it (absolute paths, `..` segments, symlinks) are refused — even the
+  auto-allowed search tools cannot read e.g. `~/.ssh` or `/etc`.
+- **`bash` is NOT sandboxed** — shell commands run with your full user
+  privileges and can touch anything outside the working directory. The
+  permission prompt (shown before every `bash` call unless you opt out) is the
+  real guard; treat "always allow" and `--yolo` accordingly.
 - **Permission prompts** — `write`, `edit`, and `bash` ask before every call
-  unless you opt out per-tool ("always allow") or globally (`--yolo`).
+  unless you opt out per-tool ("always allow") or globally (`--yolo`). Even
+  under `--yolo`, tools marked `deny` and calls the risk arbiter classifies as
+  critical are still blocked (fail-closed).
 - **Dangerous-command guard** — a few obviously destructive `bash` patterns
   (`rm -rf /`, `mkfs`, fork bombs, …) are refused outright. This is
-  defense-in-depth only; the permission prompt is the real guard.
+  defense-in-depth only and is bypassable; the permission prompt is the real
+  guard.
 - **Local by default** — no telemetry and no network calls beyond the model
   backend you configure.
 
@@ -186,6 +214,7 @@ everything depends on `core`, which owns the shared interfaces.
 | `@arterm/providers` | `OllamaProvider`, `OpenAICompatProvider`, `LlamaCppProvider` + registry.  |
 | `@arterm/tools`     | The file & shell tools and their registry.                               |
 | `@arterm/tui`       | The Ink terminal UI: chat, status bar, model picker, permission prompts.  |
+| `@arterm/memory`    | Persistent project memory (observation capture, digest, recall, search).  |
 | `arterm-cli`        | The published `arterm` binary (commander + session wiring).              |
 
 ```bash

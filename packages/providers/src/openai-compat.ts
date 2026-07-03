@@ -8,6 +8,7 @@ import type {
   TokenUsage,
   ToolSchema,
 } from "@arterm/core";
+import { fetchWithRetry } from "./retry.js";
 import { streamIdleGuard } from "./timeout.js";
 
 /** Max wait for metadata calls (model list/reachability) before giving up, in ms. */
@@ -52,6 +53,11 @@ export interface OpenAICompatOptions {
   id?: string;
   baseUrl: string;
   apiKey?: string;
+  /**
+   * Extra headers sent on every request. Some gateways (one-api/new-api relays)
+   * gate access on a recognized client User-Agent — this lets the user supply one.
+   */
+  headers?: Record<string, string>;
 }
 
 /** Talks to any OpenAI-compatible server (LM Studio, llama.cpp server, vLLM, ...). */
@@ -59,11 +65,13 @@ export class OpenAICompatProvider implements ChatProvider {
   readonly id: string;
   private baseUrl: string;
   private apiKey?: string;
+  private extraHeaders: Record<string, string>;
 
   constructor(opts: OpenAICompatOptions) {
     this.id = opts.id ?? "openai-compat";
     this.baseUrl = opts.baseUrl.replace(/\/$/, "");
     this.apiKey = opts.apiKey;
+    this.extraHeaders = opts.headers ?? {};
   }
 
   /** These servers accept the OpenAI `tools` param across models. */
@@ -115,12 +123,18 @@ export class OpenAICompatProvider implements ChatProvider {
     // accepts the connection but never streams can't hang the turn forever.
     const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
     try {
-      const res = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...this.headers() },
-        body: JSON.stringify(body),
-        signal: guard.signal,
-      });
+      // Retry only covers the connection phase — a transient 429/5xx or network
+      // blip shouldn't end the whole turn. Mid-stream failures still propagate.
+      const res = await fetchWithRetry(
+        `${this.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", ...this.headers() },
+          body: JSON.stringify(body),
+          signal: guard.signal,
+        },
+        { signal: guard.signal },
+      );
       if (!res.ok || !res.body) {
         const detail = await res.text().catch(() => "");
         throw new Error(`OpenAI-compat /chat/completions failed: ${res.status} ${detail}`);
@@ -174,7 +188,10 @@ export class OpenAICompatProvider implements ChatProvider {
   }
 
   private headers(): Record<string, string> {
-    return this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {};
+    return {
+      ...this.extraHeaders,
+      ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+    };
   }
 }
 

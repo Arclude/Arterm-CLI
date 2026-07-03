@@ -45,6 +45,7 @@ import { startHqAggregator } from "./hqAggregator.js";
 import { ensureAggregator } from "./hqAutostart.js";
 import { HQ_AGGREGATOR_PORT } from "./hqProtocol.js";
 import { connectHqReporter } from "./hqReporter.js";
+import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
@@ -592,6 +593,13 @@ async function main(): Promise<void> {
       } else {
         await startChat(globals);
       }
+    });
+
+  program
+    .command("init")
+    .description("interactive setup: provider, model, permission mode")
+    .action(async () => {
+      await runInit();
     });
 
   program

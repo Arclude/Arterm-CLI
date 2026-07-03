@@ -38,9 +38,19 @@ describe.skipIf(!gitAvailable)("worktree", () => {
 
   it("isGitRepo distinguishes repos from plain dirs", async () => {
     expect(await isGitRepo(repo)).toBe(true);
-    const plain = await fs.mkdtemp(join(tmpdir(), "arterm-plain-"));
-    expect(await isGitRepo(plain)).toBe(false);
-    await fs.rm(plain, { recursive: true, force: true });
+    const plain = realpathSync(await fs.mkdtemp(join(tmpdir(), "arterm-plain-")));
+    // Stop git's upward discovery at the temp dir — on machines where a parent
+    // of tmpdir() is itself a repo (e.g. a dotfiles repo in $HOME), the plain
+    // dir would otherwise be "inside" that outer work tree.
+    const prevCeiling = process.env.GIT_CEILING_DIRECTORIES;
+    process.env.GIT_CEILING_DIRECTORIES = tmpdir();
+    try {
+      expect(await isGitRepo(plain)).toBe(false);
+    } finally {
+      // An empty ceiling list is equivalent to unset (process.env can't hold undefined).
+      process.env.GIT_CEILING_DIRECTORIES = prevCeiling ?? "";
+      await fs.rm(plain, { recursive: true, force: true });
+    }
   });
 
   it("creates an isolated worktree on a fresh branch", async () => {

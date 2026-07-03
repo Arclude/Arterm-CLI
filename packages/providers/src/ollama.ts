@@ -9,6 +9,7 @@ import {
   modelToolCall,
 } from "@arterm/core";
 import { parseNdjson } from "./ndjson.js";
+import { fetchWithRetry } from "./retry.js";
 import { streamIdleGuard } from "./timeout.js";
 
 /** Abort a streaming chat if no bytes arrive for this long — bounds a hung server. */
@@ -147,12 +148,18 @@ export class OllamaProvider implements ChatProvider {
     // accepts the connection but never streams can't hang the turn forever.
     const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
     try {
-      const res = await fetch(`${this.host}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-        signal: guard.signal,
-      });
+      // Retry only covers the connection phase — a transient 429/5xx or network
+      // blip shouldn't end the whole turn. Mid-stream failures still propagate.
+      const res = await fetchWithRetry(
+        `${this.host}/api/chat`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: guard.signal,
+        },
+        { signal: guard.signal },
+      );
       if (!res.ok || !res.body) {
         const detail = await res.text().catch(() => "");
         throw new Error(`Ollama /api/chat failed: ${res.status} ${detail}`);
