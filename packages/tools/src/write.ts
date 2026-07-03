@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
-import { type Tool, writePreview } from "@arterm/core";
+import { type Tool, lineDiff, writePreview } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
 
@@ -22,11 +22,18 @@ export const writeTool: Tool = {
   preview: (args) =>
     writePreview(String(args.path), typeof args.content === "string" ? args.content : ""),
   async execute(args, ctx) {
-    const abs = resolveWithin(ctx.cwd, requireString(args, "path"));
+    const relPath = requireString(args, "path");
+    const abs = resolveWithin(ctx.cwd, relPath);
     const content = requireString(args, "content");
+    // Read the prior content (if any) so an overwrite renders as a real diff.
+    const before = await fs.readFile(abs, "utf8").catch(() => "");
     await fs.mkdir(dirname(abs), { recursive: true });
     await fs.writeFile(abs, content, "utf8");
     invalidateSearchIndex(ctx.cwd);
-    return { output: `Wrote ${content.length} bytes to ${args.path}` };
+    return {
+      output: `Wrote ${content.length} bytes to ${relPath}`,
+      diff: lineDiff(before, content),
+      path: relPath,
+    };
   },
 };

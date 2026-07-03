@@ -1,5 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { diffHunk, editPreview, toolCallPreview, writePreview } from "./diff.js";
+import { diffHunk, editPreview, lineDiff, toolCallPreview, writePreview } from "./diff.js";
+
+describe("lineDiff", () => {
+  it("returns [] for identical content", () => {
+    expect(lineDiff("a\nb\nc", "a\nb\nc")).toEqual([]);
+  });
+
+  it("numbers a single-line change and keeps surrounding context", () => {
+    const before = "l1\nl2\nl3\nl4\nl5";
+    const after = "l1\nl2\nX\nl4\nl5";
+    const rows = lineDiff(before, after);
+    // context l1,l2 (both nums), the del l3 (old 3), the add X (new 3), context l4,l5.
+    expect(rows.filter((r) => r.kind === "del")).toEqual([{ kind: "del", old: 3, text: "l3" }]);
+    expect(rows.filter((r) => r.kind === "add")).toEqual([{ kind: "add", new: 3, text: "X" }]);
+    const ctx = rows.filter((r) => r.kind === "context");
+    expect(ctx).toContainEqual({ kind: "context", old: 2, new: 2, text: "l2" });
+    expect(ctx).toContainEqual({ kind: "context", old: 4, new: 4, text: "l4" });
+  });
+
+  it("collapses far-apart unchanged regions behind a hunk header", () => {
+    const before = Array.from({ length: 40 }, (_, i) => `l${i + 1}`).join("\n");
+    const after = before.replace("l1", "X1").replace("l40", "X40");
+    const rows = lineDiff(before, after);
+    // The 30+ unchanged middle lines are dropped; a hunk header marks the gap.
+    expect(rows.some((r) => r.kind === "hunk")).toBe(true);
+    expect(rows.some((r) => r.kind === "context" && r.text === "l20")).toBe(false);
+  });
+
+  it("treats a brand-new file as all additions", () => {
+    const rows = lineDiff("", "a\nb");
+    expect(rows).toEqual([
+      { kind: "add", new: 1, text: "a" },
+      { kind: "add", new: 2, text: "b" },
+    ]);
+  });
+});
 
 describe("diffHunk", () => {
   it("renders old lines as removals and new lines as additions", () => {

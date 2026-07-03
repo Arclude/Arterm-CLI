@@ -1,4 +1,4 @@
-import type { AutonomyMode, Message, TokenUsage, ToolCall } from "./types.js";
+import type { AutonomyMode, DiffRow, Message, TokenUsage, ToolCall } from "./types.js";
 
 /** Lifecycle + observability events emitted by the agent loop. */
 export type AgentEvent =
@@ -6,7 +6,17 @@ export type AgentEvent =
   | { type: "text_delta"; delta: string }
   | { type: "assistant_message"; message: Message }
   | { type: "tool_call"; call: ToolCall }
-  | { type: "tool_result"; callId: string; name: string; output: string; isError: boolean }
+  | {
+      type: "tool_result";
+      callId: string;
+      name: string;
+      output: string;
+      isError: boolean;
+      /** Rich per-line diff for file-mutating tools (rendered in the transcript). */
+      diff?: DiffRow[];
+      /** Path the mutating tool changed (feeds the "changed files" turn summary). */
+      path?: string;
+    }
   | { type: "tool_denied"; callId: string; name: string; reason?: string }
   | { type: "usage"; usage: TokenUsage }
   | { type: "context_compacted"; before: number; after: number; reason: "auto" | "manual" }

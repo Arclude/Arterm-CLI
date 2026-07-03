@@ -1,4 +1,4 @@
-import type { Message, Tool, ToolCall } from "../types.js";
+import type { DiffRow, Message, Tool, ToolCall } from "../types.js";
 
 /** Koa-style middleware: do work around `next()`, which runs the rest of the chain. */
 export type Middleware<Ctx> = (ctx: Ctx, next: () => Promise<void>) => Promise<void>;
@@ -85,6 +85,10 @@ export interface ToolCallCtx {
   tool?: Tool;
   output?: string;
   isError?: boolean;
+  /** Rich per-line diff produced by a file-mutating tool (edit/write/multi_edit). */
+  diff?: DiffRow[];
+  /** Path of the file a mutating tool changed. */
+  path?: string;
 }
 export interface ContextWindowCtx {
   messages: Message[];

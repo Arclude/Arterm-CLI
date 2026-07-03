@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { type Tool, multiEditPreview } from "@arterm/core";
+import { type Tool, lineDiff, multiEditPreview } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
 
@@ -69,7 +69,8 @@ export const multiEditTool: Tool = {
     }
   },
   async execute(args, ctx) {
-    const abs = resolveWithin(ctx.cwd, requireString(args, "path"));
+    const relPath = requireString(args, "path");
+    const abs = resolveWithin(ctx.cwd, relPath);
     let edits: OneEdit[];
     try {
       edits = asEdits(args.edits);
@@ -79,7 +80,8 @@ export const multiEditTool: Tool = {
     if (edits.length === 0) return { output: "edits is empty.", isError: true };
 
     // Apply to an in-memory copy; persist only if EVERY edit matches (atomic).
-    let content = await fs.readFile(abs, "utf8");
+    const original = await fs.readFile(abs, "utf8");
+    let content = original;
     for (const [i, edit] of edits.entries()) {
       const count = content.split(edit.old_string).length - 1;
       if (count === 0) {
@@ -100,6 +102,10 @@ export const multiEditTool: Tool = {
     }
     await fs.writeFile(abs, content, "utf8");
     invalidateSearchIndex(ctx.cwd);
-    return { output: `Applied ${edits.length} edit(s) to ${args.path}` };
+    return {
+      output: `Applied ${edits.length} edit(s) to ${relPath}`,
+      diff: lineDiff(original, content),
+      path: relPath,
+    };
   },
 };

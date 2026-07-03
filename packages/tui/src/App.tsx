@@ -322,7 +322,7 @@ export function App({
 
   const abortRef = useRef<AbortController | null>(null);
   const turnStartRef = useRef(0);
-  const turnRef = useRef({ inTok: 0, outTok: 0, rounds: 0 });
+  const turnRef = useRef({ inTok: 0, outTok: 0, rounds: 0, changedFiles: new Set<string>() });
 
   const push = useCallback((item: DisplayItem) => setItems((prev) => [...prev, item]), []);
 
@@ -422,7 +422,7 @@ export function App({
           setLive("");
           setScrollOffset(0); // jump to the newest output when a turn begins
           turnStartRef.current = Date.now();
-          turnRef.current = { inTok: 0, outTok: 0, rounds: 0 };
+          turnRef.current = { inTok: 0, outTok: 0, rounds: 0, changedFiles: new Set<string>() };
           break;
         case "text_delta":
           // Accumulate streamed tokens for a live preview; replaced by the committed
@@ -436,24 +436,31 @@ export function App({
           turnRef.current.rounds += 1;
           break;
         }
-        case "tool_call":
+        case "tool_call": {
           setStatus("tool");
+          // For mutating tools show only a compact header at call time — the rich
+          // line-numbered diff is rendered on the result once it's applied.
+          const preview = toolCallPreview(event.call.name, event.call.arguments);
           push({
             kind: "tool",
             name: event.call.name,
             args: JSON.stringify(event.call.arguments),
-            diff: toolCallPreview(event.call.name, event.call.arguments) ?? undefined,
+            diff: preview ? (preview.split("\n")[0] ?? undefined) : undefined,
           });
           break;
+        }
         case "tool_result":
           push({
             kind: "tool",
             name: event.name,
             output: event.output,
             isError: event.isError,
+            diffRows: event.diff,
+            path: event.path,
             bytes: event.output.length,
             tok: Math.ceil(event.output.length / 4),
           });
+          if (event.path && !event.isError) turnRef.current.changedFiles.add(event.path);
           setStatus("thinking");
           break;
         case "tool_denied":
@@ -605,9 +612,16 @@ export function App({
         case "error":
           push({ kind: "system", text: `error: ${event.error}` });
           break;
-        case "turn_end":
+        case "turn_end": {
           setStatus("idle");
           setLive("");
+          const changed = [...turnRef.current.changedFiles];
+          if (changed.length > 0) {
+            push({
+              kind: "system",
+              text: `✎ ${changed.length} file(s) changed: ${changed.join(", ")}`,
+            });
+          }
           push({
             kind: "stats",
             inTok: turnRef.current.inTok,
@@ -616,6 +630,7 @@ export function App({
             ms: Date.now() - turnStartRef.current,
           });
           break;
+        }
       }
     });
   }, [session, push]);

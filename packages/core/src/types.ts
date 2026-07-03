@@ -73,11 +73,29 @@ export interface ChatProvider {
 }
 
 /** Result returned by a tool's execute(). */
+/** One rendered line of a file diff, for rich transcript rendering (TUI-only). */
+export interface DiffRow {
+  kind: "context" | "add" | "del" | "hunk";
+  /** 1-based old-file line number (present on context + del rows). */
+  old?: number;
+  /** 1-based new-file line number (present on context + add rows). */
+  new?: number;
+  /** The line's code text, or the "@@ … @@" header for a `hunk` row. */
+  text: string;
+}
+
 export interface ToolResult {
   /** Text fed back to the model as the tool result. */
   output: string;
   /** True when the tool failed; the model is told so it can recover. */
   isError?: boolean;
+  /**
+   * Rich per-line diff for file-mutating tools (edit/write/multi_edit), rendered
+   * in the transcript. TUI-only metadata — it is NOT sent to the model.
+   */
+  diff?: DiffRow[];
+  /** Path of the file a mutating tool changed (drives the "changed files" summary). */
+  path?: string;
 }
 
 export type PermissionLevel = "allow" | "ask" | "deny";

@@ -3,6 +3,7 @@ import type {
   ArtermConfig,
   AutonomyEngine,
   CompactionResult,
+  DiffRow,
   EventBus,
   McpServerSummary,
   ModelInfo,
@@ -118,6 +119,10 @@ export type DisplayItem =
       args?: string;
       /** Pretty diff preview (edit/write/multi_edit), rendered instead of raw args. */
       diff?: string;
+      /** Rich line-numbered diff from a completed mutating tool (rendered on the result). */
+      diffRows?: DiffRow[];
+      /** Path a mutating tool changed (shown in the diff header). */
+      path?: string;
       output?: string;
       isError?: boolean;
       ms?: number;

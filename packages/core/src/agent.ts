@@ -14,6 +14,7 @@ import { estimateHistoryTokens } from "./tokenEstimate.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
   ChatProvider,
+  DiffRow,
   Message,
   PermissionAsker,
   SkillInfo,
@@ -194,6 +195,8 @@ export class Agent {
           });
           ctx.output = result.output;
           ctx.isError = result.isError ?? false;
+          ctx.diff = result.diff;
+          ctx.path = result.path;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           ctx.output = `Tool error: ${msg}`;
@@ -528,17 +531,31 @@ export class Agent {
     // `permission` + `execute`); the agent owns only recording the outcome back into
     // history, so a feature can re-gate or wrap execution without touching this method.
     const ctx = await this.pipelines.toolCall.run({ call, signal });
-    await this.pushToolResult(call, ctx.output ?? "", ctx.isError ?? false);
+    await this.pushToolResult(call, ctx.output ?? "", ctx.isError ?? false, ctx.diff, ctx.path);
   }
 
-  private async pushToolResult(call: ToolCall, output: string, isError: boolean): Promise<void> {
+  private async pushToolResult(
+    call: ToolCall,
+    output: string,
+    isError: boolean,
+    diff?: DiffRow[],
+    path?: string,
+  ): Promise<void> {
     await this.record({
       role: "tool",
       content: output,
       toolCallId: call.id,
       name: call.name,
     });
-    this.bus.emit({ type: "tool_result", callId: call.id, name: call.name, output, isError });
+    this.bus.emit({
+      type: "tool_result",
+      callId: call.id,
+      name: call.name,
+      output,
+      isError,
+      diff,
+      path,
+    });
   }
 
   /** Append a message to history and notify the persistence hook. */

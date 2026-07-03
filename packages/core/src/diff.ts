@@ -6,8 +6,137 @@
  * is the diff body.
  */
 
+import type { DiffRow } from "./types.js";
+
 /** Max diff-body lines shown in a preview before truncating. */
 const MAX_LINES = 20;
+
+/** Lines of context kept around each change in a rich diff. */
+const CONTEXT = 3;
+/** Cap on rendered rows in a rich diff before truncating. */
+const MAX_ROWS = 80;
+/** Above this old×new line product we skip LCS and show a plain removed/added block. */
+const LCS_BUDGET = 250_000;
+
+function splitLines(s: string): string[] {
+  return s.length === 0 ? [] : s.split("\n");
+}
+
+type Op = { t: "eq" | "del" | "add"; text: string };
+
+/** Ordered LCS diff of two line arrays (equal / deleted / added, in place). */
+function lcsDiff(x: string[], y: string[]): Op[] {
+  const n = x.length;
+  const m = y.length;
+  // dp[i][j] = LCS length of x[i:] and y[j:]
+  const dp: Uint32Array[] = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i]![j] =
+        x[i] === y[j]
+          ? (dp[i + 1]![j + 1] ?? 0) + 1
+          : Math.max(dp[i + 1]![j] ?? 0, dp[i]![j + 1] ?? 0);
+    }
+  }
+  const ops: Op[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (x[i] === y[j]) {
+      ops.push({ t: "eq", text: x[i]! });
+      i++;
+      j++;
+    } else if ((dp[i + 1]![j] ?? 0) >= (dp[i]![j + 1] ?? 0)) {
+      ops.push({ t: "del", text: x[i]! });
+      i++;
+    } else {
+      ops.push({ t: "add", text: y[j]! });
+      j++;
+    }
+  }
+  while (i < n) ops.push({ t: "del", text: x[i++]! });
+  while (j < m) ops.push({ t: "add", text: y[j++]! });
+  return ops;
+}
+
+/**
+ * Compute a git-style, line-numbered diff of two file contents: unchanged lines are
+ * `context` (with both line numbers), removals are `del`, additions are `add`. Common
+ * head/tail are trimmed first (so only the changed region is diffed), unchanged runs
+ * larger than the context window collapse behind a `hunk` header, and the whole thing
+ * is capped at MAX_ROWS. Returns [] when the contents are identical.
+ */
+export function lineDiff(before: string, after: string): DiffRow[] {
+  const a = splitLines(before);
+  const b = splitLines(after);
+
+  // Trim common prefix / suffix so LCS only runs on the region that actually changed.
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--;
+    endB--;
+  }
+  const midA = a.slice(start, endA);
+  const midB = b.slice(start, endB);
+  if (midA.length === 0 && midB.length === 0) return [];
+
+  const midOps: Op[] =
+    midA.length * midB.length > LCS_BUDGET
+      ? [
+          ...midA.map((text): Op => ({ t: "del", text })),
+          ...midB.map((text): Op => ({ t: "add", text })),
+        ]
+      : lcsDiff(midA, midB);
+
+  const ops: Op[] = [
+    ...a.slice(0, start).map((text): Op => ({ t: "eq", text })),
+    ...midOps,
+    ...a.slice(endA).map((text): Op => ({ t: "eq", text })),
+  ];
+
+  // Attach line numbers.
+  let oldNo = 0;
+  let newNo = 0;
+  const rows: DiffRow[] = ops.map((op) => {
+    if (op.t === "eq") return { kind: "context", text: op.text, old: ++oldNo, new: ++newNo };
+    if (op.t === "del") return { kind: "del", text: op.text, old: ++oldNo };
+    return { kind: "add", text: op.text, new: ++newNo };
+  });
+
+  return collapseContext(rows);
+}
+
+/** Keep only rows within CONTEXT of a change; collapse the gaps behind hunk headers. */
+function collapseContext(rows: DiffRow[]): DiffRow[] {
+  const keep = new Array(rows.length).fill(false);
+  rows.forEach((r, i) => {
+    if (r.kind !== "add" && r.kind !== "del") return;
+    for (let k = Math.max(0, i - CONTEXT); k <= Math.min(rows.length - 1, i + CONTEXT); k++) {
+      keep[k] = true;
+    }
+  });
+
+  const out: DiffRow[] = [];
+  let prev = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (!keep[i]) continue;
+    if (i > prev + 1) {
+      const r = rows[i]!;
+      out.push({ kind: "hunk", text: `@@ -${r.old ?? "?"} +${r.new ?? "?"} @@` });
+    }
+    out.push(rows[i]!);
+    prev = i;
+    if (out.length >= MAX_ROWS) {
+      const hidden = rows.length - i - 1;
+      if (hidden > 0) out.push({ kind: "hunk", text: `… ${hidden} more line(s)` });
+      break;
+    }
+  }
+  return out;
+}
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";

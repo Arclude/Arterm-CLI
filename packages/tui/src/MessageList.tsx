@@ -1,3 +1,4 @@
+import type { DiffRow } from "@arterm/core";
 import { Box, Text } from "ink";
 import type React from "react";
 import { Markdown } from "./markdown.js";
@@ -52,6 +53,65 @@ function diffLineColor(line: string): string {
   if (c === "-") return "red";
   if (c === "@" || c === "…") return "cyan";
   return "gray";
+}
+
+/**
+ * Rich, git-style diff rendered from a completed edit/write/multi_edit: a line-number
+ * gutter (old · new) beside each line, removals red, additions green, context in the
+ * default colour, and collapsed regions marked by a cyan hunk header.
+ */
+function DiffView({
+  path,
+  rows,
+  isError,
+  outcome,
+}: {
+  path?: string;
+  rows: DiffRow[];
+  isError?: boolean;
+  outcome?: string;
+}): React.ReactElement {
+  const width = rows.reduce((m, r) => Math.max(m, r.old ?? 0, r.new ?? 0), 0).toString().length;
+  const pad = (n?: number): string =>
+    n === undefined ? " ".repeat(width) : String(n).padStart(width);
+  return (
+    <Box flexDirection="column">
+      <Text color={isError ? "red" : "yellow"} bold>
+        {"✎ "}
+        {path ?? "edit"}
+      </Text>
+      <Box flexDirection="column" paddingLeft={1}>
+        {rows.map((r, i) => {
+          if (r.kind === "hunk") {
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static diff rows, never reordered
+              <Text key={i} color="cyan" dimColor>
+                {r.text}
+              </Text>
+            );
+          }
+          const marker = r.kind === "add" ? "+" : r.kind === "del" ? "-" : " ";
+          const color = r.kind === "add" ? "green" : r.kind === "del" ? "red" : undefined;
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static diff rows, never reordered
+            <Text key={i} wrap="truncate-end">
+              <Text color="gray" dimColor>
+                {pad(r.old)} {pad(r.new)} │{" "}
+              </Text>
+              <Text color={color}>
+                {marker} {r.text.length > 0 ? r.text : " "}
+              </Text>
+            </Text>
+          );
+        })}
+      </Box>
+      {isError && outcome ? (
+        <Box paddingLeft={1}>
+          <Text color="red">└─ {truncate(outcome, 200)}</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
 }
 
 /** Grouped command reference, rendered by the `help` item. */
@@ -184,6 +244,17 @@ export function Item({ item }: { item: DisplayItem }): React.ReactElement {
         </MessageBlock>
       );
     case "tool": {
+      // A completed mutating tool (edit/write/multi_edit) renders its rich diff.
+      if (item.diffRows && item.diffRows.length > 0) {
+        return (
+          <DiffView
+            path={item.path}
+            rows={item.diffRows}
+            isError={item.isError}
+            outcome={item.output}
+          />
+        );
+      }
       // A result row (output, no args) renders only the indented tree line so it
       // reads as the continuation of its call row rather than a second "• name".
       if (item.output !== undefined && item.args === undefined) {

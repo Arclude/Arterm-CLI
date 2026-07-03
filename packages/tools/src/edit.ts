@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { type Tool, editPreview } from "@arterm/core";
+import { type Tool, editPreview, lineDiff } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
 
@@ -30,7 +30,8 @@ export const editTool: Tool = {
       args.replace_all === true,
     ),
   async execute(args, ctx) {
-    const abs = resolveWithin(ctx.cwd, requireString(args, "path"));
+    const relPath = requireString(args, "path");
+    const abs = resolveWithin(ctx.cwd, relPath);
     const oldStr = requireString(args, "old_string");
     const newStr = typeof args.new_string === "string" ? args.new_string : "";
     const replaceAll = args.replace_all === true;
@@ -54,6 +55,10 @@ export const editTool: Tool = {
       : content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
     await fs.writeFile(abs, updated, "utf8");
     invalidateSearchIndex(ctx.cwd);
-    return { output: `Replaced ${replaceAll ? count : 1} occurrence(s) in ${args.path}` };
+    return {
+      output: `Replaced ${replaceAll ? count : 1} occurrence(s) in ${relPath}`,
+      diff: lineDiff(content, updated),
+      path: relPath,
+    };
   },
 };
