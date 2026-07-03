@@ -53,8 +53,12 @@ function atLeast(a: RiskAssessment, floor: RiskLevel, reason: string): RiskAsses
 export function assessRisk(tool: Tool, args: Record<string, unknown>): RiskAssessment {
   const category: ToolCategory = tool.category ?? "execute";
   const base = assessByArgs(tool, args, category);
-  // A tool tagged intrinsically destructive is escalated even when its args look benign.
-  if (tool.riskTier === "destructive") {
+  // A destructive-tier tool is floored at "high" even when its args look benign —
+  // but NOT for shell/execute tools, whose real risk is already judged from the
+  // actual command above (CRITICAL_BASH / HIGH_BASH). Blanket-bumping every command
+  // would escalate even `ls`, so routine commands could never run without a prompt.
+  // This way `rm -rf` / `sudo` stay caught while safe commands pass through as-is.
+  if (tool.riskTier === "destructive" && category !== "execute") {
     return atLeast(base, "high", `destructive tool: ${tool.name}`);
   }
   return base;

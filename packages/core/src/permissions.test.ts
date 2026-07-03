@@ -89,7 +89,7 @@ describe("PermissionManager", () => {
     expect(safe.allowed).toBe(true);
   });
 
-  it("auto mode approves edits silently but still asks for execute tools", async () => {
+  it("auto mode approves edits silently but still asks for execute tools without an arbiter", async () => {
     const ask = vi.fn().mockResolvedValue("deny");
     const pm = new PermissionManager({}, "auto");
 
@@ -97,9 +97,26 @@ describe("PermissionManager", () => {
     expect(edit.allowed).toBe(true);
     expect(ask).not.toHaveBeenCalled();
 
+    // No arbiter to screen the command → execute still prompts (fail-safe).
     const exec = await pm.check(tool("bash", "ask", "execute"), {}, ask);
     expect(ask).toHaveBeenCalledOnce();
     expect(exec.allowed).toBe(false);
+  });
+
+  it("auto mode + arbiter runs safe shell commands silently but escalates risky ones", async () => {
+    const ask = vi.fn().mockResolvedValue("deny");
+    const pm = new PermissionManager({}, "auto", new RiskArbiter());
+    const bash: Tool = { ...tool("bash", "ask", "execute"), riskTier: "destructive" };
+
+    // A routine command runs without a prompt, even though bash is destructive-tier.
+    const safe = await pm.check(bash, { command: "ls -la" }, ask);
+    expect(safe.allowed).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+
+    // A risky command is escalated to the human.
+    const risky = await pm.check(bash, { command: "rm -rf node_modules" }, ask);
+    expect(ask).toHaveBeenCalledOnce();
+    expect(risky.allowed).toBe(false);
   });
 
   it("plan mode blocks edits/execute without asking but allows reads", async () => {

@@ -48,12 +48,16 @@ describe("assessRisk", () => {
     );
   });
 
-  it("raises a destructive-tier tool to at least high even with benign args", () => {
-    // Same args rate medium without the tier...
-    expect(assessRisk(tool("danger", "execute"), { command: "ls" }).level).toBe("medium");
-    // ...but the intrinsic tier escalates it.
-    const t: Tool = { ...tool("danger", "execute"), riskTier: "destructive" };
-    expect(assessRisk(t, { command: "ls" }).level).toBe("high");
+  it("floors a NON-execute destructive-tier tool at high, but leaves execute arg-driven", () => {
+    // A non-execute destructive tool is escalated even when its args look benign.
+    const nonExec: Tool = { ...tool("danger", "edit"), riskTier: "destructive" };
+    expect(assessRisk(nonExec, { path: "a.ts" }).level).toBe("high");
+    // But a destructive EXECUTE tool (like bash) is judged from the actual command, so
+    // routine commands stay low-risk (auto mode can run them) while dangerous args still
+    // escalate — the blanket bump would have forced even `ls` to a prompt.
+    const bash: Tool = { ...tool("bash", "execute"), riskTier: "destructive" };
+    expect(assessRisk(bash, { command: "ls" }).level).toBe("medium");
+    expect(assessRisk(bash, { command: "rm -rf node_modules" }).level).toBe("high");
   });
 
   it("keeps a destructive-tier tool critical when its args are catastrophic", () => {

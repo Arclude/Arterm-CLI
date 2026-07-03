@@ -4,7 +4,9 @@ import type { PermissionAsker, PermissionLevel, Tool, ToolCategory } from "./typ
 /**
  * Session permission mode (cycle with Shift+Tab in the TUI):
  *   - "ask":  prompt before edit/execute tools (the default).
- *   - "auto": auto-approve file edits; still prompt for shell/execute tools.
+ *   - "auto": auto-approve file edits and arbiter-screened safe shell commands;
+ *             risky commands (rm -rf, sudo, force-push…) still prompt, critical ones
+ *             are denied. Without an arbiter, execute tools still prompt.
  *   - "plan": read-only — block every edit/execute tool, no prompts.
  *   - "yolo": approve everything without prompts, BUT stay fail-closed —
  *             a tool-level deny and an arbiter "critical" verdict still block.
@@ -115,10 +117,14 @@ export class PermissionManager {
       return { allowed: true, persist: false };
     }
 
-    // Auto mode silently approves file edits, but still prompts for execute tools
-    // (and anything the arbiter escalated or the destructive gate caught).
-    if (!forceAsk && this.mode === "auto" && category === "edit") {
-      return { allowed: true, persist: false };
+    // Auto mode silently approves file edits. It ALSO runs shell/execute commands
+    // without a prompt — but only while an arbiter is screening them: safe commands
+    // pass, risky ones (rm -rf, sudo, force-push…) were escalated above, and critical
+    // ones were already denied. With no arbiter there's nothing screening the command,
+    // so execute tools still prompt (fail-safe).
+    if (!forceAsk && this.mode === "auto") {
+      if (category === "edit") return { allowed: true, persist: false };
+      if (category === "execute" && this.arbiter) return { allowed: true, persist: false };
     }
 
     return this.prompt(tool, args, ask);
