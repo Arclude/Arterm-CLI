@@ -69,4 +69,31 @@ describe("createOllamaEmbedder", () => {
     const e = createOllamaEmbedder({ host: "http://x" });
     expect(await e.embed("hi")).toBeNull();
   });
+
+  it("passes an abort signal to fetch so the wait is bounded", async () => {
+    const spy = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      return { ok: true, json: async () => ({ embedding: [1] }) };
+    });
+    vi.stubGlobal("fetch", spy);
+    await createOllamaEmbedder({ host: "http://x" }).embed("hi");
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("aborts and returns null when the host hangs past the timeout", async () => {
+    // Respect the abort signal instead of ever resolving — models a dead host that
+    // accepted the socket. Without the timeout this would hang embed() forever.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            const signal = init.signal as AbortSignal;
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+      ),
+    );
+    const e = createOllamaEmbedder({ host: "http://x", timeoutMs: 20 });
+    expect(await e.embed("hi")).toBeNull();
+  });
 });

@@ -414,3 +414,58 @@ describe("Agent streaming seams (userInput / request / response / assistantOutpu
     expect(agent.history.some((m) => m.role === "assistant")).toBe(false);
   });
 });
+
+/** A provider whose `chat()` rejects on first iteration — models a network outage. */
+class ThrowingProvider implements ChatProvider {
+  readonly id = "boom";
+  supportsNativeTools(): boolean {
+    return true;
+  }
+  async listModels() {
+    return [];
+  }
+  chat(_req: ChatRequest): AsyncIterable<ChatChunk> {
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<ChatChunk> {
+        return { next: () => Promise.reject(new Error("network down")) };
+      },
+    };
+  }
+}
+
+describe("Agent.assess / plan resilience", () => {
+  it("assess() resolves not-done instead of rejecting when the provider throws", async () => {
+    const agent = makeAgent(new ThrowingProvider(), new EventBus());
+    const verdict = await agent.assess("ship it");
+    expect(verdict.done).toBe(false);
+    expect(verdict.note).toMatch(/assessment failed/i);
+  });
+
+  it("plan() resolves an empty string instead of rejecting when the provider throws", async () => {
+    const agent = makeAgent(new ThrowingProvider(), new EventBus());
+    expect(await agent.plan("decompose the goal")).toBe("");
+  });
+});
+
+describe("Agent.run pre-try I/O safety", () => {
+  it("surfaces a failed user-message persist as an error event and still fires turn_end", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const agent = new Agent({
+      provider: new StubProvider(),
+      model: "m",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus,
+      cwd: process.cwd(),
+      onMessage: (m) => {
+        if (m.role === "user") throw new Error("disk full");
+      },
+    });
+    // Must not reject — a transcript-write failure should degrade gracefully.
+    await expect(agent.run("hello")).resolves.toBeUndefined();
+    expect(events.some((e) => e.type === "error")).toBe(true);
+    expect(events.filter((e) => e.type === "turn_end")).toHaveLength(1);
+  });
+});

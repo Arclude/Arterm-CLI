@@ -14,7 +14,12 @@ export interface RiskAssessment {
   reason?: string;
 }
 
-/** Truly destructive shell commands — denied outright. */
+/**
+ * Truly destructive shell commands — denied outright. Covers both POSIX shells
+ * and Windows cmd/PowerShell, because the `bash` tool runs with `shell: true`
+ * (so on Windows the command reaches cmd.exe/PowerShell). Windows patterns are
+ * case-insensitive; they target whole-drive / system-root wipes only.
+ */
 const CRITICAL_BASH: RegExp[] = [
   /rm\s+-[rf]{1,2}\s+\/(?:\s|$)/,
   /rm\s+-[rf]{1,2}\s+~(?:\/\s|\s|$)/,
@@ -23,6 +28,14 @@ const CRITICAL_BASH: RegExp[] = [
   /:\s*\(\s*\)\s*\{[^}]*\}\s*;/,
   /--no-preserve-root/,
   />\s*\/dev\/sd[a-z]/,
+  // Windows — irreversible whole-disk / system-root destruction.
+  /\bformat\b[^\n]{0,40}\b[a-z]:(?:\\|\s|"|$)/i,
+  /\bformat-volume\b/i,
+  /\bclear-disk\b/i,
+  /\bcipher\b[^\n]*\/w[:\s]/i,
+  /\b(?:rd|rmdir|del)\b[^\n]*?\/s\b[^\n]*?\b[a-z]:\\?(?:\s|"|\*|$)/i,
+  /\bremove-item\b[^\n]*?-recurse\b[^\n]*?\b[a-z]:\\?(?:\s|"|$)/i,
+  /\b(?:rd|rmdir|del|remove-item)\b[^\n]*?(?:\/s\b|-recurse\b)[^\n]*?(?:%SystemDrive%|%SystemRoot%|%WinDir%|\$env:SystemRoot|\$env:windir)/i,
 ];
 
 /** Risky-but-sometimes-legitimate commands — escalated to the human. */
@@ -37,6 +50,25 @@ const HIGH_BASH: RegExp[] = [
   /\bnpm\s+publish\b/,
   /\bkill(all)?\b\s+-9\b/,
   />\s*\/etc\//,
+  // Windows — recursive deletes, privilege escalation, remote exec, system tampering.
+  /\bremove-item\b[^\n]*-recurse\b/i,
+  /\b(?:rd|rmdir)\b[^\n]*\/s\b/i,
+  /\bdel\b[^\n]*\/s\b/i,
+  /\brunas\b/i,
+  /\bstart-process\b[^\n]*-verb\s+runas/i,
+  /(?:downloadstring|invoke-webrequest|iwr|wget|curl)\b[^\n]*\|\s*(?:iex|invoke-expression)/i,
+  /\b(?:iex|invoke-expression)\b[^\n]*(?:downloadstring|invoke-webrequest|iwr|http)/i,
+  /\bset-executionpolicy\b/i,
+  /\breg\b\s+delete\b/i,
+  /\bbcdedit\b/i,
+  /\btakeown\b/i,
+  /\bicacls\b[^\n]*\/grant/i,
+  /\bnet\b\s+(?:user|localgroup)\b[^\n]*\/add\b/i,
+  /\bsc\b\s+delete\b/i,
+  /\bdiskpart\b/i,
+  /\bvssadmin\b[^\n]*\bdelete\b/i,
+  /\bwevtutil\b[^\n]*\bcl\b/i,
+  /\bset-mppreference\b[^\n]*-disablerealtimemonitoring/i,
 ];
 
 /** Paths whose edits warrant a human look (secrets, keys, git internals). */

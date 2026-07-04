@@ -684,6 +684,22 @@ async function main(): Promise<void> {
   await program.parseAsync(process.argv);
 }
 
+// A stray rejection from fire-and-forget background work (an autonomy reflection,
+// the on-exit memory digest, an HQ reporter socket) must not tear down an active
+// session. Registering these handlers also stops Node from terminating the process
+// on an unhandled rejection. Output is debug-gated so it never corrupts the Ink TUI.
+process.on("unhandledRejection", (reason) => {
+  if (process.env.ARTERM_DEBUG) {
+    const msg = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+    process.stderr.write(`unhandled rejection: ${msg}\n`);
+  }
+});
+process.on("uncaughtException", (err) => {
+  if (process.env.ARTERM_DEBUG) {
+    process.stderr.write(`uncaught exception: ${err instanceof Error ? err.stack : String(err)}\n`);
+  }
+});
+
 main().catch((err) => {
   // Expected, actionable failures print just their message — the CLI shouldn't
   // dump a stack for a bad flag or an unreachable service.

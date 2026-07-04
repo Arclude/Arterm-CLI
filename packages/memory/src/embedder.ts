@@ -35,9 +35,14 @@ function tokenize(text: string): string[] {
  * base URL (e.g. `http://127.0.0.1:11434`). Returns `null` on any network/parse
  * error or when the model is missing, so shutdown is never blocked.
  */
-export function createOllamaEmbedder(opts: { host: string; model?: string }): Embedder {
+export function createOllamaEmbedder(opts: {
+  host: string;
+  model?: string;
+  timeoutMs?: number;
+}): Embedder {
   const model = opts.model?.trim() ? opts.model.trim() : "nomic-embed-text";
   const base = opts.host.replace(/\/+$/, "");
+  const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 10_000;
   return {
     id: `ollama:${model}`,
     dims: 768,
@@ -45,10 +50,15 @@ export function createOllamaEmbedder(opts: { host: string; model?: string }): Em
       const prompt = text.trim();
       if (!prompt) return null;
       try {
+        // A host that accepts the socket but never responds would otherwise hang
+        // embed() forever — it's awaited during recall/digest, so an unbounded wait
+        // stalls the whole session (incl. shutdown). The catch below turns the
+        // resulting AbortError into a null, matching every other failure path.
         const res = await fetch(`${base}/api/embeddings`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ model, prompt }),
+          signal: AbortSignal.timeout(timeoutMs),
         });
         if (!res.ok) return null;
         const data = (await res.json()) as { embedding?: unknown };

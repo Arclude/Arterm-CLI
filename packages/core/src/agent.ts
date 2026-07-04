@@ -313,19 +313,27 @@ export class Agent {
    */
   async assess(goal: string, signal?: AbortSignal): Promise<{ done: boolean; note: string }> {
     const { provider, model } = this.opts;
-    const system = await this.buildSystem(true);
     const probe: Message = {
       role: "user",
       content: `GOAL: "${goal}"\nConsidering everything done so far, is the goal FULLY complete? Reply with exactly "DONE" if it is finished, otherwise "CONTINUE" and one line on the next step.`,
     };
     let text = "";
-    for await (const chunk of provider.chat({
-      model,
-      messages: [system, ...this.messages, probe],
-      temperature: 0,
-      signal,
-    })) {
-      if (chunk.type === "text") text += chunk.delta;
+    try {
+      const system = await this.buildSystem(true);
+      for await (const chunk of provider.chat({
+        model,
+        messages: [system, ...this.messages, probe],
+        temperature: 0,
+        signal,
+      })) {
+        if (chunk.type === "text") text += chunk.delta;
+      }
+    } catch (err) {
+      // The autonomy loop calls assess() fire-and-forget; a provider/network failure
+      // must not become an unhandled rejection. Treat it as "not done" so the loop's
+      // idle-streak logic keeps control and can eventually stop.
+      const msg = err instanceof Error ? err.message : String(err);
+      return { done: false, note: `assessment failed: ${msg}` };
     }
     const done = /\bDONE\b/i.test(text) && !/\bCONTINUE\b/i.test(text);
     return { done, note: text.trim().slice(0, 200) };
@@ -338,16 +346,22 @@ export class Agent {
    */
   async plan(prompt: string, signal?: AbortSignal): Promise<string> {
     const { provider, model } = this.opts;
-    const system = await this.buildSystem(true);
     const probe: Message = { role: "user", content: prompt };
     let text = "";
-    for await (const chunk of provider.chat({
-      model,
-      messages: [system, ...this.messages, probe],
-      temperature: 0,
-      signal,
-    })) {
-      if (chunk.type === "text") text += chunk.delta;
+    try {
+      const system = await this.buildSystem(true);
+      for await (const chunk of provider.chat({
+        model,
+        messages: [system, ...this.messages, probe],
+        temperature: 0,
+        signal,
+      })) {
+        if (chunk.type === "text") text += chunk.delta;
+      }
+    } catch {
+      // Leader decomposition is best-effort; on failure return an empty plan so the
+      // tolerant parsers (parseTasks/parsePhases) fall back to running the goal whole.
+      return "";
     }
     return text.trim();
   }
@@ -438,10 +452,14 @@ export class Agent {
     const runSignal = handle.signal;
     handle.onTeardown(() => this.bus.emit({ type: "turn_end" }));
 
-    await this.pipelines.userInput.run({ input: userInput });
-    this.bus.emit({ type: "turn_start" });
-
     try {
+      // userInput.run persists the user message (record → onMessage → transcript
+      // append). Keep it INSIDE the try so a failed write (disk full, EACCES, path
+      // limit) surfaces as an `error` event and still runs teardown (turn_end),
+      // instead of rejecting run() and leaking the turn.
+      await this.pipelines.userInput.run({ input: userInput });
+      this.bus.emit({ type: "turn_start" });
+
       const limit = handle.getIterationLimit() ?? maxIterations;
       for (let i = 0; i < limit; i++) {
         if (runSignal.aborted) break;

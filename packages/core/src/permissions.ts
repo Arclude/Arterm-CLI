@@ -119,9 +119,10 @@ export class PermissionManager {
 
     // Auto mode silently approves file edits. It ALSO runs shell/execute commands
     // without a prompt — but only while an arbiter is screening them: safe commands
-    // pass, risky ones (rm -rf, sudo, force-push…) were escalated above, and critical
-    // ones were already denied. With no arbiter there's nothing screening the command,
-    // so execute tools still prompt (fail-safe).
+    // pass, risky ones (rm -rf, sudo, force-push, and the Windows equivalents like
+    // `del /s`, `Remove-Item -Recurse`, `runas`…) were escalated above, and critical
+    // ones (rm -rf /, format, whole-drive wipes) were already denied. With no arbiter
+    // there's nothing screening the command, so execute tools still prompt (fail-safe).
     if (!forceAsk && this.mode === "auto") {
       if (category === "edit") return { allowed: true, persist: false };
       if (category === "execute" && this.arbiter) return { allowed: true, persist: false };

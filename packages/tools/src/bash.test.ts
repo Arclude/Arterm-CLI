@@ -65,6 +65,13 @@ describe("bashTool", () => {
     "mkfs /dev/sda1",
     "dd if=/dev/zero of=/dev/sda",
     ":(){ :|:& };:",
+    // Windows (cmd/PowerShell) — refused before ever reaching the shell.
+    "format c:",
+    "Format-Volume -DriveLetter C",
+    "rmdir /s /q C:\\",
+    "del /s /q C:\\*",
+    "Remove-Item -Recurse -Force C:\\",
+    "cipher /w:C:\\",
   ])("refuses dangerous pattern: %s", async (command) => {
     const res = await bashTool.execute({ command }, ctx());
     expect(res.isError).toBe(true);

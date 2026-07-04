@@ -62,16 +62,45 @@ export type SddTaskState = "pending" | "running" | "done" | "failed";
 
 type Listener = (event: AgentEvent) => void;
 
+/** Called when a subscriber throws. Default logs only under ARTERM_DEBUG. */
+type ListenerErrorHandler = (error: unknown, event: AgentEvent) => void;
+
+function defaultListenerErrorHandler(error: unknown, event: AgentEvent): void {
+  // A throwing subscriber must never break the emit loop or the agent turn. In the
+  // TUI, writing to stderr would corrupt the Ink render, so stay silent unless the
+  // user opted into debug output.
+  if (process.env.ARTERM_DEBUG) {
+    const msg = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    process.stderr.write(`event listener threw on "${event.type}": ${msg}\n`);
+  }
+}
+
 /** Minimal synchronous event bus. The TUI subscribes; the agent publishes. */
 export class EventBus {
   private listeners = new Set<Listener>();
+
+  constructor(
+    private readonly onListenerError: ListenerErrorHandler = defaultListenerErrorHandler,
+  ) {}
 
   on(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Publish to every subscriber. Each listener is isolated: one that throws is
+   * reported via `onListenerError` and does NOT stop the others from running or
+   * bubble out of `emit` (which the agent calls on `turn_start` and inside its own
+   * error handler — an escaping throw there would become an unhandled rejection).
+   */
   emit(event: AgentEvent): void {
-    for (const listener of this.listeners) listener(event);
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.onListenerError(error, event);
+      }
+    }
   }
 }

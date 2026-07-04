@@ -12,6 +12,14 @@ const DENY = [
   /\bmkfs\b/,
   /\bdd\b.*\bof=\/dev\//, // dd ... of=/dev/sdX
   /:\(\)\s*\{.*\};\s*:/, // fork bomb
+  // Windows (cmd/PowerShell) — whole-drive / system-root wipes. `shell: true`
+  // sends these to cmd.exe/PowerShell, so the POSIX patterns above miss them.
+  /\bformat\b[^\n]{0,40}\b[a-z]:(?:\\|\s|"|$)/i, // format C:
+  /\bformat-volume\b/i,
+  /\bclear-disk\b/i,
+  /\bcipher\b[^\n]*\/w[:\s]/i, // secure-wipe free space
+  /\b(?:rd|rmdir|del)\b[^\n]*?\/s\b[^\n]*?\b[a-z]:\\?(?:\s|"|\*|$)/i, // rd /s C:\
+  /\bremove-item\b[^\n]*?-recurse\b[^\n]*?\b[a-z]:\\?(?:\s|"|$)/i, // Remove-Item -Recurse C:\
 ];
 
 export const bashTool: Tool = {
