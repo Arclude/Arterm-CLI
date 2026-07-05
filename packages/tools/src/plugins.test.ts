@@ -1,15 +1,22 @@
 import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Tool, TrustTier } from "@arterm/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PluginLoader } from "./plugins.js";
 
+// Scaffold fixtures inside the package dir rather than os.tmpdir(): the loader
+// dynamically imports these generated modules, and on Windows CI the OS temp dir
+// is an 8.3 short path (…\RUNNER~1\…) outside the project root that the vitest
+// module runner can't import. An in-repo, long-form path sidesteps it — the same
+// Windows-8.3 tmpdir gotcha that worktree.ts works around by realpath-ing.
+const FIXTURE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", ".plugins-fixtures");
+
 let dir: string;
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(join(tmpdir(), "arterm-plugins-"));
+  await fs.mkdir(FIXTURE_ROOT, { recursive: true });
+  dir = await fs.mkdtemp(join(FIXTURE_ROOT, "case-"));
 });
 afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });
