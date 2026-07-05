@@ -36,7 +36,7 @@ import {
   setOAuthTokens,
 } from "@arterm/providers";
 import { McpManager, PluginLoader, SkillRegistry, startMemoryMcpServer } from "@arterm/tools";
-import { runTui } from "@arterm/tui";
+import { type Session, runTui } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
@@ -50,7 +50,7 @@ import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryS
 import { buildSession } from "./session.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
-const VERSION = "0.1.2";
+const VERSION = "0.2.0";
 
 /** Provider ids the CLI can build — the single source of truth for `--provider`. */
 const PROVIDER_IDS: readonly string[] = providerCatalog.map((p) => p.id);
@@ -251,23 +251,7 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   // multi-agent aggregator is running and reports THIS session to it; `--hq-connect`
   // targets a specific aggregator instead. Best-effort — never blocks or kills the
   // session; messages go to stderr (before the TUI takes the alt-screen).
-  let reporter: { close(): void } | undefined;
-  if (globals.hqConnect) {
-    reporter = connectHqReporter({ session, url: globals.hqConnect, cwd: process.cwd() });
-    process.stderr.write(`HQ reporting → ${globals.hqConnect}\n`);
-  } else if (globals.hq || config.hq?.autostart) {
-    const port = parsePort(globals.hqPort, config.hq?.port ?? HQ_AGGREGATOR_PORT);
-    if (port === null) {
-      throw new ArtermUserError(`Invalid --hq-port "${globals.hqPort}". Use a port in 1–65535.`);
-    }
-    try {
-      const url = await ensureAggregator(port);
-      reporter = connectHqReporter({ session, url, cwd: process.cwd() });
-      process.stderr.write(`HQ dashboard → ${url}  (this session is now visible there)\n`);
-    } catch (err) {
-      process.stderr.write(`⚠ HQ dashboard unavailable: ${(err as Error).message}\n`);
-    }
-  }
+  const reporter = await attachHqReporter(session, globals, config);
 
   await runTui(session, { goal: globals.goal });
 
@@ -283,6 +267,38 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
   await persist();
+}
+
+/**
+ * Ensure the HQ aggregator is up (per --hq-connect / --hq / config.hq.autostart)
+ * and report this session to it, returning a closer (or undefined when HQ wasn't
+ * asked for). Best-effort — an unreachable aggregator only warns; a malformed
+ * --hq-port is the one hard error. Shared by the TUI (startChat) and headless
+ * (runHeadlessFlow) paths so a `--print … --hq` one-shot shows up in the dashboard.
+ */
+async function attachHqReporter(
+  session: Session,
+  globals: GlobalOpts,
+  config: ArtermConfig,
+): Promise<{ close(): void } | undefined> {
+  if (globals.hqConnect) {
+    process.stderr.write(`HQ reporting → ${globals.hqConnect}\n`);
+    return connectHqReporter({ session, url: globals.hqConnect, cwd: process.cwd() });
+  }
+  if (globals.hq || config.hq?.autostart) {
+    const port = parsePort(globals.hqPort, config.hq?.port ?? HQ_AGGREGATOR_PORT);
+    if (port === null) {
+      throw new ArtermUserError(`Invalid --hq-port "${globals.hqPort}". Use a port in 1–65535.`);
+    }
+    try {
+      const url = await ensureAggregator(port);
+      process.stderr.write(`HQ dashboard → ${url}  (this session is now visible there)\n`);
+      return connectHqReporter({ session, url, cwd: process.cwd() });
+    } catch (err) {
+      process.stderr.write(`⚠ HQ dashboard unavailable: ${(err as Error).message}\n`);
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -315,9 +331,14 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   const handle = await store.create({ model: config.model, provider: providerId });
   session.agent.setOnMessage((message) => handle.logMessage(message));
 
+  // Report this one-shot to the HQ dashboard when asked (--hq/--hq-connect). Writes
+  // only to stderr, so --json output on stdout stays clean; no-op unless requested.
+  const reporter = await attachHqReporter(session, globals, config);
+
   try {
     await runHeadless(session, prompt, { json: globals.json });
   } finally {
+    reporter?.close();
     try {
       await digest();
     } catch (err) {

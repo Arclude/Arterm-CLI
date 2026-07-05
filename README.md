@@ -24,8 +24,10 @@ Enter send   ? help   Alt+P models   Esc cancel   ^C quit
   status bar (provider, model, context gauge, token counts, branch, clock).
 - **Interactive model picker** — press **Alt+P** (or `/model`) for an arrow-key
   selectable list of available models with sizes; `?` opens help.
-- **File & shell tools** — `read`, `ls`, `glob`, `grep`, `write`, `edit`,
-  `multi_edit`, `web_fetch`, `web_search`, git/test/lint helpers, and `bash`.
+- **File, code & shell tools** — `read`, `ls`, `glob`, `grep`, `write`, `edit`,
+  `multi_edit`, `web_fetch`, `web_search`, `git`/`git_commit`,
+  `test`/`lint`/`format`, `search` (BM25), `symbols`, `tool_search`, `batch`,
+  and `bash`.
   The file tools are sandboxed to the working directory; `bash` is **not**
   sandboxed (it runs real shell commands) and is guarded by the permission
   prompt instead.
