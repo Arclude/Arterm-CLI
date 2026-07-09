@@ -5,6 +5,8 @@ import type {
   CompactionResult,
   DiffRow,
   EventBus,
+  ExtensionsCheck,
+  ExtensionsReload,
   McpServerSummary,
   ModelInfo,
   PermissionAsker,
@@ -93,6 +95,20 @@ export interface Session {
   skills: SkillInfo[];
   /** Returns a skill's instruction body to run it (for /skill <name>). */
   getSkillBody(name: string): string | undefined;
+  /**
+   * Live-probe every MCP server (ping + latency) and validate plugins on disk
+   * (for /mcp check and /plugins check). Injected by the CLI; absent in
+   * headless/test sessions.
+   */
+  checkExtensions?(): Promise<ExtensionsCheck>;
+  /**
+   * Reconnect failed MCP servers and rescan the plugins directory, registering
+   * any newly available tools with the agent (for /mcp reload and /plugins
+   * reload). Already-registered tools are never replaced or removed — a restart
+   * fully applies removals/updates. Injected by the CLI; absent in headless/test
+   * sessions.
+   */
+  reloadExtensions?(): Promise<ExtensionsReload>;
   /**
    * Start the live monitoring dashboard (web) against this session. Injected by the
    * CLI (the TUI can't import the cli-side server); absent in headless/test sessions.

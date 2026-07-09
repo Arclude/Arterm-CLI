@@ -48,6 +48,7 @@ import { connectHqReporter } from "./hqReporter.js";
 import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
+import { runStatus } from "./status.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
 const VERSION = "0.2.0";
@@ -235,6 +236,28 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   session.plugins = plugins.summary;
   session.skills = skills.list();
   session.getSkillBody = (name) => skills.get(name)?.body;
+
+  // Live health checks + reload for /mcp and /plugins (the TUI only sees the
+  // summaries above; these closures give it the live manager instances).
+  session.checkExtensions = async () => ({
+    mcp: await mcp.check(),
+    plugins: await plugins.check(),
+  });
+  session.reloadExtensions = async () => {
+    const [mcpTools, pluginTools] = await Promise.all([mcp.reconnect(), plugins.reload()]);
+    // Same collision rule as startup: whatever is already registered wins.
+    const have = new Set(session.agent.tools.map((t) => t.name));
+    const added = [...mcpTools, ...pluginTools].filter((t) => !have.has(t.name));
+    if (added.length > 0) {
+      session.agent.setTools([...session.agent.tools, ...added]);
+      session.toolCount = session.agent.tools.length;
+    }
+    return {
+      mcp: mcp.summary,
+      plugins: plugins.summary,
+      addedTools: added.map((t) => t.name),
+    };
+  };
 
   for (const s of mcp.summary) {
     if (s.status === "failed") {
@@ -686,6 +709,16 @@ async function main(): Promise<void> {
     .option("--open", "open the dashboard in your browser")
     .action(async (opts: { port?: string; web?: string; open?: boolean }) => {
       await hqServe(opts);
+    });
+
+  program
+    .command("status")
+    .description("check MCP server + plugin health without starting the TUI (exit 1 on failures)")
+    .option("--json", "emit machine-readable JSON")
+    .action(async (_opts: { json?: boolean }, cmd: Command) => {
+      // The root program also declares --json (headless mode) and commander binds
+      // the flag there; optsWithGlobals sees it regardless of where it landed.
+      await runStatus(cmd.optsWithGlobals<{ json?: boolean }>());
     });
 
   program

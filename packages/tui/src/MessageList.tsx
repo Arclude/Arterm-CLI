@@ -148,8 +148,8 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: "Extensions",
     items: [
-      ["/mcp", "connected MCP servers + tools"],
-      ["/plugins", "loaded plugins (trust + gating)"],
+      ["/mcp [check|reload]", "MCP servers — status · probe · reconnect"],
+      ["/plugins [check|reload]", "plugins — status · validate · rescan"],
       ["/skills · /skill <n>", "list skills · run one by name"],
       ["/web [port]", "open the live monitoring dashboard (web)"],
     ],

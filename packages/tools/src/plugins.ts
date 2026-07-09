@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { PluginSummary, Tool, TrustTier } from "@arterm/core";
+import type { PluginCheckResult, PluginSummary, Tool, TrustTier } from "@arterm/core";
 
 /** Manifest read from a plugin's `plugin.json`. */
 export interface PluginManifest {
@@ -56,7 +56,9 @@ export class PluginLoader {
   }
 
   /** Discover and load every plugin under `dir`. Never throws. */
-  async load(): Promise<Tool[]> {
+  async load(opts?: { bustImportCache?: boolean }): Promise<Tool[]> {
+    // Rebuild the summary in place — the session holds this array by reference.
+    this._summary.length = 0;
     let dirents: import("node:fs").Dirent[];
     try {
       dirents = await fs.readdir(this.dir, { withFileTypes: true });
@@ -71,7 +73,11 @@ export class PluginLoader {
       const subdir = join(this.dir, dirent.name);
       try {
         const manifest = await this.readManifest(subdir);
-        const mod = await this.importEntry(subdir, manifest.main ?? "index.js");
+        const mod = await this.importEntry(
+          subdir,
+          manifest.main ?? "index.js",
+          opts?.bustImportCache,
+        );
         const trust = this.trust[manifest.name] ?? "untrusted";
 
         let blocked = 0;
@@ -111,6 +117,55 @@ export class PluginLoader {
     return tools;
   }
 
+  /**
+   * Rescan the plugin directory, cache-busting entry imports so plugins fixed or
+   * changed on disk are re-evaluated (Node caches even FAILED module evaluations
+   * by URL). Old module instances leak and their side effects re-run — acceptable
+   * for a manual reload. Already-registered tools are not replaced or removed by
+   * the caller; a restart fully applies removals/updates. Never throws.
+   */
+  async reload(): Promise<Tool[]> {
+    return this.load({ bustImportCache: true });
+  }
+
+  /**
+   * Validate plugins on disk without importing them: the directory is readable,
+   * the manifest parses, and the entry module file exists. Tool shape is only
+   * verifiable at load/reload time (it requires an import). Never throws.
+   */
+  async check(): Promise<PluginCheckResult[]> {
+    let dirents: import("node:fs").Dirent[];
+    try {
+      dirents = await fs.readdir(this.dir, { withFileTypes: true });
+    } catch {
+      dirents = [];
+    }
+
+    const results: PluginCheckResult[] = [];
+    const seen = new Set<string>();
+    for (const dirent of dirents) {
+      if (!dirent.isDirectory()) continue;
+      const subdir = join(this.dir, dirent.name);
+      seen.add(dirent.name);
+      try {
+        const manifest = await this.readManifest(subdir);
+        seen.add(manifest.name);
+        await fs.access(join(subdir, manifest.main ?? "index.js"));
+        const summaryEntry = this._summary.find((s) => s.name === manifest.name);
+        results.push({ name: manifest.name, ok: true, toolCount: summaryEntry?.toolCount });
+      } catch (err) {
+        results.push({ name: dirent.name, ok: false, error: (err as Error).message });
+      }
+    }
+    // Previously loaded plugins whose directory has since vanished.
+    for (const entry of this._summary) {
+      if (!seen.has(entry.name)) {
+        results.push({ name: entry.name, ok: false, error: "plugin directory no longer exists" });
+      }
+    }
+    return results;
+  }
+
   /** Read and parse `<subdir>/plugin.json`; throws on missing/invalid JSON. */
   private async readManifest(subdir: string): Promise<PluginManifest> {
     const raw = await fs.readFile(join(subdir, "plugin.json"), "utf8");
@@ -126,8 +181,17 @@ export class PluginLoader {
   }
 
   /** Dynamic-import the entry module with a Windows-safe file URL. */
-  private async importEntry(subdir: string, main: string): Promise<Record<string, unknown>> {
-    const url = pathToFileURL(join(subdir, main)).href;
+  private async importEntry(
+    subdir: string,
+    main: string,
+    bustCache = false,
+  ): Promise<Record<string, unknown>> {
+    // The query defeats Node's ESM cache, which also caches failed evaluations —
+    // without it a plugin fixed on disk would keep rethrowing its old error. The
+    // param is deliberately NOT ?v=/?t= (Vite reserves those and strips them,
+    // which would defeat the bust under vitest's module runner).
+    const base = pathToFileURL(join(subdir, main)).href;
+    const url = bustCache ? `${base}?bust=${Date.now()}` : base;
     return (await import(url)) as Record<string, unknown>;
   }
 }

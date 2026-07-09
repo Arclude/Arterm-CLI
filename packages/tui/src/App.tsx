@@ -1,9 +1,11 @@
 import {
   type AutonomyMode,
+  type McpServerSummary,
   type ModelInfo,
   PERMISSION_MODES,
   type PermissionAsker,
   type PermissionMode,
+  type PluginSummary,
   type SddTaskState,
   cachedCatalogSync,
   fetchCatalog,
@@ -154,6 +156,30 @@ const COMMANDS = [
 
 /** Modes cycled by Shift+Tab; yolo is deliberately excluded (set it via /mode yolo). */
 const MODE_CYCLE: PermissionMode[] = ["ask", "auto", "plan"];
+
+/** Format MCP server summaries as ✓/✗ status lines (for /mcp and /mcp reload). */
+function mcpSummaryLines(servers: McpServerSummary[]): string {
+  return servers
+    .map((s) =>
+      s.status === "connected"
+        ? `  ✓ ${s.name} — ${s.toolCount} tool(s)`
+        : `  ✗ ${s.name} — failed: ${s.error ?? "unknown"}`,
+    )
+    .join("\n");
+}
+
+/** Format plugin summaries as trust-glyph status lines (for /plugins and /plugins reload). */
+function pluginSummaryLines(ps: PluginSummary[]): string {
+  return ps
+    .map((p) =>
+      p.status === "loaded"
+        ? `  ${p.trust === "trusted" ? "✓" : "•"} ${p.name} [${p.trust}] — ${p.toolCount} tool(s)${
+            p.blocked ? `, ${p.blocked} blocked` : ""
+          }`
+        : `  ✗ ${p.name} — failed: ${p.error ?? "unknown"}`,
+    )
+    .join("\n");
+}
 
 /** Current terminal size, tracking resize events so the layout fills the screen. */
 function useTermSize(): { rows: number; columns: number } {
@@ -1230,23 +1256,120 @@ export function App({
           break;
         }
         case "mcp": {
-          const servers = session.mcpServers;
-          if (servers.length === 0) {
+          const sub = rest[0] ?? "";
+          if (sub !== "" && sub !== "check" && sub !== "reload") {
+            push({ kind: "system", text: "usage: /mcp [check|reload]" });
+            break;
+          }
+          // The server set is fixed at startup (config-only), so an empty summary
+          // means there is nothing to list, probe, or reconnect.
+          if (session.mcpServers.length === 0) {
             push({
               kind: "system",
               text: "no MCP servers configured — add them to ~/.arterm/config.json → mcpServers",
             });
-          } else {
-            const lines = servers.map((s) =>
-              s.status === "connected"
-                ? `  ✓ ${s.name} — ${s.toolCount} tool(s)`
-                : `  ✗ ${s.name} — failed: ${s.error ?? "unknown"}`,
-            );
-            push({ kind: "system", text: `MCP servers:\n${lines.join("\n")}` });
+            break;
           }
+          if (sub === "check") {
+            if (!session.checkExtensions) {
+              push({ kind: "system", text: "health check unavailable in this session" });
+              break;
+            }
+            push({ kind: "system", text: "checking MCP servers…" });
+            try {
+              const { mcp } = await session.checkExtensions();
+              const lines = mcp.map((r) =>
+                r.ok
+                  ? `  ✓ ${r.name} — ${r.latencyMs}ms · ${r.toolCount ?? 0} tool(s)`
+                  : `  ✗ ${r.name} — ${r.error ?? "unknown"}`,
+              );
+              push({ kind: "system", text: `MCP health:\n${lines.join("\n")}` });
+            } catch (e) {
+              push({ kind: "system", text: `mcp check failed: ${(e as Error).message}` });
+            }
+            break;
+          }
+          if (sub === "reload") {
+            if (!session.reloadExtensions) {
+              push({ kind: "system", text: "reload unavailable in this session" });
+              break;
+            }
+            push({ kind: "system", text: "reconnecting MCP servers…" });
+            try {
+              const res = await session.reloadExtensions();
+              const added =
+                res.addedTools.length > 0
+                  ? `\n  +${res.addedTools.length} new tool(s): ${res.addedTools.join(", ")}`
+                  : "";
+              push({ kind: "system", text: `MCP servers:\n${mcpSummaryLines(res.mcp)}${added}` });
+            } catch (e) {
+              push({ kind: "system", text: `mcp reload failed: ${(e as Error).message}` });
+            }
+            break;
+          }
+          push({ kind: "system", text: `MCP servers:\n${mcpSummaryLines(session.mcpServers)}` });
           break;
         }
         case "plugins": {
+          const sub = rest[0] ?? "";
+          // Unlike MCP, the plugin dir can gain entries mid-session, so check and
+          // reload must run even when nothing was loaded at startup.
+          if (sub === "check") {
+            if (!session.checkExtensions) {
+              push({ kind: "system", text: "health check unavailable in this session" });
+              break;
+            }
+            push({ kind: "system", text: "checking plugins…" });
+            try {
+              const { plugins } = await session.checkExtensions();
+              if (plugins.length === 0) {
+                push({
+                  kind: "system",
+                  text: "no plugins found — drop them in ~/.arterm/plugins/<name>/",
+                });
+                break;
+              }
+              const lines = plugins.map((r) =>
+                r.ok
+                  ? `  ✓ ${r.name} — ${
+                      r.toolCount !== undefined
+                        ? `${r.toolCount} tool(s)`
+                        : "not loaded yet — /plugins reload"
+                    }`
+                  : `  ✗ ${r.name} — ${r.error ?? "unknown"}`,
+              );
+              push({ kind: "system", text: `Plugin health:\n${lines.join("\n")}` });
+            } catch (e) {
+              push({ kind: "system", text: `plugins check failed: ${(e as Error).message}` });
+            }
+            break;
+          }
+          if (sub === "reload") {
+            if (!session.reloadExtensions) {
+              push({ kind: "system", text: "reload unavailable in this session" });
+              break;
+            }
+            push({ kind: "system", text: "rescanning plugins…" });
+            try {
+              const res = await session.reloadExtensions();
+              const added =
+                res.addedTools.length > 0
+                  ? `\n  +${res.addedTools.length} new tool(s): ${res.addedTools.join(", ")}`
+                  : "";
+              const body =
+                res.plugins.length === 0
+                  ? "no plugins found — drop them in ~/.arterm/plugins/<name>/"
+                  : `Plugins:\n${pluginSummaryLines(res.plugins)}${added}`;
+              push({ kind: "system", text: body });
+            } catch (e) {
+              push({ kind: "system", text: `plugins reload failed: ${(e as Error).message}` });
+            }
+            break;
+          }
+          if (sub !== "") {
+            push({ kind: "system", text: "usage: /plugins [check|reload]" });
+            break;
+          }
           const ps = session.plugins;
           if (ps.length === 0) {
             push({
@@ -1254,14 +1377,7 @@ export function App({
               text: "no plugins loaded — drop them in ~/.arterm/plugins/<name>/ and set trust in config",
             });
           } else {
-            const lines = ps.map((p) =>
-              p.status === "loaded"
-                ? `  ${p.trust === "trusted" ? "✓" : "•"} ${p.name} [${p.trust}] — ${p.toolCount} tool(s)${
-                    p.blocked ? `, ${p.blocked} blocked` : ""
-                  }`
-                : `  ✗ ${p.name} — failed: ${p.error ?? "unknown"}`,
-            );
-            push({ kind: "system", text: `Plugins:\n${lines.join("\n")}` });
+            push({ kind: "system", text: `Plugins:\n${pluginSummaryLines(ps)}` });
           }
           break;
         }

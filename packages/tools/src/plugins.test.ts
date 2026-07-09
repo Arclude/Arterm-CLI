@@ -149,4 +149,89 @@ describe("PluginLoader", () => {
     };
     expect(mod.original.permission).toBe("allow");
   });
+
+  it("does not duplicate summary entries across repeated loads", async () => {
+    await scaffold("alpha", [{ name: "peek", category: "read" }]);
+    const loader = new PluginLoader(dir);
+    await loader.load();
+    await loader.load();
+    expect(loader.summary).toHaveLength(1);
+  });
+
+  it("reload picks up a newly added plugin and keeps the summary array identity", async () => {
+    await scaffold("alpha", [{ name: "peek", category: "read" }]);
+    const loader = new PluginLoader(dir);
+    await loader.load();
+    const ref = loader.summary;
+
+    await scaffold("beta", [{ name: "poke", category: "read" }]);
+    const tools = await loader.reload();
+    expect(tools.map((t) => t.name).sort()).toEqual(["peek", "poke"]);
+    expect(loader.summary).toBe(ref);
+    expect(loader.summary.map((s) => s.name).sort()).toEqual(["alpha", "beta"]);
+  });
+
+  it("reload recovers a plugin fixed on disk after a failed import", async () => {
+    const sub = join(dir, "fixme");
+    await fs.mkdir(sub, { recursive: true });
+    await fs.writeFile(
+      join(sub, "plugin.json"),
+      JSON.stringify({ name: "fixme", main: "index.mjs" }),
+    );
+    await fs.writeFile(join(sub, "index.mjs"), "export const tools = ["); // syntax error
+    const loader = new PluginLoader(dir, { fixme: "trusted" });
+    await loader.load();
+    expect(loader.summary[0]?.status).toBe("failed");
+
+    await fs.writeFile(
+      join(sub, "index.mjs"),
+      `export const tools = [${toolSource("fixed", "read")}];`,
+    );
+    const tools = await loader.reload();
+    expect(tools.map((t) => t.name)).toEqual(["fixed"]);
+    expect(loader.summary[0]?.status).toBe("loaded");
+  });
+});
+
+describe("PluginLoader.check", () => {
+  it("reports healthy plugins with their loaded tool count", async () => {
+    await scaffold("alpha", [{ name: "peek", category: "read" }]);
+    const loader = new PluginLoader(dir, { alpha: "trusted" });
+    await loader.load();
+    const results = await loader.check();
+    expect(results).toEqual([{ name: "alpha", ok: true, toolCount: 1 }]);
+  });
+
+  it("flags a missing manifest and a missing entry module", async () => {
+    await fs.mkdir(join(dir, "nomanifest"), { recursive: true });
+    const sub = join(dir, "noentry");
+    await fs.mkdir(sub, { recursive: true });
+    await fs.writeFile(
+      join(sub, "plugin.json"),
+      JSON.stringify({ name: "noentry", main: "gone.mjs" }),
+    );
+
+    const loader = new PluginLoader(dir);
+    const results = await loader.check();
+    expect(results.find((r) => r.name === "nomanifest")?.ok).toBe(false);
+    expect(results.find((r) => r.name === "noentry")?.ok).toBe(false);
+  });
+
+  it("flags a loaded plugin whose directory has vanished, without touching the summary", async () => {
+    await scaffold("alpha", [{ name: "peek", category: "read" }]);
+    const loader = new PluginLoader(dir);
+    await loader.load();
+    await fs.rm(join(dir, "alpha"), { recursive: true, force: true });
+
+    const results = await loader.check();
+    expect(results).toEqual([
+      { name: "alpha", ok: false, error: "plugin directory no longer exists" },
+    ]);
+    expect(loader.summary[0]?.status).toBe("loaded"); // check is side-effect-free
+  });
+
+  it("returns [] when the plugins dir is missing and nothing was loaded", async () => {
+    const loader = new PluginLoader(join(dir, "nope"));
+    await expect(loader.check()).resolves.toEqual([]);
+  });
 });

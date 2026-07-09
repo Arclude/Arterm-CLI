@@ -131,6 +131,38 @@ export interface PluginSummary {
   error?: string;
 }
 
+/** Result of one live MCP server health probe (for /mcp check and `arterm status`). */
+export interface McpCheckResult {
+  name: string;
+  ok: boolean;
+  /** Round-trip time of the probe (ping, or listTools fallback) in ms. */
+  latencyMs?: number;
+  /** Tool count known from connect time. */
+  toolCount?: number;
+  error?: string;
+}
+
+/** Result of validating one local plugin on disk (for /plugins check). */
+export interface PluginCheckResult {
+  name: string;
+  ok: boolean;
+  toolCount?: number;
+  error?: string;
+}
+
+/** Combined live health report for MCP servers and plugins. */
+export interface ExtensionsCheck {
+  mcp: McpCheckResult[];
+  plugins: PluginCheckResult[];
+}
+
+/** Result of reloading extensions: refreshed summaries plus newly registered tool names. */
+export interface ExtensionsReload {
+  mcp: McpServerSummary[];
+  plugins: PluginSummary[];
+  addedTools: string[];
+}
+
 /** A reusable prompt-based capability surfaced to the model and run via /skill. */
 export interface SkillInfo {
   name: string;

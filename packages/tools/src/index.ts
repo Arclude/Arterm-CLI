@@ -6,6 +6,9 @@ export {
   flattenMcpContent,
   type McpServerConfig,
   type McpCall,
+  type McpClientLike,
+  type McpConnectFn,
+  type McpToolDef,
 } from "./mcp.js";
 export { PluginLoader, type PluginManifest } from "./plugins.js";
 export { SkillRegistry, parseSkill, skillsPromptSection, type Skill } from "./skills.js";
