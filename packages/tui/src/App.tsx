@@ -34,6 +34,7 @@ import {
   reduceInput,
 } from "./editing.js";
 import { Markdown } from "./markdown.js";
+import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
 import type { DisplayItem, LoginProvider, Session } from "./types.js";
 
@@ -344,6 +345,11 @@ export function App({
   // Live /sdd kanban board — seeded from `sdd_graph`, updated per `sdd_task_state`.
   const [sddTasks, setSddTasks] = useState<SddBoardTask[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamBoardMember[]>([]);
+  // Board navigation: ↑/↓ (on an empty prompt) select a member, Enter opens its
+  // activity feed, Esc closes it. Feeds are per-member rings of formatted lines.
+  const [teamSel, setTeamSel] = useState(0);
+  const [teamDetailOpen, setTeamDetailOpen] = useState(false);
+  const [teamFeeds, setTeamFeeds] = useState<Map<string, string[]>>(new Map());
   // A large-looking prompt held for the y/N team-run offer (never a silent switch).
   const [teamSuggest, setTeamSuggest] = useState<string | null>(null);
   const filteredPickerModels = useMemo(() => {
@@ -591,6 +597,9 @@ export function App({
               state: "pending" as const,
             })),
           );
+          setTeamSel(0);
+          setTeamDetailOpen(false);
+          setTeamFeeds(new Map());
           push({
             kind: "system",
             text: `⚑ team: ${event.members
@@ -631,7 +640,7 @@ export function App({
           }
           break;
         case "team_member_event": {
-          // Live activity only — member tool calls never enter the transcript.
+          // Live activity + the member's drill-down feed — never the transcript.
           const inner = event.event;
           const activity =
             inner.type === "tool_call"
@@ -643,6 +652,14 @@ export function App({
                   : undefined;
           if (activity) {
             setTeamMembers((prev) => prev.map((m) => (m.id === event.id ? { ...m, activity } : m)));
+          }
+          const line = formatMemberEvent(inner);
+          if (line) {
+            setTeamFeeds((prev) => {
+              const next = new Map(prev);
+              next.set(event.id, appendFeed(prev.get(event.id), line));
+              return next;
+            });
           }
           break;
         }
@@ -751,14 +768,23 @@ export function App({
     if (initialGoal) void session.autonomy.start(initialGoal);
   }, [initialGoal, session]);
 
-  // Esc pauses an autonomous run, or cancels a manual turn.
+  // Esc pauses an autonomous run, or cancels a manual turn. While a member's
+  // drill-down view is open, Esc closes that first (see the hook below).
   useInput(
     (_input, key) => {
       if (!key.escape) return;
       if (autoState === "running") session.autonomy.pause();
       else if (status !== "idle") abortRef.current?.abort();
     },
-    { isActive: (status !== "idle" || autoState === "running") && !pending },
+    { isActive: (status !== "idle" || autoState === "running") && !pending && !teamDetailOpen },
+  );
+
+  // Esc closes the team member drill-down (takes precedence over pause/cancel).
+  useInput(
+    (_input, key) => {
+      if (key.escape) setTeamDetailOpen(false);
+    },
+    { isActive: teamDetailOpen },
   );
 
   const openPicker = useCallback(
@@ -1135,6 +1161,9 @@ export function App({
           setCtxUsed(0);
           setSddTasks([]);
           setTeamMembers([]);
+          setTeamSel(0);
+          setTeamDetailOpen(false);
+          setTeamFeeds(new Map());
           break;
         case "exit":
         case "quit":
@@ -1571,7 +1600,11 @@ export function App({
     async (value: string) => {
       const text = value.trim();
       setInput("");
-      if (!text) return;
+      if (!text) {
+        // Enter on an empty prompt toggles the selected member's drill-down view.
+        if (teamMembers.length > 0) setTeamDetailOpen((v) => !v);
+        return;
+      }
       setScrollOffset(0); // sending pins the view back to the latest
       setHistory((h) => historyPush(h, text));
       if (text === "?") {
@@ -1601,7 +1634,7 @@ export function App({
       }
       await runPlain(text);
     },
-    [session, handleSlash, push, runPlain],
+    [session, handleSlash, push, runPlain, teamMembers.length],
   );
 
   // y/N confirm for the /team offer: y routes the prompt to /team, anything else
@@ -1621,13 +1654,24 @@ export function App({
     { isActive: teamSuggest !== null },
   );
 
-  // Up/Down recall previously submitted prompts (shell-style history).
+  // Up/Down recall previously submitted prompts (shell-style history) — except
+  // while a team board is visible and the prompt is empty, where they move the
+  // member selection instead (the board hint documents this takeover).
+  const boardNav = teamMembers.length > 0 && input === "";
   const onHistoryPrev = (): void => {
+    if (boardNav) {
+      setTeamSel((s) => Math.max(0, s - 1));
+      return;
+    }
     const { nav, value } = historyUp(history, input);
     setHistory(nav);
     setInput(value);
   };
   const onHistoryNext = (): void => {
+    if (boardNav) {
+      setTeamSel((s) => Math.min(teamMembers.length - 1, s + 1));
+      return;
+    }
     const { nav, value } = historyDown(history, input);
     setHistory(nav);
     setInput(value);
@@ -1662,7 +1706,17 @@ export function App({
           </Text>
         ) : null}
         {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
-        {teamMembers.length > 0 ? <TeamBoard members={teamMembers} columns={columns} /> : null}
+        {teamMembers.length > 0 ? (
+          <TeamBoard
+            members={teamMembers}
+            columns={columns}
+            selected={teamSel}
+            detailOpen={teamDetailOpen}
+            feed={
+              teamFeeds.get(teamMembers[Math.min(teamSel, teamMembers.length - 1)]?.id ?? "") ?? []
+            }
+          />
+        ) : null}
         {teamSuggest ? (
           <Box>
             <Text color="magenta" bold>

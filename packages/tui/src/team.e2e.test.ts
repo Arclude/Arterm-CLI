@@ -162,6 +162,16 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
     expect(final).toContain("✓ test-writer");
     expect(final).toContain("patch applied");
     expect(planCall).toBe(2);
+
+    // Board navigation: ↓ selects the second member, Enter opens its activity
+    // feed (the bridged tool_call landed there), Esc closes it again.
+    stdin.write("[B"); // down arrow
+    await tick();
+    stdin.write(ENTER);
+    await waitFor(lastFrame, (f) => f.includes("⚙ test-writer") && f.includes("⚙ write"));
+    console.log(`\n──── FRAME: member drill-down ────\n${lastFrame()}\n`);
+    stdin.write(""); // esc
+    await waitFor(lastFrame, (f) => !f.includes("⚙ write"));
     unmount();
   });
 });
