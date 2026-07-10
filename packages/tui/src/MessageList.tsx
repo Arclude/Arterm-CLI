@@ -124,6 +124,8 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
       ["/models", "open the model picker (type to filter)"],
       ["/login", "sign in to a provider (provider + API key)"],
       ["/catalog [query]", "search the models.dev catalog (~5k)"],
+      ["/copy", "copy the last reply to the clipboard"],
+      ["/mouse", "toggle mouse capture (native drag-select)"],
       ["/clear", "reset the conversation"],
       ["/exit", "quit  (or Ctrl+C)"],
     ],

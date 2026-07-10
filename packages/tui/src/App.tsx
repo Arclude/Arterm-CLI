@@ -24,6 +24,7 @@ import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardMember } from "./TeamBoard.js";
+import { osc52Sequence } from "./clipboard.js";
 import {
   type HistoryNav,
   commandSuggestion,
@@ -132,6 +133,8 @@ const COMMANDS = [
   "login",
   "catalog",
   "clear",
+  "copy",
+  "mouse",
   "goal",
   "autonomy",
   "team",
@@ -367,18 +370,20 @@ export function App({
   // app reading input has the wheel translated into ↑/↓ arrow keys, which the prompt
   // reads as command-history navigation. Enabling SGR mouse reporting (1000 = button
   // events, 1006 = SGR coords) makes the terminal send real mouse sequences instead
-  // of fake arrows — those are swallowed in reduceInput, so the wheel stays inert and
-  // only genuine ↑/↓ keypresses recall history. Scroll the chat with Shift+wheel or
-  // Ctrl+Shift+↑/↓ (these bypass the app's mouse capture in Windows Terminal).
+  // of fake arrows — those drive the in-app transcript scroll and are swallowed in
+  // reduceInput. Trade-off: capture also eats click-drag, so native text selection
+  // needs Shift+drag — or `/mouse` to switch capture off temporarily (`mouseOn`),
+  // which restores plain drag-select at the cost of wheel acting as arrow keys.
   const { stdout: rawStdout } = useStdout();
+  const [mouseOn, setMouseOn] = useState(true);
   useEffect(() => {
-    if (!rawStdout) return;
+    if (!rawStdout || !mouseOn) return;
     const ESC = String.fromCharCode(27);
     rawStdout.write(`${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
     return () => {
       rawStdout.write(`${ESC}[?1000l${ESC}[?1006l${ESC}[?1007h`);
     };
-  }, [rawStdout]);
+  }, [rawStdout, mouseOn]);
 
   // Viewport height = terminal rows − the measured bottom region (input + overlays +
   // goal + status bar). Runs every commit (no deps) so it self-corrects as the bottom
@@ -1354,6 +1359,34 @@ export function App({
           }
           break;
         }
+        case "copy": {
+          // Copy the last assistant reply via OSC 52 — the terminal owns the
+          // clipboard write, so this works even with mouse capture on.
+          const last = [...items].reverse().find((i) => i.kind === "assistant");
+          if (!last || last.kind !== "assistant") {
+            push({ kind: "system", text: "nothing to copy yet — no assistant reply" });
+          } else if (!rawStdout) {
+            push({ kind: "system", text: "clipboard unavailable (no terminal stdout)" });
+          } else {
+            rawStdout.write(osc52Sequence(last.text));
+            push({
+              kind: "system",
+              text: `⧉ copied the last reply to the clipboard (${last.text.length} chars)`,
+            });
+          }
+          break;
+        }
+        case "mouse": {
+          const next = !mouseOn;
+          setMouseOn(next);
+          push({
+            kind: "system",
+            text: next
+              ? "mouse capture ON — wheel scrolls the chat · shift+drag selects text"
+              : "mouse capture OFF — drag selects text natively · wheel may act as ↑/↓ · /mouse re-enables",
+          });
+          break;
+        }
         case "sdd": {
           const skipInterview = /(^|\s)--yes\b/.test(` ${rest.join(" ")}`);
           const brief = rest
@@ -1585,6 +1618,9 @@ export function App({
       model,
       providerLabel,
       askInterview,
+      items,
+      mouseOn,
+      rawStdout,
     ],
   );
 
