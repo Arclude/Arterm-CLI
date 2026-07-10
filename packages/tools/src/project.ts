@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Tool, ToolContext, ToolResult } from "@arterm/core";
-import { execa } from "execa";
 
 const MAX_OUTPUT = 16 * 1024;
 
@@ -43,6 +42,8 @@ async function runProjectCommand(
   ctx: ToolContext,
 ): Promise<ToolResult> {
   try {
+    // Lazy: execa is loaded on first project-command use, not at startup.
+    const { execa } = await import("execa");
     const result = await execa(file, args, {
       cwd: ctx.cwd,
       shell: false,

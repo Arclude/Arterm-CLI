@@ -1,5 +1,4 @@
 import type { Tool } from "@arterm/core";
-import fg from "fast-glob";
 import { assertSafeGlob, requireString } from "./paths.js";
 
 export const globTool: Tool = {
@@ -18,6 +17,8 @@ export const globTool: Tool = {
   async execute(args, ctx) {
     const pattern = requireString(args, "pattern");
     assertSafeGlob(pattern);
+    // Lazy: fast-glob costs ~100ms to import — load it on first use, not at startup.
+    const { default: fg } = await import("fast-glob");
     const matches = await fg(pattern, {
       cwd: ctx.cwd,
       dot: false,

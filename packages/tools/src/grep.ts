@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import type { Tool } from "@arterm/core";
-import fg from "fast-glob";
 import { assertSafeGlob, isWithin, optionalString, requireString } from "./paths.js";
 
 const MAX_MATCHES = 100;
@@ -33,6 +32,8 @@ export const grepTool: Tool = {
       return { output: `Invalid regex: ${(err as Error).message}`, isError: true };
     }
 
+    // Lazy: fast-glob is loaded on first use, not at startup.
+    const { default: fg } = await import("fast-glob");
     const files = await fg(glob, {
       cwd: ctx.cwd,
       ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],

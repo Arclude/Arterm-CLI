@@ -5,6 +5,20 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-07-11
+
+### Performance
+
+- **Startup is ~2× faster** (≈2.2s → ≈1.1s to the TUI; `--version` and headless
+  bootstrap dropped from ~1s to ~130ms):
+  - The OpenAI-compatible host reachability probe no longer blocks startup — it
+    runs in the background after the session is up (a WAN round-trip to a relay
+    cost ~1s on every launch) and surfaces as an in-TUI warning if it fails.
+  - Heavy dependencies load lazily on first use instead of at startup: `execa`
+    (shell/git/project tools), `fast-glob` (glob/grep), the MCP SDK server
+    modules (`arterm mcp`), and the Ink/yoga rendering stack — the published
+    bundle is now code-split so non-TUI commands never load the UI at all.
+
 ## [0.3.0] — 2026-07-11
 
 ### Added

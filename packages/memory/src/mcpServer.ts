@@ -1,6 +1,4 @@
 import type { ArtermConfig } from "@arterm/core";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { createCmemEngine } from "./engine.js";
 import { listCmemProjects, openStoreByKey } from "./store.js";
@@ -24,6 +22,10 @@ export async function startCmemMcpServer(opts: {
   cwd: string;
   config: ArtermConfig;
 }): Promise<void> {
+  // Lazy: the MCP SDK is only needed when this server actually starts (`arterm mcp`),
+  // so it stays out of the CLI's hot startup path.
+  const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   // Reuse the full engine wiring (store + embedder + tools); no observer needed.
   const engine = await createCmemEngine({
     cwd: opts.cwd,

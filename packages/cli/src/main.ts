@@ -3,6 +3,7 @@ import {
   ARTERM_HOME,
   type ArtermConfig,
   type CatalogModel,
+  type EventBus,
   Keystore,
   type Message,
   type SessionStore,
@@ -42,7 +43,7 @@ import {
   SkillRegistry,
   startMemoryMcpServer,
 } from "@arterm/tools";
-import { type Session, runTui } from "@arterm/tui";
+import type { Session } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
@@ -53,7 +54,7 @@ import { buildSession } from "./session.js";
 import { runStatus } from "./status.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 
 /** Provider ids the CLI can build — the single source of truth for `--provider`. */
 const PROVIDER_IDS: readonly string[] = providerCatalog.map((p) => p.id);
@@ -144,16 +145,9 @@ async function preflight(providerId: string, config: ArtermConfig): Promise<stri
         ? undefined
         : `Ollama not reachable at ${config.ollamaHost}. Start it with \`ollama serve\`, or switch provider with --provider llamacpp.`;
     }
-    case "openai-compat": {
-      // Probe via the registry-built provider so the check carries the same stored
-      // key and custom headers as real chat — relay gateways (e.g. agentrouter)
-      // reject bare requests, which made this warning fire spuriously.
-      const provider = createProvider(config, "openai-compat") as OpenAICompatProvider;
-      const ok = await provider.isReachable();
-      return ok
-        ? undefined
-        : `OpenAI-compatible host not reachable at ${config.openaiCompatHost}. Check the host or that the server is running.`;
-    }
+    // openai-compat is probed in the BACKGROUND (probeCompatHostInBackground): the
+    // host is usually remote, and a synchronous WAN round-trip here cost ~1s of
+    // startup. An unreachable host surfaces as a TUI warning line instead.
     case "llamacpp": {
       const models = await new LlamaCppProvider({ modelsDir: config.modelsDir }).listModels();
       return models.length > 0
@@ -163,6 +157,36 @@ async function preflight(providerId: string, config: ArtermConfig): Promise<stri
     default:
       return undefined;
   }
+}
+
+/**
+ * Fire-and-forget reachability probe for the (usually remote) OpenAI-compatible
+ * host. Runs off the startup path — the probe carries the same stored key and
+ * custom headers as real chat, and an unreachable host is reported as a warning
+ * line on the session bus. The emit is delayed so the TUI (which subscribes on
+ * mount, with no event replay) is guaranteed to be listening by then.
+ */
+function probeCompatHostInBackground(
+  providerId: string,
+  config: ArtermConfig,
+  bus: EventBus,
+): void {
+  if (providerId !== "openai-compat") return;
+  const provider = createProvider(config, "openai-compat") as OpenAICompatProvider;
+  const started = Date.now();
+  void provider
+    .isReachable()
+    .then((ok) => {
+      if (ok) return;
+      const wait = Math.max(0, 1_500 - (Date.now() - started));
+      setTimeout(() => {
+        bus.emit({
+          type: "error",
+          error: `OpenAI-compatible host not reachable at ${config.openaiCompatHost}. Check the host or that the server is running.`,
+        });
+      }, wait).unref();
+    })
+    .catch(() => {});
 }
 
 async function startChat(globals: GlobalOpts): Promise<void> {
@@ -277,6 +301,13 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
 
+  // Remote-host reachability check runs off the critical path (see the helper) —
+  // by now the session bus exists, so a failure can surface inside the TUI.
+  probeCompatHostInBackground(providerId, config, session.bus);
+
+  // Lazy: ink (and its yoga-layout WASM) costs ~800ms to import — load it only
+  // when the TUI is actually about to render, keeping --version/--print fast.
+  const { runTui } = await import("@arterm/tui");
   await runTui(session, { goal: globals.goal });
 
   await mcp.close();

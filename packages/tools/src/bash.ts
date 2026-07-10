@@ -1,5 +1,4 @@
 import type { Tool } from "@arterm/core";
-import { execa } from "execa";
 import { requireString } from "./paths.js";
 
 /**
@@ -47,6 +46,8 @@ export const bashTool: Tool = {
     }
     const timeout = typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
     if (ctx.signal?.aborted) return { output: "Command cancelled.", isError: true };
+    // Lazy: execa costs ~250ms to import — load it on first shell use, not at startup.
+    const { execa } = await import("execa");
 
     // Timeout/cancel must kill the whole process TREE, not just the shell:
     // with `shell: true` the direct child is cmd/sh, and an orphaned grandchild

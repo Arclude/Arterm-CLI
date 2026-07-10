@@ -6,8 +6,6 @@ import {
   projectKey,
   readProjectRecords,
 } from "@arterm/core";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { createMemorySearchTool, createRememberTool, formatLearning } from "./memoryTools.js";
 
@@ -41,6 +39,10 @@ function storeForKey(key: string): MemoryStore {
  * key (from `memory_projects`) to reach other projects' memory.
  */
 export async function startMemoryMcpServer(opts: { cwd: string }): Promise<void> {
+  // Lazy: the MCP SDK is only needed when this server actually starts (`arterm mcp`),
+  // so it stays out of the CLI's hot startup path.
+  const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const defaultKey = projectKey(opts.cwd);
   const resolveKey = (project?: string): string => (project?.trim() ? project.trim() : defaultKey);
 

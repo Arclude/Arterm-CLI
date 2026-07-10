@@ -1,5 +1,4 @@
 import type { Tool } from "@arterm/core";
-import { execa } from "execa";
 import { requireString, resolveWithin } from "./paths.js";
 
 const MAX_OUTPUT = 16 * 1024;
@@ -25,6 +24,8 @@ function truncate(s: string): string {
 }
 
 async function runGit(args: string[], cwd: string, signal?: AbortSignal) {
+  // Lazy: execa is loaded on first git use, not at startup.
+  const { execa } = await import("execa");
   const result = await execa("git", args, {
     cwd,
     shell: false,
