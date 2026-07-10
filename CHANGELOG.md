@@ -5,6 +5,54 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-07-11
+
+### Added
+
+- **Agent teams (`/team <task>`).** A new autonomy mode where the leader assembles a
+  named team of specialist members and assigns work per round: roster (from your
+  agent definitions, or ad-hoc) → parallel rounds with per-member git-worktree
+  isolation for write-capable members → integration → reflect/repeat. A live member
+  board in the TUI shows each member's state, current assignment, and last tool
+  activity; `/pause /resume /stop` and plain-text steering work as with `/goal`.
+  Also reachable as `/autonomy team <goal>`, and configurable via the new
+  `config.team` block (`fanout`, `maxRounds`, `isolation`, `mergeStrategy`, `suggest`).
+- **Agent definition files (`/agents`).** Define reusable specialist sub-agents as
+  markdown: `<project>/.arterm/agents/*.md` and `~/.arterm/agents/*.md` (project wins
+  on name collisions). Frontmatter `name` / `description` / `tools` (allowlist), body
+  = the member's system prompt. Definitions also extend the role set used by the
+  parallel/phased autonomy modes and `/sdd`, and reload live via `/plugins reload`.
+- **Team auto-suggestion.** A large-looking prompt (multiple enumerated items or
+  chained scopes) gets a one-line y/N offer to run as a team instead — never a
+  silent switch. Disable with `config.team.suggest = false`.
+- **Patch auto-apply (`mergeStrategy`).** Worktree patches from team members are
+  applied back onto the main tree with `git apply --3way` (team default). A conflict
+  marks the member failed and keeps its `arterm/fleet/*` branch for manual recovery;
+  `"surface"` keeps the old report-only behavior. The previously dormant
+  `config.fleet.mergeStrategy` is now honored for plain fleet runs too.
+- **Member observability.** Team members bridge whitelisted events (tool calls,
+  messages — never token deltas) off their private bus with a stable member id;
+  the HQ dashboard gained a Team panel driven by the same id-keyed events.
+
+### Removed
+
+- **The HQ web dashboard.** The multi-agent aggregator, WebSocket reporter, the
+  Next.js web app, the `arterm hq` subcommand, the `--hq`/`--hq-port`/`--hq-connect`
+  flags, the `/web`·`/hq` TUI commands, and the `config.hq` block are gone (a
+  leftover `hq` block in an existing config file is ignored harmlessly). Live
+  multi-agent visibility now lives in the TUI itself (the /team member board).
+
+### Fixed
+
+- **Spurious "host not reachable" warning at startup.** The openai-compat
+  preflight probe now carries the stored API key and the configured custom
+  headers, so gateways that gate on them (e.g. agentrouter) no longer make a
+  perfectly working setup warn on every launch.
+- **Sub-agents now inherit MCP/plugin/memory tools.** `spawn`, `spawn_parallel`,
+  parallel/phased autonomy workers, and `/sdd` tasks previously ran with only the
+  built-in tool set; they now read the live tool roster at spawn time (delegation
+  tools still excluded — depth stays one level).
+
 ## [0.2.0] — 2026-07-05
 
 A large feature release: subscription login, a multi-agent web dashboard, richer

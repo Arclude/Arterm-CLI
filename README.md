@@ -43,8 +43,9 @@ Enter send   ? help   Alt+P models   Esc cancel   ^C quit
   spec-driven fleets delegate to sub-agents in isolated git worktrees.
 - **Persistent memory** — a claude-mem-style pipeline captures observations per
   project and recalls them into new sessions (`arterm memory serve` to browse).
-- **Multi-agent HQ dashboard** — `arterm --hq` or `/web` starts a local web
-  dashboard that live-monitors and steers every connected Arterm agent.
+- **Agent teams** — `/team <task>` has a leader assemble named specialist
+  members (from your `.arterm/agents/*.md` definitions, or ad-hoc), run them in
+  parallel git worktrees with a live member board, and auto-apply their patches.
 - **Headless mode** — `arterm --print "prompt"` (or piped stdin) for scripts;
   `--json` for structured output; `--resume`/`--continue` to pick up a session.
 - **Native + JSON-fallback tool-calling** — uses a backend's native
@@ -99,7 +100,6 @@ arterm pull <model>          # download a model via Ollama
 | `--print <prompt>`    | Headless: run one prompt, print the reply, exit (add `--json` for structured output). |
 | `--resume <id>` / `--continue` | Resume a recorded session / the most recent one. |
 | `--goal <text>`       | Start in autonomy mode with this goal.                |
-| `--hq` / `--hq-port <n>` / `--hq-connect <url>` | Start or join the multi-agent HQ dashboard. |
 
 ### Inside the TUI
 
