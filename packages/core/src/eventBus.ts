@@ -47,6 +47,32 @@ export type AgentEvent =
     }
   | { type: "phase_start"; id: string; index: number; total: number; title: string }
   | { type: "phase_done"; id: string; index: number; title: string; summary: string }
+  // Agent-team mode (/team): leader assembles a member roster, assigns work per round.
+  | {
+      type: "team_plan";
+      members: { id: string; name: string; description: string; adhoc: boolean }[];
+    }
+  | { type: "team_round"; round: number; tasks: { member: string; task: string }[] }
+  | {
+      type: "team_member_state";
+      id: string;
+      name: string;
+      state: SddTaskState;
+      task?: string;
+      filesChanged?: number;
+    }
+  // Bridged from a member's private bus — lets the team board show live activity.
+  | { type: "team_member_event"; id: string; name: string; event: AgentEvent }
+  // Result of auto-applying a member's worktree patch to the main tree.
+  | {
+      type: "team_patch";
+      id: string;
+      name: string;
+      ok: boolean;
+      files: number;
+      detail?: string;
+    }
+  | { type: "team_done"; rounds: number; done: number; failed: number }
   // Spec-Driven Development (/sdd): interview → spec → task-DAG.
   | { type: "sdd_interview"; questions: string[] }
   | { type: "sdd_spec"; id: string; specPath: string; taskCount: number }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent } from "./agent.js";
+import { registerAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine, type AutonomyFleetRunner, type AutonomyTask } from "./autonomy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import { PermissionManager } from "./permissions.js";
@@ -390,5 +391,116 @@ describe("Agent.assess", () => {
 
     expect(verdict.done).toBe(true);
     expect(agent.history.length).toBe(before);
+  });
+});
+
+describe("team mode", () => {
+  it("assembles a roster, dispatches assignments with member identity, and finishes", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      '[{"name": "coder", "description": "writes code", "instruction": "Write the code."}]',
+      '[{"member": "coder", "task": "implement it"}]',
+    ];
+    agent.assessVerdict = { done: true, note: "finished" };
+    const fleetCalls: AutonomyTask[][] = [];
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      fleetCalls.push(tasks);
+      return tasks.map((t) => ({ ...t, output: "ok" }));
+    };
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "team", runFleet });
+
+    await engine.start("build the feature");
+
+    expect(engine.state).toBe("done");
+    expect(fleetCalls).toHaveLength(1);
+    const task = fleetCalls[0]?.[0];
+    expect(task?.id).toBe("m1-coder");
+    expect(task?.role).toBe("coder");
+    // Ad-hoc member → brief travels as a task-instruction prefix, not a system prompt.
+    expect(task?.instruction).toBe("Write the code.");
+    expect(task?.systemPrompt).toBeUndefined();
+
+    const types = events.map((e) => e.type);
+    expect(types.indexOf("team_plan")).toBeGreaterThan(-1);
+    expect(types.indexOf("team_plan")).toBeLessThan(types.indexOf("team_round"));
+    expect(types.indexOf("team_round")).toBeLessThan(types.indexOf("team_done"));
+    expect(types).toContain("autonomy_done");
+    const done = events.find((e) => e.type === "team_done");
+    expect(done?.type === "team_done" && done.done).toBe(1);
+    expect(engine.snapshot().team.map((m) => m.name)).toEqual(["coder"]);
+  });
+
+  it("a definition-backed member carries its body as a system prompt and its allowlist", async () => {
+    registerAgentDefinitions([
+      {
+        name: "auditor",
+        description: "security audits",
+        instruction: "SYSTEM BRIEF",
+        tools: ["read"],
+        source: "project",
+      },
+    ]);
+    try {
+      const bus = new EventBus();
+      const agent = new FakeAgent(bus);
+      agent.plans = ['[{"name": "auditor"}]', '[{"member": "auditor", "task": "scan"}]'];
+      agent.assessVerdict = { done: true, note: "clean" };
+      const fleetCalls: AutonomyTask[][] = [];
+      const runFleet: AutonomyFleetRunner = async (tasks) => {
+        fleetCalls.push(tasks);
+        return tasks.map((t) => ({ ...t, output: "ok" }));
+      };
+      const engine = makeEngine(agent, bus, { mode: "team", runFleet });
+
+      await engine.start("audit the repo");
+
+      const task = fleetCalls[0]?.[0];
+      expect(task?.systemPrompt).toBe("SYSTEM BRIEF");
+      expect(task?.instruction).toBeUndefined();
+      expect(task?.toolNames).toEqual(["read"]);
+    } finally {
+      registerAgentDefinitions([]);
+    }
+  });
+
+  it("stops after two idle rounds, still emitting a team summary", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"name": "coder", "instruction": "x"}]', "[]", "[]"];
+    agent.assessVerdict = { done: false, note: "CONTINUE" };
+    const runFleet: AutonomyFleetRunner = async (tasks) =>
+      tasks.map((t) => ({ ...t, output: "ok" }));
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "team", runFleet });
+
+    await engine.start("vague goal");
+
+    expect(engine.state).toBe("stopped");
+    const types = events.map((e) => e.type);
+    expect(types).toContain("team_done");
+    const stop = events.find((e) => e.type === "autonomy_stopped");
+    expect(stop?.type === "autonomy_stopped" && stop.reason).toContain("no further team work");
+  });
+
+  it("counts failed members in the team summary", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      '[{"name": "a", "instruction": "x"}, {"name": "b", "instruction": "y"}]',
+      '[{"member": "a", "task": "t1"}, {"member": "b", "task": "t2"}]',
+    ];
+    agent.assessVerdict = { done: true, note: "over" };
+    const runFleet: AutonomyFleetRunner = async (tasks) =>
+      tasks.map((t, i) => ({ ...t, output: i === 0 ? "ok" : "boom", error: i === 1 }));
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "team", runFleet });
+
+    await engine.start("mixed result");
+
+    const done = events.find((e) => e.type === "team_done");
+    expect(done?.type === "team_done" && done.done).toBe(1);
+    expect(done?.type === "team_done" && done.failed).toBe(1);
   });
 });

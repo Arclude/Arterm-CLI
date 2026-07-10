@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { captureWorktree, createWorktree, isGitRepo, removeWorktree } from "./worktree.js";
+import {
+  applyPatch,
+  captureWorktree,
+  createWorktree,
+  isGitRepo,
+  removeWorktree,
+} from "./worktree.js";
 
 const run = promisify(execFile);
 
@@ -82,5 +88,36 @@ describe.skipIf(!gitAvailable)("worktree", () => {
     await removeWorktree(wt, repo, { keepBranch: false });
     const { stdout } = await run("git", ["worktree", "list"], { cwd: repo });
     expect(stdout).not.toContain(wt.path);
+  });
+
+  it("applyPatch lands a captured member patch on the main tree", async () => {
+    const wt = await createWorktree(repo, "ap1");
+    await fs.writeFile(join(wt.path, "feature.txt"), "from member\n");
+    const changes = await captureWorktree(wt);
+    await removeWorktree(wt, repo, { keepBranch: false });
+
+    const res = await applyPatch(repo, changes.patch);
+    expect(res.ok).toBe(true);
+    expect(await fs.readFile(join(repo, "feature.txt"), "utf8")).toContain("from member");
+  });
+
+  it("applyPatch reports a conflict instead of throwing", async () => {
+    const wt = await createWorktree(repo, "ap2");
+    await fs.writeFile(join(wt.path, "seed.txt"), "member version\n");
+    const changes = await captureWorktree(wt);
+    await removeWorktree(wt, repo, { keepBranch: false });
+
+    // Diverge the main tree on the same line so a 3-way merge can't resolve it.
+    await fs.writeFile(join(repo, "seed.txt"), "main version\n");
+    await run("git", ["add", "-A"], { cwd: repo });
+    await run("git", ["commit", "-m", "diverge"], { cwd: repo });
+
+    const res = await applyPatch(repo, changes.patch);
+    expect(res.ok).toBe(false);
+    expect(res.detail).toBeTruthy();
+  });
+
+  it("applyPatch treats an empty patch as a no-op success", async () => {
+    expect((await applyPatch(repo, "")).ok).toBe(true);
   });
 });

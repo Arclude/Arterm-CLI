@@ -106,8 +106,10 @@ export type PermissionLevel = "allow" | "ask" | "deny";
  *   - "eternal":  keeps going until stopped.
  *   - "parallel": each round the leader decomposes the goal into concurrent subagent
  *                 tasks (fleet), aggregates the results, reflects, and repeats.
+ *   - "team":     the leader assembles a named team of specialist members (from
+ *                 `.arterm/agents/*.md` definitions or ad-hoc) and assigns work per round.
  */
-export type AutonomyMode = "once" | "eternal" | "parallel" | "phased";
+export type AutonomyMode = "once" | "eternal" | "parallel" | "phased" | "team";
 
 /** Connection status of one configured MCP server (for the /mcp view). */
 export interface McpServerSummary {

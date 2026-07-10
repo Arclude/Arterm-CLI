@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -129,6 +129,35 @@ export async function removeWorktree(
       await git(root, ["branch", "-D", h.branch]);
     } catch {
       // Branch may not exist or be checked out elsewhere; ignore.
+    }
+  }
+}
+
+/**
+ * Apply a unified diff to the repo's working tree (`git apply --3way`, so patches
+ * based on an earlier HEAD still land when possible). Never throws — a conflict
+ * comes back as `{ ok: false }` with git's explanation, and the caller decides
+ * what to surface (team mode keeps the member's branch for manual recovery).
+ */
+export async function applyPatch(
+  repoCwd: string,
+  patch: string,
+  signal?: AbortSignal,
+): Promise<{ ok: boolean; detail?: string }> {
+  if (!patch.trim()) return { ok: true };
+  const file = join(tmpdir(), `arterm-patch-${randomUUID()}.diff`);
+  try {
+    const root = await gitRoot(repoCwd, signal);
+    await fs.writeFile(file, patch.endsWith("\n") ? patch : `${patch}\n`, "utf8");
+    await git(root, ["apply", "--3way", file], signal);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, detail: (err as Error).message };
+  } finally {
+    try {
+      await fs.unlink(file);
+    } catch {
+      // Temp file may not exist if writeFile failed; nothing to clean.
     }
   }
 }

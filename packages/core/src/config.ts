@@ -62,6 +62,23 @@ export interface ArtermConfig {
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
   /** Per-plugin trust level (untrusted by default — tools forced to ask, execute blocked). */
   plugins: Record<string, { trust: TrustTier }>;
+  /** Agent teams (/team): leader assembles specialist members and assigns work per round. */
+  team: {
+    /** Max members / concurrent assignments per round (default 4). */
+    fanout?: number;
+    /** Cap on assignment rounds (default 6). */
+    maxRounds?: number;
+    /**
+     * Member filesystem isolation. "auto" (default) = write-capable members get
+     * their own git worktree, read-only members share the cwd; "worktree"/"none"
+     * force one behavior for everyone.
+     */
+    isolation?: "auto" | "worktree" | "none";
+    /** "apply" (default) = auto-apply member patches to the main tree; "surface" = report only. */
+    mergeStrategy?: "surface" | "apply";
+    /** Offer to run large-looking prompts as a team (y/N confirm; default true). */
+    suggest?: boolean;
+  };
   /** Parallel sub-agent fan-out (spawn_parallel, parallel/phased autonomy, /sdd). */
   fleet: {
     concurrency?: number;
@@ -90,16 +107,6 @@ export interface ArtermConfig {
     maxQuestions?: number;
     /** Cap on generated tasks in the graph (default 12). */
     maxTasks?: number;
-  };
-  /** Multi-agent HQ dashboard. */
-  hq?: {
-    /**
-     * When true, every `arterm` session auto-connects to the HQ dashboard (starting a
-     * background aggregator if one isn't already running) — same as passing `--hq`.
-     */
-    autostart?: boolean;
-    /** Aggregator port to use/spawn (default 7788). */
-    port?: number;
   };
   /** Persistent, project-scoped memory (claude-mem-style capture/digest/recall). */
   memory: {
@@ -154,6 +161,7 @@ export function defaultConfig(): ArtermConfig {
     autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
     mcpServers: {},
     plugins: {},
+    team: { fanout: 4, maxRounds: 6, isolation: "auto", mergeStrategy: "apply", suggest: true },
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
@@ -198,7 +206,7 @@ const configFileSchema = z
       .partial(),
     autonomy: z
       .object({
-        mode: z.enum(["once", "eternal", "parallel", "phased"]),
+        mode: z.enum(["once", "eternal", "parallel", "phased", "team"]),
         maxSteps: z.number().int().positive().optional(),
         maxPhases: z.number().int().positive().optional(),
         phasedFanout: z.number().int().positive().optional(),
@@ -212,6 +220,15 @@ const configFileSchema = z
       }),
     ),
     plugins: z.record(z.object({ trust: z.enum(["untrusted", "trusted"]) })),
+    team: z
+      .object({
+        fanout: z.number().int().positive().optional(),
+        maxRounds: z.number().int().positive().optional(),
+        isolation: z.enum(["auto", "worktree", "none"]).optional(),
+        mergeStrategy: z.enum(["surface", "apply"]).optional(),
+        suggest: z.boolean().optional(),
+      })
+      .partial(),
     fleet: z
       .object({
         concurrency: z.number().int().positive().optional(),
@@ -231,12 +248,6 @@ const configFileSchema = z
       .object({
         maxQuestions: z.number().int().positive().optional(),
         maxTasks: z.number().int().positive().optional(),
-      })
-      .partial(),
-    hq: z
-      .object({
-        autostart: z.boolean().optional(),
-        port: z.number().int().positive().optional(),
       })
       .partial(),
     memory: z

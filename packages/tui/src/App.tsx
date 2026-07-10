@@ -23,6 +23,7 @@ import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js"
 import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
+import { TeamBoard, type TeamBoardMember } from "./TeamBoard.js";
 import {
   type HistoryNav,
   commandSuggestion,
@@ -33,6 +34,7 @@ import {
   reduceInput,
 } from "./editing.js";
 import { Markdown } from "./markdown.js";
+import { looksLikeBigTask } from "./teamSuggest.js";
 import type { DisplayItem, LoginProvider, Session } from "./types.js";
 
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
@@ -131,13 +133,13 @@ const COMMANDS = [
   "clear",
   "goal",
   "autonomy",
+  "team",
+  "agents",
   "sdd",
   "steer",
   "pause",
   "resume",
   "stop",
-  "web",
-  "hq",
   "compact",
   "cost",
   "config",
@@ -341,6 +343,9 @@ export function App({
   const [interviewInput, setInterviewInput] = useState("");
   // Live /sdd kanban board — seeded from `sdd_graph`, updated per `sdd_task_state`.
   const [sddTasks, setSddTasks] = useState<SddBoardTask[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamBoardMember[]>([]);
+  // A large-looking prompt held for the y/N team-run offer (never a silent switch).
+  const [teamSuggest, setTeamSuggest] = useState<string | null>(null);
   const filteredPickerModels = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase();
     return q ? pickerModels.filter((m) => m.name.toLowerCase().includes(q)) : pickerModels;
@@ -573,6 +578,86 @@ export function App({
           push({
             kind: "system",
             text: `◆ round ${event.round} aggregated (${event.count} result(s))`,
+          });
+          break;
+        case "team_plan":
+          // Seed the live member board; the transcript keeps a one-line roster record.
+          setTeamMembers(
+            event.members.map((m) => ({
+              id: m.id,
+              name: m.name,
+              description: m.description,
+              adhoc: m.adhoc,
+              state: "pending" as const,
+            })),
+          );
+          push({
+            kind: "system",
+            text: `⚑ team: ${event.members
+              .map((m) => `${m.name}${m.adhoc ? "*" : ""}`)
+              .join(", ")}  (* = ad-hoc)`,
+          });
+          break;
+        case "team_round":
+          push({
+            kind: "system",
+            text: `◆ round ${event.round}: ${event.tasks
+              .map((t) => `${t.member} → ${t.task.slice(0, 48)}`)
+              .join("  ·  ")}`,
+          });
+          break;
+        case "team_member_state":
+          // Update the board in place; the transcript only records terminal states.
+          setTeamMembers((prev) =>
+            prev.map((m) =>
+              m.id === event.id
+                ? {
+                    ...m,
+                    state: event.state,
+                    task: event.task ?? m.task,
+                    filesChanged: event.filesChanged ?? m.filesChanged,
+                    activity: event.state === "running" ? m.activity : undefined,
+                  }
+                : m,
+            ),
+          );
+          if (event.state === "done" || event.state === "failed") {
+            push({
+              kind: "system",
+              text: `${event.state === "done" ? "✓" : "✗"} ${event.name}${
+                event.filesChanged ? ` — ${event.filesChanged} file(s) changed` : ""
+              }`,
+            });
+          }
+          break;
+        case "team_member_event": {
+          // Live activity only — member tool calls never enter the transcript.
+          const inner = event.event;
+          const activity =
+            inner.type === "tool_call"
+              ? `⚙ ${inner.call.name}`
+              : inner.type === "assistant_message"
+                ? "✎ writing"
+                : inner.type === "tool_denied"
+                  ? "⊘ denied"
+                  : undefined;
+          if (activity) {
+            setTeamMembers((prev) => prev.map((m) => (m.id === event.id ? { ...m, activity } : m)));
+          }
+          break;
+        }
+        case "team_patch":
+          push({
+            kind: "system",
+            text: event.ok
+              ? `⤓ ${event.name}: patch applied (${event.files} file(s))`
+              : `⚠ ${event.name}: patch conflict — branch kept (${(event.detail ?? "").slice(0, 120)})`,
+          });
+          break;
+        case "team_done":
+          push({
+            kind: "system",
+            text: `■ team run complete — ${event.done} done, ${event.failed} failed, ${event.rounds} round(s)`,
           });
           break;
         case "fleet_worktree":
@@ -1049,6 +1134,7 @@ export function App({
           setOutTok(0);
           setCtxUsed(0);
           setSddTasks([]);
+          setTeamMembers([]);
           break;
         case "exit":
         case "quit":
@@ -1176,12 +1262,12 @@ export function App({
         case "autonomy": {
           const [modeArg = "", ...goalParts] = rest.join(" ").trim().split(/\s+/);
           const mode = modeArg.toLowerCase();
-          const modes: AutonomyMode[] = ["once", "eternal", "parallel", "phased"];
+          const modes: AutonomyMode[] = ["once", "eternal", "parallel", "phased", "team"];
           const g = goalParts.join(" ").trim();
           if (!modes.includes(mode as AutonomyMode) || !g) {
             push({
               kind: "system",
-              text: "usage: /autonomy <once|eternal|parallel|phased> <goal>",
+              text: "usage: /autonomy <once|eternal|parallel|phased|team> <goal>",
             });
           } else if (session.autonomy.state === "running" || session.autonomy.state === "paused") {
             push({ kind: "system", text: "a goal is already running — /stop it first" });
@@ -1189,6 +1275,49 @@ export function App({
             push({ kind: "system", text: "can't switch autonomy mode while a goal is active" });
           } else {
             void session.autonomy.start(g);
+          }
+          break;
+        }
+        case "team": {
+          const g = rest.join(" ").trim();
+          if (!g) {
+            push({ kind: "system", text: "usage: /team <task>  (leader assembles an agent team)" });
+          } else if (
+            session.autonomy.state === "running" ||
+            session.autonomy.state === "paused" ||
+            session.sdd.state === "running" ||
+            session.sdd.state === "paused"
+          ) {
+            push({ kind: "system", text: "a run is already active — /stop it first" });
+          } else if (!session.autonomy.setMode("team")) {
+            push({ kind: "system", text: "can't switch autonomy mode while a goal is active" });
+          } else {
+            setTeamMembers([]);
+            push({ kind: "system", text: `⚑ /team: assembling a team for "${g.slice(0, 80)}"…` });
+            void session.autonomy.start(g);
+          }
+          break;
+        }
+        case "agents": {
+          const defs = session.agentDefs ?? [];
+          if (defs.length === 0) {
+            push({
+              kind: "system",
+              text:
+                "no agent definitions found — add markdown files to .arterm/agents/ (project) " +
+                "or ~/.arterm/agents/ (global): frontmatter name/description/tools, body = instructions",
+            });
+          } else {
+            const lines = defs.map(
+              (d) =>
+                `  ${d.name} [${d.source}]${d.description ? ` — ${d.description}` : ""}${
+                  d.tools ? `  (tools: ${d.tools.join(", ")})` : ""
+                }`,
+            );
+            push({
+              kind: "system",
+              text: `agent definitions (used by /team):\n${lines.join("\n")}`,
+            });
           }
           break;
         }
@@ -1232,29 +1361,6 @@ export function App({
           session.autonomy.stop();
           session.sdd.stop();
           break;
-        case "hq":
-        case "web": {
-          const port = rest[0] ? Number(rest[0]) : undefined;
-          if (
-            rest[0] &&
-            (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535)
-          ) {
-            push({ kind: "system", text: "usage: /web [port]" });
-            break;
-          }
-          if (!session.startHq) {
-            push({ kind: "system", text: "web dashboard unavailable in this session" });
-            break;
-          }
-          push({ kind: "system", text: "starting web dashboard…" });
-          session
-            .startHq({ port })
-            .then(({ url }) => push({ kind: "system", text: `▸ web dashboard → ${url}` }))
-            .catch((e) =>
-              push({ kind: "system", text: `web dashboard failed: ${(e as Error).message}` }),
-            );
-          break;
-        }
         case "mcp": {
           const sub = rest[0] ?? "";
           if (sub !== "" && sub !== "check" && sub !== "reload") {
@@ -1449,6 +1555,18 @@ export function App({
     ],
   );
 
+  // The plain single-agent turn (also the decline path of the team suggestion).
+  const runPlain = useCallback(
+    async (text: string) => {
+      push({ kind: "user", text });
+      const controller = new AbortController();
+      abortRef.current = controller;
+      await session.agent.run(text, controller.signal);
+      abortRef.current = null;
+    },
+    [session, push],
+  );
+
   const submit = useCallback(
     async (value: string) => {
       const text = value.trim();
@@ -1470,13 +1588,37 @@ export function App({
         session.autonomy.steer(text);
         return;
       }
-      push({ kind: "user", text });
-      const controller = new AbortController();
-      abortRef.current = controller;
-      await session.agent.run(text, controller.signal);
-      abortRef.current = null;
+      // A large-looking prompt gets a y/N offer to run as an agent team instead
+      // (config.team.suggest gates this; declining runs the normal single turn).
+      if (
+        session.config.team?.suggest !== false &&
+        session.sdd.state !== "running" &&
+        session.sdd.state !== "paused" &&
+        looksLikeBigTask(text)
+      ) {
+        setTeamSuggest(text);
+        return;
+      }
+      await runPlain(text);
     },
-    [session, handleSlash, push],
+    [session, handleSlash, push, runPlain],
+  );
+
+  // y/N confirm for the /team offer: y routes the prompt to /team, anything else
+  // (n, Enter, Esc, any other character) falls through to the normal run.
+  useInput(
+    (input2, key) => {
+      const text = teamSuggest;
+      if (!text) return;
+      if (input2 === "y" || input2 === "Y") {
+        setTeamSuggest(null);
+        void handleSlash(`/team ${text}`);
+      } else if (input2 || key.return || key.escape) {
+        setTeamSuggest(null);
+        void runPlain(text);
+      }
+    },
+    { isActive: teamSuggest !== null },
   );
 
   // Up/Down recall previously submitted prompts (shell-style history).
@@ -1520,6 +1662,18 @@ export function App({
           </Text>
         ) : null}
         {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
+        {teamMembers.length > 0 ? <TeamBoard members={teamMembers} columns={columns} /> : null}
+        {teamSuggest ? (
+          <Box>
+            <Text color="magenta" bold>
+              ⚑ This looks like a large task
+            </Text>
+            <Text color="gray"> — run it as an agent team? </Text>
+            <Text color="magenta" bold>
+              [y/N]
+            </Text>
+          </Box>
+        ) : null}
         {interview ? (
           <SddInterview
             questions={interview.questions}
@@ -1557,7 +1711,7 @@ export function App({
               <Text color="yellow">● working… (Esc to cancel)</Text>
             ) : (
               <InputLine
-                active={!busy || autoState !== "idle"}
+                active={(!busy || autoState !== "idle") && !teamSuggest}
                 value={input}
                 commands={COMMANDS}
                 columns={columns}

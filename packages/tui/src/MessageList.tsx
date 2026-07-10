@@ -132,7 +132,9 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
     title: "Autonomy",
     items: [
       ["/goal <text>", "run autonomously toward a goal"],
-      ["/autonomy <mode> <goal>", "once | eternal | parallel | phased"],
+      ["/autonomy <mode> <goal>", "once | eternal | parallel | phased | team"],
+      ["/team <task>", "leader assembles an agent team (roster → parallel rounds)"],
+      ["/agents", "list agent definitions (.arterm/agents/*.md)"],
       ["/sdd <brief>", "spec → task graph → parallel execution"],
       ["/steer <text>", "redirect the goal · /pause /resume /stop"],
     ],
@@ -151,7 +153,6 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
       ["/mcp [check|reload]", "MCP servers — status · probe · reconnect"],
       ["/plugins [check|reload]", "plugins — status · validate · rescan"],
       ["/skills · /skill <n>", "list skills · run one by name"],
-      ["/web [port]", "open the live monitoring dashboard (web)"],
     ],
   },
   {

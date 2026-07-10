@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ARTERM_HOME,
   type ArtermConfig,
@@ -15,16 +13,18 @@ import {
   loadConfig,
   projectKey,
   readProjectRecords,
+  registerAgentDefinitions,
   retentionFromConfig,
 } from "@arterm/core";
 import { formatObservationsText, openMemStore, startCmemMcpServer } from "@arterm/memory";
 import {
   LlamaCppProvider,
   OllamaProvider,
-  OpenAICompatProvider,
+  type OpenAICompatProvider,
   allProviders,
   buildAuthorizeUrl,
   createPkce,
+  createProvider,
   createState,
   exchangeCode,
   hasCredentials,
@@ -35,16 +35,18 @@ import {
   removeOAuthTokens,
   setOAuthTokens,
 } from "@arterm/providers";
-import { McpManager, PluginLoader, SkillRegistry, startMemoryMcpServer } from "@arterm/tools";
+import {
+  AgentDefLoader,
+  McpManager,
+  PluginLoader,
+  SkillRegistry,
+  startMemoryMcpServer,
+} from "@arterm/tools";
 import { type Session, runTui } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
 import { runHeadless } from "./headless.js";
-import { startHqAggregator } from "./hqAggregator.js";
-import { ensureAggregator } from "./hqAutostart.js";
-import { HQ_AGGREGATOR_PORT } from "./hqProtocol.js";
-import { connectHqReporter } from "./hqReporter.js";
 import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
@@ -115,12 +117,6 @@ interface GlobalOpts {
   resume?: string;
   /** Resume the most recent recorded session. */
   continue?: boolean;
-  /** Open the multi-agent HQ dashboard and report this session to it. */
-  hq?: boolean;
-  /** Preferred HQ aggregator port to use/spawn (default 7788; auto-falls-back if taken). */
-  hqPort?: string;
-  /** Report this session to an existing HQ aggregator at this URL. */
-  hqConnect?: string;
 }
 
 /**
@@ -149,10 +145,11 @@ async function preflight(providerId: string, config: ArtermConfig): Promise<stri
         : `Ollama not reachable at ${config.ollamaHost}. Start it with \`ollama serve\`, or switch provider with --provider llamacpp.`;
     }
     case "openai-compat": {
-      const ok = await new OpenAICompatProvider({
-        baseUrl: config.openaiCompatHost,
-        apiKey: process.env.OPENAI_API_KEY,
-      }).isReachable();
+      // Probe via the registry-built provider so the check carries the same stored
+      // key and custom headers as real chat — relay gateways (e.g. agentrouter)
+      // reject bare requests, which made this warning fire spuriously.
+      const provider = createProvider(config, "openai-compat") as OpenAICompatProvider;
+      const ok = await provider.isReachable();
       return ok
         ? undefined
         : `OpenAI-compatible host not reachable at ${config.openaiCompatHost}. Check the host or that the server is running.`;
@@ -220,9 +217,16 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   );
   const plugins = new PluginLoader(join(ARTERM_HOME, "plugins"), pluginTrust);
   const skills = new SkillRegistry(join(ARTERM_HOME, "skills"));
+  // Agent definitions for /team and /agents: project files win over global ones.
+  const agentDefs = new AgentDefLoader(
+    join(process.cwd(), ".arterm", "agents"),
+    join(ARTERM_HOME, "agents"),
+  );
 
   const [mcpTools, pluginTools] = await Promise.all([mcp.connect(), plugins.load()]);
   await skills.load();
+  registerAgentDefinitions(await agentDefs.load());
+  session.agentDefs = agentDefs.summary;
 
   // Fold external tools into the agent (built-ins win on name collisions).
   const existing = new Set(session.agent.tools.map((t) => t.name));
@@ -245,6 +249,9 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   });
   session.reloadExtensions = async () => {
     const [mcpTools, pluginTools] = await Promise.all([mcp.reconnect(), plugins.reload()]);
+    // Re-scan agent definitions too, so /team picks up new .md files without a restart.
+    registerAgentDefinitions(await agentDefs.load());
+    session.agentDefs = agentDefs.summary;
     // Same collision rule as startup: whatever is already registered wins.
     const have = new Set(session.agent.tools.map((t) => t.name));
     const added = [...mcpTools, ...pluginTools].filter((t) => !have.has(t.name));
@@ -270,15 +277,8 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
 
-  // Live monitoring dashboard. `--hq` (or config.hq.autostart) auto-ensures a shared
-  // multi-agent aggregator is running and reports THIS session to it; `--hq-connect`
-  // targets a specific aggregator instead. Best-effort — never blocks or kills the
-  // session; messages go to stderr (before the TUI takes the alt-screen).
-  const reporter = await attachHqReporter(session, globals, config);
-
   await runTui(session, { goal: globals.goal });
 
-  reporter?.close();
   await mcp.close();
   // Digest this session's activity into persistent memory before exiting.
   try {
@@ -290,38 +290,6 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
   await persist();
-}
-
-/**
- * Ensure the HQ aggregator is up (per --hq-connect / --hq / config.hq.autostart)
- * and report this session to it, returning a closer (or undefined when HQ wasn't
- * asked for). Best-effort — an unreachable aggregator only warns; a malformed
- * --hq-port is the one hard error. Shared by the TUI (startChat) and headless
- * (runHeadlessFlow) paths so a `--print … --hq` one-shot shows up in the dashboard.
- */
-async function attachHqReporter(
-  session: Session,
-  globals: GlobalOpts,
-  config: ArtermConfig,
-): Promise<{ close(): void } | undefined> {
-  if (globals.hqConnect) {
-    process.stderr.write(`HQ reporting → ${globals.hqConnect}\n`);
-    return connectHqReporter({ session, url: globals.hqConnect, cwd: process.cwd() });
-  }
-  if (globals.hq || config.hq?.autostart) {
-    const port = parsePort(globals.hqPort, config.hq?.port ?? HQ_AGGREGATOR_PORT);
-    if (port === null) {
-      throw new ArtermUserError(`Invalid --hq-port "${globals.hqPort}". Use a port in 1–65535.`);
-    }
-    try {
-      const url = await ensureAggregator(port);
-      process.stderr.write(`HQ dashboard → ${url}  (this session is now visible there)\n`);
-      return connectHqReporter({ session, url, cwd: process.cwd() });
-    } catch (err) {
-      process.stderr.write(`⚠ HQ dashboard unavailable: ${(err as Error).message}\n`);
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -354,14 +322,9 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   const handle = await store.create({ model: config.model, provider: providerId });
   session.agent.setOnMessage((message) => handle.logMessage(message));
 
-  // Report this one-shot to the HQ dashboard when asked (--hq/--hq-connect). Writes
-  // only to stderr, so --json output on stdout stays clean; no-op unless requested.
-  const reporter = await attachHqReporter(session, globals, config);
-
   try {
     await runHeadless(session, prompt, { json: globals.json });
   } finally {
-    reporter?.close();
     try {
       await digest();
     } catch (err) {
@@ -538,37 +501,6 @@ async function memoryServe(opts: { port?: string; open?: boolean }): Promise<voi
   });
 }
 
-/** Locate the built web app (`web/out`) relative to the installed CLI, if present. */
-function defaultWebDir(): string | undefined {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url)); // packages/cli/dist
-    const candidate = join(here, "..", "..", "..", "web", "out");
-    return existsSync(join(candidate, "index.html")) ? candidate : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** `arterm hq` — the long-lived multi-agent aggregator + web app host. */
-async function hqServe(opts: { port?: string; web?: string; open?: boolean }): Promise<void> {
-  const port = parsePort(opts.port, HQ_AGGREGATOR_PORT);
-  if (port === null) {
-    throw new ArtermUserError(`Invalid --port "${opts.port}". Use an integer between 1 and 65535.`);
-  }
-  const webDir = opts.web ?? defaultWebDir();
-  const server = await startHqAggregator({ port, webDir });
-  process.stdout.write(
-    `Arterm HQ aggregator → ${server.url}\nAgents connect with: arterm --hq-connect ${server.url}\nPress Ctrl+C to stop.\n`,
-  );
-  if (opts.open) await openBrowser(server.url);
-  await new Promise<void>((resolve) => {
-    process.on("SIGINT", () => {
-      process.stdout.write("\nStopping HQ aggregator.\n");
-      void server.close().then(resolve);
-    });
-  });
-}
-
 async function memoryList(): Promise<void> {
   const cwd = process.cwd();
   const config = await loadConfig();
@@ -620,10 +552,7 @@ async function main(): Promise<void> {
     .option("--print <prompt>", "run a single prompt headlessly (no TUI) and print the result")
     .option("--json", "with --print or piped input, emit the result as JSON")
     .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
-    .option("--continue", "resume the most recent recorded session")
-    .option("--hq", "open the multi-agent HQ dashboard and report this session to it")
-    .option("--hq-port <n>", "HQ aggregator port to use/spawn (default 7788)")
-    .option("--hq-connect <url>", "report this session to an existing HQ aggregator at this URL");
+    .option("--continue", "resume the most recent recorded session");
 
   program
     .command("chat", { isDefault: true })
@@ -702,16 +631,6 @@ async function main(): Promise<void> {
     .action(memoryList);
 
   program
-    .command("hq")
-    .description("run the multi-agent HQ aggregator + web dashboard")
-    .option("--port <n>", `port to listen on (default ${HQ_AGGREGATOR_PORT})`)
-    .option("--web <dir>", "directory of the built web app to serve (static export)")
-    .option("--open", "open the dashboard in your browser")
-    .action(async (opts: { port?: string; web?: string; open?: boolean }) => {
-      await hqServe(opts);
-    });
-
-  program
     .command("status")
     .description("check MCP server + plugin health without starting the TUI (exit 1 on failures)")
     .option("--json", "emit machine-readable JSON")
@@ -739,7 +658,7 @@ async function main(): Promise<void> {
 }
 
 // A stray rejection from fire-and-forget background work (an autonomy reflection,
-// the on-exit memory digest, an HQ reporter socket) must not tear down an active
+// the on-exit memory digest) must not tear down an active
 // session. Registering these handlers also stops Node from terminating the process
 // on an unhandled rejection. Output is debug-gated so it never corrupts the Ink TUI.
 process.on("unhandledRejection", (reason) => {

@@ -1,6 +1,15 @@
 import type { Agent } from "./agent.js";
+import { listAgentDefinitions } from "./agentRegistry.js";
 import type { EventBus } from "./eventBus.js";
 import { availableRoles } from "./subagent.js";
+import {
+  type TeamAssignment,
+  type TeamMember,
+  buildRosterPrompt,
+  buildTeamDecomposePrompt,
+  parseAssignments,
+  parseRoster,
+} from "./team.js";
 import type { AutonomyMode, Tool } from "./types.js";
 
 export type AutonomyState = "idle" | "running" | "paused" | "done" | "stopped";
@@ -9,11 +18,21 @@ export type AutonomyState = "idle" | "running" | "paused" | "done" | "stopped";
 export interface AutonomyTask {
   task: string;
   role?: string;
+  /** Stable team-member id (team mode) — threaded through fleet events. */
+  id?: string;
+  /** Ad-hoc member brief, prefixed onto the task (wins over the role preset). */
+  instruction?: string;
+  /** A definition-backed member's full system prompt. */
+  systemPrompt?: string;
+  /** Tool-name allowlist from the member's definition. */
+  toolNames?: string[];
 }
 
 /** A result returned by one parallel sub-agent. */
 export interface AutonomyTaskResult extends AutonomyTask {
   output: string;
+  /** True when the sub-agent failed (its output holds the error message). */
+  error?: boolean;
 }
 
 /** Runs a batch of tasks concurrently (sub-agent fleet) and returns ordered results. */
@@ -41,7 +60,11 @@ export interface AutonomyOptions {
   fanout?: number;
   /** Max sequential phases in "phased" mode. Default 8. */
   maxPhases?: number;
-  /** Fleet runner required by "parallel"/"phased" modes (injected so core stays decoupled). */
+  /** Team mode: max members / concurrent assignments per round. Default 4. */
+  teamFanout?: number;
+  /** Team mode: cap on assignment rounds. Default 6. */
+  teamRounds?: number;
+  /** Fleet runner required by "parallel"/"phased"/"team" modes (injected so core stays decoupled). */
   runFleet?: AutonomyFleetRunner;
 }
 
@@ -68,6 +91,10 @@ export class AutonomyEngine {
   private resumeResolve?: () => void;
   /** Latest planned phases (phased mode) — surfaced read-only via `snapshot()`. */
   private _phases: Phase[] = [];
+  /** Latest assembled team roster (team mode) — surfaced read-only via `snapshot()`. */
+  private _team: TeamMember[] = [];
+  private teamFanout: number;
+  private teamRounds: number;
 
   constructor(
     private readonly agent: Agent,
@@ -79,6 +106,8 @@ export class AutonomyEngine {
     this.maxSteps = opts.maxSteps ?? 25;
     this.fanout = Math.min(16, Math.max(1, opts.fanout ?? 16));
     this.maxPhases = Math.min(20, Math.max(1, opts.maxPhases ?? 8));
+    this.teamFanout = Math.min(16, Math.max(1, opts.teamFanout ?? 4));
+    this.teamRounds = Math.min(20, Math.max(1, opts.teamRounds ?? 6));
     this.runFleet = opts.runFleet;
   }
 
@@ -99,7 +128,7 @@ export class AutonomyEngine {
 
   /**
    * Atomic read-only view of the engine's live state — for external monitors
-   * (e.g. the HQ dashboard) that can't reach the private goal/step/phase fields.
+   * that can't reach the private goal/step/phase fields.
    */
   snapshot(): {
     state: AutonomyState;
@@ -107,6 +136,7 @@ export class AutonomyEngine {
     goal: string;
     step: number;
     phases: { id: string; title: string; done: string; parallel?: boolean }[];
+    team: { id: string; name: string; description: string; adhoc: boolean }[];
   } {
     return {
       state: this._state,
@@ -118,6 +148,12 @@ export class AutonomyEngine {
         title: p.title,
         done: p.done,
         ...(p.parallel ? { parallel: true } : {}),
+      })),
+      team: this._team.map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        adhoc: m.adhoc,
       })),
     };
   }
@@ -131,8 +167,18 @@ export class AutonomyEngine {
     this.stopped = false;
     this.pendingSteer = undefined;
     this._phases = [];
+    this._team = [];
     this._state = "running";
     this.bus.emit({ type: "goal_set", goal: this.goal, mode: this.mode });
+
+    if (this.mode === "team") {
+      try {
+        await this.runTeamLoop();
+      } finally {
+        if (this._state === "running") this._state = "stopped";
+      }
+      return;
+    }
 
     if (this.mode === "parallel") {
       try {
@@ -305,6 +351,153 @@ export class AutonomyEngine {
       this._state = "stopped";
       this.bus.emit({ type: "autonomy_stopped", reason: `reached round limit (${this.maxSteps})` });
     }
+  }
+
+  /**
+   * Team mode: the leader assembles a roster of named specialist members once
+   * (user agent definitions preferred, ad-hoc otherwise), then each round assigns
+   * independent tasks to members, the fleet runs them concurrently (write-capable
+   * members isolated in worktrees by the composition root), and the leader
+   * integrates the results and reflects. Ends on assess-done, /stop, idle rounds,
+   * or the round cap.
+   */
+  private async runTeamLoop(): Promise<void> {
+    const runFleet = this.runFleet;
+    if (!runFleet) {
+      this._state = "stopped";
+      this.bus.emit({ type: "autonomy_stopped", reason: "team mode needs a fleet runner" });
+      return;
+    }
+
+    this.current = new AbortController();
+    const roster = await this.assembleTeam();
+    if (this.stopped) return;
+    this._team = roster;
+    this.bus.emit({
+      type: "team_plan",
+      members: roster.map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        adhoc: m.adhoc,
+      })),
+    });
+
+    let round = 0;
+    let done = 0;
+    let failed = 0;
+    const summary = () => this.bus.emit({ type: "team_done", rounds: round, done, failed });
+
+    while (!this.stopped && round < this.teamRounds) {
+      await this.gate();
+      if (this.stopped) break;
+
+      round += 1;
+      this.step = round;
+      this.bus.emit({ type: "autonomy_step", step: round });
+      this.current = new AbortController();
+
+      const assignments = await this.assignWork(roster, round);
+      if (this.stopped) break;
+      if (this.paused()) continue;
+
+      if (assignments.length === 0) {
+        // Leader proposed no work — reflect on whether the goal is done.
+        const verdict = await this.agent.assess(this.goal, this.current.signal);
+        this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
+        if (verdict.done) {
+          summary();
+          this.finish(verdict.note || "goal complete");
+          return;
+        }
+        this.idleStreak += 1;
+        if (this.idleStreak >= 2) {
+          this._state = "stopped";
+          summary();
+          this.bus.emit({ type: "autonomy_stopped", reason: "no further team work proposed" });
+          return;
+        }
+        continue;
+      }
+      this.idleStreak = 0;
+
+      // File-backed members carry their definition body as a full system prompt;
+      // ad-hoc members get their brief as a task-instruction prefix.
+      const tasks: AutonomyTask[] = assignments.map((a) => ({
+        task: a.task,
+        role: a.member.name,
+        id: a.member.id,
+        instruction: a.member.adhoc ? a.member.instruction || undefined : undefined,
+        systemPrompt: a.member.adhoc ? undefined : a.member.instruction,
+        toolNames: a.member.toolNames,
+      }));
+      this.bus.emit({
+        type: "team_round",
+        round,
+        tasks: assignments.map((a) => ({ member: a.member.name, task: a.task })),
+      });
+
+      let results: AutonomyTaskResult[];
+      try {
+        results = await runFleet(tasks, this.current.signal);
+      } catch (err) {
+        if (this.stopped) break;
+        if (this.paused()) continue;
+        this.bus.emit({
+          type: "autonomy_reflect",
+          done: false,
+          note: `fleet error: ${(err as Error).message}`,
+        });
+        continue;
+      }
+      if (this.stopped) break;
+      if (this.paused()) continue;
+
+      done += results.filter((r) => !r.error).length;
+      failed += results.filter((r) => r.error).length;
+
+      await this.aggregate(round, results);
+      this.bus.emit({ type: "autonomy_aggregate", round, count: results.length });
+
+      const verdict = await this.agent.assess(this.goal, this.current.signal);
+      this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
+      if (verdict.done) {
+        summary();
+        this.finish(verdict.note || "goal complete");
+        return;
+      }
+    }
+    summary();
+    if (!this.stopped) {
+      this._state = "stopped";
+      this.bus.emit({
+        type: "autonomy_stopped",
+        reason: `reached round limit (${this.teamRounds})`,
+      });
+    }
+  }
+
+  /** Ask the leader to assemble the team (with a parse-proof fallback roster). */
+  private async assembleTeam(): Promise<TeamMember[]> {
+    const steer = this.pendingSteer;
+    this.pendingSteer = undefined;
+    const defs = listAgentDefinitions();
+    const raw = await this.agent.plan(
+      buildRosterPrompt(this.goal, defs, this.teamFanout, steer),
+      this.current?.signal,
+    );
+    return parseRoster(raw, defs, this.teamFanout);
+  }
+
+  /** Ask the leader to assign the next round of work across the roster. */
+  private async assignWork(roster: TeamMember[], round: number): Promise<TeamAssignment[]> {
+    const steer = this.pendingSteer;
+    this.pendingSteer = undefined;
+    const raw = await this.agent.plan(
+      buildTeamDecomposePrompt(this.goal, roster, round, steer, this.teamFanout),
+      this.current?.signal,
+    );
+    return parseAssignments(raw, roster, this.teamFanout);
   }
 
   /**

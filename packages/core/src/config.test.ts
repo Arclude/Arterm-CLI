@@ -69,3 +69,37 @@ describe("validateConfigFile", () => {
     expect(cfg.session.maxSessions).toBeGreaterThan(0);
   });
 });
+
+describe("team config", () => {
+  it("has safe defaults", () => {
+    const cfg = defaultConfig();
+    expect(cfg.team).toEqual({
+      fanout: 4,
+      maxRounds: 6,
+      isolation: "auto",
+      mergeStrategy: "apply",
+      suggest: true,
+    });
+  });
+
+  it("accepts a valid block and drops invalid fields with a warning", () => {
+    const warnings: string[] = [];
+    const out = validateConfigFile({ team: { fanout: 2, isolation: "bogus" } }, (m) =>
+      warnings.push(m),
+    );
+    expect(out.team?.fanout).toBe(2);
+    expect(out.team?.isolation).toBeUndefined();
+    expect(warnings.some((w) => w.includes("team.isolation"))).toBe(true);
+  });
+
+  it("merges a partial team block over the defaults without wiping it", () => {
+    const merged = mergeConfig(defaultConfig(), { team: { fanout: 2 } });
+    expect(merged.team.fanout).toBe(2);
+    expect(merged.team.mergeStrategy).toBe("apply");
+  });
+
+  it('accepts autonomy mode "team"', () => {
+    const out = validateConfigFile({ autonomy: { mode: "team" } }, () => {});
+    expect(out.autonomy?.mode).toBe("team");
+  });
+});

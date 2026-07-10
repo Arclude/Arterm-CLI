@@ -11,6 +11,7 @@ export {
   type McpToolDef,
 } from "./mcp.js";
 export { PluginLoader, type PluginManifest } from "./plugins.js";
+export { AgentDefLoader, agentDefDirs, parseAgentDef } from "./agentDefs.js";
 export { SkillRegistry, parseSkill, skillsPromptSection, type Skill } from "./skills.js";
 export {
   createSpawnTool,

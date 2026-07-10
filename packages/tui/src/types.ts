@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentDefSummary,
   ArtermConfig,
   AutonomyEngine,
   CompactionResult,
@@ -93,6 +94,11 @@ export interface Session {
   plugins: PluginSummary[];
   /** Available skills (for /skills); populated after startup. */
   skills: SkillInfo[];
+  /**
+   * Loaded agent definitions (for /agents and the /team roster catalog);
+   * populated after startup by the CLI. Absent in headless/test sessions.
+   */
+  agentDefs?: AgentDefSummary[];
   /** Returns a skill's instruction body to run it (for /skill <name>). */
   getSkillBody(name: string): string | undefined;
   /**
@@ -109,15 +115,6 @@ export interface Session {
    * sessions.
    */
   reloadExtensions?(): Promise<ExtensionsReload>;
-  /**
-   * Start the live monitoring dashboard (web) against this session. Injected by the
-   * CLI (the TUI can't import the cli-side server); absent in headless/test sessions.
-   * Returns the running server so the TUI can print/close it.
-   */
-  startHq?(opts?: { port?: number; open?: boolean }): Promise<{
-    url: string;
-    close(): Promise<void>;
-  }>;
   /**
    * Project-memory legend to show at session start (claude-mem-style), or "" when
    * there's nothing to recall. Rendered once as a system block above the prompt.

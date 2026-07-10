@@ -1,7 +1,9 @@
 import {
   Agent,
+  type AgentEvent,
   type ArtermConfig,
   AutonomyEngine,
+  type AutonomyTask,
   Container,
   EventBus,
   MemoryRecorder,
@@ -13,6 +15,8 @@ import {
   RunController,
   SddRunner,
   Tokens,
+  type Tool,
+  applyPatch,
   createContextStrategy,
   createMemoryStore,
   createPipelines,
@@ -21,6 +25,7 @@ import {
   estimateTokens,
   formatMemorySection,
   loadConfig,
+  memberIsolation,
   runFleet,
   runSubagent,
   saveConfig,
@@ -50,9 +55,6 @@ import {
   taskDoneTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
-import { ensureAggregator } from "./hqAutostart.js";
-import { HQ_AGGREGATOR_PORT } from "./hqProtocol.js";
-import { connectHqReporter } from "./hqReporter.js";
 
 export interface SessionOptions {
   config: ArtermConfig;
@@ -194,6 +196,16 @@ export async function buildSession(opts: SessionOptions): Promise<{
     container,
   });
 
+  // Live sub-agent tool set, read from `agent.tools` at spawn time — after main.ts
+  // has folded in MCP/plugin tools, so sub-agents inherit them. The delegation
+  // tools stay out (depth is one level), and an optional allowlist narrows the set
+  // (team members with a `tools:` frontmatter list).
+  const subagentTools = (allow?: string[]): Tool[] =>
+    agent.tools.filter(
+      (t) =>
+        t.name !== "spawn" && t.name !== "spawn_parallel" && (!allow || allow.includes(t.name)),
+    );
+
   // Sub-agent delegation: the main agent gets a `spawn` tool that runs a fresh
   // sub-agent (own history, the core tool set, no `spawn` of its own → one level
   // deep) toward a task and returns its result.
@@ -202,7 +214,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     const output = await runSubagent(task, {
       provider,
       model: agent.model,
-      tools: defaultTools(),
+      tools: subagentTools(),
       permissions,
       ask: (tool, args) => asker(tool, args),
       cwd,
@@ -215,16 +227,37 @@ export async function buildSession(opts: SessionOptions): Promise<{
     return output;
   };
 
-  // Parallel fan-out: run several independent sub-tasks concurrently. Threaded with
-  // an optional abort signal so the autonomy engine can cancel an in-flight round.
-  const runFleetTasks = async (tasks: { task: string; role?: string }[], signal?: AbortSignal) => {
+  // Parallel fan-out: run several independent sub-tasks concurrently. Team tasks
+  // (those carrying a member id) additionally get per-member tools + isolation, an
+  // id-tagged event bridge to the shared bus, and patch auto-apply per
+  // config.team.mergeStrategy once the round returns.
+  const runFleetTasks = async (tasks: AutonomyTask[], signal?: AbortSignal) => {
     bus.emit({ type: "fleet_start", count: tasks.length });
+    const teamRun = tasks.some((t) => t.id);
+    const isolationMode = config.team?.isolation ?? "auto";
+    const fleetTasks = tasks.map((t) => {
+      if (!t.id) return { task: t.task, role: t.role };
+      const id = t.id;
+      const memberTools = subagentTools(t.toolNames);
+      return {
+        task: t.task,
+        role: t.role,
+        id,
+        instruction: t.instruction,
+        systemPrompt: t.systemPrompt,
+        tools: memberTools,
+        // "auto": writers isolate in a worktree, read-only members share the cwd.
+        isolation: isolationMode === "auto" ? memberIsolation(memberTools) : isolationMode,
+        onEvent: (e: AgentEvent) =>
+          bus.emit({ type: "team_member_event", id, name: t.role ?? "member", event: e }),
+      };
+    });
     const results = await runFleet(
-      tasks,
+      fleetTasks,
       {
         provider,
         model: agent.model,
-        tools: defaultTools(),
+        tools: subagentTools(),
         permissions,
         ask: (tool, args) => asker(tool, args),
         cwd,
@@ -233,14 +266,86 @@ export async function buildSession(opts: SessionOptions): Promise<{
         maxSteps: config.autonomy?.maxSteps,
         concurrency: config.fleet?.concurrency,
         isolation: config.fleet?.isolation ?? "none",
-        onStart: (_i, task, role) => bus.emit({ type: "subagent_start", task, role }),
-        onDone: (_i, output) => bus.emit({ type: "subagent_done", output }),
+        onStart: (i, task, role) => {
+          bus.emit({ type: "subagent_start", task, role });
+          const t = tasks[i];
+          if (t?.id) {
+            bus.emit({
+              type: "team_member_state",
+              id: t.id,
+              name: t.role ?? "member",
+              state: "running",
+              task: t.task,
+            });
+          }
+        },
+        onDone: (i, output, result) => {
+          bus.emit({ type: "subagent_done", output });
+          const t = tasks[i];
+          if (t?.id) {
+            bus.emit({
+              type: "team_member_state",
+              id: t.id,
+              name: t.role ?? "member",
+              state: result?.error ? "failed" : "done",
+              task: t.task,
+              filesChanged: result?.worktree?.files.length,
+            });
+          }
+        },
         onWorktree: (_i, info) => bus.emit({ type: "fleet_worktree", ...info }),
       },
       signal,
     );
     bus.emit({ type: "fleet_done", count: results.length });
-    return results.map((r) => ({ task: r.task, role: r.role, output: r.output }));
+
+    // First consumer of mergeStrategy: bring worktree patches back onto the main
+    // tree, sequentially so conflicts are attributed to one member. Teams default
+    // to "apply"; the plain fleet keeps its "surface" default. A conflict marks
+    // the member failed — its branch survives (removeWorktree keeps changed
+    // branches) for manual recovery.
+    const strategy = teamRun
+      ? (config.team?.mergeStrategy ?? "apply")
+      : (config.fleet?.mergeStrategy ?? "surface");
+    if (strategy === "apply") {
+      for (const r of results) {
+        if (!r.worktree?.patch) continue;
+        const applied = await applyPatch(cwd, r.worktree.patch, signal);
+        const name = r.role ?? "member";
+        if (r.id) {
+          bus.emit({
+            type: "team_patch",
+            id: r.id,
+            name,
+            ok: applied.ok,
+            files: r.worktree.files.length,
+            detail: applied.detail,
+          });
+        }
+        if (applied.ok) {
+          r.output = `${r.output}\n[patch applied to the main working tree]`;
+        } else {
+          r.error = true;
+          r.output = `${r.output}\n[patch conflict — branch ${r.worktree.branch} kept: ${applied.detail ?? "git apply failed"}]`;
+          if (r.id) {
+            bus.emit({
+              type: "team_member_state",
+              id: r.id,
+              name,
+              state: "failed",
+              filesChanged: r.worktree.files.length,
+            });
+          }
+        }
+      }
+    }
+    return results.map((r) => ({
+      task: r.task,
+      role: r.role,
+      id: r.id,
+      output: r.output,
+      error: r.error,
+    }));
   };
 
   // The `spawn_parallel` tool form (no abort signal; the model drives it).
@@ -311,6 +416,8 @@ export async function buildSession(opts: SessionOptions): Promise<{
     maxSteps: config.autonomy?.maxSteps,
     maxPhases: config.autonomy?.maxPhases,
     fanout: config.autonomy?.phasedFanout ?? config.fleet?.concurrency,
+    teamFanout: config.team?.fanout,
+    teamRounds: config.team?.maxRounds,
     runFleet: (tasks, signal) => runFleetTasks(tasks, signal),
   });
 
@@ -412,19 +519,6 @@ export async function buildSession(opts: SessionOptions): Promise<{
     skills: [],
     getSkillBody: () => undefined,
     memoryBanner,
-  };
-
-  // Live monitoring dashboard (web), activated on demand by `/hq` / `/web`. Ensures a
-  // shared aggregator is up (auto-picking a free port if the default is taken) and
-  // reports THIS session to it. A single-instance guard means repeated commands reuse
-  // the same connection instead of spawning again.
-  let hq: { url: string; close(): Promise<void> } | undefined;
-  session.startHq = async (opts) => {
-    if (hq) return hq;
-    const url = await ensureAggregator(opts?.port ?? config.hq?.port ?? HQ_AGGREGATOR_PORT);
-    const reporter = connectHqReporter({ session, url, cwd });
-    hq = { url, close: async () => reporter.close() };
-    return hq;
   };
 
   const persist = async () => {
