@@ -418,7 +418,11 @@ export function App({
         const cb = Number(mm[1]);
         if ((cb & 64) === 0) continue; // not a wheel event
         const low = cb & 3;
-        delta += low === 0 ? -3 : low === 1 ? 3 : 0; // wheel up → newer (−), down → older (+)
+        // Natural chat direction: wheel up lifts the view toward OLDER lines
+        // (offset +), wheel down returns toward the newest (offset −) — matching
+        // the scroll hint. (687383b had flipped this; at the bottom, wheel-up then
+        // hit the 0-clamp and the transcript felt unscrollable.)
+        delta += low === 0 ? 3 : low === 1 ? -3 : 0;
       }
       if (delta !== 0)
         setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + delta)));

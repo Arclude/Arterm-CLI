@@ -139,9 +139,7 @@ export async function runSubagent(
   if (doneSummary || lastAssistant) return doneSummary || lastAssistant;
   // Nothing produced: report WHY instead of a blank shrug — a provider failure
   // (401 quota, unreachable host, …) was previously invisible to the caller.
-  return lastError
-    ? `sub-agent failed: ${lastError}`
-    : "(sub-agent produced no output)";
+  return lastError ? `sub-agent failed: ${lastError}` : "(sub-agent produced no output)";
 }
 
 export interface FleetTask {
