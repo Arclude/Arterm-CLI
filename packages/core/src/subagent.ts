@@ -107,12 +107,18 @@ export async function runSubagent(
 
   let lastAssistant = "";
   let doneSummary: string | undefined;
+  let lastError = "";
   const off = bus.on((e) => {
     if (e.type === "assistant_message") {
       const text = e.message.content.trim();
       if (text) lastAssistant = text;
     } else if (e.type === "autonomy_done") {
       doneSummary = e.summary;
+    } else if (e.type === "error") {
+      // The agent loop swallows provider errors into bus events; on this PRIVATE
+      // bus nobody else sees them, so keep the last one to surface as the result
+      // when the run otherwise produced nothing (e.g. auth/quota failures).
+      lastError = e.error;
     }
     if (opts.onEvent && BRIDGED_EVENTS.has(e.type)) opts.onEvent(e);
   });
@@ -130,7 +136,12 @@ export async function runSubagent(
   } finally {
     off();
   }
-  return doneSummary || lastAssistant || "(sub-agent produced no output)";
+  if (doneSummary || lastAssistant) return doneSummary || lastAssistant;
+  // Nothing produced: report WHY instead of a blank shrug — a provider failure
+  // (401 quota, unreachable host, …) was previously invisible to the caller.
+  return lastError
+    ? `sub-agent failed: ${lastError}`
+    : "(sub-agent produced no output)";
 }
 
 export interface FleetTask {
@@ -244,12 +255,15 @@ export async function runFleet(
         }
       }
 
+      // A worker that threw OR one whose sub-agent reported a swallowed provider
+      // failure (the "sub-agent failed:" convention) counts as failed.
+      const errored = failed || output.startsWith("sub-agent failed:");
       const result: FleetResult = {
         task: t.task,
         role: t.role,
         id: t.id,
         output,
-        ...(failed ? { error: true } : {}),
+        ...(errored ? { error: true } : {}),
         worktree: worktreeInfo,
       };
       results[index] = result;

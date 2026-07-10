@@ -5,6 +5,23 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] — 2026-07-11
+
+### Added
+
+- **Team board navigation.** ↑/↓ on an empty prompt select a member on the
+  /team board (❯ marker), Enter drills into the selected member's live
+  activity feed (tool calls, results, messages — last 100 lines per member),
+  Esc closes it. Works during the run and after it finishes.
+
+### Fixed
+
+- **Sub-agent failures are no longer silent.** A sub-agent whose provider
+  call failed (e.g. a 401/quota error) used to report "(sub-agent produced
+  no output)" while the real reason stayed invisible on its private bus; the
+  error now comes back as the sub-agent's result and the member/worker is
+  marked failed on the board and in the round summary.
+
 ## [0.3.1] — 2026-07-11
 
 ### Performance

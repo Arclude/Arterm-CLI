@@ -228,6 +228,49 @@ describe("runSubagent", () => {
     expect(bridged).not.toContain("text_delta");
     expect(bridged).not.toContain("turn_start");
   });
+
+  it("surfaces a swallowed provider error instead of '(no output)'", async () => {
+    // The agent loop converts provider throws into bus `error` events; on the
+    // sub-agent's private bus those were invisible (seen live as a 401-quota
+    // fleet where every member "produced no output").
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      // biome-ignore lint/correctness/useYield: the provider fails before yielding
+      async *chat() {
+        throw new Error("/chat/completions failed: 401 quota exhausted");
+      },
+    };
+
+    const output = await runSubagent("do anything", {
+      provider,
+      model: "x",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      cwd: process.cwd(),
+      taskDone,
+      maxSteps: 2,
+    });
+
+    expect(output).toContain("sub-agent failed:");
+    expect(output).toContain("401");
+
+    // And the fleet marks such a member as errored, not silently done.
+    const results = await runFleet([{ task: "A", id: "m1" }], {
+      provider,
+      model: "x",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      cwd: process.cwd(),
+      taskDone,
+      maxSteps: 2,
+    });
+    expect(results[0]?.error).toBe(true);
+    expect(results[0]?.output).toContain("401");
+  });
 });
 
 describe("runFleet", () => {

@@ -19,7 +19,7 @@ interface Props {
   columns: number;
 }
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 
 function gitBranch(): string {
   try {
