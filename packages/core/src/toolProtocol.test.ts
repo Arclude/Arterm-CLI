@@ -82,7 +82,7 @@ describe("parseToolCalls", () => {
   });
 });
 
-describe("parseToolCalls — degenerate {\"<tool>\": {…}} shape (known-tool gated)", () => {
+describe('parseToolCalls — degenerate {"<tool>": {…}} shape (known-tool gated)', () => {
   const known = new Set(["read", "bash"]);
 
   it("recovers a fenced single-key call when the key is a known tool", () => {

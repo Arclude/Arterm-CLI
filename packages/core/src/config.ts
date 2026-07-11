@@ -248,9 +248,7 @@ const configFileSchema = z
         suggest: z.boolean().optional(),
       })
       .partial(),
-    tui: z
-      .object({ fullscreen: z.boolean().optional(), mouse: z.boolean().optional() })
-      .partial(),
+    tui: z.object({ fullscreen: z.boolean().optional(), mouse: z.boolean().optional() }).partial(),
     fleet: z
       .object({
         concurrency: z.number().int().positive().optional(),

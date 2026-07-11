@@ -229,10 +229,7 @@ export class Agent {
       // text). Emits a tool_call event per recovered call, exactly as the stream path did.
       res.use("recoverToolCalls", async (ctx, next) => {
         if (this.opts.tools.length > 0 && ctx.calls.length === 0) {
-          const parsed = parseToolCalls(
-            ctx.text,
-            new Set(this.opts.tools.map((t) => t.name)),
-          );
+          const parsed = parseToolCalls(ctx.text, new Set(this.opts.tools.map((t) => t.name)));
           if (parsed.calls.length > 0) {
             ctx.text = parsed.cleaned;
             for (const call of parsed.calls) {

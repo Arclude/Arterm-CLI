@@ -327,8 +327,7 @@ const Transcript = memo(function Transcript({
     }
   }, [items, live, columns, onMeasure]);
 
-  const cut =
-    contentRows > 0 ? Math.max(1, contentRows - Math.max(0, scrollOffset)) : undefined;
+  const cut = contentRows > 0 ? Math.max(1, contentRows - Math.max(0, scrollOffset)) : undefined;
   return (
     <Box
       width={columns}
@@ -577,7 +576,6 @@ export function App({
     );
     return undefined;
   }, [rawStdout, fullscreen, mouseCapture]);
-
 
   // Classic-mode resize recovery: reflowed wrapped lines invalidate Ink's
   // RELATIVE erase counts (its very next repaint can eat into the transcript or

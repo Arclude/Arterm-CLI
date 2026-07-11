@@ -228,8 +228,7 @@ export function StatusBar({
         </Text>
       </Text>
       <Text color="gray" dimColor wrap="truncate">
-        Enter send · ↑↓ history · wheel scrolls · {selectHint} · /copy last reply · ? help · ^C
-        quit
+        Enter send · ↑↓ history · wheel scrolls · {selectHint} · /copy last reply · ? help · ^C quit
       </Text>
     </Box>
   );
