@@ -164,7 +164,10 @@ export class Agent {
       tc.use("permission", async (ctx, next) => {
         const tool = this.toolMap.get(ctx.call.name);
         if (!tool) {
-          ctx.output = `Unknown tool: ${ctx.call.name}`;
+          // Name the real roster: small local models often guess names like
+          // read_file/search — a corrective list lets them recover instead of
+          // spiraling through more invented tools.
+          ctx.output = `Unknown tool: ${ctx.call.name}. Valid tools: ${[...this.toolMap.keys()].join(", ")}`;
           ctx.isError = true;
           return;
         }
