@@ -13,9 +13,26 @@ import {
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
-import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
+import {
+  Box,
+  type DOMElement,
+  Static,
+  Text,
+  measureElement,
+  useApp,
+  useInput,
+  useStdout,
+} from "ink";
 import type React from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { LoginOverlay } from "./LoginOverlay.js";
 import { Item } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
@@ -256,6 +273,73 @@ const LiveMessage = memo(function LiveMessage({
     </Box>
   );
 });
+
+/**
+ * Keeps the dynamic bottom region GLUED to the terminal's bottom edge.
+ *
+ * Ink's log-update repaints by erasing the previous frame from its TOP line and
+ * writing the new one below — so when the frame SHRINKS (live message committed,
+ * queue drained, a board closed) the cursor ends up higher and the leftover rows
+ * stay blank: the region becomes top-anchored and the footer "floats" up off the
+ * bottom of the window. This wrapper renders the region inside a bottom-justified
+ * box whose height never shrinks mid-flight: it grows with the content (capped at
+ * rows-2 — a frame reaching stdout.rows trips Ink's clearTerminal path, which
+ * wipes scrollback), holds while the content shrinks (the blank padding sits at
+ * the TOP, the footer stays put), and snaps back to the content size when
+ * `snapKey` changes — static commits/resize, whose rewrite re-anchors the bottom
+ * edge anyway. (Same family of trick as gemini-cli's constrained live region.)
+ */
+function AnchoredRegion({
+  rows,
+  columns,
+  snapKey,
+  children,
+}: {
+  rows: number;
+  columns: number;
+  /** Changes on static commits / /clear remounts / resize — moments to re-fit. */
+  snapKey: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const contentRef = useRef<DOMElement>(null);
+  const [regionH, setRegionH] = useState(0);
+  const snapRef = useRef(snapKey);
+  // Content height does not depend on the container height (fixed width, the
+  // clip/justify live on the outer box), so measuring here cannot feed back.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure every commit
+  useLayoutEffect(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    const { height } = measureElement(node);
+    const cap = Math.max(4, rows - 2);
+    const fit = Math.min(Math.max(1, height), cap);
+    setRegionH((cur) => {
+      if (snapRef.current !== snapKey) {
+        snapRef.current = snapKey;
+        return fit; // the bottom edge was just re-anchored — follow the content
+      }
+      return fit > cur ? fit : cur; // grow with content, never shrink mid-flight
+    });
+  });
+  const inner = (
+    <Box ref={contentRef} flexDirection="column" flexShrink={0} width={columns}>
+      {children}
+    </Box>
+  );
+  // First render (height unknown yet): content-sized, no clipping flash.
+  if (regionH === 0) return inner;
+  return (
+    <Box
+      width={columns}
+      height={regionH}
+      overflowY="hidden"
+      flexDirection="column"
+      justifyContent="flex-end"
+    >
+      {inner}
+    </Box>
+  );
+}
 
 export function App({
   session,
@@ -1139,9 +1223,11 @@ export function App({
           // <Static> only appends — remount it (new key) and blank the terminal's
           // screen + scrollback so the cleared transcript really disappears; the
           // newline pad re-anchors the prompt to the bottom of the window.
+          // 3J comes FIRST deliberately: syncedStdout rewrites Ink's 2J+3J+H
+          // clearTerminal to spare the scrollback, but leaves this order alone.
           setStaticGen((g) => g + 1);
           const ESC = String.fromCharCode(27);
-          rawStdout?.write(`${ESC}[2J${ESC}[3J${ESC}[H${"\n".repeat(Math.max(0, rows - 1))}`);
+          rawStdout?.write(`${ESC}[3J${ESC}[2J${ESC}[H${"\n".repeat(Math.max(0, rows - 1))}`);
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -1744,7 +1830,11 @@ export function App({
           </Box>
         )}
       </Static>
-      <Box flexDirection="column" width={columns}>
+      <AnchoredRegion
+        rows={rows}
+        columns={columns}
+        snapKey={`${staticGen}:${items.length}:${rows}:${columns}`}
+      >
         {live ? <LiveMessage text={live} maxRows={liveMaxRows} columns={columns} /> : null}
         {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
         {teamMembers.length > 0 ? (
@@ -1809,12 +1899,17 @@ export function App({
                 </Text>
               </Text>
             ) : null}
-            {queue.map((q, i) => (
+            {queue.slice(0, 3).map((q, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: queue is order-only
               <Text key={i} color="gray" dimColor wrap="truncate">
                 ⏳ {q}
               </Text>
             ))}
+            {queue.length > 3 ? (
+              <Text color="gray" dimColor>
+                ⏳ +{queue.length - 3} more queued
+              </Text>
+            ) : null}
             <InputLine
               active={!teamSuggest}
               value={input}
@@ -1851,7 +1946,7 @@ export function App({
           mode={mode}
           columns={columns}
         />
-      </Box>
+      </AnchoredRegion>
     </>
   );
 }
