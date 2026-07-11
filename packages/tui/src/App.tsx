@@ -13,18 +13,9 @@ import {
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
-import {
-  Box,
-  type DOMElement,
-  Text,
-  measureElement,
-  useApp,
-  useInput,
-  useStdin,
-  useStdout,
-} from "ink";
+import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 import type React from "react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginOverlay } from "./LoginOverlay.js";
 import { Item } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
@@ -33,7 +24,6 @@ import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardMember } from "./TeamBoard.js";
-import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
 import { osc52Sequence } from "./clipboard.js";
 import {
   type HistoryNav,
@@ -52,6 +42,9 @@ import type { DisplayItem, LoginProvider, Session } from "./types.js";
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
 const DEFAULT_CTX = 32768;
 
+/** Streamed tokens repaint the live message at most this often (~22 fps). */
+const LIVE_FLUSH_MS = 45;
+
 /** Custom single-line input so `?` on an empty line opens help. */
 function InputLine({
   active,
@@ -61,6 +54,8 @@ function InputLine({
   onChange,
   onSubmit,
   onHelp,
+  onHistoryPrev,
+  onHistoryNext,
 }: {
   active: boolean;
   value: string;
@@ -69,6 +64,8 @@ function InputLine({
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onHelp: () => void;
+  onHistoryPrev: () => void;
+  onHistoryNext: () => void;
 }): React.ReactElement {
   const suggestion = commandSuggestion(value, commands);
   const { stdout } = useStdout();
@@ -91,9 +88,6 @@ function InputLine({
         if (suggestion) onChange(value + suggestion);
         return;
       }
-      // ↑/↓ are owned by App's arrow router (which separates wheel-synthesized
-      // arrows from keyboard history navigation) — never double-handle them.
-      if (key.upArrow || key.downArrow) return;
       const action = reduceInput(value, input, key);
       switch (action.type) {
         case "submit":
@@ -103,7 +97,9 @@ function InputLine({
         case "help":
           return onHelp();
         case "history_prev":
+          return onHistoryPrev();
         case "history_next":
+          return onHistoryNext();
         case "noop":
           return;
       }
@@ -209,85 +205,46 @@ function useTermSize(): { rows: number; columns: number } {
 }
 
 /**
- * Managed, in-app scrollable transcript (replaces Ink's <Static>). The alternate
- * screen has no scrollback for the chat to ride, so we scroll it ourselves (the
- * wheel reaches us as alternate-scroll arrow keys — see arrowRouter.ts).
- * Technique (Ink-5, mirrors WrongStack's ScrollableHistory):
- * a height-bounded `overflowY:"hidden"` + `justifyContent:"flex-end"` viewport bottom-
- * aligns the content, so overflow clips off the TOP (newest visible) for free; a
- * positive `marginBottom={scrollOffset}` then lifts the content to reveal older rows.
- * (Negative marginTop does NOT clip reliably — it overlaps; do not use it.)
- *
- * Wrapped in React.memo so keystrokes in the prompt don't re-lay-out the whole
- * transcript — only items/live/viewport/offset changes do.
+ * The live, in-progress assistant message, shown in Ink's dynamic bottom region
+ * while streaming (the finished message is committed to <Static> and this
+ * clears). Only the TAIL is rendered, for two reasons: the dynamic region must
+ * stay well under the terminal height — once Ink's frame reaches `stdout.rows`
+ * it falls back to clearing and rewriting the WHOLE terminal on every render
+ * (the source of visible stutter and scrollback corruption) — and a shorter
+ * frame keeps per-token repaints cheap.
  */
-const Transcript = memo(function Transcript({
-  items,
-  live,
-  viewportRows,
-  marginBottom,
+const LiveMessage = memo(function LiveMessage({
+  text,
+  maxRows,
   columns,
-  onMeasure,
 }: {
-  items: DisplayItem[];
-  live: string;
-  viewportRows: number;
-  marginBottom: number;
+  text: string;
+  maxRows: number;
   columns: number;
-  /** Reports the measured content height (rows) after each layout, so App can clamp
-   *  the scroll offset and keep the view anchored as content streams in. */
-  onMeasure: (totalLines: number) => void;
 }): React.ReactElement {
-  const contentRef = useRef<DOMElement>(null);
-  const lastReported = useRef(-1);
-  // The content's own height does not depend on viewportRows/marginBottom (margins
-  // and justify are layout-outside), so measuring here never feeds back into a loop.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on content change
-  useLayoutEffect(() => {
-    const node = contentRef.current;
-    if (!node) return;
-    const { height } = measureElement(node);
-    if (height !== lastReported.current) {
-      lastReported.current = height;
-      onMeasure(height);
-    }
-  }, [items, live, columns, onMeasure]);
-
+  const lines = text.split("\n");
+  const clipped = lines.length > maxRows;
+  const tail = clipped ? lines.slice(-maxRows).join("\n") : text;
   return (
     <Box
       width={columns}
-      height={Math.max(1, viewportRows)}
-      overflowY="hidden"
-      justifyContent="flex-end"
       flexDirection="column"
+      borderStyle="single"
+      borderColor="green"
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      paddingLeft={1}
     >
-      <Box
-        ref={contentRef}
-        flexDirection="column"
-        marginBottom={Math.max(0, marginBottom)}
-        flexShrink={0}
-      >
-        {items.map((item, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: transcript is append-only
-          <Item key={i} item={item} />
-        ))}
-        {live ? (
-          <Box
-            flexDirection="column"
-            borderStyle="single"
-            borderColor="green"
-            borderTop={false}
-            borderRight={false}
-            borderBottom={false}
-            paddingLeft={1}
-          >
-            <Text color="green" bold>
-              ASSISTANT
-            </Text>
-            <Markdown text={live} />
-          </Box>
-        ) : null}
-      </Box>
+      <Text color="green" bold>
+        ASSISTANT
+      </Text>
+      {clipped ? (
+        <Text color="gray" dimColor>
+          … akış devam ediyor (tam metin bitince yukarıda)
+        </Text>
+      ) : null}
+      <Markdown text={tail} />
     </Box>
   );
 });
@@ -303,18 +260,10 @@ export function App({
   const { rows, columns } = useTermSize();
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
-  // In-app transcript scrolling (see the Transcript component). `scrollOffset` is how
-  // many lines the view is lifted off the bottom (0 = pinned to newest). The wheel
-  // and PgUp/PgDn drive it; keyboard ↑/↓ stay on prompt history (the arrow router
-  // separates the two). `totalLines`/`viewportRows` are measured so the offset can
-  // be clamped and the content kept put as it streams.
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const [totalLines, setTotalLines] = useState(0);
-  const [viewportRows, setViewportRows] = useState(() => Math.max(1, rows - 8));
-  const bottomRef = useRef<DOMElement>(null);
-  const viewportRef = useRef(viewportRows);
-  const prevContentRef = useRef(0);
-  const maxOffsetRef = useRef(0);
+  // Finished transcript items render through Ink's <Static> into the terminal's
+  // normal scrollback (native wheel/selection — like Claude Code). <Static> only
+  // ever appends, so /clear remounts it via this generation key.
+  const [staticGen, setStaticGen] = useState(0);
   // Streamed assistant text for the current round, shown live below the committed
   // transcript and cleared once the full message is recorded (assistant_message).
   const [live, setLive] = useState("");
@@ -374,108 +323,40 @@ export function App({
 
   const push = useCallback((item: DisplayItem) => setItems((prev) => [...prev, item]), []);
 
-  // Native drag-to-select must always work, so the mouse is NEVER captured (SGR
-  // reporting eats click-drag). The wheel still has to scroll the transcript
-  // though: DECSET 1007 ("alternate scroll") makes the terminal translate wheel
-  // ticks into ↑/↓ sequences while the alternate screen is active, and the arrow
-  // router below tells those apart from real keystrokes by batching/timing. Any
-  // mouse reporting left over from a crashed session is switched off defensively.
+  // The mouse is NEVER captured (SGR reporting eats click-drag): in the normal
+  // buffer the terminal owns the wheel (native scrollback) and drag-to-select,
+  // so no scroll plumbing is needed at all. Any mouse reporting left over from
+  // a crashed program is switched off defensively so selection can't be broken.
   const { stdout: rawStdout } = useStdout();
   useEffect(() => {
     if (!rawStdout) return;
     const ESC = String.fromCharCode(27);
-    rawStdout.write(`${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${ESC}[?1007h`);
+    rawStdout.write(`${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l`);
   }, [rawStdout]);
 
-  // Viewport height = terminal rows − the measured bottom region (input + overlays +
-  // goal + status bar). Runs every commit (no deps) so it self-corrects as the bottom
-  // region grows/shrinks; only dispatches when the value actually changes.
-  useLayoutEffect(() => {
-    if (!bottomRef.current) return;
-    const { height } = measureElement(bottomRef.current);
-    const vp = Math.max(1, rows - height);
-    viewportRef.current = vp;
-    setViewportRows((cur) => (cur === vp ? cur : vp));
-  });
-
-  // Receives the transcript's measured height from <Transcript>. When content grows
-  // while the user is scrolled up, bump the offset by the growth so their view stays
-  // anchored (instead of jumping); when pinned (offset 0) it stays at the bottom.
-  // Stable identity (reads refs only) so it doesn't thrash the memoized Transcript.
-  const handleMeasure = useCallback((height: number) => {
-    const prev = prevContentRef.current;
-    if (height === prev) return;
-    prevContentRef.current = height;
-    setTotalLines(height);
-    setScrollOffset((off) => {
-      const max = Math.max(0, height - viewportRef.current);
-      if (off > 0 && height > prev) return Math.min(max, off + (height - prev));
-      return Math.min(off, max);
-    });
+  // Streamed tokens are buffered and flushed to `live` at most every LIVE_FLUSH_MS:
+  // a per-token setState makes Ink repaint the dynamic region for every word,
+  // which reads as stuttering. `liveBufRef` always holds the full in-progress text.
+  const liveBufRef = useRef("");
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appendLive = useCallback((delta: string) => {
+    liveBufRef.current += delta;
+    if (liveTimerRef.current === null) {
+      liveTimerRef.current = setTimeout(() => {
+        liveTimerRef.current = null;
+        setLive(liveBufRef.current);
+      }, LIVE_FLUSH_MS);
+    }
   }, []);
-
-  // Positive lines lift the view toward OLDER content (offset +), negative
-  // returns toward the newest — matching the scroll hint. (687383b had flipped
-  // this; at the bottom, wheel-up then hit the 0-clamp and felt unscrollable.)
-  const scrollBy = useCallback((lines: number) => {
-    setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + lines)));
+  const resetLive = useCallback(() => {
+    liveBufRef.current = "";
+    if (liveTimerRef.current !== null) {
+      clearTimeout(liveTimerRef.current);
+      liveTimerRef.current = null;
+    }
+    setLive("");
   }, []);
-
-  // The latest history handler and overlay state live behind refs so the
-  // memoized router and the raw stdin listener below never go stale.
-  const arrowHistoryRef = useRef<(dir: ArrowDir) => void>(() => {});
-  const overlayOpenRef = useRef(false);
-
-  // Routes ↑/↓ to prompt history (keyboard) or transcript scroll (wheel via
-  // alternate scroll) — see arrowRouter.ts for how the two are told apart.
-  const arrowRouter = useMemo(
-    () =>
-      createArrowRouter({
-        onHistory: (dir) => arrowHistoryRef.current(dir),
-        onScroll: (dir, lines) => scrollBy(dir === "up" ? lines : -lines),
-      }),
-    [scrollBy],
-  );
-  useEffect(() => () => arrowRouter.dispose(), [arrowRouter]);
-
-  // Arrows are taken from Ink's RAW input events: the keypress parser collapses
-  // a batched multi-arrow wheel chunk into a single upArrow, hiding the count
-  // the router needs. Overlays (picker/login/interview) own arrow navigation,
-  // so the router stands down while one is open.
-  const { internal_eventEmitter } = useStdin();
-  useEffect(() => {
-    const onRawInput = (chunk: string): void => {
-      if (overlayOpenRef.current) return;
-      const runs = parseArrowChunk(chunk);
-      if (!runs) return;
-      for (const run of runs) arrowRouter.feed(run.dir, run.count);
-    };
-    internal_eventEmitter.on("input", onRawInput);
-    return () => {
-      internal_eventEmitter.removeListener("input", onRawInput);
-    };
-  }, [internal_eventEmitter, arrowRouter]);
-
-  // PgUp/PgDn page the transcript unconditionally — a timing-free fallback that
-  // also works on terminals whose wheel never reaches the app.
-  useInput(
-    (_input, key) => {
-      if (overlayOpenRef.current) return;
-      if (!key.pageUp && !key.pageDown) return;
-      const page = Math.max(1, viewportRef.current - 1);
-      if (key.pageUp) {
-        scrollBy(page);
-        return;
-      }
-      // Paging down: the scroll-hint row disappears when the bottom is reached,
-      // growing the viewport by one — snap the last stranded line out.
-      setScrollOffset((o) => {
-        const next = Math.max(0, o - page);
-        return next <= 1 ? 0 : next;
-      });
-    },
-    { isActive: true },
-  );
+  useEffect(() => resetLive, [resetLive]);
 
   // Wire the permission prompt into the agent's permission flow (once).
   useEffect(() => {
@@ -507,20 +388,19 @@ export function App({
       switch (event.type) {
         case "turn_start":
           setStatus("thinking");
-          setLive("");
-          setScrollOffset(0); // jump to the newest output when a turn begins
+          resetLive();
           turnStartRef.current = Date.now();
           turnRef.current = { inTok: 0, outTok: 0, rounds: 0, changedFiles: new Set<string>() };
           break;
         case "text_delta":
-          // Accumulate streamed tokens for a live preview; replaced by the committed
-          // assistant_message once the round finishes.
-          setLive((s) => s + event.delta);
+          // Accumulate streamed tokens for a throttled live preview; replaced by
+          // the committed assistant_message once the round finishes.
+          appendLive(event.delta);
           break;
         case "assistant_message": {
           const text = event.message.content.trim();
           if (text) push({ kind: "assistant", text });
-          setLive("");
+          resetLive();
           turnRef.current.rounds += 1;
           break;
         }
@@ -793,7 +673,7 @@ export function App({
           break;
         case "turn_end": {
           setStatus("idle");
-          setLive("");
+          resetLive();
           const changed = [...turnRef.current.changedFiles];
           if (changed.length > 0) {
             push({
@@ -812,7 +692,7 @@ export function App({
         }
       }
     });
-  }, [session, push]);
+  }, [session, push, appendLive, resetLive]);
 
   // Kick off an autonomous run if launched with --goal (start() guards re-entry).
   useEffect(() => {
@@ -1203,10 +1083,14 @@ export function App({
         case "?":
           push({ kind: "help" });
           break;
-        case "clear":
+        case "clear": {
           session.agent.reset();
           setItems([]);
-          setScrollOffset(0);
+          // <Static> only appends — remount it (new key) and blank the terminal's
+          // screen + scrollback so the cleared transcript really disappears.
+          setStaticGen((g) => g + 1);
+          const ESC = String.fromCharCode(27);
+          rawStdout?.write(`${ESC}[2J${ESC}[3J${ESC}[H`);
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -1216,6 +1100,7 @@ export function App({
           setTeamDetailOpen(false);
           setTeamFeeds(new Map());
           break;
+        }
         case "exit":
         case "quit":
           exit();
@@ -1676,7 +1561,6 @@ export function App({
         if (teamMembers.length > 0) setTeamDetailOpen((v) => !v);
         return;
       }
-      setScrollOffset(0); // sending pins the view back to the latest
       setHistory((h) => historyPush(h, text));
       if (text === "?") {
         push({ kind: "help" });
@@ -1751,46 +1635,23 @@ export function App({
   const busy = status !== "idle";
   const mode = permMode.toUpperCase();
 
-  // Feed the arrow router's refs the freshest state each render (the router and
-  // the raw stdin listener are memoized once and read through these).
-  overlayOpenRef.current = pickerOpen || loginOpen || interview !== null;
-  arrowHistoryRef.current = (dir) => {
-    // While the prompt is hidden (busy spinner, team-suggest ask), a keyboard
-    // arrow has no history to walk — let it nudge the transcript instead.
-    const promptLive = (!busy || autoState !== "idle") && !teamSuggest;
-    if (!promptLive) {
-      scrollBy(dir === "up" ? 1 : -1);
-      return;
-    }
-    if (dir === "up") onHistoryPrev();
-    else onHistoryNext();
-  };
-
-  // Clamp the scroll offset to the measured content and expose the max to the
-  // scroll handler (which runs outside render via a ref).
-  const maxOffset = Math.max(0, totalLines - viewportRows);
-  maxOffsetRef.current = maxOffset;
-  const clampedOffset = Math.min(scrollOffset, maxOffset);
+  // Finished items are printed ONCE into the terminal's scrollback via <Static>;
+  // everything below it is Ink's small in-place dynamic region. Keeping that
+  // region far below the terminal height matters: at >= stdout.rows Ink clears
+  // and rewrites the whole terminal every render (stutter + broken scrollback).
+  const liveMaxRows = Math.max(4, rows - 16);
 
   return (
-    <Box flexDirection="column" width={columns}>
-      <Transcript
-        items={items}
-        live={live}
-        viewportRows={viewportRows}
-        marginBottom={clampedOffset}
-        columns={columns}
-        onMeasure={handleMeasure}
-      />
-      {/* Bottom region: measured (bottomRef) so the viewport height above can be
-          computed as terminal rows − this height. Holds the scroll affordance, the
-          input/overlays, the goal line, and the status bar. */}
-      <Box ref={bottomRef} flexDirection="column">
-        {clampedOffset > 0 ? (
-          <Text color="gray" dimColor>
-            ↑ {clampedOffset} satır yukarıda · tekerleği aşağı çevir / mesaj gönder = en alta dön
-          </Text>
-        ) : null}
+    <>
+      <Static key={staticGen} items={items}>
+        {(item, i) => (
+          <Box key={i} width={columns}>
+            <Item item={item} />
+          </Box>
+        )}
+      </Static>
+      <Box flexDirection="column" width={columns}>
+        {live ? <LiveMessage text={live} maxRows={liveMaxRows} columns={columns} /> : null}
         {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
         {teamMembers.length > 0 ? (
           <TeamBoard
@@ -1858,6 +1719,8 @@ export function App({
                 onChange={setInput}
                 onSubmit={submit}
                 onHelp={() => push({ kind: "help" })}
+                onHistoryPrev={onHistoryPrev}
+                onHistoryNext={onHistoryNext}
               />
             )}
           </Box>
@@ -1886,6 +1749,6 @@ export function App({
           columns={columns}
         />
       </Box>
-    </Box>
+    </>
   );
 }

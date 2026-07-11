@@ -68,14 +68,17 @@ function fakeSession(bus: EventBus): Session {
 describe("/copy", () => {
   it("copies the last assistant reply via OSC 52", async () => {
     const bus = new EventBus();
-    const { stdin, lastFrame, unmount } = render(createElement(App, { session: fakeSession(bus) }));
+    const { stdin, frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
+    // System replies are committed to <Static> (native scrollback), so they show
+    // up in the accumulated output stream rather than the last dynamic frame.
+    const seen = () => frames.join("\n");
     await tick();
 
     // Nothing to copy yet.
     stdin.write("/copy");
     await tick();
     stdin.write(ENTER);
-    await waitFor(lastFrame, (f) => f.includes("nothing to copy"));
+    await waitFor(seen, (f) => f.includes("nothing to copy"));
 
     bus.emit({
       type: "assistant_message",
@@ -86,8 +89,8 @@ describe("/copy", () => {
     stdin.write("/copy");
     await tick();
     stdin.write(ENTER);
-    await waitFor(lastFrame, (f) => f.includes("⧉ copied the last reply"));
-    expect(lastFrame() ?? "").toContain("14 chars");
+    await waitFor(seen, (f) => f.includes("⧉ copied the last reply"));
+    expect(seen()).toContain("14 chars");
 
     unmount();
   });

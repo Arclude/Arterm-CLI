@@ -106,7 +106,13 @@ describe("/sdd end-to-end (real SddRunner ↔ App)", () => {
       getSkillBody: () => undefined,
     } as unknown as Session;
 
-    const { stdin, lastFrame, unmount } = render(createElement(App, { session }));
+    const { stdin, frames, unmount } = render(createElement(App, { session }));
+    // Transcript lines land in <Static> (native scrollback) — search the whole
+    // accumulated output. And `lastFrame()` can be one of the app's own control
+    // writes (paste-mode toggles etc.), so poll the newest REAL UI frame instead
+    // (every rendered frame carries the ARTERM status bar).
+    const seen = () => frames.join("\n");
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();
 
     // Kick off /sdd — the real runner asks the model, emits sdd_interview, then
@@ -114,26 +120,26 @@ describe("/sdd end-to-end (real SddRunner ↔ App)", () => {
     stdin.write("/sdd build a blog");
     await tick();
     stdin.write(ENTER);
-    await waitFor(lastFrame, (f) => f.includes("What framework?"));
+    await waitFor(ui, (f) => f.includes("What framework?"));
 
     // Answer both interview questions.
     stdin.write("React");
     await tick();
     stdin.write(ENTER);
-    await waitFor(lastFrame, (f) => f.includes("Auth needed?"));
+    await waitFor(ui, (f) => f.includes("Auth needed?"));
     stdin.write("yes");
     await tick();
     stdin.write(ENTER);
 
     // The runner now builds the spec + graph (plan #2) and seeds the board.
-    await waitFor(lastFrame, (f) => f.includes("/sdd board"));
-    expect(lastFrame() ?? "").toContain("Design schema");
+    await waitFor(ui, (f) => f.includes("/sdd board"));
+    expect(ui()).toContain("Design schema");
 
     // The DAG walks t1 → t2; wait for both tasks to land in DONE.
-    await waitFor(lastFrame, (f) => f.includes("DONE (2)"));
+    await waitFor(ui, (f) => f.includes("DONE (2)"));
 
-    // And the real runner emitted sdd_done, rendered to the transcript.
-    await waitFor(lastFrame, (f) => f.includes("/sdd complete"));
+    // And the real runner emitted sdd_done, rendered to the transcript (static).
+    await waitFor(seen, (f) => f.includes("/sdd complete"));
     expect(planCall).toBe(2);
     unmount();
   });

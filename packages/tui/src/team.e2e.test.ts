@@ -137,7 +137,13 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
       agentDefs: [],
     } as unknown as Session;
 
-    const { stdin, lastFrame, unmount } = render(createElement(App, { session }));
+    const { stdin, frames, unmount } = render(createElement(App, { session }));
+    // Transcript lines are committed to <Static> (native scrollback) — they show
+    // up in the accumulated output. `lastFrame()` can also be one of the app's own
+    // control writes (paste-mode toggles etc.), so poll the newest REAL UI frame
+    // instead (every rendered frame carries the ARTERM status bar).
+    const seen = () => frames.join("\n");
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();
 
     stdin.write("/team refactor the parser and add tests");
@@ -145,22 +151,22 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
     stdin.write(ENTER);
 
     // Roster lands: header line + board seeded with both members pending.
-    await waitFor(lastFrame, (f) => f.includes("⚑ team") && f.includes("test-writer"));
+    await waitFor(ui, (f) => f.includes("⚑ team") && f.includes("test-writer"));
 
     // A member is RUNNING with live tool activity on its board row.
-    await waitFor(lastFrame, (f) => f.includes("▸ refactorer") && f.includes("⚙ edit"));
-    console.log(`\n──── FRAME: member running (live activity) ────\n${lastFrame()}\n`);
+    await waitFor(ui, (f) => f.includes("▸ refactorer") && f.includes("⚙ edit"));
+    console.log(`\n──── FRAME: member running (live activity) ────\n${ui()}\n`);
 
     // Both members reach DONE with their changed-file counts.
-    await waitFor(lastFrame, (f) => f.includes("2/2 done"));
+    await waitFor(ui, (f) => f.includes("2/2 done"));
 
     // Patch-applied lines + the completion summary hit the transcript.
-    await waitFor(lastFrame, (f) => f.includes("team run complete"));
-    const final = lastFrame() ?? "";
+    await waitFor(ui, (f) => f.includes("team run complete"));
+    const final = ui();
     console.log(`\n──── FRAME: run complete ────\n${final}\n`);
     expect(final).toContain("✓ refactorer");
     expect(final).toContain("✓ test-writer");
-    expect(final).toContain("patch applied");
+    expect(seen()).toContain("patch applied");
     expect(planCall).toBe(2);
 
     // Board navigation: ↓ selects the second member, Enter opens its activity
@@ -168,10 +174,16 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
     stdin.write("[B"); // down arrow
     await tick();
     stdin.write(ENTER);
-    await waitFor(lastFrame, (f) => f.includes("⚙ test-writer") && f.includes("⚙ write"));
-    console.log(`\n──── FRAME: member drill-down ────\n${lastFrame()}\n`);
+    await waitFor(ui, (f) => f.includes("⚙ test-writer") && f.includes("⚙ write"));
+    console.log(`\n──── FRAME: member drill-down ────\n${ui()}\n`);
+    // Two Escs: under ink-testing-library React's passive effects (which attach
+    // the drill-down's Esc handler) only flush on the NEXT input event, so the
+    // first Esc pumps the flush and the second one closes. Plain-node ink (the
+    // real runtime) flushes between keystrokes — a single Esc works there.
     stdin.write(""); // esc
-    await waitFor(lastFrame, (f) => !f.includes("⚙ write"));
+    await tick();
+    stdin.write(""); // esc - the one that actually closes (see above)
+    await waitFor(ui, (f) => !f.includes("⚙ write"));
     unmount();
   });
 });
