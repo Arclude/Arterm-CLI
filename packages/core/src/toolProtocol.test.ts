@@ -81,3 +81,37 @@ describe("parseToolCalls", () => {
     expect(calls.map((c) => c.name)).toEqual(["read"]);
   });
 });
+
+describe("parseToolCalls — degenerate {\"<tool>\": {…}} shape (known-tool gated)", () => {
+  const known = new Set(["read", "bash"]);
+
+  it("recovers a fenced single-key call when the key is a known tool", () => {
+    const text = '```json\n{\n  "read": {\n    "path": "notes.txt"\n  }\n}\n```';
+    const { calls, cleaned } = parseToolCalls(text, known);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("read");
+    expect(calls[0]?.arguments).toEqual({ path: "notes.txt" });
+    expect(cleaned).toBe("");
+  });
+
+  it("recovers the bare (unfenced) single-key shape too", () => {
+    const { calls } = parseToolCalls('I will read it: {"read": {"path": "a.ts"}}', known);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("read");
+  });
+
+  it("never treats unknown single-key objects as calls", () => {
+    const { calls } = parseToolCalls('config: {"server": {"port": 80}}', known);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("stays inert without a knownTools set (no false positives possible)", () => {
+    const { calls } = parseToolCalls('{"read": {"path": "a.ts"}}');
+    expect(calls).toHaveLength(0);
+  });
+
+  it("requires exactly one key and an object payload", () => {
+    expect(parseToolCalls('{"read": {"path": "a"}, "extra": 1}', known).calls).toHaveLength(0);
+    expect(parseToolCalls('{"read": "a.ts"}', known).calls).toHaveLength(0);
+  });
+});

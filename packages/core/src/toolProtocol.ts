@@ -90,10 +90,28 @@ function extractBalancedObjects(text: string): string[] {
  * stripped. Tolerates ```json fences, plain ``` fences, and arrays of calls.
  * Falls back to bare (unfenced) JSON objects — common with small local models —
  * which also rescues calls whose file content embeds its own ``` fences.
+ *
+ * When `knownTools` is given, one more degenerate small-model shape is rescued:
+ * `{"<tool>": { ...args }}` (the wrapper keys dropped entirely). It is accepted
+ * ONLY when the single key is a real tool name, so ordinary JSON in prose can
+ * never be mistaken for a call.
  */
-export function parseToolCalls(text: string): { calls: ToolCall[]; cleaned: string } {
+export function parseToolCalls(
+  text: string,
+  knownTools?: ReadonlySet<string>,
+): { calls: ToolCall[]; cleaned: string } {
   const calls: ToolCall[] = [];
   let cleaned = text;
+
+  const asDegenerateCall = (c: object): ToolCall | null => {
+    if (!knownTools) return null;
+    const keys = Object.keys(c);
+    const key = keys[0];
+    if (keys.length !== 1 || key === undefined || !knownTools.has(key)) return null;
+    const rawArgs = (c as Record<string, unknown>)[key];
+    if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs)) return null;
+    return { id: randomUUID(), name: key, arguments: rawArgs as Record<string, unknown> };
+  };
 
   const consume = (body: string, fullMatch: string): void => {
     let parsed: unknown;
@@ -105,12 +123,19 @@ export function parseToolCalls(text: string): { calls: ToolCall[]; cleaned: stri
     const candidates = Array.isArray(parsed) ? parsed : [parsed];
     let consumed = false;
     for (const c of candidates) {
-      if (c && typeof c === "object" && ("tool" in c || "name" in c)) {
+      if (!c || typeof c !== "object") continue;
+      if ("tool" in c || "name" in c) {
         const call = asCall(c as RawCall);
         if (call) {
           calls.push(call);
           consumed = true;
+          continue;
         }
+      }
+      const degenerate = asDegenerateCall(c);
+      if (degenerate) {
+        calls.push(degenerate);
+        consumed = true;
       }
     }
     if (consumed) cleaned = cleaned.replace(fullMatch, "");
@@ -129,8 +154,15 @@ export function parseToolCalls(text: string): { calls: ToolCall[]; cleaned: stri
   if (calls.length === 0) {
     for (const obj of extractBalancedObjects(text)) {
       // Require name+arguments together for the {name,…} shape to avoid matching
-      // unrelated JSON objects that merely have a "name" field.
-      if (obj.includes('"tool"') || (obj.includes('"name"') && obj.includes('"arguments"'))) {
+      // unrelated JSON objects that merely have a "name" field; the degenerate
+      // {"<tool>": {…}} shape is gated on a quoted known tool name instead.
+      const mentionsKnownTool =
+        knownTools !== undefined && [...knownTools].some((n) => obj.includes(`"${n}"`));
+      if (
+        obj.includes('"tool"') ||
+        (obj.includes('"name"') && obj.includes('"arguments"')) ||
+        mentionsKnownTool
+      ) {
         consume(obj, obj);
       }
     }
