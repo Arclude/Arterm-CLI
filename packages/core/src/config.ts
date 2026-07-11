@@ -147,6 +147,14 @@ export interface ArtermConfig {
      * false = classic mode: the chat flows into the terminal's own scrollback.
      */
     fullscreen?: boolean;
+    /**
+     * Fullscreen only. true (default): capture the mouse (SGR reporting) so the
+     * wheel scrolls the chat deterministically — text selection then needs
+     * Shift+drag (the terminal's capture bypass), like Claude Code. false: no
+     * capture — plain drag selects natively and the wheel is routed through the
+     * terminal's alternate-scroll arrow keys instead.
+     */
+    mouse?: boolean;
   };
 }
 
@@ -172,7 +180,7 @@ export function defaultConfig(): ArtermConfig {
     mcpServers: {},
     plugins: {},
     team: { fanout: 4, maxRounds: 6, isolation: "auto", mergeStrategy: "apply", suggest: true },
-    tui: { fullscreen: true },
+    tui: { fullscreen: true, mouse: true },
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
@@ -240,7 +248,9 @@ const configFileSchema = z
         suggest: z.boolean().optional(),
       })
       .partial(),
-    tui: z.object({ fullscreen: z.boolean().optional() }).partial(),
+    tui: z
+      .object({ fullscreen: z.boolean().optional(), mouse: z.boolean().optional() })
+      .partial(),
     fleet: z
       .object({
         concurrency: z.number().int().positive().optional(),

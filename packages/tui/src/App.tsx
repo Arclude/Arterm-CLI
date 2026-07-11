@@ -538,18 +538,33 @@ export function App({
   // buffer the terminal owns the wheel (native scrollback) and drag-to-select,
   // so no scroll plumbing is needed at all. Any mouse reporting left over from
   // a crashed program is switched off defensively so selection can't be broken.
+  // Fullscreen wheel input, two flavors (config tui.mouse):
+  //  - captured (default): SGR mouse reporting — wheel arrives as ESC[<64/65;x;yM
+  //    with the DIRECTION ENCODED IN THE BYTES (64=up, 65=down), immune to the
+  //    terminal's alternate-scroll arrow translation quirks. Like Claude Code's
+  //    fullscreen renderer; text selection then needs Shift+drag.
+  //  - uncaptured: alternate scroll (DECSET 1007) + arrowRouter timing/batching —
+  //    plain drag-select keeps working, wheel direction depends on the terminal.
+  // Classic mode captures nothing (native scrollback owns the wheel).
   const { stdout: rawStdout } = useStdout();
+  const mouseCapture = fullscreen && (session.config.tui?.mouse ?? true);
   useEffect(() => {
     if (!rawStdout) return;
     const ESC = String.fromCharCode(27);
-    // The mouse is never captured (capture would break native drag-to-select) —
-    // clear any reporting a crashed program left behind. In fullscreen, enable
-    // alternate scroll (DECSET 1007): the terminal turns wheel ticks into ↑/↓
-    // sequences and arrowRouter routes them to the in-app scroll.
+    if (mouseCapture) {
+      rawStdout.write(`${ESC}[?1002l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
+      return () => {
+        rawStdout.write(`${ESC}[?1000l${ESC}[?1006l`);
+      };
+    }
+    // Clear any reporting a crashed program left behind; arrows carry the wheel
+    // in fullscreen (alternate scroll), nothing in classic.
     rawStdout.write(
       `${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
     );
-  }, [rawStdout, fullscreen]);
+    return undefined;
+  }, [rawStdout, fullscreen, mouseCapture]);
+
 
   // Classic-mode resize recovery: reflowed wrapped lines invalidate Ink's
   // RELATIVE erase counts (its very next repaint can eat into the transcript or
@@ -603,6 +618,25 @@ export function App({
     setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + lines)));
   }, []);
 
+  // Captured-mouse wheel: SGR reports (button bit 64; low bits 0 = up, 1 = down) —
+  // a fast scroll batches several into one chunk, so sum them. reduceInput
+  // separately swallows these so they never touch the prompt text. The mapping
+  // (up = +3 = toward OLDER lines) matches the scroll hint and was
+  // user-validated back in the SGR era (a4c35a8).
+  useInput(
+    (input) => {
+      let delta = 0;
+      for (const mm of input.matchAll(/\[<(\d+);\d+;\d+[Mm]/g)) {
+        const cb = Number(mm[1]);
+        if ((cb & 64) === 0) continue; // not a wheel event
+        const low = cb & 3;
+        delta += low === 0 ? 3 : low === 1 ? -3 : 0;
+      }
+      if (delta !== 0) scrollBy(delta);
+    },
+    { isActive: mouseCapture },
+  );
+
   // Routes ↑/↓ to prompt history (keyboard) or transcript scroll (wheel via
   // alternate scroll) — see arrowRouter.ts for how the two are told apart.
   const arrowHistoryRef = useRef<(dir: ArrowDir) => void>(() => {});
@@ -622,7 +656,9 @@ export function App({
   // the router needs. Overlays (picker/login/interview) own arrow navigation.
   const { internal_eventEmitter } = useStdin();
   useEffect(() => {
-    if (!fullscreen) return;
+    // Only the uncaptured fallback needs arrow routing — with SGR capture the
+    // wheel never becomes arrows, so ↑/↓ are purely keyboard (direct history).
+    if (!fullscreen || mouseCapture) return;
     const onRawInput = (chunk: string): void => {
       if (overlayOpenRef.current) return;
       const runs = parseArrowChunk(chunk);
@@ -633,7 +669,7 @@ export function App({
     return () => {
       internal_eventEmitter.removeListener("input", onRawInput);
     };
-  }, [fullscreen, internal_eventEmitter, arrowRouter]);
+  }, [fullscreen, mouseCapture, internal_eventEmitter, arrowRouter]);
 
   // PgUp/PgDn page the transcript — a timing-free fallback that also works on
   // terminals whose wheel never reaches the app.
@@ -2127,7 +2163,7 @@ export function App({
             onHelp={() => push({ kind: "help" })}
             onHistoryPrev={onHistoryPrev}
             onHistoryNext={onHistoryNext}
-            externalArrows={fullscreen}
+            externalArrows={fullscreen && !mouseCapture}
           />
         </Box>
       )}
@@ -2153,6 +2189,7 @@ export function App({
         toolCount={session.toolCount}
         mode={mode}
         columns={columns}
+        shiftSelect={mouseCapture}
       />
     </>
   );

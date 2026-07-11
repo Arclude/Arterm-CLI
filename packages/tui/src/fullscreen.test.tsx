@@ -17,11 +17,14 @@ async function waitFor(view: () => string, pred: (f: string) => boolean, timeout
 }
 
 const ESC = String.fromCharCode(27);
-/** One wheel tick under alternate scroll (DECSET 1007): a batched arrow chunk. */
+/** SGR mouse wheel reports (captured mode; 64 = up, 65 = down). */
+const SGR_UP = "[<64;10;10M";
+const SGR_DOWN = "[<65;10;10M";
+/** One wheel tick under alternate scroll (uncaptured fallback): arrow chunk. */
 const WHEEL_UP = `${ESC}[A`.repeat(3);
 const WHEEL_DOWN = `${ESC}[B`.repeat(3);
 
-function fakeSession(bus: EventBus): Session {
+function fakeSession(bus: EventBus, tui?: { fullscreen?: boolean; mouse?: boolean }): Session {
   const noop = (): void => {};
   return {
     agent: {
@@ -31,7 +34,7 @@ function fakeSession(bus: EventBus): Session {
       run: async () => {},
     },
     bus,
-    config: { ...defaultConfig() },
+    config: { ...defaultConfig(), ...(tui ? { tui } : {}) },
     providerLabel: "ollama",
     toolCount: 7,
     yolo: false,
@@ -66,7 +69,7 @@ function fakeSession(bus: EventBus): Session {
 }
 
 describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
-  it("keeps the footer in every frame and scrolls the chat in-app with the wheel", async () => {
+  it("captured mouse (default): SGR wheel scrolls in-app, footer pinned in every frame", async () => {
     const bus = new EventBus();
     const { stdin, frames, unmount } = render(
       createElement(App, { session: fakeSession(bus), fullscreen: true }),
@@ -83,19 +86,52 @@ describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
     }
     await tick();
 
-    // Pinned to the newest output; the footer (status bar) is in the frame.
+    // Pinned to the newest output; the footer (status bar) is in the frame,
+    // and the hint advertises the capture-mode selection bypass.
     expect(ui()).toContain("ARTERM");
+    expect(ui()).toContain("shift+drag selects");
     expect(ui()).not.toContain("satır yukarıda");
 
-    // Wheel UP (batched arrow chunks) lifts the view — the offset hint appears,
-    // and the footer is STILL in the very same frame (pinned, not scrolled away).
-    stdin.write(WHEEL_UP);
-    stdin.write(WHEEL_UP);
+    // Wheel UP (SGR reports — direction is IN the bytes) lifts the view; the
+    // footer is STILL in the very same frame (pinned, not scrolled away).
+    stdin.write(SGR_UP);
+    stdin.write(SGR_UP);
     await waitFor(ui, (f) => f.includes("satır yukarıda"));
     expect(ui()).toContain("ARTERM");
     expect(ui()).toContain("› "); // the input line is visible while scrolled
 
     // Wheel DOWN returns toward the newest output until the hint disappears.
+    stdin.write(SGR_DOWN);
+    stdin.write(SGR_DOWN);
+    await waitFor(ui, (f) => !f.includes("satır yukarıda"));
+
+    unmount();
+  });
+
+  it("uncaptured fallback (tui.mouse=false): alternate-scroll arrows drive the scroll", async () => {
+    const bus = new EventBus();
+    const { stdin, frames, unmount } = render(
+      createElement(App, {
+        session: fakeSession(bus, { fullscreen: true, mouse: false }),
+        fullscreen: true,
+      }),
+    );
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await tick();
+
+    for (let i = 0; i < 60; i++) {
+      bus.emit({
+        type: "assistant_message",
+        message: { role: "assistant", content: `line number ${i}` },
+      });
+    }
+    await tick();
+    expect(ui()).toContain("drag selects text"); // no capture — native selection
+
+    stdin.write(WHEEL_UP);
+    stdin.write(WHEEL_UP);
+    await waitFor(ui, (f) => f.includes("satır yukarıda"));
+
     stdin.write(WHEEL_DOWN);
     stdin.write(WHEEL_DOWN);
     await waitFor(ui, (f) => !f.includes("satır yukarıda"));

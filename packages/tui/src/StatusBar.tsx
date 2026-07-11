@@ -17,6 +17,8 @@ interface Props {
   mode: string;
   /** Terminal width in columns; drives the responsive layout. */
   columns: number;
+  /** Mouse is captured (fullscreen): selection needs the terminal's Shift+drag bypass. */
+  shiftSelect?: boolean;
 }
 
 const VERSION = "0.3.2";
@@ -94,7 +96,9 @@ export function StatusBar({
   toolCount,
   mode,
   columns,
+  shiftSelect = false,
 }: Props): React.ReactElement {
+  const selectHint = shiftSelect ? "shift+drag selects" : "drag selects text";
   // Computed inline (no per-second timer) so the UI does not repaint while idle.
   const clock = new Date().toLocaleTimeString();
   const branch = gitBranch();
@@ -169,7 +173,7 @@ export function StatusBar({
           </Text>
         </Text>
         <Text color="gray" dimColor wrap="truncate">
-          ? help · Alt+P models · wheel scrolls · drag selects text · ^C quit
+          ? help · Alt+P models · wheel scrolls · {selectHint} · ^C quit
         </Text>
       </Box>
     );
@@ -224,7 +228,7 @@ export function StatusBar({
         </Text>
       </Text>
       <Text color="gray" dimColor wrap="truncate">
-        Enter send · ↑↓ history · wheel scrolls · drag selects text · /copy last reply · ? help · ^C
+        Enter send · ↑↓ history · wheel scrolls · {selectHint} · /copy last reply · ? help · ^C
         quit
       </Text>
     </Box>
