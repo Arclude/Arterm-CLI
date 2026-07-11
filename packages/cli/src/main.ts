@@ -54,7 +54,7 @@ import { buildSession } from "./session.js";
 import { runStatus } from "./status.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
-const VERSION = "0.3.2";
+const VERSION = "0.3.3";
 
 /** Provider ids the CLI can build — the single source of truth for `--provider`. */
 const PROVIDER_IDS: readonly string[] = providerCatalog.map((p) => p.id);

@@ -5,6 +5,46 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] — 2026-07-12
+
+### Added
+
+- **Fullscreen mode (default).** The TUI now owns the whole window on the
+  alternate screen, like Claude Code's fullscreen renderer: the input and
+  status bar stay pinned to the bottom **even while scrolling**, and the wheel
+  scrolls the chat in-app (SGR mouse capture — direction is encoded in the
+  bytes; text selection uses the terminal's Shift+drag bypass). PgUp/PgDn page;
+  ↑ still recalls prompt history; a hint row shows how far back you are.
+  `tui.fullscreen: false` restores the classic native-scrollback mode, and
+  `tui.mouse: false` swaps capture for alternate-scroll arrows (plain
+  drag-select, terminal-dependent wheel direction).
+- **Type while the model works + message queue.** The prompt stays live during
+  a turn; Enter queues each message (dimmed ⏳ lines above the input) and the
+  queue dispatches FIFO as the loop returns to idle. Esc cancels the turn and
+  drops the queue; `/clear` empties it too.
+- **`/copy`** copies the last assistant reply to the clipboard via OSC 52.
+- **Degenerate tool-call recovery.** Small local models that emit
+  `{"<tool>": {…}}` (no name/arguments wrapper) are now recovered — gated on
+  real tool names so ordinary JSON in prose can never be mistaken for a call.
+
+### Fixed
+
+- **Flicker-free rendering.** All of Ink's repaint writes are coalesced into
+  single frames wrapped in DEC 2026 synchronized output (skipped under tmux),
+  and the worst-case full clear can no longer wipe the terminal's scrollback.
+- **Fullscreen scrollback actually scrolls.** The old margin-based viewport
+  never revealed older rows (it only shrank the visible slice — reading as an
+  inverted wheel); the new cutter-window viewport gives line-precise
+  scrollback, verified by content-level tests.
+- **Footer stays glued to the bottom** in classic mode (AnchoredRegion: the
+  dynamic region's height never shrinks mid-flight, so Ink's top-anchored
+  repaints can't strand it) — including across resizes.
+- **Expired OAuth sessions recover cleanly.** A dead refresh token
+  (invalid_grant) is dropped and reported as one actionable line instead of a
+  raw 400 dump on every turn.
+- Wheel scroll direction restored (wheel up = older lines); typing no longer
+  garbles around fast submits (input handlers read state through refs).
+
 ## [0.3.2] — 2026-07-11
 
 ### Added
