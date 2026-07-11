@@ -209,9 +209,23 @@ function accessTokenResolver(id: string): (() => Promise<string>) | undefined {
       throw new Error(`Not signed in to ${id}. Run \`arterm login ${id}\`.`);
     }
     if (!tokensExpired(tokens)) return tokens.accessToken;
-    const refreshed = await refreshTokens(config, tokens.refreshToken);
-    setOAuthTokens(id, refreshed);
-    return refreshed.accessToken;
+    try {
+      const refreshed = await refreshTokens(config, tokens.refreshToken);
+      setOAuthTokens(id, refreshed);
+      return refreshed.accessToken;
+    } catch (err) {
+      // A dead refresh token (expired, revoked, or rotated by another client)
+      // can never recover by retrying — drop it so the UI reports a clean
+      // signed-out state, and say exactly how to get back in.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("invalid_grant")) {
+        removeOAuthTokens(id);
+        throw new Error(
+          `${id} session expired — sign in again with \`arterm login ${id}\` (or /login in the TUI).`,
+        );
+      }
+      throw err;
+    }
   };
 }
 
