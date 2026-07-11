@@ -176,13 +176,7 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
     stdin.write(ENTER);
     await waitFor(ui, (f) => f.includes("⚙ test-writer") && f.includes("⚙ write"));
     console.log(`\n──── FRAME: member drill-down ────\n${ui()}\n`);
-    // Two Escs: under ink-testing-library React's passive effects (which attach
-    // the drill-down's Esc handler) only flush on the NEXT input event, so the
-    // first Esc pumps the flush and the second one closes. Plain-node ink (the
-    // real runtime) flushes between keystrokes — a single Esc works there.
     stdin.write(""); // esc
-    await tick();
-    stdin.write(""); // esc - the one that actually closes (see above)
     await waitFor(ui, (f) => !f.includes("⚙ write"));
     unmount();
   });

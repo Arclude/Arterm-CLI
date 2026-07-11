@@ -68,6 +68,12 @@ function InputLine({
   onHistoryNext: () => void;
 }): React.ReactElement {
   const suggestion = commandSuggestion(value, commands);
+  // The input handler reads the CURRENT value through this ref, never its own
+  // closure: a handler can fire before the re-subscription effect that would
+  // refresh its closure lands (React flushes passive effects after the commit),
+  // and acting on a stale value garbles fast typing around submits.
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const { stdout } = useStdout();
   // Turn on the terminal's bracketed-paste mode while the prompt is active, so a
   // paste arrives wrapped in ESC[200~ … ESC[201~ and reduceInput inserts it
@@ -82,13 +88,15 @@ function InputLine({
   }, [active, stdout]);
   useInput(
     (input, key) => {
+      const v = valueRef.current;
       // Tab completes a slash command to its first match. Shift+Tab is the
       // permission-mode cycle, handled in App — fall through and leave it.
       if (key.tab && !key.shift) {
-        if (suggestion) onChange(value + suggestion);
+        const s = commandSuggestion(v, commands);
+        if (s) onChange(v + s);
         return;
       }
-      const action = reduceInput(value, input, key);
+      const action = reduceInput(v, input, key);
       switch (action.type) {
         case "submit":
           return onSubmit(action.value);
@@ -260,6 +268,18 @@ export function App({
   const { rows, columns } = useTermSize();
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
+  // Prompts entered while a turn is running — drained FIFO by the queue effect
+  // (see submit/dispatch). Refs mirror the latest state so input handlers and
+  // the drain guard never act through a stale closure.
+  const [queue, setQueue] = useState<string[]>([]);
+  const queueBusyRef = useRef(false);
+  const statusRef = useRef<Status>("idle");
+  const queueRef = useRef<string[]>([]);
+  statusRef.current = status;
+  queueRef.current = queue;
+  // Points at drainQueue (defined after `dispatch`); the bus subscription below
+  // needs it before that definition exists.
+  const drainRef = useRef<() => void>(() => {});
   // Finished transcript items render through Ink's <Static> into the terminal's
   // normal scrollback (native wheel/selection — like Claude Code). <Static> only
   // ever appends, so /clear remounts it via this generation key.
@@ -309,9 +329,20 @@ export function App({
   // activity feed, Esc closes it. Feeds are per-member rings of formatted lines.
   const [teamSel, setTeamSel] = useState(0);
   const [teamDetailOpen, setTeamDetailOpen] = useState(false);
+  // Ref mirrors for the always-active Esc handlers below — a handler can fire
+  // before the effect that would refresh its closure/subscription lands, so
+  // gates are read through refs instead of isActive/closures.
+  const teamDetailOpenRef = useRef(false);
+  teamDetailOpenRef.current = teamDetailOpen;
+  const autoStateRef = useRef(autoState);
+  autoStateRef.current = autoState;
+  const pendingRef = useRef<PendingPermission | null>(null);
+  pendingRef.current = pending;
   const [teamFeeds, setTeamFeeds] = useState<Map<string, string[]>>(new Map());
   // A large-looking prompt held for the y/N team-run offer (never a silent switch).
   const [teamSuggest, setTeamSuggest] = useState<string | null>(null);
+  const teamSuggestRef = useRef<string | null>(null);
+  teamSuggestRef.current = teamSuggest;
   const filteredPickerModels = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase();
     return q ? pickerModels.filter((m) => m.name.toLowerCase().includes(q)) : pickerModels;
@@ -388,6 +419,7 @@ export function App({
       switch (event.type) {
         case "turn_start":
           setStatus("thinking");
+          statusRef.current = "thinking"; // eager: gates the queue drain instantly
           resetLive();
           turnStartRef.current = Date.now();
           turnRef.current = { inTok: 0, outTok: 0, rounds: 0, changedFiles: new Set<string>() };
@@ -482,13 +514,17 @@ export function App({
           break;
         case "autonomy_done":
           setAutoState("idle");
+          autoStateRef.current = "idle";
           setGoalText("");
           push({ kind: "system", text: `✓ goal complete: ${event.summary}` });
+          drainRef.current();
           break;
         case "autonomy_stopped":
           setAutoState("idle");
+          autoStateRef.current = "idle";
           setGoalText("");
           push({ kind: "system", text: `■ autonomy stopped — ${event.reason}` });
+          drainRef.current();
           break;
         case "subagent_start":
           push({
@@ -673,6 +709,8 @@ export function App({
           break;
         case "turn_end": {
           setStatus("idle");
+          statusRef.current = "idle";
+          drainRef.current(); // a queued prompt (if any) starts once this run unwinds
           resetLive();
           const changed = [...turnRef.current.changedFiles];
           if (changed.length > 0) {
@@ -701,21 +739,32 @@ export function App({
 
   // Esc pauses an autonomous run, or cancels a manual turn. While a member's
   // drill-down view is open, Esc closes that first (see the hook below).
+  // Esc: close the member drill-down if one is open; otherwise pause an
+  // autonomous run or cancel a manual turn (dropping the queued prompts —
+  // cancelling means "stop", not "start the next one"). Always subscribed and
+  // gated through refs: an isActive flip only takes effect after its effect
+  // flushes, which can lag the very keypress it should catch.
   useInput(
     (_input, key) => {
-      if (!key.escape) return;
-      if (autoState === "running") session.autonomy.pause();
-      else if (status !== "idle") abortRef.current?.abort();
+      if (!key.escape || pendingRef.current) return;
+      if (teamDetailOpenRef.current) {
+        setTeamDetailOpen(false);
+        return;
+      }
+      if (autoStateRef.current === "running") {
+        session.autonomy.pause();
+        return;
+      }
+      if (statusRef.current !== "idle") {
+        abortRef.current?.abort();
+        const dropped = queueRef.current.length;
+        if (dropped > 0) {
+          setQueue([]);
+          push({ kind: "system", text: `⏳ dropped ${dropped} queued prompt(s)` });
+        }
+      }
     },
-    { isActive: (status !== "idle" || autoState === "running") && !pending && !teamDetailOpen },
-  );
-
-  // Esc closes the team member drill-down (takes precedence over pause/cancel).
-  useInput(
-    (_input, key) => {
-      if (key.escape) setTeamDetailOpen(false);
-    },
-    { isActive: teamDetailOpen },
+    { isActive: true },
   );
 
   const openPicker = useCallback(
@@ -1086,11 +1135,13 @@ export function App({
         case "clear": {
           session.agent.reset();
           setItems([]);
+          setQueue([]);
           // <Static> only appends — remount it (new key) and blank the terminal's
-          // screen + scrollback so the cleared transcript really disappears.
+          // screen + scrollback so the cleared transcript really disappears; the
+          // newline pad re-anchors the prompt to the bottom of the window.
           setStaticGen((g) => g + 1);
           const ESC = String.fromCharCode(27);
-          rawStdout?.write(`${ESC}[2J${ESC}[3J${ESC}[H`);
+          rawStdout?.write(`${ESC}[2J${ESC}[3J${ESC}[H${"\n".repeat(Math.max(0, rows - 1))}`);
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -1537,6 +1588,7 @@ export function App({
       askInterview,
       items,
       rawStdout,
+      rows,
     ],
   );
 
@@ -1552,16 +1604,11 @@ export function App({
     [session, push],
   );
 
-  const submit = useCallback(
-    async (value: string) => {
-      const text = value.trim();
-      setInput("");
-      if (!text) {
-        // Enter on an empty prompt toggles the selected member's drill-down view.
-        if (teamMembers.length > 0) setTeamDetailOpen((v) => !v);
-        return;
-      }
-      setHistory((h) => historyPush(h, text));
+  // Executes one submitted line (slash command / steering / plain turn). Split
+  // out of `submit` so queued prompts can be dispatched later without re-doing
+  // the input/history bookkeeping their original Enter already did.
+  const dispatch = useCallback(
+    async (text: string) => {
       if (text === "?") {
         push({ kind: "help" });
         return;
@@ -1589,8 +1636,55 @@ export function App({
       }
       await runPlain(text);
     },
-    [session, handleSlash, push, runPlain, teamMembers.length],
+    [session, handleSlash, push, runPlain],
   );
+
+  const submit = useCallback(
+    async (value: string) => {
+      const text = value.trim();
+      setInput("");
+      if (!text) {
+        // Enter on an empty prompt toggles the selected member's drill-down view.
+        if (teamMembers.length > 0) setTeamDetailOpen((v) => !v);
+        return;
+      }
+      setHistory((h) => historyPush(h, text));
+      // The prompt stays live while a turn runs: anything submitted mid-turn is
+      // queued and dispatched FIFO once the loop is idle again. (Autonomy runs
+      // are exempt — there, plain text steers the engine immediately.)
+      if (statusRef.current !== "idle" && session.autonomy.state === "idle") {
+        setQueue((q) => [...q, text]);
+        return;
+      }
+      await dispatch(text);
+    },
+    [session, dispatch, teamMembers.length],
+  );
+
+  // Drains the oldest queued prompt once the loop is idle again. Event-driven —
+  // called on turn_end / autonomy completion (via drainRef) and self-chained
+  // after each dispatched item — never effect-driven, so it cannot stall on
+  // React's passive-effect scheduling. The one-tick deferral lets the finishing
+  // run fully unwind first (runPlain clears abortRef AFTER turn_end fires).
+  const drainQueue = useCallback(() => {
+    setTimeout(() => {
+      if (queueBusyRef.current || statusRef.current !== "idle") return;
+      if (autoStateRef.current !== "idle" || teamSuggestRef.current !== null) return;
+      const next = queueRef.current[0];
+      if (next === undefined) return;
+      queueBusyRef.current = true;
+      setQueue((q) => q.slice(1));
+      void (async () => {
+        try {
+          await dispatch(next);
+        } finally {
+          queueBusyRef.current = false;
+          drainRef.current();
+        }
+      })();
+    }, 0);
+  }, [dispatch]);
+  drainRef.current = drainQueue;
 
   // y/N confirm for the /team offer: y routes the prompt to /team, anything else
   // (n, Enter, Esc, any other character) falls through to the normal run.
@@ -1704,25 +1798,34 @@ export function App({
             oauthUrl={loginUrl}
           />
         ) : (
-          <Box marginTop={1}>
+          <Box marginTop={1} flexDirection="column">
             {busy && autoState === "idle" ? (
-              // A normal turn shows a static spinner (Esc cancels). During an autonomous
-              // run the prompt stays live even while busy, so typed /pause /steer /stop
-              // (and plain-text steering) reach the engine between/within steps.
-              <Text color="yellow">● working… (Esc to cancel)</Text>
-            ) : (
-              <InputLine
-                active={(!busy || autoState !== "idle") && !teamSuggest}
-                value={input}
-                commands={COMMANDS}
-                columns={columns}
-                onChange={setInput}
-                onSubmit={submit}
-                onHelp={() => push({ kind: "help" })}
-                onHistoryPrev={onHistoryPrev}
-                onHistoryNext={onHistoryNext}
-              />
-            )}
+              // The turn runs behind a LIVE prompt: keep typing, Enter queues the
+              // next message(s), Esc cancels the turn (and drops the queue).
+              <Text color="yellow">
+                ● working…{" "}
+                <Text color="gray" dimColor>
+                  Esc cancels · Enter queues the next message
+                </Text>
+              </Text>
+            ) : null}
+            {queue.map((q, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: queue is order-only
+              <Text key={i} color="gray" dimColor wrap="truncate">
+                ⏳ {q}
+              </Text>
+            ))}
+            <InputLine
+              active={!teamSuggest}
+              value={input}
+              commands={COMMANDS}
+              columns={columns}
+              onChange={setInput}
+              onSubmit={submit}
+              onHelp={() => push({ kind: "help" })}
+              onHistoryPrev={onHistoryPrev}
+              onHistoryNext={onHistoryNext}
+            />
           </Box>
         )}
         {autoState !== "idle" ? (

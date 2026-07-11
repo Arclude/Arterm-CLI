@@ -14,6 +14,12 @@ export type { Session, DisplayItem } from "./types.js";
  * is redrawn in place by Ink.
  */
 export async function runTui(session: Session, opts?: { goal?: string }): Promise<void> {
+  // Anchor the prompt to the BOTTOM of the window from the first frame: pad the
+  // screen once so Ink's dynamic region starts on the last rows, and the chat
+  // grows upward into scrollback above the fixed footer.
+  if (process.stdout.isTTY) {
+    process.stdout.write("\n".repeat(Math.max(0, (process.stdout.rows ?? 24) - 1)));
+  }
   const instance = render(React.createElement(App, { session, initialGoal: opts?.goal }));
   await instance.waitUntilExit();
 }
