@@ -276,12 +276,19 @@ const LiveMessage = memo(function LiveMessage({
 
 /**
  * Fullscreen mode's managed, in-app scrollable transcript. The alternate screen
- * has no scrollback for the chat to ride, so we scroll it ourselves (the wheel
- * reaches us as alternate-scroll arrow keys — see arrowRouter.ts). Technique
- * (Ink-5): a height-bounded `overflowY:"hidden"` + `justifyContent:"flex-end"`
- * viewport bottom-aligns the content, so overflow clips off the TOP (newest
- * visible) for free; a positive `marginBottom={scrollOffset}` then lifts the
- * content to reveal older rows. (Negative marginTop does NOT clip reliably.)
+ * has no scrollback for the chat to ride, so we window it ourselves with two
+ * nested clips (both directions PROVEN in ink 5 — see viewport probe history):
+ *
+ *   1. a "cutter" box of height (contentRows − scrollOffset) around the natural
+ *      content bottom-clips everything newer than the scroll position;
+ *   2. the outer viewport (height-bounded + justifyContent:"flex-end") bottom-
+ *      aligns the cutter, so its TOP overflow clips for free.
+ *
+ * Net visible window: content rows [end − viewport .. end − 1], end = total −
+ * offset — i.e. real scrollback. (The old `marginBottom={offset}` trick did NOT
+ * do this in ink 5: it shrank the visible slice while staying pinned to the
+ * newest rows, which read as "scrolling the wrong way" — never use margins to
+ * scroll here.)
  *
  * Wrapped in React.memo so keystrokes in the prompt don't re-lay-out the whole
  * transcript — only items/live/viewport/offset changes do.
@@ -290,23 +297,24 @@ const Transcript = memo(function Transcript({
   items,
   live,
   viewportRows,
-  marginBottom,
+  scrollOffset,
   columns,
   onMeasure,
 }: {
   items: DisplayItem[];
   live: string;
   viewportRows: number;
-  marginBottom: number;
+  scrollOffset: number;
   columns: number;
   /** Reports the measured content height (rows) after each layout, so App can clamp
    *  the scroll offset and keep the view anchored as content streams in. */
   onMeasure: (totalLines: number) => void;
 }): React.ReactElement {
   const contentRef = useRef<DOMElement>(null);
+  const [contentRows, setContentRows] = useState(0);
   const lastReported = useRef(-1);
-  // The content's own height does not depend on viewportRows/marginBottom (margins
-  // and justify are layout-outside), so measuring here never feeds back into a loop.
+  // The inner box is never height-constrained, so this measures the NATURAL
+  // content height; the cutter/viewport clip outside it and cannot feed back.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on content change
   useLayoutEffect(() => {
     const node = contentRef.current;
@@ -314,10 +322,13 @@ const Transcript = memo(function Transcript({
     const { height } = measureElement(node);
     if (height !== lastReported.current) {
       lastReported.current = height;
+      setContentRows(height);
       onMeasure(height);
     }
   }, [items, live, columns, onMeasure]);
 
+  const cut =
+    contentRows > 0 ? Math.max(1, contentRows - Math.max(0, scrollOffset)) : undefined;
   return (
     <Box
       width={columns}
@@ -327,31 +338,33 @@ const Transcript = memo(function Transcript({
       flexDirection="column"
     >
       <Box
-        ref={contentRef}
+        height={cut}
+        overflowY={cut === undefined ? undefined : "hidden"}
         flexDirection="column"
-        marginBottom={Math.max(0, marginBottom)}
         flexShrink={0}
       >
-        {items.map((item, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: transcript is append-only
-          <Item key={i} item={item} />
-        ))}
-        {live ? (
-          <Box
-            flexDirection="column"
-            borderStyle="single"
-            borderColor="green"
-            borderTop={false}
-            borderRight={false}
-            borderBottom={false}
-            paddingLeft={1}
-          >
-            <Text color="green" bold>
-              ASSISTANT
-            </Text>
-            <Markdown text={live} />
-          </Box>
-        ) : null}
+        <Box ref={contentRef} flexDirection="column" flexShrink={0}>
+          {items.map((item, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: transcript is append-only
+            <Item key={i} item={item} />
+          ))}
+          {live ? (
+            <Box
+              flexDirection="column"
+              borderStyle="single"
+              borderColor="green"
+              borderTop={false}
+              borderRight={false}
+              borderBottom={false}
+              paddingLeft={1}
+            >
+              <Text color="green" bold>
+                ASSISTANT
+              </Text>
+              <Markdown text={live} />
+            </Box>
+          ) : null}
+        </Box>
       </Box>
     </Box>
   );
@@ -2206,7 +2219,7 @@ export function App({
           items={items}
           live={live}
           viewportRows={viewportRows}
-          marginBottom={clampedOffset}
+          scrollOffset={clampedOffset}
           columns={columns}
           onMeasure={handleMeasure}
         />

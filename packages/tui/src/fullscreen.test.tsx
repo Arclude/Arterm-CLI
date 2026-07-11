@@ -92,11 +92,17 @@ describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
     expect(ui()).toContain("shift+drag selects");
     expect(ui()).not.toContain("satır yukarıda");
 
-    // Wheel UP (SGR reports — direction is IN the bytes) lifts the view; the
-    // footer is STILL in the very same frame (pinned, not scrolled away).
+    // Pinned view shows the NEWEST line.
+    expect(ui()).toContain("line number 59");
+
+    // Wheel UP (SGR reports — direction is IN the bytes) reveals OLDER lines:
+    // the newest line leaves the window, an older one enters, and the footer
+    // is STILL in the very same frame (pinned, not scrolled away).
     stdin.write(SGR_UP);
     stdin.write(SGR_UP);
     await waitFor(ui, (f) => f.includes("satır yukarıda"));
+    expect(ui()).not.toContain("line number 59");
+    expect(ui()).toContain("line number 53");
     expect(ui()).toContain("ARTERM");
     expect(ui()).toContain("› "); // the input line is visible while scrolled
 
@@ -104,6 +110,7 @@ describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
     stdin.write(SGR_DOWN);
     stdin.write(SGR_DOWN);
     await waitFor(ui, (f) => !f.includes("satır yukarıda"));
+    expect(ui()).toContain("line number 59");
 
     unmount();
   });
