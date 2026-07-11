@@ -65,8 +65,8 @@ function fakeSession(bus: EventBus): Session {
   } as unknown as Session;
 }
 
-describe("/copy and /mouse", () => {
-  it("copies the last assistant reply via OSC 52 and toggles mouse capture", async () => {
+describe("/copy", () => {
+  it("copies the last assistant reply via OSC 52", async () => {
     const bus = new EventBus();
     const { stdin, lastFrame, unmount } = render(createElement(App, { session: fakeSession(bus) }));
     await tick();
@@ -88,16 +88,6 @@ describe("/copy and /mouse", () => {
     stdin.write(ENTER);
     await waitFor(lastFrame, (f) => f.includes("⧉ copied the last reply"));
     expect(lastFrame() ?? "").toContain("14 chars");
-
-    // Mouse capture toggles off and back on with clear state lines.
-    stdin.write("/mouse");
-    await tick();
-    stdin.write(ENTER);
-    await waitFor(lastFrame, (f) => f.includes("mouse capture OFF"));
-    stdin.write("/mouse");
-    await tick();
-    stdin.write(ENTER);
-    await waitFor(lastFrame, (f) => f.includes("mouse capture ON"));
 
     unmount();
   });

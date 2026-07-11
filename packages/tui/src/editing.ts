@@ -49,10 +49,11 @@ export function isPaste(input: string): boolean {
 }
 
 /**
- * SGR mouse-event sequence (ESC[<b;x;y M|m) the terminal emits once mouse
- * reporting is enabled. We turn reporting on solely to stop the wheel from being
- * translated into ↑/↓ arrow keys (which the prompt would read as history recall);
- * the events themselves carry no prompt meaning and are swallowed by reduceInput.
+ * SGR mouse-event sequence (ESC[<b;x;y M|m) a terminal emits while mouse
+ * reporting is enabled. The TUI no longer turns reporting on (capture would
+ * break native drag-to-select; the wheel arrives as alternate-scroll arrows
+ * instead — see arrowRouter.ts), but a stray report can still leak in, e.g.
+ * reporting left enabled by a previous crashed program — swallow, never type it.
  */
 const MOUSE_SGR = /\[<\d+;\d+;\d+[Mm]/;
 export function isMouseSequence(input: string): boolean {
@@ -78,9 +79,8 @@ function stripPaste(s: string): string {
  * - `?` on an empty line opens help.
  */
 export function reduceInput(value: string, input: string, key: KeyLike): InputAction {
-  // Mouse-wheel / click events (mouse reporting is on) must never touch the prompt
-  // text — swallow them before anything else. This is what makes the wheel stop
-  // recalling old prompts: with reporting on it sends these instead of ↑/↓.
+  // Stray mouse reports (see isMouseSequence) must never touch the prompt text —
+  // swallow them before anything else.
   if (isMouseSequence(input)) return { type: "noop" };
 
   // Pasted text arrives as a single chunk (wrapped in bracketed-paste markers

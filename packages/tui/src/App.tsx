@@ -13,7 +13,16 @@ import {
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
-import { Box, type DOMElement, Text, measureElement, useApp, useInput, useStdout } from "ink";
+import {
+  Box,
+  type DOMElement,
+  Text,
+  measureElement,
+  useApp,
+  useInput,
+  useStdin,
+  useStdout,
+} from "ink";
 import type React from "react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoginOverlay } from "./LoginOverlay.js";
@@ -24,6 +33,7 @@ import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardMember } from "./TeamBoard.js";
+import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
 import { osc52Sequence } from "./clipboard.js";
 import {
   type HistoryNav,
@@ -51,8 +61,6 @@ function InputLine({
   onChange,
   onSubmit,
   onHelp,
-  onHistoryPrev,
-  onHistoryNext,
 }: {
   active: boolean;
   value: string;
@@ -61,8 +69,6 @@ function InputLine({
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onHelp: () => void;
-  onHistoryPrev: () => void;
-  onHistoryNext: () => void;
 }): React.ReactElement {
   const suggestion = commandSuggestion(value, commands);
   const { stdout } = useStdout();
@@ -85,6 +91,9 @@ function InputLine({
         if (suggestion) onChange(value + suggestion);
         return;
       }
+      // ↑/↓ are owned by App's arrow router (which separates wheel-synthesized
+      // arrows from keyboard history navigation) — never double-handle them.
+      if (key.upArrow || key.downArrow) return;
       const action = reduceInput(value, input, key);
       switch (action.type) {
         case "submit":
@@ -94,9 +103,7 @@ function InputLine({
         case "help":
           return onHelp();
         case "history_prev":
-          return onHistoryPrev();
         case "history_next":
-          return onHistoryNext();
         case "noop":
           return;
       }
@@ -134,7 +141,6 @@ const COMMANDS = [
   "catalog",
   "clear",
   "copy",
-  "mouse",
   "goal",
   "autonomy",
   "team",
@@ -203,9 +209,10 @@ function useTermSize(): { rows: number; columns: number } {
 }
 
 /**
- * Managed, in-app scrollable transcript (replaces Ink's <Static>). Mouse reporting
- * captures the wheel, so the chat can no longer ride the terminal's native scrollback
- * — we scroll it ourselves. Technique (Ink-5, mirrors WrongStack's ScrollableHistory):
+ * Managed, in-app scrollable transcript (replaces Ink's <Static>). The alternate
+ * screen has no scrollback for the chat to ride, so we scroll it ourselves (the
+ * wheel reaches us as alternate-scroll arrow keys — see arrowRouter.ts).
+ * Technique (Ink-5, mirrors WrongStack's ScrollableHistory):
  * a height-bounded `overflowY:"hidden"` + `justifyContent:"flex-end"` viewport bottom-
  * aligns the content, so overflow clips off the TOP (newest visible) for free; a
  * positive `marginBottom={scrollOffset}` then lifts the content to reveal older rows.
@@ -297,9 +304,10 @@ export function App({
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   // In-app transcript scrolling (see the Transcript component). `scrollOffset` is how
-  // many lines the view is lifted off the bottom (0 = pinned to newest). The mouse
-  // wheel drives it; ↑/↓ stay on prompt history. `totalLines`/`viewportRows` are
-  // measured so the offset can be clamped and the content kept put as it streams.
+  // many lines the view is lifted off the bottom (0 = pinned to newest). The wheel
+  // and PgUp/PgDn drive it; keyboard ↑/↓ stay on prompt history (the arrow router
+  // separates the two). `totalLines`/`viewportRows` are measured so the offset can
+  // be clamped and the content kept put as it streams.
   const [scrollOffset, setScrollOffset] = useState(0);
   const [totalLines, setTotalLines] = useState(0);
   const [viewportRows, setViewportRows] = useState(() => Math.max(1, rows - 8));
@@ -366,24 +374,18 @@ export function App({
 
   const push = useCallback((item: DisplayItem) => setItems((prev) => [...prev, item]), []);
 
-  // Stop the mouse wheel from recalling old prompts. On Windows Terminal a console
-  // app reading input has the wheel translated into ↑/↓ arrow keys, which the prompt
-  // reads as command-history navigation. Enabling SGR mouse reporting (1000 = button
-  // events, 1006 = SGR coords) makes the terminal send real mouse sequences instead
-  // of fake arrows — those drive the in-app transcript scroll and are swallowed in
-  // reduceInput. Trade-off: capture also eats click-drag, so native text selection
-  // needs Shift+drag — or `/mouse` to switch capture off temporarily (`mouseOn`),
-  // which restores plain drag-select at the cost of wheel acting as arrow keys.
+  // Native drag-to-select must always work, so the mouse is NEVER captured (SGR
+  // reporting eats click-drag). The wheel still has to scroll the transcript
+  // though: DECSET 1007 ("alternate scroll") makes the terminal translate wheel
+  // ticks into ↑/↓ sequences while the alternate screen is active, and the arrow
+  // router below tells those apart from real keystrokes by batching/timing. Any
+  // mouse reporting left over from a crashed session is switched off defensively.
   const { stdout: rawStdout } = useStdout();
-  const [mouseOn, setMouseOn] = useState(true);
   useEffect(() => {
-    if (!rawStdout || !mouseOn) return;
+    if (!rawStdout) return;
     const ESC = String.fromCharCode(27);
-    rawStdout.write(`${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
-    return () => {
-      rawStdout.write(`${ESC}[?1000l${ESC}[?1006l${ESC}[?1007h`);
-    };
-  }, [rawStdout, mouseOn]);
+    rawStdout.write(`${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${ESC}[?1007h`);
+  }, [rawStdout]);
 
   // Viewport height = terminal rows − the measured bottom region (input + overlays +
   // goal + status bar). Runs every commit (no deps) so it self-corrects as the bottom
@@ -412,25 +414,65 @@ export function App({
     });
   }, []);
 
-  // Mouse wheel scrolls the transcript. With mouse reporting on, the wheel arrives as
-  // SGR mouse reports (button bit 64; low bits 0 = up, 1 = down) — a fast scroll batches
-  // several into one chunk, so sum them. reduceInput separately swallows these so they
-  // never touch the prompt text.
+  // Positive lines lift the view toward OLDER content (offset +), negative
+  // returns toward the newest — matching the scroll hint. (687383b had flipped
+  // this; at the bottom, wheel-up then hit the 0-clamp and felt unscrollable.)
+  const scrollBy = useCallback((lines: number) => {
+    setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + lines)));
+  }, []);
+
+  // The latest history handler and overlay state live behind refs so the
+  // memoized router and the raw stdin listener below never go stale.
+  const arrowHistoryRef = useRef<(dir: ArrowDir) => void>(() => {});
+  const overlayOpenRef = useRef(false);
+
+  // Routes ↑/↓ to prompt history (keyboard) or transcript scroll (wheel via
+  // alternate scroll) — see arrowRouter.ts for how the two are told apart.
+  const arrowRouter = useMemo(
+    () =>
+      createArrowRouter({
+        onHistory: (dir) => arrowHistoryRef.current(dir),
+        onScroll: (dir, lines) => scrollBy(dir === "up" ? lines : -lines),
+      }),
+    [scrollBy],
+  );
+  useEffect(() => () => arrowRouter.dispose(), [arrowRouter]);
+
+  // Arrows are taken from Ink's RAW input events: the keypress parser collapses
+  // a batched multi-arrow wheel chunk into a single upArrow, hiding the count
+  // the router needs. Overlays (picker/login/interview) own arrow navigation,
+  // so the router stands down while one is open.
+  const { internal_eventEmitter } = useStdin();
+  useEffect(() => {
+    const onRawInput = (chunk: string): void => {
+      if (overlayOpenRef.current) return;
+      const runs = parseArrowChunk(chunk);
+      if (!runs) return;
+      for (const run of runs) arrowRouter.feed(run.dir, run.count);
+    };
+    internal_eventEmitter.on("input", onRawInput);
+    return () => {
+      internal_eventEmitter.removeListener("input", onRawInput);
+    };
+  }, [internal_eventEmitter, arrowRouter]);
+
+  // PgUp/PgDn page the transcript unconditionally — a timing-free fallback that
+  // also works on terminals whose wheel never reaches the app.
   useInput(
-    (input) => {
-      let delta = 0;
-      for (const mm of input.matchAll(/\[<(\d+);\d+;\d+[Mm]/g)) {
-        const cb = Number(mm[1]);
-        if ((cb & 64) === 0) continue; // not a wheel event
-        const low = cb & 3;
-        // Natural chat direction: wheel up lifts the view toward OLDER lines
-        // (offset +), wheel down returns toward the newest (offset −) — matching
-        // the scroll hint. (687383b had flipped this; at the bottom, wheel-up then
-        // hit the 0-clamp and the transcript felt unscrollable.)
-        delta += low === 0 ? 3 : low === 1 ? -3 : 0;
+    (_input, key) => {
+      if (overlayOpenRef.current) return;
+      if (!key.pageUp && !key.pageDown) return;
+      const page = Math.max(1, viewportRef.current - 1);
+      if (key.pageUp) {
+        scrollBy(page);
+        return;
       }
-      if (delta !== 0)
-        setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + delta)));
+      // Paging down: the scroll-hint row disappears when the bottom is reached,
+      // growing the viewport by one — snap the last stranded line out.
+      setScrollOffset((o) => {
+        const next = Math.max(0, o - page);
+        return next <= 1 ? 0 : next;
+      });
     },
     { isActive: true },
   );
@@ -1361,7 +1403,8 @@ export function App({
         }
         case "copy": {
           // Copy the last assistant reply via OSC 52 — the terminal owns the
-          // clipboard write, so this works even with mouse capture on.
+          // clipboard write, so this works over SSH too, and it reaches replies
+          // longer than the screen (drag-select only covers what is visible).
           const last = [...items].reverse().find((i) => i.kind === "assistant");
           if (!last || last.kind !== "assistant") {
             push({ kind: "system", text: "nothing to copy yet — no assistant reply" });
@@ -1374,17 +1417,6 @@ export function App({
               text: `⧉ copied the last reply to the clipboard (${last.text.length} chars)`,
             });
           }
-          break;
-        }
-        case "mouse": {
-          const next = !mouseOn;
-          setMouseOn(next);
-          push({
-            kind: "system",
-            text: next
-              ? "mouse capture ON — wheel scrolls the chat · shift+drag selects text"
-              : "mouse capture OFF — drag selects text natively · wheel may act as ↑/↓ · /mouse re-enables",
-          });
           break;
         }
         case "sdd": {
@@ -1619,7 +1651,6 @@ export function App({
       providerLabel,
       askInterview,
       items,
-      mouseOn,
       rawStdout,
     ],
   );
@@ -1720,8 +1751,23 @@ export function App({
   const busy = status !== "idle";
   const mode = permMode.toUpperCase();
 
-  // Clamp the scroll offset to the measured content and expose the max to the wheel
-  // handler (which runs outside render via a ref).
+  // Feed the arrow router's refs the freshest state each render (the router and
+  // the raw stdin listener are memoized once and read through these).
+  overlayOpenRef.current = pickerOpen || loginOpen || interview !== null;
+  arrowHistoryRef.current = (dir) => {
+    // While the prompt is hidden (busy spinner, team-suggest ask), a keyboard
+    // arrow has no history to walk — let it nudge the transcript instead.
+    const promptLive = (!busy || autoState !== "idle") && !teamSuggest;
+    if (!promptLive) {
+      scrollBy(dir === "up" ? 1 : -1);
+      return;
+    }
+    if (dir === "up") onHistoryPrev();
+    else onHistoryNext();
+  };
+
+  // Clamp the scroll offset to the measured content and expose the max to the
+  // scroll handler (which runs outside render via a ref).
   const maxOffset = Math.max(0, totalLines - viewportRows);
   maxOffsetRef.current = maxOffset;
   const clampedOffset = Math.min(scrollOffset, maxOffset);
@@ -1812,8 +1858,6 @@ export function App({
                 onChange={setInput}
                 onSubmit={submit}
                 onHelp={() => push({ kind: "help" })}
-                onHistoryPrev={onHistoryPrev}
-                onHistoryNext={onHistoryNext}
               />
             )}
           </Box>

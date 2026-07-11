@@ -169,7 +169,7 @@ export function StatusBar({
           </Text>
         </Text>
         <Text color="gray" dimColor wrap="truncate">
-          ? help · Alt+P models · wheel scrolls · shift+drag selects · ^C quit
+          ? help · Alt+P models · wheel scrolls · drag selects text · ^C quit
         </Text>
       </Box>
     );
@@ -224,8 +224,8 @@ export function StatusBar({
         </Text>
       </Text>
       <Text color="gray" dimColor wrap="truncate">
-        Enter send · ↑↓ history · wheel scrolls · shift+drag selects · /copy last reply · ? help ·
-        ^C quit
+        Enter send · ↑↓ history · wheel scrolls · drag selects text · /copy last reply · ? help · ^C
+        quit
       </Text>
     </Box>
   );
