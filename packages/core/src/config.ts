@@ -138,6 +138,16 @@ export interface ArtermConfig {
      */
     summarizeModel?: string;
   };
+  /** Terminal UI rendering options. */
+  tui: {
+    /**
+     * Fullscreen mode (default): the TUI owns the whole window on the alternate
+     * screen — the footer stays pinned to the bottom even while scrolling, and
+     * the wheel scrolls the chat in-app (Claude Code's fullscreen renderer).
+     * false = classic mode: the chat flows into the terminal's own scrollback.
+     */
+    fullscreen?: boolean;
+  };
 }
 
 export const ARTERM_HOME = join(homedir(), ".arterm");
@@ -162,6 +172,7 @@ export function defaultConfig(): ArtermConfig {
     mcpServers: {},
     plugins: {},
     team: { fanout: 4, maxRounds: 6, isolation: "auto", mergeStrategy: "apply", suggest: true },
+    tui: { fullscreen: true },
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
@@ -229,6 +240,7 @@ const configFileSchema = z
         suggest: z.boolean().optional(),
       })
       .partial(),
+    tui: z.object({ fullscreen: z.boolean().optional() }).partial(),
     fleet: z
       .object({
         concurrency: z.number().int().positive().optional(),

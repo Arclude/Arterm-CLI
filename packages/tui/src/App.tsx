@@ -21,18 +21,11 @@ import {
   measureElement,
   useApp,
   useInput,
+  useStdin,
   useStdout,
 } from "ink";
 import type React from "react";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoginOverlay } from "./LoginOverlay.js";
 import { Item } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
@@ -41,6 +34,7 @@ import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardMember } from "./TeamBoard.js";
+import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
 import { osc52Sequence } from "./clipboard.js";
 import {
   type HistoryNav,
@@ -73,6 +67,7 @@ function InputLine({
   onHelp,
   onHistoryPrev,
   onHistoryNext,
+  externalArrows = false,
 }: {
   active: boolean;
   value: string;
@@ -83,6 +78,8 @@ function InputLine({
   onHelp: () => void;
   onHistoryPrev: () => void;
   onHistoryNext: () => void;
+  /** Fullscreen: ↑/↓ are owned by App's arrow router (wheel vs keyboard). */
+  externalArrows?: boolean;
 }): React.ReactElement {
   const suggestion = commandSuggestion(value, commands);
   // The input handler reads the CURRENT value through this ref, never its own
@@ -106,6 +103,9 @@ function InputLine({
   useInput(
     (input, key) => {
       const v = valueRef.current;
+      // Fullscreen: never double-handle arrows — the arrow router separates
+      // wheel-synthesized arrows (scroll) from keyboard ones (history).
+      if (externalArrows && (key.upArrow || key.downArrow)) return;
       // Tab completes a slash command to its first match. Shift+Tab is the
       // permission-mode cycle, handled in App — fall through and leave it.
       if (key.tab && !key.shift) {
@@ -275,6 +275,89 @@ const LiveMessage = memo(function LiveMessage({
 });
 
 /**
+ * Fullscreen mode's managed, in-app scrollable transcript. The alternate screen
+ * has no scrollback for the chat to ride, so we scroll it ourselves (the wheel
+ * reaches us as alternate-scroll arrow keys — see arrowRouter.ts). Technique
+ * (Ink-5): a height-bounded `overflowY:"hidden"` + `justifyContent:"flex-end"`
+ * viewport bottom-aligns the content, so overflow clips off the TOP (newest
+ * visible) for free; a positive `marginBottom={scrollOffset}` then lifts the
+ * content to reveal older rows. (Negative marginTop does NOT clip reliably.)
+ *
+ * Wrapped in React.memo so keystrokes in the prompt don't re-lay-out the whole
+ * transcript — only items/live/viewport/offset changes do.
+ */
+const Transcript = memo(function Transcript({
+  items,
+  live,
+  viewportRows,
+  marginBottom,
+  columns,
+  onMeasure,
+}: {
+  items: DisplayItem[];
+  live: string;
+  viewportRows: number;
+  marginBottom: number;
+  columns: number;
+  /** Reports the measured content height (rows) after each layout, so App can clamp
+   *  the scroll offset and keep the view anchored as content streams in. */
+  onMeasure: (totalLines: number) => void;
+}): React.ReactElement {
+  const contentRef = useRef<DOMElement>(null);
+  const lastReported = useRef(-1);
+  // The content's own height does not depend on viewportRows/marginBottom (margins
+  // and justify are layout-outside), so measuring here never feeds back into a loop.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on content change
+  useLayoutEffect(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    const { height } = measureElement(node);
+    if (height !== lastReported.current) {
+      lastReported.current = height;
+      onMeasure(height);
+    }
+  }, [items, live, columns, onMeasure]);
+
+  return (
+    <Box
+      width={columns}
+      height={Math.max(1, viewportRows)}
+      overflowY="hidden"
+      justifyContent="flex-end"
+      flexDirection="column"
+    >
+      <Box
+        ref={contentRef}
+        flexDirection="column"
+        marginBottom={Math.max(0, marginBottom)}
+        flexShrink={0}
+      >
+        {items.map((item, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: transcript is append-only
+          <Item key={i} item={item} />
+        ))}
+        {live ? (
+          <Box
+            flexDirection="column"
+            borderStyle="single"
+            borderColor="green"
+            borderTop={false}
+            borderRight={false}
+            borderBottom={false}
+            paddingLeft={1}
+          >
+            <Text color="green" bold>
+              ASSISTANT
+            </Text>
+            <Markdown text={live} />
+          </Box>
+        ) : null}
+      </Box>
+    </Box>
+  );
+});
+
+/**
  * Keeps the dynamic bottom region GLUED to the terminal's bottom edge.
  *
  * Ink's log-update repaints by erasing the previous frame from its TOP line and
@@ -306,7 +389,6 @@ function AnchoredRegion({
   const snapRef = useRef(snapKey);
   // Content height does not depend on the container height (fixed width, the
   // clip/justify live on the outer box), so measuring here cannot feed back.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure every commit
   useLayoutEffect(() => {
     const node = contentRef.current;
     if (!node) return;
@@ -344,14 +426,28 @@ function AnchoredRegion({
 export function App({
   session,
   initialGoal,
+  fullscreen = false,
 }: {
   session: Session;
   initialGoal?: string;
+  /** Alternate-screen mode: pinned footer + in-app scroll (see runTui). */
+  fullscreen?: boolean;
 }): React.ReactElement {
   const { exit } = useApp();
   const { rows, columns } = useTermSize();
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
+  // Fullscreen in-app scrolling: how many lines the view is lifted off the
+  // bottom (0 = pinned to newest). Wheel (via alternate-scroll arrows) and
+  // PgUp/PgDn drive it; keyboard ↑/↓ stay on prompt history (arrowRouter tells
+  // them apart). totalLines/viewportRows are measured to clamp the offset.
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [totalLines, setTotalLines] = useState(0);
+  const [viewportRows, setViewportRows] = useState(() => Math.max(1, rows - 8));
+  const bottomRef = useRef<DOMElement>(null);
+  const viewportRef = useRef(viewportRows);
+  const prevContentRef = useRef(0);
+  const maxOffsetRef = useRef(0);
   // Prompts entered while a turn is running — drained FIFO by the queue effect
   // (see submit/dispatch). Refs mirror the latest state so input handlers and
   // the drain guard never act through a stale closure.
@@ -446,28 +542,110 @@ export function App({
   useEffect(() => {
     if (!rawStdout) return;
     const ESC = String.fromCharCode(27);
-    rawStdout.write(`${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l`);
-  }, [rawStdout]);
+    // The mouse is never captured (capture would break native drag-to-select) —
+    // clear any reporting a crashed program left behind. In fullscreen, enable
+    // alternate scroll (DECSET 1007): the terminal turns wheel ticks into ↑/↓
+    // sequences and arrowRouter routes them to the in-app scroll.
+    rawStdout.write(
+      `${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
+    );
+  }, [rawStdout, fullscreen]);
 
-  // Resize recovery: reflowed wrapped lines invalidate Ink's RELATIVE erase
-  // counts (its very next repaint can eat into the transcript or leave stale
-  // footer fragments) and the region loses its bottom anchor. Blank the SCREEN
-  // (2J only — scrollback stays) and re-pad to the new bottom; the repaint that
-  // follows the size-state update then erases nothing but blank pad rows and
-  // lands anchored again. syncedStdout coalesces it all into one atomic frame.
+  // Classic-mode resize recovery: reflowed wrapped lines invalidate Ink's
+  // RELATIVE erase counts (its very next repaint can eat into the transcript or
+  // leave stale footer fragments) and the region loses its bottom anchor. Blank
+  // the SCREEN (2J only — scrollback stays) and re-pad to the new bottom; the
+  // repaint that follows the size-state update then erases nothing but blank
+  // pad rows and lands anchored again. syncedStdout makes it one atomic frame.
+  // (Fullscreen repaints the whole fixed-height frame anyway — no pad wanted.)
   useEffect(() => {
-    if (!rawStdout) return;
+    if (!rawStdout || fullscreen) return;
     const onResize = (): void => {
       const ESC = String.fromCharCode(27);
-      rawStdout.write(
-        `${ESC}[2J${ESC}[H${"\n".repeat(Math.max(0, (rawStdout.rows ?? 24) - 1))}`,
-      );
+      rawStdout.write(`${ESC}[2J${ESC}[H${"\n".repeat(Math.max(0, (rawStdout.rows ?? 24) - 1))}`);
     };
     rawStdout.on("resize", onResize);
     return () => {
       rawStdout.off("resize", onResize);
     };
-  }, [rawStdout]);
+  }, [rawStdout, fullscreen]);
+
+  // ── Fullscreen scroll machinery ─────────────────────────────────────────────
+  // Viewport height = terminal rows − the measured bottom region (input +
+  // overlays + goal + status bar). Runs every commit (no deps) so it
+  // self-corrects as the bottom region grows/shrinks.
+  useLayoutEffect(() => {
+    if (!fullscreen || !bottomRef.current) return;
+    const { height } = measureElement(bottomRef.current);
+    const vp = Math.max(1, rows - 1 - height);
+    viewportRef.current = vp;
+    setViewportRows((cur) => (cur === vp ? cur : vp));
+  });
+
+  // Receives the transcript's measured height. When content grows while the
+  // user is scrolled up, bump the offset by the growth so their view stays
+  // anchored; when pinned (offset 0) it stays at the bottom.
+  const handleMeasure = useCallback((height: number) => {
+    const prev = prevContentRef.current;
+    if (height === prev) return;
+    prevContentRef.current = height;
+    setTotalLines(height);
+    setScrollOffset((off) => {
+      const max = Math.max(0, height - viewportRef.current);
+      if (off > 0 && height > prev) return Math.min(max, off + (height - prev));
+      return Math.min(off, max);
+    });
+  }, []);
+
+  // Positive lines lift the view toward OLDER content, negative returns toward
+  // the newest — matching the scroll hint.
+  const scrollBy = useCallback((lines: number) => {
+    setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + lines)));
+  }, []);
+
+  // Routes ↑/↓ to prompt history (keyboard) or transcript scroll (wheel via
+  // alternate scroll) — see arrowRouter.ts for how the two are told apart.
+  const arrowHistoryRef = useRef<(dir: ArrowDir) => void>(() => {});
+  const overlayOpenRef = useRef(false);
+  const arrowRouter = useMemo(
+    () =>
+      createArrowRouter({
+        onHistory: (dir) => arrowHistoryRef.current(dir),
+        onScroll: (dir, lines) => scrollBy(dir === "up" ? lines : -lines),
+      }),
+    [scrollBy],
+  );
+  useEffect(() => () => arrowRouter.dispose(), [arrowRouter]);
+
+  // Arrows are taken from Ink's RAW input events: its keypress parser collapses
+  // a batched multi-arrow wheel chunk into a single upArrow, hiding the count
+  // the router needs. Overlays (picker/login/interview) own arrow navigation.
+  const { internal_eventEmitter } = useStdin();
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onRawInput = (chunk: string): void => {
+      if (overlayOpenRef.current) return;
+      const runs = parseArrowChunk(chunk);
+      if (!runs) return;
+      for (const run of runs) arrowRouter.feed(run.dir, run.count);
+    };
+    internal_eventEmitter.on("input", onRawInput);
+    return () => {
+      internal_eventEmitter.removeListener("input", onRawInput);
+    };
+  }, [fullscreen, internal_eventEmitter, arrowRouter]);
+
+  // PgUp/PgDn page the transcript — a timing-free fallback that also works on
+  // terminals whose wheel never reaches the app.
+  useInput(
+    (_input, key) => {
+      if (overlayOpenRef.current) return;
+      if (!key.pageUp && !key.pageDown) return;
+      const page = Math.max(1, viewportRef.current - 1);
+      scrollBy(key.pageUp ? page : -page);
+    },
+    { isActive: fullscreen },
+  );
 
   // Streamed tokens are buffered and flushed to `live` at most every LIVE_FLUSH_MS:
   // a per-token setState makes Ink repaint the dynamic region for every word,
@@ -524,6 +702,7 @@ export function App({
         case "turn_start":
           setStatus("thinking");
           statusRef.current = "thinking"; // eager: gates the queue drain instantly
+          setScrollOffset(0); // jump to the newest output when a turn begins
           resetLive();
           turnStartRef.current = Date.now();
           turnRef.current = { inTok: 0, outTok: 0, rounds: 0, changedFiles: new Set<string>() };
@@ -1240,14 +1419,18 @@ export function App({
           session.agent.reset();
           setItems([]);
           setQueue([]);
-          // <Static> only appends — remount it (new key) and blank the terminal's
+          setScrollOffset(0);
+          // Classic: <Static> only appends — remount it (new key) and blank the
           // screen + scrollback so the cleared transcript really disappears; the
           // newline pad re-anchors the prompt to the bottom of the window.
           // 3J comes FIRST deliberately: syncedStdout rewrites Ink's 2J+3J+H
           // clearTerminal to spare the scrollback, but leaves this order alone.
+          // Fullscreen just resets state — the fixed frame repaints itself.
           setStaticGen((g) => g + 1);
-          const ESC = String.fromCharCode(27);
-          rawStdout?.write(`${ESC}[3J${ESC}[2J${ESC}[H${"\n".repeat(Math.max(0, rows - 1))}`);
+          if (!fullscreen) {
+            const ESC = String.fromCharCode(27);
+            rawStdout?.write(`${ESC}[3J${ESC}[2J${ESC}[H${"\n".repeat(Math.max(0, rows - 1))}`);
+          }
           setInTok(0);
           setOutTok(0);
           setCtxUsed(0);
@@ -1695,6 +1878,7 @@ export function App({
       items,
       rawStdout,
       rows,
+      fullscreen,
     ],
   );
 
@@ -1841,6 +2025,166 @@ export function App({
   // and rewrites the whole terminal every render (stutter + broken scrollback).
   const liveMaxRows = Math.max(4, rows - 16);
 
+  // Fullscreen: feed the arrow router the freshest state each render (it is
+  // memoized once and reads through these refs), and clamp the scroll offset
+  // to the measured content.
+  overlayOpenRef.current = pickerOpen || loginOpen || interview !== null;
+  arrowHistoryRef.current = (dir) => {
+    if (teamSuggest) {
+      scrollBy(dir === "up" ? 1 : -1);
+      return;
+    }
+    if (dir === "up") onHistoryPrev();
+    else onHistoryNext();
+  };
+  const maxOffset = Math.max(0, totalLines - viewportRows);
+  maxOffsetRef.current = maxOffset;
+  const clampedOffset = Math.min(scrollOffset, maxOffset);
+
+  const footer = (
+    <>
+      {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
+      {teamMembers.length > 0 ? (
+        <TeamBoard
+          members={teamMembers}
+          columns={columns}
+          selected={teamSel}
+          detailOpen={teamDetailOpen}
+          feed={
+            teamFeeds.get(teamMembers[Math.min(teamSel, teamMembers.length - 1)]?.id ?? "") ?? []
+          }
+        />
+      ) : null}
+      {teamSuggest ? (
+        <Box>
+          <Text color="magenta" bold>
+            ⚑ This looks like a large task
+          </Text>
+          <Text color="gray"> — run it as an agent team? </Text>
+          <Text color="magenta" bold>
+            [y/N]
+          </Text>
+        </Box>
+      ) : null}
+      {interview ? (
+        <SddInterview
+          questions={interview.questions}
+          answers={interview.answers}
+          current={interviewInput}
+        />
+      ) : pending ? (
+        <PermissionPrompt pending={pending} />
+      ) : pickerOpen ? (
+        <ModelPicker
+          models={filteredPickerModels}
+          index={pickerIndex}
+          current={model}
+          loading={pickerLoading}
+          query={pickerQuery}
+        />
+      ) : loginOpen ? (
+        <LoginOverlay
+          step={loginStep}
+          providers={session.loginProviders}
+          index={loginIndex}
+          current={providerLabel}
+          signedIn={signedIn}
+          selected={loginSel ?? undefined}
+          keyValue={loginKey}
+          hostValue={loginHost}
+          oauthUrl={loginUrl}
+        />
+      ) : (
+        <Box marginTop={1} flexDirection="column">
+          {busy && autoState === "idle" ? (
+            // The turn runs behind a LIVE prompt: keep typing, Enter queues the
+            // next message(s), Esc cancels the turn (and drops the queue).
+            <Text color="yellow">
+              ● working…{" "}
+              <Text color="gray" dimColor>
+                Esc cancels · Enter queues the next message
+              </Text>
+            </Text>
+          ) : null}
+          {queue.slice(0, 3).map((q, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: queue is order-only
+            <Text key={i} color="gray" dimColor wrap="truncate">
+              ⏳ {q}
+            </Text>
+          ))}
+          {queue.length > 3 ? (
+            <Text color="gray" dimColor>
+              ⏳ +{queue.length - 3} more queued
+            </Text>
+          ) : null}
+          <InputLine
+            active={!teamSuggest}
+            value={input}
+            commands={COMMANDS}
+            columns={columns}
+            onChange={setInput}
+            onSubmit={submit}
+            onHelp={() => push({ kind: "help" })}
+            onHistoryPrev={onHistoryPrev}
+            onHistoryNext={onHistoryNext}
+            externalArrows={fullscreen}
+          />
+        </Box>
+      )}
+      {autoState !== "idle" ? (
+        <Box>
+          <Text color="magenta" bold>
+            {autoState === "paused" ? "⏸ GOAL" : "◆ GOAL"}
+          </Text>
+          <Text color="gray">
+            {"  "}
+            step {autoStep} · {goalText.slice(0, 64)}
+          </Text>
+        </Box>
+      ) : null}
+      <StatusBar
+        provider={providerLabel}
+        model={model}
+        status={status}
+        inTok={inTok}
+        outTok={outTok}
+        ctxUsed={ctxUsed}
+        ctxWindow={session.agent.effectiveContextWindow() ?? DEFAULT_CTX}
+        toolCount={session.toolCount}
+        mode={mode}
+        columns={columns}
+      />
+    </>
+  );
+
+  if (fullscreen) {
+    // The whole window is one fixed-height frame (rows-1 keeps Ink's trailing
+    // newline on-screen and stays under its clear-everything threshold): the
+    // transcript viewport fills the space above a footer that is pinned purely
+    // by being the column's last child — scrolling happens INSIDE the viewport,
+    // so the footer never moves, exactly like Claude Code's fullscreen renderer.
+    return (
+      <Box flexDirection="column" width={columns} height={Math.max(4, rows - 1)}>
+        <Transcript
+          items={items}
+          live={live}
+          viewportRows={viewportRows}
+          marginBottom={clampedOffset}
+          columns={columns}
+          onMeasure={handleMeasure}
+        />
+        <Box ref={bottomRef} flexDirection="column" flexShrink={0}>
+          {clampedOffset > 0 ? (
+            <Text color="gray" dimColor>
+              ↑ {clampedOffset} satır yukarıda · tekerleği aşağı çevir / mesaj gönder = en alta dön
+            </Text>
+          ) : null}
+          {footer}
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <>
       <Static key={staticGen} items={items}>
@@ -1856,116 +2200,7 @@ export function App({
         snapKey={`${staticGen}:${items.length}:${rows}:${columns}`}
       >
         {live ? <LiveMessage text={live} maxRows={liveMaxRows} columns={columns} /> : null}
-        {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
-        {teamMembers.length > 0 ? (
-          <TeamBoard
-            members={teamMembers}
-            columns={columns}
-            selected={teamSel}
-            detailOpen={teamDetailOpen}
-            feed={
-              teamFeeds.get(teamMembers[Math.min(teamSel, teamMembers.length - 1)]?.id ?? "") ?? []
-            }
-          />
-        ) : null}
-        {teamSuggest ? (
-          <Box>
-            <Text color="magenta" bold>
-              ⚑ This looks like a large task
-            </Text>
-            <Text color="gray"> — run it as an agent team? </Text>
-            <Text color="magenta" bold>
-              [y/N]
-            </Text>
-          </Box>
-        ) : null}
-        {interview ? (
-          <SddInterview
-            questions={interview.questions}
-            answers={interview.answers}
-            current={interviewInput}
-          />
-        ) : pending ? (
-          <PermissionPrompt pending={pending} />
-        ) : pickerOpen ? (
-          <ModelPicker
-            models={filteredPickerModels}
-            index={pickerIndex}
-            current={model}
-            loading={pickerLoading}
-            query={pickerQuery}
-          />
-        ) : loginOpen ? (
-          <LoginOverlay
-            step={loginStep}
-            providers={session.loginProviders}
-            index={loginIndex}
-            current={providerLabel}
-            signedIn={signedIn}
-            selected={loginSel ?? undefined}
-            keyValue={loginKey}
-            hostValue={loginHost}
-            oauthUrl={loginUrl}
-          />
-        ) : (
-          <Box marginTop={1} flexDirection="column">
-            {busy && autoState === "idle" ? (
-              // The turn runs behind a LIVE prompt: keep typing, Enter queues the
-              // next message(s), Esc cancels the turn (and drops the queue).
-              <Text color="yellow">
-                ● working…{" "}
-                <Text color="gray" dimColor>
-                  Esc cancels · Enter queues the next message
-                </Text>
-              </Text>
-            ) : null}
-            {queue.slice(0, 3).map((q, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: queue is order-only
-              <Text key={i} color="gray" dimColor wrap="truncate">
-                ⏳ {q}
-              </Text>
-            ))}
-            {queue.length > 3 ? (
-              <Text color="gray" dimColor>
-                ⏳ +{queue.length - 3} more queued
-              </Text>
-            ) : null}
-            <InputLine
-              active={!teamSuggest}
-              value={input}
-              commands={COMMANDS}
-              columns={columns}
-              onChange={setInput}
-              onSubmit={submit}
-              onHelp={() => push({ kind: "help" })}
-              onHistoryPrev={onHistoryPrev}
-              onHistoryNext={onHistoryNext}
-            />
-          </Box>
-        )}
-        {autoState !== "idle" ? (
-          <Box>
-            <Text color="magenta" bold>
-              {autoState === "paused" ? "⏸ GOAL" : "◆ GOAL"}
-            </Text>
-            <Text color="gray">
-              {"  "}
-              step {autoStep} · {goalText.slice(0, 64)}
-            </Text>
-          </Box>
-        ) : null}
-        <StatusBar
-          provider={providerLabel}
-          model={model}
-          status={status}
-          inTok={inTok}
-          outTok={outTok}
-          ctxUsed={ctxUsed}
-          ctxWindow={session.agent.effectiveContextWindow() ?? DEFAULT_CTX}
-          toolCount={session.toolCount}
-          mode={mode}
-          columns={columns}
-        />
+        {footer}
       </AnchoredRegion>
     </>
   );
