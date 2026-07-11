@@ -27,16 +27,22 @@ const SYNC_END = `${ESC}[?2026l`;
 const INK_CLEAR = `${ESC}[2J${ESC}[3J${ESC}[H`;
 const SAFE_CLEAR = `${ESC}[2J${ESC}[H`;
 
-export function syncedStdout(real: NodeJS.WriteStream): NodeJS.WriteStream {
+export function syncedStdout(
+  real: NodeJS.WriteStream,
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.WriteStream {
   let buf: string[] = [];
   let scheduled = false;
+  // Claude Code gates DEC 2026 the same way: tmux (< 3.4) mangles passthrough
+  // of the mode, so under tmux we still coalesce writes but skip the brackets.
+  const brackets = !(env.TMUX || env.TERM_PROGRAM === "tmux");
 
   const flush = (): void => {
     scheduled = false;
     if (buf.length === 0) return;
     const chunk = buf.join("");
     buf = [];
-    real.write(`${SYNC_START}${chunk}${SYNC_END}`);
+    real.write(brackets ? `${SYNC_START}${chunk}${SYNC_END}` : chunk);
   };
 
   const write = (chunk: unknown): boolean => {

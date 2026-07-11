@@ -449,6 +449,26 @@ export function App({
     rawStdout.write(`${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l`);
   }, [rawStdout]);
 
+  // Resize recovery: reflowed wrapped lines invalidate Ink's RELATIVE erase
+  // counts (its very next repaint can eat into the transcript or leave stale
+  // footer fragments) and the region loses its bottom anchor. Blank the SCREEN
+  // (2J only — scrollback stays) and re-pad to the new bottom; the repaint that
+  // follows the size-state update then erases nothing but blank pad rows and
+  // lands anchored again. syncedStdout coalesces it all into one atomic frame.
+  useEffect(() => {
+    if (!rawStdout) return;
+    const onResize = (): void => {
+      const ESC = String.fromCharCode(27);
+      rawStdout.write(
+        `${ESC}[2J${ESC}[H${"\n".repeat(Math.max(0, (rawStdout.rows ?? 24) - 1))}`,
+      );
+    };
+    rawStdout.on("resize", onResize);
+    return () => {
+      rawStdout.off("resize", onResize);
+    };
+  }, [rawStdout]);
+
   // Streamed tokens are buffered and flushed to `live` at most every LIVE_FLUSH_MS:
   // a per-token setState makes Ink repaint the dynamic region for every word,
   // which reads as stuttering. `liveBufRef` always holds the full in-progress text.
