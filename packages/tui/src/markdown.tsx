@@ -1,4 +1,5 @@
 import { Box, Text } from "ink";
+import { memo } from "react";
 import type React from "react";
 
 /**
@@ -147,8 +148,10 @@ function Spans({ spans, base }: { spans: MdSpan[]; base?: { color?: string; bold
   );
 }
 
-/** Renders assistant markdown in the transcript. Falls back gracefully on plain text. */
-export function Markdown({ text }: { text: string }): React.ReactElement {
+/** Renders assistant markdown in the transcript. Falls back gracefully on plain
+ *  text. Memoized on `text` so re-rendering the transcript (e.g. on scroll) does
+ *  not re-parse unchanged messages. */
+export const Markdown = memo(function Markdown({ text }: { text: string }): React.ReactElement {
   const blocks = parseMarkdown(text);
   return (
     <Box flexDirection="column">
@@ -206,4 +209,4 @@ export function Markdown({ text }: { text: string }): React.ReactElement {
       })}
     </Box>
   );
-}
+});

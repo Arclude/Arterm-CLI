@@ -1,5 +1,6 @@
 import type { DiffRow } from "@arterm/core";
 import { Box, Text } from "ink";
+import { memo } from "react";
 import type React from "react";
 import { Markdown } from "./markdown.js";
 import type { DisplayItem } from "./types.js";
@@ -231,7 +232,11 @@ function HelpPanel(): React.ReactElement {
   );
 }
 
-export function Item({ item }: { item: DisplayItem }): React.ReactElement {
+// Memoized: a scroll re-renders the transcript with a new offset, but each
+// item's props are unchanged, so React skips re-running its markdown/diff render
+// — only the cutter layout shifts. This is what keeps scroll fluid on a long
+// transcript (without it, every wheel tick re-parses every message's markdown).
+export const Item = memo(function Item({ item }: { item: DisplayItem }): React.ReactElement {
   switch (item.kind) {
     case "user":
       return (
@@ -317,7 +322,7 @@ export function Item({ item }: { item: DisplayItem }): React.ReactElement {
         </Box>
       );
   }
-}
+});
 
 export function MessageList({ items, live }: Props): React.ReactElement {
   return (
