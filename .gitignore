@@ -9,3 +9,6 @@ next-env.d.ts
 .arterm/
 coverage/
 .plugins-fixtures/
+
+# Understand-Anything analysis artifacts
+.understand-anything/
