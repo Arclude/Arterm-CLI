@@ -20,6 +20,7 @@ export {
   type FleetFn,
 } from "./spawn.js";
 export { createMemorySearchTool, createRememberTool, formatLearning } from "./memoryTools.js";
+export { makeMessageTool, type MessageToolOptions } from "./message.js";
 export { startMemoryMcpServer } from "./mcpMemoryServer.js";
 export {
   type CodeSymbol,

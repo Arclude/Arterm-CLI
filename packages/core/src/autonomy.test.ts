@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Agent } from "./agent.js";
 import { registerAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine, type AutonomyFleetRunner, type AutonomyTask } from "./autonomy.js";
+import { Blackboard } from "./blackboard.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import { PermissionManager } from "./permissions.js";
 import type { AutonomyMode, ChatProvider, Tool } from "./types.js";
@@ -52,7 +53,11 @@ class FakeAgent {
     }
     this.onRun?.(this.n);
   }
+  // Optional per-call verdicts (consumed in order); falls back to assessVerdict.
+  assessVerdicts?: { done: boolean; note: string }[];
+  private assessN = 0;
   async assess(): Promise<{ done: boolean; note: string }> {
+    if (this.assessVerdicts) return this.assessVerdicts[this.assessN++] ?? this.assessVerdict;
     return this.assessVerdict;
   }
   // Scripted decomposition output, one entry per round (defaults to "[]").
@@ -73,6 +78,7 @@ function makeEngine(
     maxSteps?: number;
     fanout?: number;
     runFleet?: AutonomyFleetRunner;
+    blackboard?: Blackboard;
   },
 ) {
   return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, opts);
@@ -430,6 +436,58 @@ describe("team mode", () => {
     const done = events.find((e) => e.type === "team_done");
     expect(done?.type === "team_done" && done.done).toBe(1);
     expect(engine.snapshot().team.map((m) => m.name)).toEqual(["coder"]);
+  });
+
+  it("posts round results to the blackboard and prefixes next-round tasks with the brief", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      // roster
+      '[{"name": "coder", "description": "writes", "instruction": "Write."},' +
+        '{"name": "reviewer", "description": "reviews", "instruction": "Review."}]',
+      // round 1 assignments
+      '[{"member": "coder", "task": "implement"},{"member": "reviewer", "task": "review"}]',
+      // round 2 assignments
+      '[{"member": "coder", "task": "fix the review notes"}]',
+    ];
+    // Not done after round 1, done after round 2.
+    agent.assessVerdicts = [
+      { done: false, note: "keep going" },
+      { done: true, note: "finished" },
+    ];
+    const fleetCalls: AutonomyTask[][] = [];
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      fleetCalls.push(tasks);
+      return tasks.map((t) => ({ ...t, output: `${t.role} output` }));
+    };
+    const board = new Blackboard();
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "team", runFleet, blackboard: board });
+
+    await engine.start("build it");
+
+    expect(engine.state).toBe("done");
+    expect(fleetCalls).toHaveLength(2);
+
+    // Round 1 results landed on the board (round 2 also posts coder's result).
+    const round1 = board.entries().filter((e) => e.kind === "result" && e.round === 1);
+    expect(round1.map((e) => e.from).sort()).toEqual(["m1-coder", "m2-reviewer"]);
+
+    // Round 2's coder task is prefixed with the board brief carrying the reviewer's
+    // round-1 result (teammate work), while the raw assignment is preserved.
+    const coderRound2 = fleetCalls[1]?.[0];
+    expect(coderRound2?.id).toBe("m1-coder");
+    expect(coderRound2?.task).toContain("Team board");
+    expect(coderRound2?.task).toContain("reviewer output");
+    expect(coderRound2?.task).toContain("fix the review notes");
+    // A member never sees its own posting echoed back.
+    expect(coderRound2?.task).not.toContain("coder output");
+
+    // Each posted result also surfaces as a team_message event (topology graph):
+    // 2 from round 1 + 1 from round 2, all of kind "result".
+    const msgs = events.filter((e) => e.type === "team_message");
+    expect(msgs).toHaveLength(3);
+    expect(msgs.every((m) => m.type === "team_message" && m.kind === "result")).toBe(true);
   });
 
   it("a definition-backed member carries its body as a system prompt and its allowlist", async () => {

@@ -79,6 +79,7 @@ describe("team config", () => {
       isolation: "auto",
       mergeStrategy: "apply",
       suggest: true,
+      blackboard: true,
     });
   });
 

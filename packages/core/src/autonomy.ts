@@ -1,5 +1,6 @@
 import type { Agent } from "./agent.js";
 import { listAgentDefinitions } from "./agentRegistry.js";
+import type { Blackboard } from "./blackboard.js";
 import type { EventBus } from "./eventBus.js";
 import { availableRoles } from "./subagent.js";
 import {
@@ -66,6 +67,14 @@ export interface AutonomyOptions {
   teamRounds?: number;
   /** Fleet runner required by "parallel"/"phased"/"team" modes (injected so core stays decoupled). */
   runFleet?: AutonomyFleetRunner;
+  /**
+   * Team mode shared blackboard. When present, each round's results are posted to
+   * it and each member's next-round task is prefixed with the board digest meant
+   * for it (teammate results + messages addressed to it). Members write directed
+   * notes via the `message` tool wired against the same instance. Omit to keep the
+   * pure star topology (leader-only aggregation).
+   */
+  blackboard?: Blackboard;
 }
 
 /**
@@ -81,6 +90,7 @@ export class AutonomyEngine {
   private fanout: number;
   private maxPhases: number;
   private readonly runFleet?: AutonomyFleetRunner;
+  private readonly blackboard?: Blackboard;
   private goal = "";
   private step = 0;
   private idleStreak = 0;
@@ -109,6 +119,7 @@ export class AutonomyEngine {
     this.teamFanout = Math.min(16, Math.max(1, opts.teamFanout ?? 4));
     this.teamRounds = Math.min(20, Math.max(1, opts.teamRounds ?? 6));
     this.runFleet = opts.runFleet;
+    this.blackboard = opts.blackboard;
   }
 
   get state(): AutonomyState {
@@ -370,9 +381,11 @@ export class AutonomyEngine {
     }
 
     this.current = new AbortController();
+    this.blackboard?.clear();
     const roster = await this.assembleTeam();
     if (this.stopped) return;
     this._team = roster;
+    this.blackboard?.setRoster(roster.map((m) => ({ id: m.id, name: m.name })));
     this.bus.emit({
       type: "team_plan",
       members: roster.map((m) => ({
@@ -394,6 +407,7 @@ export class AutonomyEngine {
 
       round += 1;
       this.step = round;
+      if (this.blackboard) this.blackboard.round = round;
       this.bus.emit({ type: "autonomy_step", step: round });
       this.current = new AbortController();
 
@@ -422,15 +436,21 @@ export class AutonomyEngine {
       this.idleStreak = 0;
 
       // File-backed members carry their definition body as a full system prompt;
-      // ad-hoc members get their brief as a task-instruction prefix.
-      const tasks: AutonomyTask[] = assignments.map((a) => ({
-        task: a.task,
-        role: a.member.name,
-        id: a.member.id,
-        instruction: a.member.adhoc ? a.member.instruction || undefined : undefined,
-        systemPrompt: a.member.adhoc ? undefined : a.member.instruction,
-        toolNames: a.member.toolNames,
-      }));
+      // ad-hoc members get their brief as a task-instruction prefix. When a
+      // blackboard is active, prefix each task with the digest meant for that
+      // member (teammate results + messages addressed to it from earlier rounds).
+      const tasks: AutonomyTask[] = assignments.map((a) => {
+        const brief = this.blackboard?.briefFor(a.member.id);
+        const task = brief ? `${brief}\n\n${a.task}` : a.task;
+        return {
+          task,
+          role: a.member.name,
+          id: a.member.id,
+          instruction: a.member.adhoc ? a.member.instruction || undefined : undefined,
+          systemPrompt: a.member.adhoc ? undefined : a.member.instruction,
+          toolNames: a.member.toolNames,
+        };
+      });
       this.bus.emit({
         type: "team_round",
         round,
@@ -455,6 +475,25 @@ export class AutonomyEngine {
 
       done += results.filter((r) => !r.error).length;
       failed += results.filter((r) => r.error).length;
+
+      // Post each member's result to the board so teammates read it next round,
+      // and surface the flow as a team_message event (topology graph). Failed
+      // slots hold an error string — not useful shared context, so skip them.
+      if (this.blackboard) {
+        for (const r of results) {
+          if (r.error || !r.id) continue;
+          const name = r.role ?? "member";
+          this.blackboard.post({ from: r.id, fromName: name, kind: "result", text: r.output });
+          this.bus.emit({
+            type: "team_message",
+            round,
+            from: r.id,
+            fromName: name,
+            kind: "result",
+            text: r.output.length > 600 ? `${r.output.slice(0, 600)}…` : r.output,
+          });
+        }
+      }
 
       await this.aggregate(round, results);
       this.bus.emit({ type: "autonomy_aggregate", round, count: results.length });

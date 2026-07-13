@@ -19,6 +19,7 @@ export * from "./contextRegistry.js";
 export * from "./toolProtocol.js";
 export * from "./agent.js";
 export * from "./agentRegistry.js";
+export * from "./blackboard.js";
 export * from "./autonomy.js";
 export * from "./subagent.js";
 export * from "./team.js";

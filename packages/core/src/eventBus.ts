@@ -63,6 +63,18 @@ export type AgentEvent =
     }
   // Bridged from a member's private bus — lets the team board show live activity.
   | { type: "team_member_event"; id: string; name: string; event: AgentEvent }
+  // A blackboard posting: a member's result (broadcast) or a directed teammate
+  // message. Drives the topology graph's member↔member edges in the desktop UI.
+  | {
+      type: "team_message";
+      round: number;
+      from: string;
+      fromName: string;
+      to?: string;
+      toName?: string;
+      kind: "result" | "message";
+      text: string;
+    }
   // Result of auto-applying a member's worktree patch to the main tree.
   | {
       type: "team_patch";

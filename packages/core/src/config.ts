@@ -78,6 +78,12 @@ export interface ArtermConfig {
     mergeStrategy?: "surface" | "apply";
     /** Offer to run large-looking prompts as a team (y/N confirm; default true). */
     suggest?: boolean;
+    /**
+     * Shared blackboard: members read each other's results and can address
+     * teammates with the `message` tool (default true). false keeps the pure
+     * star topology where all coordination goes through the leader.
+     */
+    blackboard?: boolean;
   };
   /** Parallel sub-agent fan-out (spawn_parallel, parallel/phased autonomy, /sdd). */
   fleet: {
@@ -179,7 +185,14 @@ export function defaultConfig(): ArtermConfig {
     autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
     mcpServers: {},
     plugins: {},
-    team: { fanout: 4, maxRounds: 6, isolation: "auto", mergeStrategy: "apply", suggest: true },
+    team: {
+      fanout: 4,
+      maxRounds: 6,
+      isolation: "auto",
+      mergeStrategy: "apply",
+      suggest: true,
+      blackboard: true,
+    },
     tui: { fullscreen: true, mouse: true },
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
     arbiter: { enabled: true },
@@ -246,6 +259,7 @@ const configFileSchema = z
         isolation: z.enum(["auto", "worktree", "none"]).optional(),
         mergeStrategy: z.enum(["surface", "apply"]).optional(),
         suggest: z.boolean().optional(),
+        blackboard: z.boolean().optional(),
       })
       .partial(),
     tui: z.object({ fullscreen: z.boolean().optional(), mouse: z.boolean().optional() }).partial(),

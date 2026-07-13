@@ -4,6 +4,7 @@ import {
   type ArtermConfig,
   AutonomyEngine,
   type AutonomyTask,
+  Blackboard,
   Container,
   EventBus,
   MemoryRecorder,
@@ -52,6 +53,7 @@ import {
   createSpawnParallelTool,
   createSpawnTool,
   defaultTools,
+  makeMessageTool,
   taskDoneTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
@@ -227,6 +229,12 @@ export async function buildSession(opts: SessionOptions): Promise<{
     return output;
   };
 
+  // Team blackboard: a shared space members read/write across rounds (breaks the
+  // star topology). Disabled → pure leader-only aggregation. Same instance is
+  // handed to the engine (result-posting + brief injection) and to each member's
+  // `message` tool below.
+  const blackboard = config.team?.blackboard === false ? undefined : new Blackboard();
+
   // Parallel fan-out: run several independent sub-tasks concurrently. Team tasks
   // (those carrying a member id) additionally get per-member tools + isolation, an
   // id-tagged event bridge to the shared bus, and patch auto-apply per
@@ -239,6 +247,13 @@ export async function buildSession(opts: SessionOptions): Promise<{
       if (!t.id) return { task: t.task, role: t.role };
       const id = t.id;
       const memberTools = subagentTools(t.toolNames);
+      // Team members always get a `message` tool (independent of their allowlist)
+      // so they can post to / address teammates on the shared board.
+      if (blackboard) {
+        memberTools.push(
+          makeMessageTool({ board: blackboard, selfId: id, selfName: t.role ?? "member", bus }),
+        );
+      }
       return {
         task: t.task,
         role: t.role,
@@ -419,6 +434,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     teamFanout: config.team?.fanout,
     teamRounds: config.team?.maxRounds,
     runFleet: (tasks, signal) => runFleetTasks(tasks, signal),
+    blackboard,
   });
 
   const sdd = new SddRunner(
