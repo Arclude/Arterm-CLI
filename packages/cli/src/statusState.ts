@@ -227,9 +227,7 @@ export class StatusState {
 
   /** Append a main-agent activity string, capped like a member's (newest last). */
   private pushMainActivity(activity: string): void {
-    this.mainActivities = [...this.mainActivities, activity].slice(
-      -MEMBER_ACTIVITY_MAX,
-    );
+    this.mainActivities = [...this.mainActivities, activity].slice(-MEMBER_ACTIVITY_MAX);
   }
 
   /** Coalesce derived-state pushes to ~4/sec regardless of event burst rate. */
