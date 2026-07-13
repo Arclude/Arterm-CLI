@@ -102,6 +102,13 @@ export interface ArtermConfig {
     /** Cache freshness before a background refresh (default 24h). */
     maxAgeHours?: number;
   };
+  /** Loopback status server for the Arterm desktop app (docs/desktop-integration.md). */
+  statusServer?: {
+    /** true = always, false = never, "auto" = only when ARTERM_TERMINAL is set (default). */
+    enabled?: boolean | "auto";
+    /** Listen port; 0 = OS-assigned ephemeral (default — collision-free across sessions). */
+    port?: number;
+  };
   /**
    * Re-prompt for tools tagged `riskTier: "destructive"` even in auto/yolo modes.
    * Off by default; enable with `--confirm-destructive`.
@@ -197,6 +204,7 @@ export function defaultConfig(): ArtermConfig {
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
+    statusServer: { enabled: "auto", port: 0 },
     confirmDestructive: false,
     sdd: { maxQuestions: 4, maxTasks: 12 },
     memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20, engine: "legacy" },
@@ -275,6 +283,12 @@ const configFileSchema = z
       .object({
         enabled: z.boolean().optional(),
         maxAgeHours: z.number().positive().optional(),
+      })
+      .partial(),
+    statusServer: z
+      .object({
+        enabled: z.union([z.boolean(), z.literal("auto")]).optional(),
+        port: z.number().int().min(0).max(65535).optional(),
       })
       .partial(),
     confirmDestructive: z.boolean(),

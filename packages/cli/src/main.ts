@@ -52,6 +52,7 @@ import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
 import { runStatus } from "./status.js";
+import { type StatusServer, startStatusServer } from "./statusServer.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
 const VERSION = "0.3.3";
@@ -118,6 +119,49 @@ interface GlobalOpts {
   resume?: string;
   /** Resume the most recent recorded session. */
   continue?: boolean;
+  /** Pin the desktop status server port (implies enabled). */
+  statusPort?: string;
+  /** False when --no-status-server was passed (commander negated boolean). */
+  statusServer?: boolean;
+}
+
+/**
+ * Start the desktop status server when enabled (docs/desktop-integration.md).
+ * Precedence: --no-status-server > --status-port (implies on) > config.statusServer
+ * ("auto" = only when ARTERM_TERMINAL is set). Failure warns and never blocks startup.
+ */
+async function maybeStartStatusServer(
+  session: Session,
+  config: ArtermConfig,
+  globals: GlobalOpts,
+): Promise<StatusServer | undefined> {
+  if (globals.statusServer === false) return undefined;
+  let pinned: number | undefined;
+  if (globals.statusPort !== undefined) {
+    pinned = Number(globals.statusPort);
+    if (!Number.isInteger(pinned) || pinned < 0 || pinned > 65535) {
+      process.stderr.write(
+        `⚠ invalid --status-port "${globals.statusPort}" — status server disabled\n`,
+      );
+      return undefined;
+    }
+  }
+  const enabled = config.statusServer?.enabled ?? "auto";
+  const on =
+    pinned !== undefined ||
+    enabled === true ||
+    (enabled === "auto" && Boolean(process.env.ARTERM_TERMINAL));
+  if (!on) return undefined;
+  try {
+    return await startStatusServer({
+      session,
+      cwd: process.cwd(),
+      port: pinned ?? config.statusServer?.port ?? 0,
+    });
+  } catch (err) {
+    process.stderr.write(`⚠ status server failed to start: ${(err as Error).message}\n`);
+    return undefined;
+  }
 }
 
 /**
@@ -305,11 +349,14 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   // by now the session bus exists, so a failure can surface inside the TUI.
   probeCompatHostInBackground(providerId, config, session.bus);
 
+  const statusServer = await maybeStartStatusServer(session, config, globals);
+
   // Lazy: ink (and its yoga-layout WASM) costs ~800ms to import — load it only
   // when the TUI is actually about to render, keeping --version/--print fast.
   const { runTui } = await import("@arterm/tui");
   await runTui(session, { goal: globals.goal });
 
+  await statusServer?.close();
   await mcp.close();
   // Digest this session's activity into persistent memory before exiting.
   try {
@@ -353,9 +400,12 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   const handle = await store.create({ model: config.model, provider: providerId });
   session.agent.setOnMessage((message) => handle.logMessage(message));
 
+  const statusServer = await maybeStartStatusServer(session, config, globals);
+
   try {
     await runHeadless(session, prompt, { json: globals.json });
   } finally {
+    await statusServer?.close();
     try {
       await digest();
     } catch (err) {
@@ -583,7 +633,9 @@ async function main(): Promise<void> {
     .option("--print <prompt>", "run a single prompt headlessly (no TUI) and print the result")
     .option("--json", "with --print or piped input, emit the result as JSON")
     .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
-    .option("--continue", "resume the most recent recorded session");
+    .option("--continue", "resume the most recent recorded session")
+    .option("--status-port <port>", "pin the desktop status server port (implies enabled)")
+    .option("--no-status-server", "disable the desktop status server");
 
   program
     .command("chat", { isDefault: true })
