@@ -2,6 +2,7 @@ import type { Agent } from "./agent.js";
 import { listAgentDefinitions } from "./agentRegistry.js";
 import type { Blackboard } from "./blackboard.js";
 import type { EventBus } from "./eventBus.js";
+import type { MemberMemory } from "./memberMemory.js";
 import { availableRoles } from "./subagent.js";
 import {
   type TeamAssignment,
@@ -75,6 +76,13 @@ export interface AutonomyOptions {
    * pure star topology (leader-only aggregation).
    */
   blackboard?: Blackboard;
+  /**
+   * Team mode per-member memory. When present, each member's round output is recapped
+   * into its private memory and handed back — with any notes it left via the `memo`
+   * tool wired against the same instance — as a prefix to its next-round task. Omit
+   * to have members start every round with no memory of their own earlier work.
+   */
+  memberMemory?: MemberMemory;
 }
 
 /**
@@ -91,6 +99,7 @@ export class AutonomyEngine {
   private maxPhases: number;
   private readonly runFleet?: AutonomyFleetRunner;
   private readonly blackboard?: Blackboard;
+  private readonly memberMemory?: MemberMemory;
   private goal = "";
   private step = 0;
   private idleStreak = 0;
@@ -120,6 +129,7 @@ export class AutonomyEngine {
     this.teamRounds = Math.min(20, Math.max(1, opts.teamRounds ?? 6));
     this.runFleet = opts.runFleet;
     this.blackboard = opts.blackboard;
+    this.memberMemory = opts.memberMemory;
   }
 
   get state(): AutonomyState {
@@ -382,6 +392,7 @@ export class AutonomyEngine {
 
     this.current = new AbortController();
     this.blackboard?.clear();
+    this.memberMemory?.clear();
     const roster = await this.assembleTeam();
     if (this.stopped) return;
     this._team = roster;
@@ -408,6 +419,7 @@ export class AutonomyEngine {
       round += 1;
       this.step = round;
       if (this.blackboard) this.blackboard.round = round;
+      if (this.memberMemory) this.memberMemory.round = round;
       this.bus.emit({ type: "autonomy_step", step: round });
       this.current = new AbortController();
 
@@ -436,12 +448,14 @@ export class AutonomyEngine {
       this.idleStreak = 0;
 
       // File-backed members carry their definition body as a full system prompt;
-      // ad-hoc members get their brief as a task-instruction prefix. When a
-      // blackboard is active, prefix each task with the digest meant for that
-      // member (teammate results + messages addressed to it from earlier rounds).
+      // ad-hoc members get their brief as a task-instruction prefix. Two digests can
+      // precede the task: the member's own memory (what it did/decided in earlier
+      // rounds) comes first to re-establish its own context, then the blackboard
+      // digest meant for it (teammate results + messages addressed to it).
       const tasks: AutonomyTask[] = assignments.map((a) => {
+        const recall = this.memberMemory?.recall(a.member.id);
         const brief = this.blackboard?.briefFor(a.member.id);
-        const task = brief ? `${brief}\n\n${a.task}` : a.task;
+        const task = [recall, brief, a.task].filter(Boolean).join("\n\n");
         return {
           task,
           role: a.member.name,
@@ -476,23 +490,25 @@ export class AutonomyEngine {
       done += results.filter((r) => !r.error).length;
       failed += results.filter((r) => r.error).length;
 
-      // Post each member's result to the board so teammates read it next round,
-      // and surface the flow as a team_message event (topology graph). Failed
-      // slots hold an error string — not useful shared context, so skip them.
-      if (this.blackboard) {
-        for (const r of results) {
-          if (r.error || !r.id) continue;
-          const name = r.role ?? "member";
-          this.blackboard.post({ from: r.id, fromName: name, kind: "result", text: r.output });
-          this.bus.emit({
-            type: "team_message",
-            round,
-            from: r.id,
-            fromName: name,
-            kind: "result",
-            text: r.output.length > 600 ? `${r.output.slice(0, 600)}…` : r.output,
-          });
-        }
+      // Each member's result goes two places: the shared board, so teammates read it
+      // next round (surfaced as a team_message event for the topology graph), and the
+      // member's own memory, so it remembers what it did when it runs again. The two
+      // are independently switchable. Failed slots hold an error string — not useful
+      // as shared context or as a recap, so skip them.
+      for (const r of results) {
+        if (r.error || !r.id) continue;
+        const name = r.role ?? "member";
+        this.memberMemory?.recap(r.id, r.output);
+        if (!this.blackboard) continue;
+        this.blackboard.post({ from: r.id, fromName: name, kind: "result", text: r.output });
+        this.bus.emit({
+          type: "team_message",
+          round,
+          from: r.id,
+          fromName: name,
+          kind: "result",
+          text: r.output.length > 600 ? `${r.output.slice(0, 600)}…` : r.output,
+        });
       }
 
       await this.aggregate(round, results);

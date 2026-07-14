@@ -4,6 +4,7 @@ import { registerAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine, type AutonomyFleetRunner, type AutonomyTask } from "./autonomy.js";
 import { Blackboard } from "./blackboard.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
+import { MemberMemory } from "./memberMemory.js";
 import { PermissionManager } from "./permissions.js";
 import type { AutonomyMode, ChatProvider, Tool } from "./types.js";
 
@@ -79,6 +80,7 @@ function makeEngine(
     fanout?: number;
     runFleet?: AutonomyFleetRunner;
     blackboard?: Blackboard;
+    memberMemory?: MemberMemory;
   },
 ) {
   return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, opts);
@@ -488,6 +490,65 @@ describe("team mode", () => {
     const msgs = events.filter((e) => e.type === "team_message");
     expect(msgs).toHaveLength(3);
     expect(msgs.every((m) => m.type === "team_message" && m.kind === "result")).toBe(true);
+  });
+
+  it("recaps a member's own result into its private memory and hands it back next round", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      // roster
+      '[{"name": "coder", "description": "writes", "instruction": "Write."},' +
+        '{"name": "reviewer", "description": "reviews", "instruction": "Review."}]',
+      // round 1 assignments
+      '[{"member": "coder", "task": "implement"},{"member": "reviewer", "task": "review"}]',
+      // round 2 assignments
+      '[{"member": "coder", "task": "keep going"}]',
+    ];
+    agent.assessVerdicts = [
+      { done: false, note: "keep going" },
+      { done: true, note: "finished" },
+    ];
+    const fleetCalls: AutonomyTask[][] = [];
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      fleetCalls.push(tasks);
+      return tasks.map((t) => ({ ...t, output: `${t.role} output` }));
+    };
+    const memory = new MemberMemory();
+    // No blackboard: memory is independently switchable, so the recall must reach the
+    // member on its own.
+    const engine = makeEngine(agent, bus, { mode: "team", runFleet, memberMemory: memory });
+
+    await engine.start("build it");
+
+    expect(engine.state).toBe("done");
+    expect(memory.entries("m1-coder").map((e) => e.kind)).toEqual(["recap", "recap"]);
+
+    // Unlike the board — which never echoes a member's own posting back — the member's
+    // private memory carries its own round-1 output into round 2.
+    const coderRound2 = fleetCalls[1]?.[0];
+    expect(coderRound2?.task).toContain("private memory");
+    expect(coderRound2?.task).toContain("coder output");
+    expect(coderRound2?.task).toContain("keep going");
+    // And strictly its own: the reviewer's output is the board's job, not memory's.
+    expect(coderRound2?.task).not.toContain("reviewer output");
+  });
+
+  it("does not recap failed member slots", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      '[{"name": "coder", "description": "writes", "instruction": "Write."}]',
+      '[{"member": "coder", "task": "implement"}]',
+    ];
+    agent.assessVerdict = { done: true, note: "finished" };
+    const runFleet: AutonomyFleetRunner = async (tasks) =>
+      tasks.map((t) => ({ ...t, output: "member crashed", error: true }));
+    const memory = new MemberMemory();
+    const engine = makeEngine(agent, bus, { mode: "team", runFleet, memberMemory: memory });
+
+    await engine.start("build it");
+
+    expect(memory.entries("m1-coder")).toHaveLength(0);
   });
 
   it("a definition-backed member carries its body as a system prompt and its allowlist", async () => {

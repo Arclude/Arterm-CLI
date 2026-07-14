@@ -84,6 +84,12 @@ export interface ArtermConfig {
      * star topology where all coordination goes through the leader.
      */
     blackboard?: boolean;
+    /**
+     * Per-member private memory: members carry their own notes (`memo` tool) and a
+     * recap of their last rounds across rounds (default true). false makes every
+     * member start each round with no memory of its own earlier work.
+     */
+    memory?: boolean;
   };
   /** Parallel sub-agent fan-out (spawn_parallel, parallel/phased autonomy, /sdd). */
   fleet: {
@@ -199,6 +205,7 @@ export function defaultConfig(): ArtermConfig {
       mergeStrategy: "apply",
       suggest: true,
       blackboard: true,
+      memory: true,
     },
     tui: { fullscreen: true, mouse: true },
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
@@ -268,6 +275,7 @@ const configFileSchema = z
         mergeStrategy: z.enum(["surface", "apply"]).optional(),
         suggest: z.boolean().optional(),
         blackboard: z.boolean().optional(),
+        memory: z.boolean().optional(),
       })
       .partial(),
     tui: z.object({ fullscreen: z.boolean().optional(), mouse: z.boolean().optional() }).partial(),

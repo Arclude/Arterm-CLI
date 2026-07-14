@@ -75,6 +75,17 @@ export type AgentEvent =
       kind: "result" | "message";
       text: string;
     }
+  // A private note a member left its future self (via `memo`). Drives the member's
+  // self-loop / notes view in the desktop UI. Auto-captured round recaps are NOT
+  // emitted — they're derivable from the `kind: "result"` team_message above.
+  | {
+      type: "team_memory";
+      round: number;
+      member: string;
+      memberName: string;
+      kind: "note";
+      text: string;
+    }
   // Result of auto-applying a member's worktree patch to the main tree.
   | {
       type: "team_patch";

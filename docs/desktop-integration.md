@@ -200,6 +200,17 @@ Mirrors the CLI TUI (`packages/tui/src/App.tsx` bus switch):
   - `from`/`to` are member ids matching `team[].id` (or `"leader"` for `from`). `round` is the
     1-based team round. `text` is truncated (~600 chars). Only present when the shared blackboard
     is enabled (`config.team.blackboard`, default on).
+- `team_memory {round, member, memberName, kind, text}` — a private note a member left its
+  **future self** (via its `memo` tool). Members run isolated per round, so this is how a
+  decision or a ruled-out approach survives into their next round; the board covers what a
+  member shares, this covers what it keeps. Stream-only, same as `team_message` — accumulate
+  it client-side; it is NOT folded into the snapshot.
+  - `member` is a member id matching `team[].id`; `round` is the 1-based team round; `text`
+    is truncated (~600 chars).
+  - `kind: "note"` is the only kind emitted today — treat unknown kinds as ignorable. A
+    member's own round output is also recapped into its private memory, but that is NOT
+    emitted here: it is already on the wire as the `kind: "result"` `team_message` above.
+  - Only present when per-member memory is enabled (`config.team.memory`, default on).
 - `team_done` — the board persists (final states visible) until the next `team_plan`.
 
 Per-member telemetry (`toolUseCount`, `tokenCount`, `recentActivities`, `startedAt`,

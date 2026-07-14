@@ -80,6 +80,7 @@ describe("team config", () => {
       mergeStrategy: "apply",
       suggest: true,
       blackboard: true,
+      memory: true,
     });
   });
 

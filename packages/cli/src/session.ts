@@ -7,6 +7,7 @@ import {
   Blackboard,
   Container,
   EventBus,
+  MemberMemory,
   MemoryRecorder,
   type Message,
   type PermissionAsker,
@@ -53,6 +54,7 @@ import {
   createSpawnParallelTool,
   createSpawnTool,
   defaultTools,
+  makeMemoTool,
   makeMessageTool,
   taskDoneTool,
 } from "@arterm/tools";
@@ -235,6 +237,12 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // `message` tool below.
   const blackboard = config.team?.blackboard === false ? undefined : new Blackboard();
 
+  // Per-member private memory: what a member carries across its own rounds (its
+  // `memo` notes + a recap of its output). Disabled → members start each round with
+  // no memory of their own earlier work. Same instance goes to the engine (recap +
+  // recall injection) and to each member's `memo` tool below.
+  const memberMemory = config.team?.memory === false ? undefined : new MemberMemory();
+
   // Parallel fan-out: run several independent sub-tasks concurrently. Team tasks
   // (those carrying a member id) additionally get per-member tools + isolation, an
   // id-tagged event bridge to the shared bus, and patch auto-apply per
@@ -252,6 +260,12 @@ export async function buildSession(opts: SessionOptions): Promise<{
       if (blackboard) {
         memberTools.push(
           makeMessageTool({ board: blackboard, selfId: id, selfName: t.role ?? "member", bus }),
+        );
+      }
+      // Likewise a `memo` tool, so a member can leave notes for its own next round.
+      if (memberMemory) {
+        memberTools.push(
+          makeMemoTool({ memory: memberMemory, selfId: id, selfName: t.role ?? "member", bus }),
         );
       }
       return {
@@ -435,6 +449,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     teamRounds: config.team?.maxRounds,
     runFleet: (tasks, signal) => runFleetTasks(tasks, signal),
     blackboard,
+    memberMemory,
   });
 
   const sdd = new SddRunner(
