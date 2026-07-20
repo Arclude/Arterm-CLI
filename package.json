@@ -14,7 +14,7 @@
     "test": "pnpm -r test",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "arterm": "pnpm --filter @arterm/cli arterm"
+    "arterm": "pnpm --filter arterm-cli arterm"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
