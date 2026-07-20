@@ -1,11 +1,16 @@
+import { randomUUID } from "node:crypto";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ARTERM_HOME,
   type ArtermConfig,
+  type AutonomyMode,
+  type AutonomySnapshot,
   type CatalogModel,
   type EventBus,
   Keystore,
   type Message,
+  SESSIONS_DIR,
   type SessionStore,
   type SessionSummary,
   createSessionStore,
@@ -51,6 +56,7 @@ import { runHeadless } from "./headless.js";
 import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { buildSession } from "./session.js";
+import { type CliManagedSession, SessionManager } from "./sessionManager.js";
 import { runStatus } from "./status.js";
 import { type StatusServer, startStatusServer } from "./statusServer.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
@@ -80,7 +86,7 @@ function newestSessionId(sessions: SessionSummary[]): string {
 async function resolveResumeMessages(
   store: SessionStore,
   globals: GlobalOpts,
-): Promise<Message[] | undefined> {
+): Promise<{ id: string; messages: Message[] } | undefined> {
   if (!globals.resume && !globals.continue) return undefined;
 
   let id = globals.resume;
@@ -102,7 +108,36 @@ async function resolveResumeMessages(
   }
   // Status line on stderr so it never dirties stdout (esp. headless --json).
   process.stderr.write(`↻ resumed session ${id} (${messages.length} messages)\n`);
-  return messages;
+  return { id, messages };
+}
+
+/** Path of a session's autonomy crash-recovery checkpoint (next to its transcript). */
+function autonomyCheckpointPath(sessionId: string): string {
+  return join(SESSIONS_DIR, `${sessionId}.autonomy.json`);
+}
+
+/**
+ * Read (and consume) the autonomy checkpoint a resumed session may have left
+ * behind. Consuming it keeps a stale goal from being re-announced forever; the
+ * new session writes its own checkpoint the moment a goal starts.
+ */
+async function takeAutonomyCheckpoint(
+  sessionId: string,
+): Promise<{ goal: string; mode: AutonomyMode; step: number; savedAt?: number } | undefined> {
+  const path = autonomyCheckpointPath(sessionId);
+  try {
+    const raw = JSON.parse(await readFile(path, "utf8")) as {
+      goal?: string;
+      mode?: AutonomyMode;
+      step?: number;
+      savedAt?: number;
+    };
+    await rm(path, { force: true });
+    if (!raw.goal) return undefined;
+    return { goal: raw.goal, mode: raw.mode ?? "once", step: raw.step ?? 0, savedAt: raw.savedAt };
+  } catch {
+    return undefined; // no checkpoint (or unreadable) — nothing to surface
+  }
 }
 
 interface GlobalOpts {
@@ -134,6 +169,7 @@ async function maybeStartStatusServer(
   session: Session,
   config: ArtermConfig,
   globals: GlobalOpts,
+  opts?: { sessionId?: string; allowPinnedPort?: boolean },
 ): Promise<StatusServer | undefined> {
   if (globals.statusServer === false) return undefined;
   let pinned: number | undefined;
@@ -152,11 +188,14 @@ async function maybeStartStatusServer(
     enabled === true ||
     (enabled === "auto" && Boolean(process.env.ARTERM_TERMINAL));
   if (!on) return undefined;
+  // A pinned port can only serve one session; later sessions always bind port 0.
+  const allowPinned = opts?.allowPinnedPort ?? true;
   try {
     return await startStatusServer({
       session,
       cwd: process.cwd(),
-      port: pinned ?? config.statusServer?.port ?? 0,
+      port: allowPinned ? (pinned ?? config.statusServer?.port ?? 0) : 0,
+      sessionId: opts?.sessionId,
     });
   } catch (err) {
     process.stderr.write(`⚠ status server failed to start: ${(err as Error).message}\n`);
@@ -251,19 +290,10 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   // Open the transcript store first: resuming seeds the agent from a prior session.
   // With session.mode "off" (the default) this stays empty and nothing hits disk.
   const store = createSessionStore(config);
-  const initialMessages = await resolveResumeMessages(store, globals);
+  const resumed = await resolveResumeMessages(store, globals);
+  const initialMessages = resumed?.messages;
 
-  const { session, persist, digest } = await buildSession({
-    config,
-    providerId: globals.provider,
-    model: globals.model,
-    yolo: globals.yolo,
-    confirmDestructive: globals.confirmDestructive,
-    cwd: process.cwd(),
-    initialMessages,
-  });
-
-  // Trim old transcripts (best-effort), then open this session's store handle.
+  // Trim old transcripts (best-effort) before any session opens a store handle.
   try {
     await store.prune(retentionFromConfig(config));
   } catch (err) {
@@ -272,13 +302,8 @@ async function startChat(globals: GlobalOpts): Promise<void> {
       process.stderr.write(`⚠ session prune failed: ${(err as Error).message}\n`);
     }
   }
-  const handle = await store.create({ model: config.model, provider: providerId });
 
-  // Log messages incrementally as they're produced, so in-memory context
-  // compaction never loses the on-disk record.
-  session.agent.setOnMessage((message) => handle.logMessage(message));
-
-  // Load external capabilities: MCP servers, local plugins, and skills.
+  // Load external capabilities once: MCP servers, local plugins, and skills.
   const mcp = new McpManager(config.mcpServers);
   const pluginTrust = Object.fromEntries(
     Object.entries(config.plugins ?? {}).map(([name, p]) => [name, p.trust]),
@@ -294,44 +319,92 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   const [mcpTools, pluginTools] = await Promise.all([mcp.connect(), plugins.load()]);
   await skills.load();
   registerAgentDefinitions(await agentDefs.load());
-  session.agentDefs = agentDefs.summary;
 
-  // Fold external tools into the agent (built-ins win on name collisions).
-  const existing = new Set(session.agent.tools.map((t) => t.name));
-  const extra = [...mcpTools, ...pluginTools].filter((t) => !existing.has(t.name));
-  if (extra.length > 0) {
-    session.agent.setTools([...session.agent.tools, ...extra]);
-    session.toolCount = session.agent.tools.length;
-  }
-  session.agent.setSkills(skills.list());
-  session.mcpServers = mcp.summary;
-  session.plugins = plugins.summary;
-  session.skills = skills.list();
-  session.getSkillBody = (name) => skills.get(name)?.body;
-
-  // Live health checks + reload for /mcp and /plugins (the TUI only sees the
-  // summaries above; these closures give it the live manager instances).
-  session.checkExtensions = async () => ({
-    mcp: await mcp.check(),
-    plugins: await plugins.check(),
-  });
-  session.reloadExtensions = async () => {
-    const [mcpTools, pluginTools] = await Promise.all([mcp.reconnect(), plugins.reload()]);
-    // Re-scan agent definitions too, so /team picks up new .md files without a restart.
-    registerAgentDefinitions(await agentDefs.load());
+  // Apply the shared extension set to a session — called once per session, so
+  // every concurrently running session sees the same MCP/plugin/skill surface.
+  const enrichSession = (session: Session): void => {
     session.agentDefs = agentDefs.summary;
-    // Same collision rule as startup: whatever is already registered wins.
-    const have = new Set(session.agent.tools.map((t) => t.name));
-    const added = [...mcpTools, ...pluginTools].filter((t) => !have.has(t.name));
-    if (added.length > 0) {
-      session.agent.setTools([...session.agent.tools, ...added]);
+
+    // Fold external tools into the agent (built-ins win on name collisions).
+    const existing = new Set(session.agent.tools.map((t) => t.name));
+    const extra = [...mcpTools, ...pluginTools].filter((t) => !existing.has(t.name));
+    if (extra.length > 0) {
+      session.agent.setTools([...session.agent.tools, ...extra]);
       session.toolCount = session.agent.tools.length;
     }
-    return {
-      mcp: mcp.summary,
-      plugins: plugins.summary,
-      addedTools: added.map((t) => t.name),
+    session.agent.setSkills(skills.list());
+    session.mcpServers = mcp.summary;
+    session.plugins = plugins.summary;
+    session.skills = skills.list();
+    session.getSkillBody = (name) => skills.get(name)?.body;
+
+    // Live health checks + reload for /mcp and /plugins (the TUI only sees the
+    // summaries above; these closures give it the live manager instances).
+    session.checkExtensions = async () => ({
+      mcp: await mcp.check(),
+      plugins: await plugins.check(),
+    });
+    session.reloadExtensions = async () => {
+      const [mcpTools, pluginTools] = await Promise.all([mcp.reconnect(), plugins.reload()]);
+      // Re-scan agent definitions too, so /team picks up new .md files without a restart.
+      registerAgentDefinitions(await agentDefs.load());
+      session.agentDefs = agentDefs.summary;
+      // Same collision rule as startup: whatever is already registered wins.
+      const have = new Set(session.agent.tools.map((t) => t.name));
+      const added = [...mcpTools, ...pluginTools].filter((t) => !have.has(t.name));
+      if (added.length > 0) {
+        session.agent.setTools([...session.agent.tools, ...added]);
+        session.toolCount = session.agent.tools.length;
+      }
+      return {
+        mcp: mcp.summary,
+        plugins: plugins.summary,
+        addedTools: added.map((t) => t.name),
+      };
     };
+  };
+
+  // Session factory: each session gets its own config clone (switchModel/
+  // switchProvider mutate it in place), store handle, and status server —
+  // one discovery file per session keeps the desktop dashboard accurate.
+  let firstSession = true;
+  const makeSession = async (): Promise<CliManagedSession> => {
+    const isFirst = firstSession;
+    firstSession = false;
+    const cfg = structuredClone(config);
+    const { session, persist, digest, setAutonomyCheckpointSink } = await buildSession({
+      config: cfg,
+      providerId: globals.provider,
+      model: globals.model,
+      yolo: globals.yolo,
+      confirmDestructive: globals.confirmDestructive,
+      cwd: process.cwd(),
+      initialMessages: isFirst ? initialMessages : undefined,
+    });
+
+    // Log messages incrementally as they're produced, so in-memory context
+    // compaction never loses the on-disk record.
+    const handle = await store.create({ model: cfg.model, provider: providerId });
+    session.agent.setOnMessage((message) => handle.logMessage(message));
+
+    // Crash recovery: mirror the autonomy engine's progress into a checkpoint
+    // file next to the transcript. Cleared by the engine on task_done / user
+    // stop; a crash leaves it behind for the next --resume to surface.
+    if (cfg.session?.mode === "jsonl") {
+      const ckptPath = autonomyCheckpointPath(handle.id);
+      setAutonomyCheckpointSink(async (snap: AutonomySnapshot | null) => {
+        if (snap === null) await rm(ckptPath, { force: true });
+        else await writeFile(ckptPath, JSON.stringify({ ...snap, savedAt: Date.now() }), "utf8");
+      });
+    }
+
+    enrichSession(session);
+    const id = randomUUID();
+    const statusServer = await maybeStartStatusServer(session, cfg, globals, {
+      sessionId: id,
+      allowPinnedPort: isFirst,
+    });
+    return { id, session, statusServer, persist, digest };
   };
 
   for (const s of mcp.summary) {
@@ -345,29 +418,54 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     }
   }
 
+  const first = await makeSession();
+  const manager = new SessionManager(first, makeSession);
+
   // Remote-host reachability check runs off the critical path (see the helper) —
   // by now the session bus exists, so a failure can surface inside the TUI.
-  probeCompatHostInBackground(providerId, config, session.bus);
+  probeCompatHostInBackground(providerId, config, first.session.bus);
 
-  const statusServer = await maybeStartStatusServer(session, config, globals);
+  // A resumed session may have died mid-goal: surface the leftover autonomy
+  // checkpoint inside the TUI (delayed past mount, like the probe above) so the
+  // user can relaunch the goal deliberately — never auto-restarted.
+  if (resumed) {
+    void takeAutonomyCheckpoint(resumed.id).then((ckpt) => {
+      if (!ckpt) return;
+      setTimeout(() => {
+        first.session.bus.emit({ type: "autonomy_resume_available", ...ckpt });
+      }, 800);
+    });
+  }
 
   // Lazy: ink (and its yoga-layout WASM) costs ~800ms to import — load it only
   // when the TUI is actually about to render, keeping --version/--print fast.
   const { runTui } = await import("@arterm/tui");
-  await runTui(session, { goal: globals.goal });
+  await runTui(
+    { id: first.id, session: first.session },
+    {
+      goal: globals.goal,
+      createSession: async () => {
+        const s = await manager.create();
+        return { id: s.id, session: s.session };
+      },
+      closeSession: async (id) => {
+        await manager.close(id, (err) => {
+          if (process.env.ARTERM_DEBUG) {
+            process.stderr.write(`⚠ memory digest failed: ${err.message}\n`);
+          }
+        });
+      },
+    },
+  );
 
-  await statusServer?.close();
-  await mcp.close();
-  // Digest this session's activity into persistent memory before exiting.
-  try {
-    await digest();
-  } catch (err) {
+  // Digest every session's activity into persistent memory before exiting.
+  await manager.closeAll((err) => {
     // Memory digest must never block a clean shutdown; show it under ARTERM_DEBUG.
     if (process.env.ARTERM_DEBUG) {
-      process.stderr.write(`⚠ memory digest failed: ${(err as Error).message}\n`);
+      process.stderr.write(`⚠ memory digest failed: ${err.message}\n`);
     }
-  }
-  await persist();
+  });
+  await mcp.close();
 }
 
 /**
@@ -384,7 +482,7 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   requireKnownProvider(providerId);
 
   const store = createSessionStore(config);
-  const initialMessages = await resolveResumeMessages(store, globals);
+  const resumed = await resolveResumeMessages(store, globals);
 
   const { session, persist, digest } = await buildSession({
     config,
@@ -393,7 +491,7 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
     yolo: globals.yolo,
     confirmDestructive: globals.confirmDestructive,
     cwd: process.cwd(),
-    initialMessages,
+    initialMessages: resumed?.messages,
   });
 
   // Record this turn so it's resumable later (no-op when session.mode is "off").

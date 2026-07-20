@@ -10,16 +10,22 @@ and its mirror in the desktop repo (`docs/arterm-cli-integration.md`) in the sam
 
 ## 1. Discovery
 
-Every CLI process with the status server enabled writes a discovery file:
+Every CLI **session** with the status server enabled writes a discovery file:
 
 ```
-~/.arterm/status/<pid>.json
+~/.arterm/status/<pid>-<sessionId>.json
 ```
 
+- One interactive CLI process may host **several sessions**; each session runs its own
+  status server (own port + token) and writes its own discovery file, so multiple files
+  per `pid` are legal. Consumers treat each file as one independent session.
 - Written **atomically** (write to a temp file in the same directory, then rename).
 - Removed on clean exit (`close()` and a best-effort `process.on("exit")` unlink).
 - On every status-server start, the CLI **sweeps** the directory: any file whose `pid` is
-  not alive (`process.kill(pid, 0)` → `ESRCH`) is deleted.
+  not alive (`process.kill(pid, 0)` → `ESRCH`) is deleted. The pid parses from the leading
+  digits of the filename; consumers/sweepers MUST fall back to the `pid` field in the JSON
+  body for filenames that don't start with digits (e.g. legacy `<pid>.json` files parse
+  either way).
 - File mode `0o600` best-effort. On Windows `chmod` is a no-op; the real boundary is the
   home-directory ACL. Same-user processes can read the token — they are inside the trust
   boundary (see §4).
@@ -39,9 +45,11 @@ Every CLI process with the status server enabled writes a discovery file:
 }
 ```
 
-- `sessionId` — UUID v4, stable for the process lifetime. The desktop keys sessions by it.
+- `sessionId` — UUID v4, stable for the session lifetime (= the process lifetime for a
+  single-session process). The desktop keys sessions by it.
 - `port` — the real listening port (the server binds port `0` by default; the OS assigns).
-- `token` — 32 hex chars (128-bit), regenerated every process start.
+  Each session in a process has its own port.
+- `token` — 32 hex chars (128-bit), generated per session at session start.
 - `terminalId` — present **only** when the env var `ARTERM_TERMINAL_ID` is set (the desktop
   sets it to the PTY id for every terminal it spawns). Used for terminal-tab association.
 - `model` / `provider` — informational; may be stale after a mid-session `/model` switch

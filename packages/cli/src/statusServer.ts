@@ -17,7 +17,8 @@ import { StatusState, control } from "./statusState.js";
  * Loopback-only HTTP + SSE status server for the Arterm desktop app.
  * Protocol contract: docs/desktop-integration.md (v1). Serves a live snapshot,
  * a stamped event stream, and a control endpoint; announces itself via a
- * discovery file at `~/.arterm/status/<pid>.json`.
+ * discovery file at `~/.arterm/status/<pid>-<sessionId>.json`. One process may
+ * host several sessions, each with its own server and discovery file.
  */
 
 export const STATUS_DIR = join(homedir(), ".arterm", "status");
@@ -86,7 +87,29 @@ function sweepStaleDiscovery(): void {
   }
 }
 
-/** Atomically write this process's discovery file (contract §1). */
+// One exit handler unlinks every live discovery file, however many sessions
+// this process hosts — per-server process.on("exit") would trip the listener
+// warning past ten sessions.
+const liveDiscoveryFiles = new Set<string>();
+let exitUnlinkInstalled = false;
+
+function trackDiscoveryFile(file: string): void {
+  liveDiscoveryFiles.add(file);
+  if (exitUnlinkInstalled) return;
+  exitUnlinkInstalled = true;
+  process.on("exit", () => {
+    for (const f of liveDiscoveryFiles) {
+      try {
+        unlinkSync(f);
+      } catch {
+        // best-effort
+      }
+    }
+    liveDiscoveryFiles.clear();
+  });
+}
+
+/** Atomically write one session's discovery file (contract §1). */
 function writeDiscovery(entry: {
   port: number;
   token: string;
@@ -97,8 +120,9 @@ function writeDiscovery(entry: {
   startedAt: number;
 }): string {
   mkdirSync(STATUS_DIR, { recursive: true });
-  const file = join(STATUS_DIR, `${process.pid}.json`);
-  const tmp = join(STATUS_DIR, `${process.pid}.json.tmp`);
+  const name = `${process.pid}-${entry.sessionId}.json`;
+  const file = join(STATUS_DIR, name);
+  const tmp = join(STATUS_DIR, `${name}.tmp`);
   const terminalId = Number(process.env.ARTERM_TERMINAL_ID);
   const body = {
     v: 1,
@@ -284,8 +308,11 @@ export function startStatusServer(opts: {
         // Discovery is best-effort; the server still works if the file can't be written.
       }
 
+      if (discoveryFile) trackDiscoveryFile(discoveryFile);
+
       const unlinkDiscovery = (): void => {
         if (!discoveryFile) return;
+        liveDiscoveryFiles.delete(discoveryFile);
         try {
           unlinkSync(discoveryFile);
         } catch {
@@ -293,7 +320,6 @@ export function startStatusServer(opts: {
         }
         discoveryFile = undefined;
       };
-      process.on("exit", unlinkDiscovery);
 
       resolve({
         url: `http://127.0.0.1:${port}`,
@@ -302,7 +328,6 @@ export function startStatusServer(opts: {
         close: () =>
           new Promise<void>((done) => {
             unlinkDiscovery();
-            process.removeListener("exit", unlinkDiscovery);
             state.dispose();
             server.close(() => done());
             // SSE responses hold connections open; drop them so close() completes.

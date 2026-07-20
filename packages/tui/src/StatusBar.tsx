@@ -19,13 +19,17 @@ interface Props {
   columns: number;
   /** Mouse is captured (fullscreen): selection needs the terminal's Shift+drag bypass. */
   shiftSelect?: boolean;
+  /** Session working directory (multi-session: not necessarily process.cwd()). */
+  cwd?: string;
+  /** Multi-session summary for the badge: 1-based index, total, busy background count. */
+  sessions?: { index: number; count: number; busyBackground: number };
 }
 
 const VERSION = "0.3.3";
 
-function gitBranch(): string {
+function gitBranch(dir: string): string {
   try {
-    const head = readFileSync(join(process.cwd(), ".git", "HEAD"), "utf8").trim();
+    const head = readFileSync(join(dir, ".git", "HEAD"), "utf8").trim();
     const m = head.match(/ref: refs\/heads\/(.+)/);
     return m?.[1] ?? head.slice(0, 7);
   } catch {
@@ -97,12 +101,15 @@ export function StatusBar({
   mode,
   columns,
   shiftSelect = false,
+  cwd: cwdProp,
+  sessions,
 }: Props): React.ReactElement {
   const selectHint = shiftSelect ? "shift+drag selects" : "drag selects text";
   // Computed inline (no per-second timer) so the UI does not repaint while idle.
   const clock = new Date().toLocaleTimeString();
-  const branch = gitBranch();
-  const cwd = basename(process.cwd());
+  const dir = cwdProp ?? process.cwd();
+  const branch = gitBranch(dir);
+  const cwd = basename(dir);
   const pct = ctxWindow ? Math.min(100, Math.round((ctxUsed / ctxWindow) * 100)) : 0;
   const statusColor = status === "idle" ? "green" : "yellow";
 
@@ -120,6 +127,15 @@ export function StatusBar({
       {"   ·   "}
     </Text>
   );
+  // Multi-session badge: position in the ring plus how many hidden sessions work.
+  const sessionBadge =
+    sessions && sessions.count > 1 ? (
+      <Text color="cyan">
+        {" ❖ "}
+        {sessions.index}/{sessions.count}
+        {sessions.busyBackground > 0 ? ` · ${sessions.busyBackground} çalışıyor` : ""}
+      </Text>
+    ) : null;
 
   // Wide panes get the dense two-row bar. Narrow panes stack each group on its
   // own truncating line so every detail stays visible instead of being clipped.
@@ -135,6 +151,7 @@ export function StatusBar({
           {sepN}
           {dot}
           <Text color={statusColor}> {status}</Text>
+          {sessionBadge}
         </Text>
         <Text wrap="truncate">
           <Text color="magenta">{m}</Text> <ModeBadge mode={mode} />
@@ -173,7 +190,7 @@ export function StatusBar({
           </Text>
         </Text>
         <Text color="gray" dimColor wrap="truncate">
-          ? help · Alt+P models · wheel scrolls · {selectHint} · ^C quit
+          ? help · ← sessions · ^X close · Alt+P models · wheel scrolls · {selectHint} · ^C quit
         </Text>
       </Box>
     );
@@ -189,6 +206,7 @@ export function StatusBar({
         {sepW}
         {dot}
         <Text color={statusColor}> {status}</Text>
+        {sessionBadge}
         {sepW}
         <Text color="magenta">
           {provider}/{model}
@@ -228,7 +246,8 @@ export function StatusBar({
         </Text>
       </Text>
       <Text color="gray" dimColor wrap="truncate">
-        Enter send · ↑↓ history · wheel scrolls · {selectHint} · /copy last reply · ? help · ^C quit
+        Enter send · ↑↓ history · ← sessions · ^←/^→ switch · ^X close · wheel scrolls ·{" "}
+        {selectHint} · ? help · ^C quit
       </Text>
     </Box>
   );

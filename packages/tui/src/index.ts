@@ -1,6 +1,6 @@
 import { render } from "ink";
 import React from "react";
-import { App } from "./App.js";
+import { MultiApp } from "./MultiApp.js";
 import { syncedStdout } from "./syncOutput.js";
 import type { Session } from "./types.js";
 
@@ -15,7 +15,15 @@ export { syncedStdout } from "./syncOutput.js";
  * exit. Only the small bottom region (live stream, boards, input, status bar)
  * is redrawn in place by Ink.
  */
-export async function runTui(session: Session, opts?: { goal?: string }): Promise<void> {
+export async function runTui(
+  initial: { id: string; session: Session },
+  opts?: {
+    goal?: string;
+    createSession?: () => Promise<{ id: string; session: Session }>;
+    closeSession?: (id: string) => Promise<void>;
+  },
+): Promise<void> {
+  const session = initial.session;
   const tty = Boolean(process.stdout.isTTY);
   // Fullscreen (default): own the whole window on the alternate screen, like
   // Claude Code's fullscreen renderer — the footer stays pinned to the bottom
@@ -35,7 +43,13 @@ export async function runTui(session: Session, opts?: { goal?: string }): Promis
     // synchronized-output frames (no half-painted footer) and Ink's worst-case
     // full clear can no longer wipe the scrollback. See syncOutput.ts.
     const instance = render(
-      React.createElement(App, { session, initialGoal: opts?.goal, fullscreen }),
+      React.createElement(MultiApp, {
+        initial,
+        initialGoal: opts?.goal,
+        createSession: opts?.createSession,
+        closeSession: opts?.closeSession,
+        fullscreen,
+      }),
       { stdout: tty ? syncedStdout(process.stdout) : process.stdout },
     );
     await instance.waitUntilExit();

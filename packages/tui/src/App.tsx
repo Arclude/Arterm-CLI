@@ -438,13 +438,35 @@ function AnchoredRegion({
 export function App({
   session,
   initialGoal,
+  initialPrompt,
   fullscreen = false,
+  visible = true,
+  onOpenSessions,
+  onCycleSession,
+  onCloseSession,
+  onPendingChange,
+  sessionsBadge,
 }: {
   session: Session;
   initialGoal?: string;
+  /** First user message of a session created from the session panel. */
+  initialPrompt?: string;
   /** Alternate-screen mode: pinned footer + in-app scroll (see runTui). */
   fullscreen?: boolean;
-}): React.ReactElement {
+  /**
+   * Multi-session: false keeps this App mounted (bus subscription, queue,
+   * transcript all keep accumulating) but renders nothing and ignores input.
+   */
+  visible?: boolean;
+  onOpenSessions?: () => void;
+  onCycleSession?: (dir: -1 | 1) => void;
+  /** Ctrl+X — close this session (the last one closes the whole app). */
+  onCloseSession?: () => void;
+  /** Reports whether a permission prompt is waiting (background-session badge). */
+  onPendingChange?: (pending: boolean) => void;
+  /** Multi-session summary for the status bar badge. */
+  sessionsBadge?: { index: number; count: number; busyBackground: number };
+}): React.ReactElement | null {
   const { exit } = useApp();
   const { rows, columns } = useTermSize();
   const [items, setItems] = useState<DisplayItem[]>([]);
@@ -530,6 +552,10 @@ export function App({
   autoStateRef.current = autoState;
   const pendingRef = useRef<PendingPermission | null>(null);
   pendingRef.current = pending;
+  // Multi-session: the always-active handlers (Esc, raw stdin arrows) read this
+  // instead of isActive so a hidden App never reacts to keys.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const [teamFeeds, setTeamFeeds] = useState<Map<string, string[]>>(new Map());
   // A large-looking prompt held for the y/N team-run offer (never a silent switch).
   const [teamSuggest, setTeamSuggest] = useState<string | null>(null);
@@ -558,43 +584,11 @@ export function App({
   //  - uncaptured: alternate scroll (DECSET 1007) + arrowRouter timing/batching —
   //    plain drag-select keeps working, wheel direction depends on the terminal.
   // Classic mode captures nothing (native scrollback owns the wheel).
+  // The terminal-mode escape writes (mouse capture, alternate scroll, classic
+  // resize re-pad) live in MultiApp — they are process-global, and per-App
+  // ownership would flap the modes on every session switch.
   const { stdout: rawStdout } = useStdout();
   const mouseCapture = fullscreen && (session.config.tui?.mouse ?? true);
-  useEffect(() => {
-    if (!rawStdout) return;
-    const ESC = String.fromCharCode(27);
-    if (mouseCapture) {
-      rawStdout.write(`${ESC}[?1002l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
-      return () => {
-        rawStdout.write(`${ESC}[?1000l${ESC}[?1006l`);
-      };
-    }
-    // Clear any reporting a crashed program left behind; arrows carry the wheel
-    // in fullscreen (alternate scroll), nothing in classic.
-    rawStdout.write(
-      `${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
-    );
-    return undefined;
-  }, [rawStdout, fullscreen, mouseCapture]);
-
-  // Classic-mode resize recovery: reflowed wrapped lines invalidate Ink's
-  // RELATIVE erase counts (its very next repaint can eat into the transcript or
-  // leave stale footer fragments) and the region loses its bottom anchor. Blank
-  // the SCREEN (2J only — scrollback stays) and re-pad to the new bottom; the
-  // repaint that follows the size-state update then erases nothing but blank
-  // pad rows and lands anchored again. syncedStdout makes it one atomic frame.
-  // (Fullscreen repaints the whole fixed-height frame anyway — no pad wanted.)
-  useEffect(() => {
-    if (!rawStdout || fullscreen) return;
-    const onResize = (): void => {
-      const ESC = String.fromCharCode(27);
-      rawStdout.write(`${ESC}[2J${ESC}[H${"\n".repeat(Math.max(0, (rawStdout.rows ?? 24) - 1))}`);
-    };
-    rawStdout.on("resize", onResize);
-    return () => {
-      rawStdout.off("resize", onResize);
-    };
-  }, [rawStdout, fullscreen]);
 
   // ── Fullscreen scroll machinery ─────────────────────────────────────────────
   // Viewport height = terminal rows − the measured bottom region (input +
@@ -645,7 +639,7 @@ export function App({
       }
       if (delta !== 0) scrollBy(delta);
     },
-    { isActive: mouseCapture },
+    { isActive: visible && mouseCapture },
   );
 
   // Routes ↑/↓ to prompt history (keyboard) or transcript scroll (wheel via
@@ -671,7 +665,7 @@ export function App({
     // wheel never becomes arrows, so ↑/↓ are purely keyboard (direct history).
     if (!fullscreen || mouseCapture) return;
     const onRawInput = (chunk: string): void => {
-      if (overlayOpenRef.current) return;
+      if (!visibleRef.current || overlayOpenRef.current) return;
       const runs = parseArrowChunk(chunk);
       if (!runs) return;
       for (const run of runs) arrowRouter.feed(run.dir, run.count);
@@ -691,7 +685,7 @@ export function App({
       const page = Math.max(1, viewportRef.current - 1);
       scrollBy(key.pageUp ? page : -page);
     },
-    { isActive: fullscreen },
+    { isActive: visible && fullscreen },
   );
 
   // Streamed tokens are buffered and flushed to `live` at most every LIVE_FLUSH_MS:
@@ -818,6 +812,35 @@ export function App({
             }`,
           });
           setCtxUsed(0);
+          break;
+        case "autonomy_verify":
+          push({
+            kind: "system",
+            text: event.pass
+              ? `✓ verifier accepted the completion claim${event.note ? ` — ${event.note}` : ""}`
+              : `✗ verifier rejected the completion claim${event.note ? ` — ${event.note}` : ""}`,
+          });
+          break;
+        case "tool_results_cleared":
+          push({
+            kind: "system",
+            text: `✓ context: ${event.cleared} stale tool result${event.cleared > 1 ? "s" : ""} cleared`,
+          });
+          break;
+        case "autonomy_resume_available":
+          push({
+            kind: "system",
+            text: `⏸ unfinished goal from the resumed session (${event.mode}, step ${event.step}): "${event.goal}" — relaunch with /goal ${event.goal}`,
+          });
+          break;
+        case "run_limit":
+          push({
+            kind: "system",
+            text:
+              event.kind === "iterations"
+                ? `⚠ turn stopped: iteration cap reached (${event.limit}) — the reply may be unfinished; send a message to continue`
+                : `⚠ turn stopped: token budget spent (${event.used}/${event.limit}) — send a message to continue`,
+          });
           break;
         case "goal_set":
           setAutoState("running");
@@ -1076,6 +1099,7 @@ export function App({
   // flushes, which can lag the very keypress it should catch.
   useInput(
     (_input, key) => {
+      if (!visibleRef.current) return;
       if (!key.escape || pendingRef.current) return;
       if (teamDetailOpenRef.current) {
         setTeamDetailOpen(false);
@@ -1256,7 +1280,9 @@ export function App({
     (input2, key) => {
       if ((key.meta || key.ctrl) && (input2 === "p" || input2 === "P")) void openPicker();
     },
-    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending && !interview },
+    {
+      isActive: visible && status === "idle" && !pickerOpen && !loginOpen && !pending && !interview,
+    },
   );
 
   // Shift+Tab cycles the permission mode (ASK → AUTO → PLAN).
@@ -1267,7 +1293,9 @@ export function App({
         applyMode(MODE_CYCLE[(i + 1) % MODE_CYCLE.length] ?? "ask");
       }
     },
-    { isActive: status === "idle" && !pickerOpen && !loginOpen && !pending && !interview },
+    {
+      isActive: visible && status === "idle" && !pickerOpen && !loginOpen && !pending && !interview,
+    },
   );
 
   // Picker navigation + type-to-search filtering.
@@ -1290,7 +1318,7 @@ export function App({
         setPickerIndex(0);
       }
     },
-    { isActive: pickerOpen },
+    { isActive: visible && pickerOpen },
   );
 
   // Login overlay: navigate providers, then type/paste the API key.
@@ -1416,7 +1444,7 @@ export function App({
         setLoginKey((k) => k + input2);
       }
     },
-    { isActive: loginOpen },
+    { isActive: visible && loginOpen },
   );
 
   // /sdd interview overlay: type an answer, Enter advances to the next question, and
@@ -1451,7 +1479,7 @@ export function App({
       if (key.backspace || key.delete) setInterviewInput((s) => s.slice(0, -1));
       else if (input2 && !key.ctrl && !key.meta) setInterviewInput((s) => s + input2);
     },
-    { isActive: interview !== null },
+    { isActive: visible && interview !== null },
   );
 
   const handleSlash = useCallback(
@@ -1976,6 +2004,41 @@ export function App({
     [session, handleSlash, push, runPlain],
   );
 
+  // First message of a panel-created session (mirror of initialGoal, one-shot).
+  const initialPromptSentRef = useRef(false);
+  useEffect(() => {
+    if (!initialPrompt || initialPromptSentRef.current) return;
+    initialPromptSentRef.current = true;
+    void dispatch(initialPrompt);
+  }, [initialPrompt, dispatch]);
+
+  // Background-session badge: tell the host when a permission prompt is waiting.
+  useEffect(() => {
+    onPendingChange?.(pending !== null);
+  }, [pending, onPendingChange]);
+
+  // Multi-session keys: plain ← opens the session panel (the prompt editor is
+  // append-only, so ← is not cursor movement); Ctrl+←/→ cycle sessions directly;
+  // Ctrl+X closes this session (Ctrl+C stays "quit the whole CLI").
+  useInput(
+    (input, key) => {
+      if (key.ctrl && (input === "x" || input === "X")) {
+        onCloseSession?.();
+        return;
+      }
+      if (!key.leftArrow && !key.rightArrow) return;
+      if (key.ctrl) {
+        onCycleSession?.(key.leftArrow ? -1 : 1);
+        return;
+      }
+      if (key.leftArrow && !key.meta && !key.shift) onOpenSessions?.();
+    },
+    {
+      isActive:
+        visible && !pickerOpen && !loginOpen && !pending && !interview && teamSuggest === null,
+    },
+  );
+
   const submit = useCallback(
     async (value: string) => {
       const text = value.trim();
@@ -2037,7 +2100,7 @@ export function App({
         void runPlain(text);
       }
     },
-    { isActive: teamSuggest !== null },
+    { isActive: visible && teamSuggest !== null },
   );
 
   // Up/Down recall previously submitted prompts (shell-style history) — except
@@ -2165,7 +2228,7 @@ export function App({
             </Text>
           ) : null}
           <InputLine
-            active={!teamSuggest}
+            active={visible && !teamSuggest}
             value={input}
             commands={COMMANDS}
             columns={columns}
@@ -2201,9 +2264,14 @@ export function App({
         mode={mode}
         columns={columns}
         shiftSelect={mouseCapture}
+        sessions={sessionsBadge}
       />
     </>
   );
+
+  // Multi-session: a hidden App stays mounted (every hook above keeps running —
+  // bus subscription, queue drain, token counters) but renders nothing.
+  if (!visible) return null;
 
   if (fullscreen) {
     // The whole window is one fixed-height frame (rows-1 keeps Ink's trailing
