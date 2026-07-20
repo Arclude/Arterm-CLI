@@ -46,6 +46,21 @@ export interface ArtermConfig {
     compactAtPercent?: number;
     /** Window strategy: keep at most this many recent messages. */
     maxMessages?: number;
+    /** Replace stale tool outputs with placeholders before compaction (default true). */
+    clearToolResults?: boolean;
+    /** Clear once usage crosses this fraction of `window` (default 0.6). */
+    clearAtPercent?: number;
+    /** Never clear the newest N tool results (default 3). */
+    keepRecentToolResults?: number;
+  };
+  /** Per-turn spend guards for the agent loop. */
+  budget: {
+    /**
+     * Stop the turn once the summed prompt+completion tokens of its iterations
+     * cross this cap (each iteration re-bills the prompt, so the sum is the real
+     * cost). Unset = no token cap; the iteration cap still applies.
+     */
+    turnTokens?: number;
   };
   /** Autonomous goal-loop defaults (/goal). */
   autonomy: {
@@ -57,6 +72,14 @@ export interface ArtermConfig {
     maxPhases?: number;
     /** Phased mode: max sub-agents per parallel phase (default = fleet.concurrency). */
     phasedFanout?: number;
+    /**
+     * Verify goal completion with a fresh-context grader sub-agent before
+     * accepting task_done / assess-done (default false). The worker never
+     * grades its own output; a failed verify feeds back as a steer note.
+     */
+    verify?: boolean;
+    /** Model for the verify grader (default: the session model). */
+    verifyModel?: string;
   };
   /** External MCP (Model Context Protocol) servers to connect over stdio. */
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
@@ -100,7 +123,16 @@ export interface ArtermConfig {
     mergeStrategy?: "surface" | "apply";
   };
   /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
-  arbiter: { enabled: boolean };
+  arbiter: {
+    enabled: boolean;
+    /**
+     * Optional gatekeeper model (OpenAI Agents SDK "cheap model guards the
+     * expensive one" pattern): screens execute-category tool calls BEFORE the
+     * permission chain and can only BLOCK, never approve — the regex RiskArbiter
+     * and the permission mode still run after it. Unset = no model gate.
+     */
+    model?: string;
+  };
   /** models.dev catalog: enrich model listing + native-tool detection from authoritative data. */
   catalog?: {
     /** Fetch/consult the catalog (default true). */
@@ -195,6 +227,7 @@ export function defaultConfig(): ArtermConfig {
     // maxSessions bounds disk usage. Set `session.mode: "off"` to disable.
     session: { mode: "jsonl", maxSessions: 100 },
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
+    budget: {},
     autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
     mcpServers: {},
     plugins: {},
@@ -249,6 +282,14 @@ const configFileSchema = z
         window: z.number().int().positive().optional(),
         compactAtPercent: z.number().min(0).max(1).optional(),
         maxMessages: z.number().int().positive().optional(),
+        clearToolResults: z.boolean().optional(),
+        clearAtPercent: z.number().min(0).max(1).optional(),
+        keepRecentToolResults: z.number().int().nonnegative().optional(),
+      })
+      .partial(),
+    budget: z
+      .object({
+        turnTokens: z.number().int().positive().optional(),
       })
       .partial(),
     autonomy: z
@@ -257,6 +298,8 @@ const configFileSchema = z
         maxSteps: z.number().int().positive().optional(),
         maxPhases: z.number().int().positive().optional(),
         phasedFanout: z.number().int().positive().optional(),
+        verify: z.boolean().optional(),
+        verifyModel: z.string().optional(),
       })
       .partial(),
     mcpServers: z.record(
@@ -286,7 +329,12 @@ const configFileSchema = z
         mergeStrategy: z.enum(["surface", "apply"]).optional(),
       })
       .partial(),
-    arbiter: z.object({ enabled: z.boolean() }).partial(),
+    arbiter: z
+      .object({
+        enabled: z.boolean().optional(),
+        model: z.string().optional(),
+      })
+      .partial(),
     catalog: z
       .object({
         enabled: z.boolean().optional(),

@@ -4,6 +4,7 @@ export * from "./eventBus.js";
 export * from "./config.js";
 export * from "./permissions.js";
 export * from "./arbiter.js";
+export * from "./brainArbiter.js";
 export * from "./keystore.js";
 export * from "./modelsDev.js";
 export * from "./sessions.js";

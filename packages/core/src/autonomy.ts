@@ -54,6 +54,16 @@ export interface Phase {
   parallel?: boolean;
 }
 
+/** Atomic read-only view of the engine's live state (also the checkpoint payload). */
+export interface AutonomySnapshot {
+  state: AutonomyState;
+  mode: AutonomyMode;
+  goal: string;
+  step: number;
+  phases: { id: string; title: string; done: string; parallel?: boolean }[];
+  team: { id: string; name: string; description: string; adhoc: boolean }[];
+}
+
 export interface AutonomyOptions {
   mode?: AutonomyMode;
   /** Step (or parallel-round) cap (safety bound). Default 25. */
@@ -83,6 +93,18 @@ export interface AutonomyOptions {
    * to have members start every round with no memory of their own earlier work.
    */
   memberMemory?: MemberMemory;
+  /**
+   * Fresh-context completion grader ("the agent doing the work isn't the one
+   * grading it"). When present, a once-mode completion claim (task_done or
+   * assess-done) must pass it before finish(): a FAIL feeds back as a steer
+   * note and the loop continues; the second FAIL stops the run. Verifier
+   * errors never block completion (fail-open).
+   */
+  verify?: (
+    goal: string,
+    claim: string,
+    signal?: AbortSignal,
+  ) => Promise<{ pass: boolean; feedback: string }>;
 }
 
 /**
@@ -130,10 +152,58 @@ export class AutonomyEngine {
     this.runFleet = opts.runFleet;
     this.blackboard = opts.blackboard;
     this.memberMemory = opts.memberMemory;
+    this.verify = opts.verify;
+  }
+
+  private readonly verify?: AutonomyOptions["verify"];
+  private verifyFails = 0;
+
+  /**
+   * Gate a completion claim through the fresh-context verifier. True = accept.
+   * A rejection stores the feedback as the next step's steer note; a verifier
+   * failure accepts the claim (fail-open — verification is an extra net, not a
+   * new way to lose finished work).
+   */
+  private async verifyDone(claim: string): Promise<boolean> {
+    const verify = this.verify;
+    if (!verify) return true;
+    try {
+      const res = await verify(this.goal, claim, this.current?.signal);
+      this.bus.emit({ type: "autonomy_verify", pass: res.pass, note: res.feedback });
+      if (res.pass) return true;
+      this.verifyFails += 1;
+      this.pendingSteer = `An independent verifier rejected the completion claim: ${res.feedback} Address this concretely before declaring the goal done again.`;
+      return false;
+    } catch {
+      return true;
+    }
   }
 
   get state(): AutonomyState {
     return this._state;
+  }
+
+  /**
+   * Wire a checkpoint sink: called with a fresh snapshot after every step /
+   * round / phase, and with `null` when the run reaches a deliberate end
+   * (task_done or user stop) so a stale checkpoint never outlives its goal.
+   * Limit-stops (step cap, idle streak) keep the checkpoint — those runs are
+   * the resumable ones. Best-effort: sink failures never disturb the loop.
+   */
+  setCheckpointSink(sink?: (snap: AutonomySnapshot | null) => void | Promise<void>): void {
+    this.checkpointSink = sink;
+  }
+
+  private checkpointSink?: (snap: AutonomySnapshot | null) => void | Promise<void>;
+
+  private ckpt(clear = false): void {
+    const sink = this.checkpointSink;
+    if (!sink) return;
+    try {
+      void Promise.resolve(sink(clear ? null : this.snapshot())).catch(() => {});
+    } catch {
+      // Checkpointing must never disturb the run.
+    }
   }
 
   /** Switch the run mode. Only allowed while idle/done/stopped (never mid-run). */
@@ -151,14 +221,7 @@ export class AutonomyEngine {
    * Atomic read-only view of the engine's live state — for external monitors
    * that can't reach the private goal/step/phase fields.
    */
-  snapshot(): {
-    state: AutonomyState;
-    mode: AutonomyMode;
-    goal: string;
-    step: number;
-    phases: { id: string; title: string; done: string; parallel?: boolean }[];
-    team: { id: string; name: string; description: string; adhoc: boolean }[];
-  } {
+  snapshot(): AutonomySnapshot {
     return {
       state: this._state,
       mode: this.mode,
@@ -185,6 +248,7 @@ export class AutonomyEngine {
     this.goal = goal.trim();
     this.step = 0;
     this.idleStreak = 0;
+    this.verifyFails = 0;
     this.stopped = false;
     this.pendingSteer = undefined;
     this._phases = [];
@@ -232,14 +296,26 @@ export class AutonomyEngine {
 
         this.step += 1;
         this.bus.emit({ type: "autonomy_step", step: this.step });
+        this.ckpt();
 
         const { sawTool, doneSummary } = await this.runStep();
         if (this.stopped) break;
         if (this.paused()) continue; // paused mid-step; re-gate at loop top
 
         if (doneSummary !== undefined && !eternal) {
-          this.finish(doneSummary);
-          return;
+          if (await this.verifyDone(doneSummary)) {
+            this.finish(doneSummary);
+            return;
+          }
+          if (this.verifyFails >= 2) {
+            this._state = "stopped";
+            this.bus.emit({
+              type: "autonomy_stopped",
+              reason: "completion claim rejected twice by the verifier",
+            });
+            return; // checkpoint survives — a rejected-but-claimed goal is resumable
+          }
+          continue; // rejection feedback is queued as the next step's steer note
         }
 
         if (!sawTool) {
@@ -247,8 +323,19 @@ export class AutonomyEngine {
           const verdict = await this.agent.assess(this.goal, this.current?.signal);
           this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
           if (verdict.done && !eternal) {
-            this.finish(verdict.note || "goal complete");
-            return;
+            if (await this.verifyDone(verdict.note || "goal complete")) {
+              this.finish(verdict.note || "goal complete");
+              return;
+            }
+            if (this.verifyFails >= 2) {
+              this._state = "stopped";
+              this.bus.emit({
+                type: "autonomy_stopped",
+                reason: "completion claim rejected twice by the verifier",
+              });
+              return;
+            }
+            continue;
           }
           this.idleStreak += 1;
           if (this.idleStreak >= 2 && !eternal) {
@@ -341,6 +428,7 @@ export class AutonomyEngine {
       }
       this.idleStreak = 0;
       this.bus.emit({ type: "autonomy_fleet_round", round, tasks });
+      this.ckpt();
 
       let results: AutonomyTaskResult[];
       try {
@@ -470,6 +558,7 @@ export class AutonomyEngine {
         round,
         tasks: assignments.map((a) => ({ member: a.member.name, task: a.task })),
       });
+      this.ckpt();
 
       let results: AutonomyTaskResult[];
       try {
@@ -595,6 +684,7 @@ export class AutonomyEngine {
         total: phases.length,
         title: phase.title,
       });
+      this.ckpt();
 
       const summary = await this.runPhase(phase, i, phases.length, handoff);
       if (this.stopped) return;
@@ -811,6 +901,7 @@ Integrate them: note concisely what is now done and what still remains. Do not c
     this.resumeResolve?.(); // unblock the gate if paused
     this.current?.abort();
     this.bus.emit({ type: "autonomy_stopped", reason: "stopped by user" });
+    this.ckpt(true); // a deliberate stop is an end state — drop the checkpoint
   }
 
   private paused(): boolean {
@@ -824,5 +915,6 @@ Integrate them: note concisely what is now done and what still remains. Do not c
   private finish(summary: string): void {
     this._state = "done";
     this.bus.emit({ type: "autonomy_done", summary });
+    this.ckpt(true); // goal complete — drop the checkpoint
   }
 }

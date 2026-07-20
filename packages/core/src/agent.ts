@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { join } from "node:path";
 import type { CompactionResult, ContextStrategy } from "./contextStrategy.js";
 import type { EventBus } from "./eventBus.js";
 import {
@@ -18,6 +19,7 @@ import type {
   Message,
   PermissionAsker,
   SkillInfo,
+  TokenUsage,
   Tool,
   ToolCall,
   ToolSchema,
@@ -37,6 +39,18 @@ export interface AgentOptions {
   temperature?: number;
   /** Hard cap on tool-call round-trips per user turn. */
   maxIterations?: number;
+  /**
+   * Token budget per turn: summed prompt+completion tokens across the turn's
+   * iterations (each iteration re-bills the prompt, so the sum is the real
+   * spend). Crossing it stops the loop and emits a `run_limit` event.
+   */
+  turnTokenBudget?: number;
+  /** Replace stale tool outputs with placeholders before compaction (default true). */
+  clearToolResults?: boolean;
+  /** Clear stale tool results once usage crosses this fraction of the window (default 0.6). */
+  clearAtPercent?: number;
+  /** Never clear the newest N tool results (default 3). */
+  keepRecentToolResults?: number;
   /** Base system prompt (agent persona). */
   systemPrompt?: string;
   /** Context-compaction strategy (defaults to no compaction). */
@@ -90,6 +104,37 @@ const DEFAULT_SYSTEM =
 /** Directories that add noise to the project listing without helping the model. */
 const LISTING_IGNORE = new Set([".git", "node_modules", ".DS_Store"]);
 
+/**
+ * Project instruction files loaded up-front, first match wins. Small and eager
+ * (the Claude Code / AGENTS.md pattern): instructions belong in context from
+ * turn one, while file CONTENTS stay just-in-time via the read/grep tools.
+ */
+const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md", "ARTERM.md"];
+
+/** Character cap for injected project instructions — oversized files lose the
+ * model's attention (context rot), so the tail is dropped, not summarized. */
+const INSTRUCTIONS_MAX_CHARS = 6000;
+
+/** First existing instruction file in `dir` (name + capped body), if any. */
+async function loadProjectInstructions(
+  dir: string,
+): Promise<{ name: string; body: string } | undefined> {
+  for (const name of INSTRUCTION_FILES) {
+    try {
+      const raw = (await fs.readFile(join(dir, name), "utf8")).trim();
+      if (!raw) continue;
+      const body =
+        raw.length > INSTRUCTIONS_MAX_CHARS
+          ? `${raw.slice(0, INSTRUCTIONS_MAX_CHARS)}\n… (${name} truncated — read the file for the rest)`
+          : raw;
+      return { name, body };
+    } catch {
+      // Missing or unreadable — try the next candidate.
+    }
+  }
+  return undefined;
+}
+
 /** Top-level entries of `dir`, directories marked with a trailing slash. */
 async function listProjectEntries(dir: string, limit = 200): Promise<string[]> {
   const dirents = await fs.readdir(dir, { withFileTypes: true });
@@ -118,6 +163,10 @@ export class Agent {
   private toolMap: Map<string, Tool>;
   /** Prompt tokens reported by the provider on the last turn (compaction signal). */
   private lastPromptTokens?: number;
+  /** Loop-guard state, reset each run(): consecutive same-error streaks per tool. */
+  private failStreaks = new Map<string, { sig: string; count: number }>();
+  /** Loop-guard state, reset each run(): consecutive identical tool calls. */
+  private callStreak = { key: "", count: 0 };
   readonly bus: EventBus;
   /** Per-agent kernel container (session-supplied or an internal default). */
   private readonly container: Container;
@@ -144,6 +193,20 @@ export class Agent {
    */
   private installDefaultPipelines(): void {
     const cw = this.pipelines.contextWindow;
+    if (!cw.has("clearToolResults")) {
+      // First line of context defense (registered before autoCompact so it runs
+      // first): stale tool outputs are re-fetchable, so once usage crosses the
+      // clear threshold they become placeholders. Zero inference cost, and the
+      // tool-message structure survives (native APIs keep their call pairing).
+      // The on-disk transcript is untouched — messages were logged when recorded.
+      cw.use("clearToolResults", async (ctx, next) => {
+        if (this.shouldClearToolResults()) {
+          const cleared = this.clearStaleToolResults();
+          if (cleared > 0) this.bus.emit({ type: "tool_results_cleared", cleared });
+        }
+        await next();
+      });
+    }
     if (!cw.has("autoCompact")) {
       cw.use("autoCompact", async (ctx, next) => {
         if (this.shouldAutoCompact()) {
@@ -204,6 +267,35 @@ export class Agent {
           const msg = err instanceof Error ? err.message : String(err);
           ctx.output = `Tool error: ${msg}`;
           ctx.isError = true;
+        }
+        await next();
+      });
+    }
+    if (!tc.has("loopGuard")) {
+      // Runs after `execute` (registration order). Two guards against silent
+      // error-compounding: the same tool failing repeatedly with the same error,
+      // and the exact same call being replayed with identical arguments. Both
+      // append a corrective note to the tool result — small local models escape
+      // these loops only when the failure is named explicitly.
+      tc.use("loopGuard", async (ctx, next) => {
+        const key = `${ctx.call.name}:${JSON.stringify(ctx.call.arguments ?? {})}`;
+        this.callStreak =
+          this.callStreak.key === key
+            ? { key, count: this.callStreak.count + 1 }
+            : { key, count: 1 };
+        if (ctx.isError) {
+          const sig = (ctx.output ?? "").slice(0, 160);
+          const prev = this.failStreaks.get(ctx.call.name);
+          const count = prev && prev.sig === sig ? prev.count + 1 : 1;
+          this.failStreaks.set(ctx.call.name, { sig, count });
+          if (count >= 2) {
+            ctx.output = `${ctx.output}\n\n[loop-guard] ${ctx.call.name} has now failed ${count}x in a row with the same error. Do not repeat the call unchanged — fix the arguments, use a different tool, or tell the user what is blocking you.`;
+          }
+        } else {
+          this.failStreaks.delete(ctx.call.name);
+          if (this.callStreak.count >= 3) {
+            ctx.output = `${ctx.output}\n\n[loop-guard] This exact call has now run ${this.callStreak.count}x with identical arguments and is not making progress. Change the arguments or move on.`;
+          }
         }
         await next();
       });
@@ -411,6 +503,14 @@ export class Agent {
     } catch {
       // If the directory can't be listed, the `ls` tool still works at call time.
     }
+    const instructions = await loadProjectInstructions(this.opts.cwd);
+    if (instructions) {
+      lines.push(
+        "",
+        `Project instructions from ${instructions.name} (follow these):`,
+        instructions.body,
+      );
+    }
     const skills = this.opts.skills;
     if (skills && skills.length > 0) {
       lines.push("", "Available skills (the user can run one with /skill <name>):");
@@ -447,6 +547,8 @@ export class Agent {
     // of truth while the public `run(input, signal?)` contract is unchanged.
     const handle = this.runController.begin();
     handle.iterationLimit(maxIterations);
+    this.failStreaks = new Map();
+    this.callStreak = { key: "", count: 0 };
     const onExternalAbort = () => handle.abort("external");
     if (signal) {
       if (signal.aborted) handle.abort("external");
@@ -464,8 +566,16 @@ export class Agent {
       this.bus.emit({ type: "turn_start" });
 
       const limit = handle.getIterationLimit() ?? maxIterations;
+      const budget = this.opts.turnTokenBudget;
+      let usedTokens = 0;
+      // True only when the loop ran out of iterations with the model still mid-work —
+      // that stop must be announced, not silent (see the run_limit emit below).
+      let exhausted = true;
       for (let i = 0; i < limit; i++) {
-        if (runSignal.aborted) break;
+        if (runSignal.aborted) {
+          exhausted = false;
+          break;
+        }
         // Auto-compaction runs as the `contextWindow` pipeline's default stage, so the
         // threshold policy is swappable without touching the loop.
         await this.pipelines.contextWindow.run({ messages: this.messages, reason: "auto" });
@@ -485,7 +595,10 @@ export class Agent {
         if (response.calls.length > 0) assistant.toolCalls = response.calls;
         await this.pipelines.assistantOutput.run({ message: assistant });
 
-        if (response.calls.length === 0) break;
+        if (response.calls.length === 0) {
+          exhausted = false;
+          break;
+        }
 
         for (const call of response.calls) {
           // An abort mid-turn must still leave a tool result for every recorded
@@ -497,6 +610,23 @@ export class Agent {
           }
           await this.runToolCall(call, runSignal);
         }
+
+        // Token budget: each iteration re-bills the prompt, so the running total is
+        // the turn's real spend. Checked after the tool results are recorded so the
+        // history is never left with an unanswered tool_call.
+        if (raw.usage) {
+          usedTokens +=
+            raw.usage.totalTokens ??
+            (raw.usage.promptTokens ?? 0) + (raw.usage.completionTokens ?? 0);
+          if (budget !== undefined && usedTokens >= budget) {
+            this.bus.emit({ type: "run_limit", kind: "tokens", limit: budget, used: usedTokens });
+            exhausted = false;
+            break;
+          }
+        }
+      }
+      if (exhausted) {
+        this.bus.emit({ type: "run_limit", kind: "iterations", limit, used: limit });
       }
     } catch (err) {
       this.bus.emit({ type: "error", error: err instanceof Error ? err.message : String(err) });
@@ -517,9 +647,10 @@ export class Agent {
     messages: Message[],
     native: boolean,
     signal?: AbortSignal,
-  ): Promise<{ text: string; calls: ToolCall[] }> {
+  ): Promise<{ text: string; calls: ToolCall[]; usage?: TokenUsage }> {
     const { provider, model, tools, temperature } = this.opts;
     const calls: ToolCall[] = [];
+    let usage: TokenUsage | undefined;
     let text = "";
 
     const stream = provider.chat({
@@ -538,13 +669,14 @@ export class Agent {
         calls.push(chunk.call);
         this.bus.emit({ type: "tool_call", call: chunk.call });
       } else if (chunk.type === "done" && chunk.usage) {
+        usage = chunk.usage;
         if (chunk.usage.promptTokens !== undefined)
           this.lastPromptTokens = chunk.usage.promptTokens;
         this.bus.emit({ type: "usage", usage: chunk.usage });
       }
     }
 
-    return { text, calls };
+    return { text, calls, usage };
   }
 
   private async runToolCall(call: ToolCall, signal?: AbortSignal): Promise<void> {
@@ -592,6 +724,40 @@ export class Agent {
     if (!window || !strategy || strategy.id === "none") return false;
     const used = this.lastPromptTokens ?? estimateHistoryTokens(this.messages);
     return used >= (this.opts.compactAtPercent ?? 0.85) * window;
+  }
+
+  private shouldClearToolResults(): boolean {
+    if (this.opts.clearToolResults === false) return false;
+    const window = this.effectiveContextWindow();
+    if (!window) return false;
+    const used = this.lastPromptTokens ?? estimateHistoryTokens(this.messages);
+    return used >= (this.opts.clearAtPercent ?? 0.6) * window;
+  }
+
+  /** Placeholder marker — also the re-entry guard against clearing twice. */
+  private static readonly CLEARED_PREFIX = "[cleared to save context";
+
+  /**
+   * Replace every tool result except the newest `keepRecentToolResults` with a
+   * short placeholder. Only the CONTENT changes: role/toolCallId/name survive,
+   * so native providers still see a result for every recorded tool call.
+   */
+  private clearStaleToolResults(): number {
+    const keep = Math.max(0, this.opts.keepRecentToolResults ?? 3);
+    const toolIndexes: number[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      if (this.messages[i]?.role === "tool") toolIndexes.push(i);
+    }
+    let cleared = 0;
+    for (const idx of toolIndexes.slice(0, Math.max(0, toolIndexes.length - keep))) {
+      const msg = this.messages[idx];
+      if (!msg || msg.content.length <= 200 || msg.content.startsWith(Agent.CLEARED_PREFIX)) {
+        continue;
+      }
+      msg.content = `${Agent.CLEARED_PREFIX} — stale ${msg.name ?? "tool"} output dropped; call the tool again if you need it]`;
+      cleared++;
+    }
+    return cleared;
   }
 
   /**

@@ -92,6 +92,159 @@ function collect(bus: EventBus): AgentEvent[] {
   return events;
 }
 
+describe("AutonomyEngine completion verifier (verify hook)", () => {
+  function makeVerifyEngine(
+    agent: FakeAgent,
+    bus: EventBus,
+    verify: (goal: string, claim: string) => Promise<{ pass: boolean; feedback: string }>,
+    maxSteps = 10,
+  ) {
+    return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps,
+      verify,
+    });
+  }
+
+  it("accepts task_done when the verifier passes", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"]];
+    const events = collect(bus);
+    let calls = 0;
+    const engine = makeVerifyEngine(agent, bus, async () => {
+      calls++;
+      return { pass: true, feedback: "looks complete" };
+    });
+
+    await engine.start("g");
+
+    expect(calls).toBe(1);
+    expect(engine.state).toBe("done");
+    expect(events.some((e) => e.type === "autonomy_verify" && e.pass)).toBe(true);
+  });
+
+  it("rejects once, feeds back a steer note, then completes on the retry", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"], ["task_done"]];
+    let n = 0;
+    const engine = makeVerifyEngine(agent, bus, async () => {
+      n++;
+      return n === 1
+        ? { pass: false, feedback: "tests still failing" }
+        : { pass: true, feedback: "now green" };
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("done");
+    // The rejection was injected as a steer note into the retry's prompt.
+    expect(agent.prompts[1]).toContain("tests still failing");
+  });
+
+  it("stops after two verifier rejections and keeps a resumable checkpoint", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"], ["task_done"], ["task_done"]];
+    const events = collect(bus);
+    const cleared: boolean[] = [];
+    const engine = makeVerifyEngine(agent, bus, async () => ({
+      pass: false,
+      feedback: "still not done",
+    }));
+    engine.setCheckpointSink((snap) => {
+      cleared.push(snap === null);
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("stopped");
+    expect(events.some((e) => e.type === "autonomy_stopped")).toBe(true);
+    // A rejected-but-claimed goal stays resumable — the checkpoint was never cleared.
+    expect(cleared).not.toContain(true);
+  });
+
+  it("fails open: a throwing verifier accepts the completion claim", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"]];
+    const engine = makeVerifyEngine(agent, bus, async () => {
+      throw new Error("verifier crashed");
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("done");
+  });
+});
+
+describe("AutonomyEngine checkpoints (setCheckpointSink)", () => {
+  it("checkpoints every step and clears on task_done", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["task_done"]];
+    const engine = makeEngine(agent, bus, { mode: "once", maxSteps: 10 });
+    const seen: (string | null)[] = [];
+    engine.setCheckpointSink((snap) => {
+      seen.push(snap === null ? null : `${snap.goal}@${snap.step}`);
+    });
+
+    await engine.start("hedef");
+
+    // One snapshot per step, then the explicit clear when the goal completes.
+    expect(seen).toEqual(["hedef@1", "hedef@2", null]);
+  });
+
+  it("keeps the checkpoint when the run dies at the step cap (crash-resume case)", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["write"], ["write"]];
+    const engine = makeEngine(agent, bus, { mode: "once", maxSteps: 2 });
+    const seen: (string | null)[] = [];
+    engine.setCheckpointSink((snap) => {
+      seen.push(snap === null ? null : `step${snap.step}`);
+    });
+
+    await engine.start("g");
+
+    // Step-cap stop is resumable — no null must have been written.
+    expect(seen).toEqual(["step1", "step2"]);
+  });
+
+  it("clears the checkpoint on a deliberate user stop", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["write"], ["write"]];
+    const engine = makeEngine(agent, bus, { mode: "once", maxSteps: 10 });
+    const seen: (string | null)[] = [];
+    engine.setCheckpointSink((snap) => {
+      seen.push(snap === null ? null : `step${snap.step}`);
+    });
+    agent.onRun = (n) => {
+      if (n === 2) engine.stop();
+    };
+
+    await engine.start("g");
+
+    expect(seen.at(-1)).toBeNull();
+  });
+
+  it("a throwing sink never disturbs the run", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["task_done"]];
+    const engine = makeEngine(agent, bus, { mode: "once", maxSteps: 10 });
+    engine.setCheckpointSink(() => {
+      throw new Error("disk full");
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("done");
+  });
+});
+
 describe("AutonomyEngine", () => {
   it("completes in once mode when task_done is called", async () => {
     const bus = new EventBus();

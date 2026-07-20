@@ -20,17 +20,33 @@ export type AgentEvent =
   | { type: "tool_denied"; callId: string; name: string; reason?: string }
   | { type: "usage"; usage: TokenUsage }
   | { type: "context_compacted"; before: number; after: number; reason: "auto" | "manual" }
+  // Stale tool outputs were replaced with placeholders (cheaper than compaction).
+  | { type: "tool_results_cleared"; cleared: number }
+  // The turn hit a hard cap (iteration count or token budget) and stopped early —
+  // surfaced so limit stops are never silent (the reply may be mid-thought).
+  | { type: "run_limit"; kind: "iterations" | "tokens"; limit: number; used: number }
   | { type: "turn_end" }
   | { type: "error"; error: string }
   // Autonomy engine lifecycle.
   | { type: "goal_set"; goal: string; mode: AutonomyMode }
   | { type: "autonomy_step"; step: number }
   | { type: "autonomy_reflect"; done: boolean; note?: string }
+  // Fresh-context verifier's judgment on a completion claim (decision 3).
+  | { type: "autonomy_verify"; pass: boolean; note?: string }
   | { type: "autonomy_steer"; note: string }
   | { type: "autonomy_paused" }
   | { type: "autonomy_resumed" }
   | { type: "autonomy_done"; summary: string }
   | { type: "autonomy_stopped"; reason: string }
+  // A resumed session left an unfinished autonomy checkpoint on disk — surfaced
+  // so the user can decide whether to relaunch the goal (never auto-restarted).
+  | {
+      type: "autonomy_resume_available";
+      goal: string;
+      mode: AutonomyMode;
+      step: number;
+      savedAt?: number;
+    }
   // Sub-agent (fleet) lifecycle.
   | { type: "subagent_start"; task: string; role?: string }
   | { type: "subagent_done"; output: string }
