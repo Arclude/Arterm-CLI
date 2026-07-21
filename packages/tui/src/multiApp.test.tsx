@@ -220,4 +220,28 @@ describe("MultiApp (multi-session host)", () => {
     await waitFor(m.seen, (f) => f.includes("ilk gorev"));
     m.unmount();
   });
+
+  it("re-asserts SGR mouse modes on resize (heals a host-emulator reset)", async () => {
+    const bus = new EventBus();
+    const instance = render(
+      createElement(MultiApp, {
+        initial: { id: "sess-a", session: fakeSession(bus, "A") },
+        fullscreen: true,
+      }),
+    );
+    const sgrWrites = (): number => instance.frames.join("").split(`${ESC}[?1006h`).length - 1;
+    // Mount writes the capture modes once…
+    await waitFor(
+      () => String(sgrWrites()),
+      (n) => Number(n) >= 1,
+    );
+    const before = sgrWrites();
+    // …and a SIGWINCH (the desktop pool's rebind kick) re-asserts them.
+    instance.stdout.emit("resize");
+    await waitFor(
+      () => String(sgrWrites()),
+      (n) => Number(n) > before,
+    );
+    instance.unmount();
+  });
 });

@@ -92,18 +92,29 @@ export function MultiApp({
   useEffect(() => {
     if (!rawStdout) return;
     const ESC = String.fromCharCode(27);
-    if (mouseCapture) {
-      rawStdout.write(`${ESC}[?1002l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
-      return () => {
-        rawStdout.write(`${ESC}[?1000l${ESC}[?1006l`);
-      };
-    }
-    // Clear any reporting a crashed program left behind; arrows carry the wheel
-    // in fullscreen (alternate scroll), nothing in classic.
-    rawStdout.write(
-      `${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
-    );
-    return undefined;
+    // Written on mount AND on every resize: a host terminal can reset the
+    // emulator behind our back — the desktop app's renderer pool reset()s a
+    // pane on rebind and replays a serialized snapshot that restores ?1000h
+    // but not ?1006h, downgrading wheel reports to X10 bytes the SGR parser
+    // can't read (dead wheel). Every such rebind ends in a SIGWINCH kick, so
+    // re-asserting here heals it; re-sending the modes is idempotent.
+    const assertModes = mouseCapture
+      ? (): void => {
+          rawStdout.write(`${ESC}[?1002l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
+        }
+      : (): void => {
+          // Clear any reporting a crashed program left behind; arrows carry the
+          // wheel in fullscreen (alternate scroll), nothing in classic.
+          rawStdout.write(
+            `${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
+          );
+        };
+    assertModes();
+    rawStdout.on("resize", assertModes);
+    return () => {
+      rawStdout.off("resize", assertModes);
+      if (mouseCapture) rawStdout.write(`${ESC}[?1000l${ESC}[?1006l`);
+    };
   }, [rawStdout, fullscreen, mouseCapture]);
 
   // Classic-mode resize recovery: reflowed wrapped lines invalidate Ink's
