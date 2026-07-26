@@ -52,7 +52,7 @@ import type { Session } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
-import { runHeadless } from "./headless.js";
+import { runHeadless, runHeadlessGoal } from "./headless.js";
 import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { runPermissionsExplain } from "./permissionsExplain.js";
@@ -508,7 +508,10 @@ async function startChat(globals: GlobalOpts): Promise<void> {
  * to stay fast and predictable — built-in tools + memory still apply.
  */
 async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
-  const prompt = globals.print ?? (await readStdin());
+  // `--goal` runs the autonomy loop; `--print`/stdin runs one prompt. When both
+  // are given the goal wins, because it is the more specific instruction — and
+  // it used to be dropped on the floor here without a word.
+  const prompt = globals.goal ? "" : (globals.print ?? (await readStdin()));
   const config = await loadConfig();
   const providerId = globals.provider ?? config.provider;
   requireKnownProvider(providerId);
@@ -533,7 +536,11 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   const statusServer = await maybeStartStatusServer(session, config, globals);
 
   try {
-    await runHeadless(session, prompt, { json: globals.json });
+    if (globals.goal) {
+      await runHeadlessGoal(session, globals.goal, { json: globals.json });
+    } else {
+      await runHeadless(session, prompt, { json: globals.json });
+    }
   } finally {
     await statusServer?.close();
     try {
@@ -759,8 +766,11 @@ async function main(): Promise<void> {
     .option("-m, --model <name>", "model name or .gguf file")
     .option("--yolo", "skip permission prompts (still blocks critical/destructive calls)")
     .option("--confirm-destructive", "always re-prompt before destructive tools, even in auto/yolo")
-    .option("--goal <text>", "start an autonomous run toward this goal")
-    .option("--print <prompt>", "run a single prompt headlessly (no TUI) and print the result")
+    .option("--goal <text>", "start an autonomous run toward this goal (add --print for no TUI)")
+    // Optional value: `--print "…"` runs that prompt, while a bare `--print`
+    // alongside `--goal` just means "no TUI" — otherwise scripting a goal run
+    // requires the nonsense of `--print ""`.
+    .option("--print [prompt]", "run headlessly (no TUI) and print the result")
     .option("--json", "with --print or piped input, emit the result as JSON")
     .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
     .option("--continue", "resume the most recent recorded session")

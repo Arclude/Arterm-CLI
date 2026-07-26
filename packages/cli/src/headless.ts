@@ -99,3 +99,112 @@ export async function runHeadless(
 
   return result;
 }
+
+/** The structured result printed by a headless goal run in `--json` mode. */
+export interface HeadlessGoalResult {
+  goal: string;
+  /** How the run ended. `stopped` carries a reason. */
+  state: "done" | "stopped";
+  summary: string;
+  steps: number;
+  /** Every verification verdict, in order. */
+  verdicts: {
+    pass: boolean;
+    by?: string;
+    scope?: string;
+    id?: string;
+    /** True when no verdict could be obtained and the claim passed by default. */
+    skipped?: boolean;
+    note?: string;
+    mustFix?: string[];
+  }[];
+}
+
+/**
+ * Run an autonomous goal to completion without the TUI.
+ *
+ * `--goal` used to reach only the Ink path, so `arterm --print --goal "…"` ran the
+ * goal text as a single prompt and silently did something else entirely. It also
+ * meant the autonomy loop — and therefore verification — had no scriptable entry
+ * point at all, which is why exercising it needed a pty driving a real terminal.
+ *
+ * Lifecycle goes to stderr so stdout stays the answer, exactly as in `runHeadless`.
+ */
+export async function runHeadlessGoal(
+  session: Session,
+  goal: string,
+  opts: HeadlessOptions = {},
+): Promise<HeadlessGoalResult> {
+  if (!goal.trim()) throw new ArtermUserError('No goal provided. Pass one with --goal "…".');
+
+  session.setAsker(async () => "deny");
+
+  const verdicts: HeadlessGoalResult["verdicts"] = [];
+  let steps = 0;
+  let summary = "";
+  let stoppedReason: string | undefined;
+  const log = (line: string): void => {
+    if (!opts.json) process.stderr.write(`${line}\n`);
+  };
+
+  const unsubscribe = session.bus.on((event) => {
+    switch (event.type) {
+      case "autonomy_step":
+        steps = event.step;
+        log(`▸ step ${event.step}`);
+        break;
+      case "autonomy_verify": {
+        verdicts.push({
+          pass: event.pass,
+          ...(event.by ? { by: event.by } : {}),
+          ...(event.scope ? { scope: event.scope } : {}),
+          ...(event.id ? { id: event.id } : {}),
+          ...(event.skipped ? { skipped: true } : {}),
+          ...(event.note ? { note: event.note } : {}),
+          ...(event.mustFix?.length ? { mustFix: event.mustFix } : {}),
+        });
+        const where = event.scope && event.scope !== "goal" ? ` ${event.scope}` : "";
+        const by = event.by ? ` (${event.by})` : "";
+        if (!event.pass) {
+          log(`✗ verification failed${by}${where} — ${event.note ?? "criteria not met"}`);
+          for (const m of event.mustFix ?? []) log(`  • ${m}`);
+        } else if (event.skipped) {
+          log(`⚠ verification unavailable — accepting the claim (${event.note ?? "no verdict"})`);
+        } else {
+          log(`✓ verified${by}${where}${event.note ? ` — ${event.note}` : ""}`);
+        }
+        break;
+      }
+      case "autonomy_done":
+        summary = event.summary;
+        log("■ goal complete");
+        break;
+      case "autonomy_stopped":
+        stoppedReason = event.reason;
+        log(`■ stopped — ${event.reason}`);
+        break;
+    }
+  });
+
+  try {
+    await session.autonomy.start(goal);
+  } finally {
+    unsubscribe();
+  }
+
+  const state = stoppedReason === undefined ? "done" : "stopped";
+  const result: HeadlessGoalResult = {
+    goal,
+    state,
+    summary: summary || stoppedReason || "",
+    steps,
+    verdicts,
+  };
+
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else if (result.summary) {
+    process.stdout.write(`${result.summary}\n`);
+  }
+  return result;
+}

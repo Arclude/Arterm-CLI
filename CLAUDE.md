@@ -195,6 +195,10 @@ merely mentions verification yields nothing. The command reaches `sh -c` as a
 single positional argument (never `shell: true`), so the shell interprets
 metacharacters rather than Node.
 
+`arterm --print --goal "…"` runs the loop headlessly and streams its verdicts —
+the scriptable way to exercise any of this without a terminal. Add `--json` for a
+structured run + verdict list.
+
 `AutonomyEngine.gateClaim()` is the single call site for every mode. A rejection
 queues its `mustFix` items into `pendingSteer`, which every mode's prompt builder
 already consumes — that is why no mode needs its own repair plumbing. `eternal`

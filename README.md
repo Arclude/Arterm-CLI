@@ -299,6 +299,29 @@ default — it can catch a bad result, but it cannot break a working setup.
 the reviewer at something better than the working model, which is worth doing if
 your main model is small. `enabled: false` turns the whole layer off.
 
+An autonomous run is scriptable — add `--print` to keep it out of the TUI:
+
+```bash
+arterm --print --goal "$(cat <<'EOF'
+port the parser to the new AST
+verify: pnpm -r test --filter core
+EOF
+)"
+```
+
+```
+▸ step 1
+✗ verification failed (command) — verification failed (exit 1): pnpm -r test --filter core
+  • `pnpm -r test --filter core` must exit 0 — it exited 1
+▸ step 2
+✓ verified (command)
+■ goal complete
+```
+
+Lifecycle goes to stderr and the final summary to stdout, so `--print --goal … 2>/dev/null`
+gives you just the answer. `--json` emits the run plus every verdict as one object,
+which is what you want in CI.
+
 ### Fallback models
 
 When the active model fails with something a retry can't fix quickly — rate
