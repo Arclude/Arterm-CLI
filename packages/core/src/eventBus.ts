@@ -1,3 +1,4 @@
+import type { ProviderErrorKind } from "./providerError.js";
 import type { AutonomyMode, DiffRow, Message, TokenUsage, ToolCall } from "./types.js";
 
 /** Lifecycle + observability events emitted by the agent loop. */
@@ -26,7 +27,28 @@ export type AgentEvent =
   // surfaced so limit stops are never silent (the reply may be mid-thought).
   | { type: "run_limit"; kind: "iterations" | "tokens"; limit: number; used: number }
   | { type: "turn_end" }
-  | { type: "error"; error: string }
+  // A turn failed. When the failure came from a provider it carries the taxonomy
+  // (see ProviderError), so a UI can say "out of quota" instead of pasting a
+  // status line, and an operator can tell a dead key from a dropped socket.
+  | {
+      type: "error";
+      error: string;
+      kind?: ProviderErrorKind;
+      provider?: string;
+      status?: number;
+      /** True when the same request could plausibly succeed on a retry. */
+      retryable?: boolean;
+    }
+  // The active model refused (quota, overload, outage) and the chain moved to the
+  // next configured target. Emitted before the replacement request goes out, so a
+  // UI can show which model actually answered.
+  | {
+      type: "provider_fallback";
+      from: { provider: string; model: string };
+      to: { provider: string; model: string };
+      reason: ProviderErrorKind;
+      detail: string;
+    }
   // Autonomy engine lifecycle.
   | { type: "goal_set"; goal: string; mode: AutonomyMode }
   | { type: "autonomy_step"; step: number }

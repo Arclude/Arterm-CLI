@@ -8,8 +8,15 @@ import type {
   ToolSchema,
 } from "@arterm/core";
 
+import { withStreamReplay } from "./replay.js";
+import { fetchWithRetry } from "./retry.js";
+import { streamIdleGuard } from "./timeout.js";
+
 /** Anthropic requires `max_tokens`; this is the default per-response output cap. */
 const DEFAULT_MAX_TOKENS = 8192;
+
+/** Abort a streaming chat if no bytes arrive for this long — bounds a hung server. */
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 /** Beta header that opts a request into subscription (OAuth) inference. */
 const OAUTH_BETA = "oauth-2025-04-20";
@@ -20,6 +27,29 @@ const OAUTH_BETA = "oauth-2025-04-20";
  * Claude Code client, so this exact line must be the first system block.
  */
 const OAUTH_SYSTEM_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/**
+ * Retry settings handed to every SDK client. The SDK's own retry loop is turned
+ * OFF and replaced with ours, because of one line in its `retryRequest`:
+ *
+ *   > If the API asks us to wait a certain amount of time, just do what it says
+ *
+ * It has no cap. A `Retry-After: 3600` makes the SDK `await sleep(3_600_000)` —
+ * twice, by default — *inside* `streamOnce`. Nothing above it can intervene: the
+ * fallback chain never sees an error to act on, the turn simply stops for an
+ * hour, and this is the provider most likely to be rate-limited in the first
+ * place. Routing the transport through `fetchWithRetry` gives Anthropic the same
+ * bounded budget as the fetch-based providers — retry the transient, abandon a
+ * refusal longer than we'd wait — while the SDK still turns the final response
+ * into a typed `APIError` the taxonomy understands.
+ */
+const RESILIENCE = {
+  maxRetries: 0,
+  fetch: ((input: string | URL, init?: RequestInit): Promise<Response> =>
+    fetchWithRetry(String(input), init ?? {}, {
+      ...(init?.signal ? { signal: init.signal } : {}),
+    })) as unknown as typeof fetch,
+} as const;
 
 /** Current Claude models surfaced in the picker (no network/key required). */
 const KNOWN_MODELS = [
@@ -123,11 +153,13 @@ export class AnthropicProvider implements ChatProvider {
         authToken: token,
         defaultHeaders: { "anthropic-beta": OAUTH_BETA },
         ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
+        ...RESILIENCE,
       });
     }
     return new Anthropic({
       apiKey: this.apiKey,
       ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
+      ...RESILIENCE,
     });
   }
 
@@ -139,6 +171,11 @@ export class AnthropicProvider implements ChatProvider {
     return KNOWN_MODELS.map((name) => ({ name, provider: this.id, supportsTools: true }));
   }
 
+  /**
+   * The SDK retries the connection phase but not a stream that dies mid-flight,
+   * which is exactly when a long generation is most expensive to lose — so the
+   * request is replayable until the first chunk reaches the caller.
+   */
   async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {
     if (!this.usesOauth && !this.apiKey) {
       throw new Error(
@@ -146,6 +183,11 @@ export class AnthropicProvider implements ChatProvider {
           "subscription, or `arterm auth set anthropic` for an API key.",
       );
     }
+    yield* withStreamReplay(this.id, () => this.streamOnce(req), { signal: req.signal });
+  }
+
+  private async *streamOnce(req: ChatRequest): AsyncIterable<ChatChunk> {
+    // Resolved per attempt so a replay picks up a token refreshed in between.
     const client = await this.resolveClient();
     const { system, messages } = toAnthropicConversation(req.messages);
     // OAuth inference only serves requests that lead with the Claude Code identity,
@@ -156,46 +198,54 @@ export class AnthropicProvider implements ChatProvider {
           ...(system ? [{ type: "text" as const, text: system }] : []),
         ]
       : system;
-    // `temperature` is intentionally omitted — current Claude models (Opus
-    // 4.8/4.7, Fable 5) reject sampling parameters with a 400.
-    const stream = client.messages.stream(
-      {
-        model: req.model,
-        max_tokens: this.maxTokens,
-        ...(systemParam ? { system: systemParam } : {}),
-        messages,
-        ...(req.tools && req.tools.length > 0 ? { tools: toAnthropicTools(req.tools) } : {}),
-      },
-      { signal: req.signal },
-    );
+    // Bound the stream with an idle timeout (reset on each event) so a server that
+    // accepts the connection but never streams can't hang the turn forever.
+    const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
+    try {
+      // `temperature` is intentionally omitted — current Claude models (Opus
+      // 4.8/4.7, Fable 5) reject sampling parameters with a 400.
+      const stream = client.messages.stream(
+        {
+          model: req.model,
+          max_tokens: this.maxTokens,
+          ...(systemParam ? { system: systemParam } : {}),
+          messages,
+          ...(req.tools && req.tools.length > 0 ? { tools: toAnthropicTools(req.tools) } : {}),
+        },
+        { signal: guard.signal },
+      );
 
-    for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        yield { type: "text", delta: event.delta.text };
+      for await (const event of stream) {
+        guard.reset();
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          yield { type: "text", delta: event.delta.text };
+        }
       }
-    }
 
-    // The SDK accumulates tool-call input JSON; read the complete blocks here.
-    const final = await stream.finalMessage();
-    for (const block of final.content) {
-      if (block.type === "tool_use") {
-        yield {
-          type: "tool_call",
-          call: {
-            id: block.id,
-            name: block.name,
-            arguments: (block.input ?? {}) as Record<string, unknown>,
-          },
-        };
+      // The SDK accumulates tool-call input JSON; read the complete blocks here.
+      const final = await stream.finalMessage();
+      for (const block of final.content) {
+        if (block.type === "tool_use") {
+          yield {
+            type: "tool_call",
+            call: {
+              id: block.id,
+              name: block.name,
+              arguments: (block.input ?? {}) as Record<string, unknown>,
+            },
+          };
+        }
       }
+      yield {
+        type: "done",
+        usage: {
+          promptTokens: final.usage.input_tokens,
+          completionTokens: final.usage.output_tokens,
+          totalTokens: final.usage.input_tokens + final.usage.output_tokens,
+        },
+      };
+    } finally {
+      guard.clear();
     }
-    yield {
-      type: "done",
-      usage: {
-        promptTokens: final.usage.input_tokens,
-        completionTokens: final.usage.output_tokens,
-        totalTokens: final.usage.input_tokens + final.usage.output_tokens,
-      },
-    };
   }
 }

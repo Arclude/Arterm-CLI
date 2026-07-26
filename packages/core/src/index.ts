@@ -1,6 +1,7 @@
 export * from "./types.js";
 export * from "./diff.js";
 export * from "./eventBus.js";
+export * from "./providerError.js";
 export * from "./config.js";
 export * from "./permissions.js";
 export * from "./arbiter.js";

@@ -1,3 +1,5 @@
+export * from "./replay.js";
+export * from "./fallback.js";
 export * from "./ollama.js";
 export * from "./llamacpp.js";
 export * from "./openai-compat.js";

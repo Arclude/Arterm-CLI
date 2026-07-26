@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { fetchWithRetry } from "./retry.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchWithRetry, sleep } from "./retry.js";
 
 /** A sleep that never actually waits but records the requested delays. */
 function instantSleep(delays: number[]) {
@@ -141,20 +141,138 @@ describe("fetchWithRetry", () => {
     expect(delays).toEqual([2000]);
   });
 
-  it("caps Retry-After at 30s", async () => {
+  it("waits a Retry-After that sits exactly on the budget", async () => {
+    const delays: number[] = [];
+    let calls = 0;
+    const res = await fetchWithRetry(
+      "http://x/",
+      {},
+      {
+        fetchImpl: async () => {
+          calls++;
+          return calls === 1 ? jsonResponse(429, { "retry-after": "30" }) : jsonResponse(200);
+        },
+        sleep: instantSleep(delays),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(delays).toEqual([30_000]);
+  });
+
+  it("gives up immediately when Retry-After exceeds the wait budget", async () => {
+    // A one-hour rate limit does not clear because we waited 30s three times.
+    // Returning now is what lets the fallback chain reach a model that answers.
+    const delays: number[] = [];
+    let calls = 0;
+    const res = await fetchWithRetry(
+      "http://x/",
+      {},
+      {
+        fetchImpl: async () => {
+          calls++;
+          return jsonResponse(429, { "retry-after": "3600" });
+        },
+        sleep: instantSleep(delays),
+      },
+    );
+    expect(res.status).toBe(429);
+    expect(calls).toBe(1);
+    expect(delays).toEqual([]);
+  });
+
+  it("leaves the short-circuited body unread for the caller's error detail", async () => {
+    const res = await fetchWithRetry(
+      "http://x/",
+      {},
+      {
+        fetchImpl: async () =>
+          new Response('{"error":"monthly quota exhausted"}', {
+            status: 429,
+            headers: { "retry-after": "7200" },
+          }),
+        sleep: instantSleep([]),
+      },
+    );
+    expect(res.bodyUsed).toBe(false);
+    await expect(res.text()).resolves.toContain("monthly quota exhausted");
+  });
+
+  it("honors an HTTP-date Retry-After beyond the budget", async () => {
+    const delays: number[] = [];
+    let calls = 0;
+    const res = await fetchWithRetry(
+      "http://x/",
+      {},
+      {
+        fetchImpl: async () => {
+          calls++;
+          return jsonResponse(503, {
+            "retry-after": new Date(Date.now() + 20 * 60_000).toUTCString(),
+          });
+        },
+        sleep: instantSleep(delays),
+      },
+    );
+    expect(res.status).toBe(503);
+    expect(calls).toBe(1);
+  });
+
+  it("still backs off normally when the budget is raised", async () => {
     const delays: number[] = [];
     let calls = 0;
     await fetchWithRetry(
       "http://x/",
       {},
       {
+        maxWaitMs: 120_000,
         fetchImpl: async () => {
           calls++;
-          return calls === 1 ? jsonResponse(429, { "retry-after": "600" }) : jsonResponse(200);
+          return calls === 1 ? jsonResponse(429, { "retry-after": "60" }) : jsonResponse(200);
         },
         sleep: instantSleep(delays),
       },
     );
-    expect(delays).toEqual([30_000]);
+    expect(delays).toEqual([60_000]);
+  });
+});
+
+describe("sleep", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("keeps the event loop alive while a backoff is pending", async () => {
+    // Regression: this timer was unref'd "so a backoff can't hold the process
+    // open". But during a retry the dead socket holds nothing either, so the
+    // timer is the only ref left — `arterm --print` exited 0 mid-backoff with no
+    // answer, no error, and no second attempt. Cancellation is `signal`'s job.
+    const realSetTimeout = globalThis.setTimeout;
+    let unrefCalled = false;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ): ReturnType<typeof setTimeout> => {
+      const handle = realSetTimeout(fn, ms);
+      const realUnref = handle.unref.bind(handle);
+      handle.unref = () => {
+        unrefCalled = true;
+        return realUnref();
+      };
+      return handle;
+    }) as unknown as typeof setTimeout);
+
+    await sleep(1);
+    expect(unrefCalled).toBe(false);
+  });
+
+  it("rejects immediately when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(sleep(50_000, controller.signal)).rejects.toBeDefined();
+  });
+
+  it("rejects as soon as the signal fires, without waiting out the delay", async () => {
+    const controller = new AbortController();
+    const pending = sleep(50_000, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toBeDefined();
   });
 });

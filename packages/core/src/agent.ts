@@ -11,6 +11,7 @@ import {
 } from "./kernel/index.js";
 import { modelContextWindow } from "./modelsDev.js";
 import type { PermissionManager } from "./permissions.js";
+import { ProviderError } from "./providerError.js";
 import { estimateHistoryTokens } from "./tokenEstimate.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
@@ -629,7 +630,21 @@ export class Agent {
         this.bus.emit({ type: "run_limit", kind: "iterations", limit, used: limit });
       }
     } catch (err) {
-      this.bus.emit({ type: "error", error: err instanceof Error ? err.message : String(err) });
+      // Carry the provider taxonomy when there is one, so the UI and the desktop
+      // bridge can distinguish "your key is dead" from "the socket dropped"
+      // without parsing the message.
+      this.bus.emit(
+        ProviderError.is(err)
+          ? {
+              type: "error",
+              error: err.message,
+              kind: err.kind,
+              provider: err.provider,
+              status: err.status,
+              retryable: err.retryable,
+            }
+          : { type: "error", error: err instanceof Error ? err.message : String(err) },
+      );
     } finally {
       if (signal) signal.removeEventListener("abort", onExternalAbort);
       // Teardown (LIFO) runs the turn_end emit; idempotent and never throws.

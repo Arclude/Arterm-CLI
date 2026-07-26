@@ -6,12 +6,21 @@
  * output, so mid-stream failures still propagate to the caller. Retryable
  * failures are network errors (fetch rejection) and 408/429/5xx responses;
  * an abort from the caller's signal is never retried.
+ *
+ * When the server states how long it will keep refusing (`Retry-After`) and that
+ * is longer than {@link MAX_WAIT_MS}, retrying stops immediately — see
+ * `exceedsWaitBudget`.
  */
 
-/** HTTP statuses worth retrying — transient by definition. */
-const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+import { parseRetryAfter } from "@arterm/core";
 
-/** Hard cap on a single wait, even when Retry-After asks for more. */
+/** HTTP statuses worth retrying — transient by definition. 529 is "overloaded". */
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
+
+/**
+ * The longest we are willing to sit inside one backoff. Doubles as the retry
+ * budget: a `Retry-After` above this means retrying here is pointless.
+ */
 const MAX_WAIT_MS = 30_000;
 
 export interface RetryOptions {
@@ -19,12 +28,27 @@ export interface RetryOptions {
   retries?: number;
   /** First backoff delay; doubles per attempt with jitter (default 500ms). */
   baseDelayMs?: number;
+  /**
+   * Longest single wait, and the `Retry-After` above which retrying is abandoned
+   * (default 30s).
+   */
+  maxWaitMs?: number;
   /** Abort waiting (and give up) when this fires. */
   signal?: AbortSignal;
   /** Injectable for tests. */
   fetchImpl?: typeof fetch;
   /** Injectable for tests — resolves after ms or rejects on abort. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+/** Wait `ms`, rejecting if `signal` fires first. Exported for stream replay backoff. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return defaultSleep(ms, signal);
+}
+
+/** Full-jitter exponential backoff for attempt `n` (0-based). */
+export function backoffDelay(attempt: number, baseDelayMs = 500): number {
+  return delayFor(attempt, baseDelayMs, null, MAX_WAIT_MS);
 }
 
 function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -37,8 +61,11 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
       signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
-    // Don't keep the process alive just to wait out a backoff.
-    timer.unref?.();
+    // Deliberately NOT unref'd. A backoff is a turn in progress, and this timer
+    // is often the only thing left holding the event loop open — the dead socket
+    // that caused the retry holds nothing. Unref'ing it let `arterm --print`
+    // exit 0 mid-backoff: no answer, no error, no retry, silent success.
+    // Cancellation is `signal`'s job, not the loop's.
     const onAbort = () => {
       clearTimeout(timer);
       reject(abortError(signal));
@@ -57,18 +84,32 @@ function isAbort(err: unknown, signal?: AbortSignal): boolean {
 }
 
 /** Delay before attempt `n` (0-based), honoring a Retry-After header when given. */
-function delayFor(attempt: number, baseDelayMs: number, retryAfter: string | null): number {
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) {
-      return Math.min(seconds * 1000, MAX_WAIT_MS);
-    }
-    const dateMs = Date.parse(retryAfter) - Date.now();
-    if (Number.isFinite(dateMs) && dateMs > 0) return Math.min(dateMs, MAX_WAIT_MS);
-  }
+function delayFor(
+  attempt: number,
+  baseDelayMs: number,
+  retryAfter: string | null,
+  maxWaitMs: number,
+): number {
+  const asked = parseRetryAfter(retryAfter);
+  if (asked !== null) return Math.min(asked, maxWaitMs);
   // Full-jitter exponential backoff: uniform in [0, base * 2^attempt].
-  const cap = Math.min(baseDelayMs * 2 ** attempt, MAX_WAIT_MS);
+  const cap = Math.min(baseDelayMs * 2 ** attempt, maxWaitMs);
   return Math.random() * cap;
+}
+
+/**
+ * Whether the server's `Retry-After` is longer than we are prepared to wait.
+ *
+ * When it is, retrying is pure delay dressed up as resilience: clamping the wait
+ * to 30s does not make a one-hour rate limit clear any sooner — it just buys the
+ * same refusal three more times, 90 seconds later. Giving up now lets the
+ * fallback chain reach a model that will actually answer, and a user with no
+ * chain configured sees an accurate "rate limited for 58m" immediately instead
+ * of after a minute and a half of silent waiting.
+ */
+function exceedsWaitBudget(retryAfter: string | null, maxWaitMs: number): boolean {
+  const asked = parseRetryAfter(retryAfter);
+  return asked !== null && asked > maxWaitMs;
 }
 
 /**
@@ -82,21 +123,30 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const retries = opts.retries ?? 3;
   const baseDelayMs = opts.baseDelayMs ?? 500;
+  const maxWaitMs = opts.maxWaitMs ?? MAX_WAIT_MS;
   const doFetch = opts.fetchImpl ?? fetch;
   const sleep = opts.sleep ?? defaultSleep;
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) {
-      await sleep(delayFor(attempt - 1, baseDelayMs, retryAfterOf(lastError)), opts.signal);
+      await sleep(
+        delayFor(attempt - 1, baseDelayMs, retryAfterOf(lastError), maxWaitMs),
+        opts.signal,
+      );
     }
     try {
       const res = await doFetch(url, init);
       if (res.ok || !RETRYABLE_STATUS.has(res.status)) return res;
       if (attempt === retries) return res;
+      const retryAfter = res.headers.get("retry-after");
+      // Hand the response back unread: the caller turns it into a ProviderError
+      // whose detail comes from the body, and the fallback chain switches models
+      // now rather than after three doomed attempts.
+      if (exceedsWaitBudget(retryAfter, maxWaitMs)) return res;
       // Drain the failed body so the connection can be reused, then back off.
       const detail = await res.text().catch(() => "");
-      lastError = new RetryableStatusError(res.status, detail, res.headers.get("retry-after"));
+      lastError = new RetryableStatusError(res.status, detail, retryAfter);
     } catch (err) {
       if (isAbort(err, opts.signal)) throw err;
       if (attempt === retries) throw err;

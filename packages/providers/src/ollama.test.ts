@@ -68,3 +68,51 @@ describe("OllamaProvider.chat tool-call normalization", () => {
     }
   });
 });
+
+/** A 200 whose body dies the way a dropped socket does, before any content. */
+function dyingResponse(): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(
+        Object.assign(new TypeError("terminated"), {
+          cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+        }),
+      );
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
+describe("OllamaProvider.chat resilience", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("recovers a turn whose connection dropped before the first token", async () => {
+    let calls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls++;
+      if (calls === 1) return dyingResponse();
+      return ndjsonResponse([
+        { message: { content: "hello" } },
+        { done: true, prompt_eval_count: 1, eval_count: 1 },
+      ]);
+    });
+
+    const p = new OllamaProvider({ host: "http://localhost:11434" });
+    const chunks: ChatChunk[] = [];
+    for await (const c of p.chat({ model: "llama3", messages: [] })) chunks.push(c);
+
+    expect(calls).toBe(2);
+    expect(chunks.filter((c) => c.type === "text").map((c) => c.delta)).toEqual(["hello"]);
+  });
+
+  it("reports a rejected key as a non-retryable auth failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("no", { status: 401 }));
+    const p = new OllamaProvider({ host: "http://localhost:11434" });
+
+    await expect(
+      (async () => {
+        for await (const _ of p.chat({ model: "llama3", messages: [] }));
+      })(),
+    ).rejects.toMatchObject({ name: "ProviderError", kind: "auth", retryable: false });
+  });
+});

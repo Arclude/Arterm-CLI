@@ -21,6 +21,16 @@ export interface ArtermConfig {
   openaiCompatHeaders: Record<string, string>;
   /** Directory holding .gguf files for direct loading. */
   modelsDir: string;
+  /**
+   * Models to fall back to, in order, when the active one fails with a retryable
+   * error (quota, overload, outage, dropped connection) — and only before any
+   * output has been produced. Empty (the default) keeps the single-model path.
+   *
+   * `provider` defaults to the active one, so `[{ model: "llama3" }]` is a
+   * same-provider fallback and `[{ provider: "anthropic", model: "…" }]` crosses
+   * vendors. A cross-vendor target needs its own credentials configured.
+   */
+  fallbackModels: Array<{ provider?: string; model: string }>;
   /** Sampling temperature. */
   temperature: number;
   /** Per-tool permission overrides, persisted by "always allow". */
@@ -142,7 +152,10 @@ export interface ArtermConfig {
   };
   /** Loopback status server for the Arterm desktop app (docs/desktop-integration.md). */
   statusServer?: {
-    /** true = always, false = never, "auto" = only when ARTERM_TERMINAL is set (default). */
+    /**
+     * true = always (headless included), false = never, "auto" = every interactive
+     * session in any terminal, headless only inside the Arterm terminal (default).
+     */
     enabled?: boolean | "auto";
     /** Listen port; 0 = OS-assigned ephemeral (default — collision-free across sessions). */
     port?: number;
@@ -220,6 +233,7 @@ export function defaultConfig(): ArtermConfig {
     openaiCompatHost: process.env.OPENAI_COMPAT_HOST ?? "http://localhost:1234/v1",
     openaiCompatHeaders: {},
     modelsDir: join(ARTERM_HOME, "models"),
+    fallbackModels: [],
     temperature: 0.7,
     permissions: {},
     mode: "ask",
@@ -266,6 +280,7 @@ const configFileSchema = z
     openaiCompatHost: z.string(),
     openaiCompatHeaders: z.record(z.string()),
     modelsDir: z.string(),
+    fallbackModels: z.array(z.object({ provider: z.string().optional(), model: z.string() })),
     temperature: z.number().min(0).max(2),
     permissions: z.record(z.enum(["allow", "ask", "deny"])),
     mode: z.enum(["ask", "auto", "plan", "yolo"]),

@@ -8,7 +8,9 @@ import {
   type ToolSchema,
   modelToolCall,
 } from "@arterm/core";
+import { providerErrorFromResponse } from "@arterm/core";
 import { parseNdjson } from "./ndjson.js";
+import { withStreamReplay } from "./replay.js";
 import { fetchWithRetry } from "./retry.js";
 import { streamIdleGuard } from "./timeout.js";
 
@@ -135,7 +137,15 @@ export class OllamaProvider implements ChatProvider {
     }
   }
 
+  /**
+   * A socket that dies before the first chunk costs nothing to re-issue, so the
+   * whole request is replayable until output starts flowing.
+   */
   async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {
+    yield* withStreamReplay(this.id, () => this.streamOnce(req), { signal: req.signal });
+  }
+
+  private async *streamOnce(req: ChatRequest): AsyncIterable<ChatChunk> {
     const body = {
       model: req.model,
       messages: req.messages.map(toOllamaMessage),
@@ -161,8 +171,7 @@ export class OllamaProvider implements ChatProvider {
         { signal: guard.signal },
       );
       if (!res.ok || !res.body) {
-        const detail = await res.text().catch(() => "");
-        throw new Error(`Ollama /api/chat failed: ${res.status} ${detail}`);
+        throw await providerErrorFromResponse(this.id, res, "/api/chat");
       }
 
       let promptTokens: number | undefined;
