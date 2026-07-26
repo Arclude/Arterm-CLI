@@ -3,7 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveWithin } from "./paths.js";
-import { editTool, globTool, multiEditTool, readTool, searchTool, writeTool } from "./registry.js";
+import {
+  editTool,
+  globTool,
+  multiEditTool,
+  readTool,
+  searchTool,
+  submitVerdictTool,
+  writeTool,
+} from "./registry.js";
 
 let dir: string;
 const ctx = () => ({ cwd: dir });
@@ -192,5 +200,39 @@ describe("searchTool index invalidation", () => {
     await writeTool.execute({ path: "bravo.txt", content: "lazy sleeping dog" }, ctx());
     const second = await searchTool.execute({ query: "lazy" }, ctx());
     expect(second.output).toContain("bravo.txt");
+  });
+});
+
+describe("submitVerdictTool", () => {
+  it("is allow + read, which is what survives the judge's own sandbox", () => {
+    // The judge runs with `ask: () => "deny"` and in plan mode, so an "ask"
+    // permission would deny its own verdict and any non-read category is blocked
+    // outright. Both fields are load-bearing, not stylistic.
+    expect(submitVerdictTool.permission).toBe("allow");
+    expect(submitVerdictTool.category).toBe("read");
+  });
+
+  it("requires only pass and summary", () => {
+    // mustFix stays optional on purpose: a required field a small model omits
+    // would be a parse failure, and a parse failure fails OPEN — upgrading a
+    // rejection into an acceptance.
+    expect(submitVerdictTool.parameters.required).toEqual(["pass", "summary"]);
+  });
+
+  it("confirms a usable verdict", async () => {
+    const pass = await submitVerdictTool.execute({ pass: true, summary: "ok" }, ctx());
+    expect(pass.output).toContain("PASS");
+    expect(pass.isError).toBeUndefined();
+    const fail = await submitVerdictTool.execute(
+      { pass: false, summary: "no", mustFix: ["a.ts:1", "b.ts:2"] },
+      ctx(),
+    );
+    expect(fail.output).toContain("2 item(s)");
+  });
+
+  it("names the offending value when the payload is unusable", async () => {
+    const res = await submitVerdictTool.execute({ pass: "maybe", summary: "hm" }, ctx());
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain('"maybe"');
   });
 });

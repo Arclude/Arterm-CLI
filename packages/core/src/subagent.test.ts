@@ -8,6 +8,7 @@ import type { AgentEvent } from "./eventBus.js";
 import { PermissionManager } from "./permissions.js";
 import { availableRoles, roleInstruction, runFleet, runSubagent } from "./subagent.js";
 import type { ChatProvider, Tool } from "./types.js";
+import { VERDICT_TOOL_NAME, captureVerdict, decideVerdict, formatVerdictEcho } from "./verify.js";
 
 const runCmd = promisify(execFile);
 async function hasGit(): Promise<boolean> {
@@ -434,5 +435,187 @@ describe("runFleet", () => {
     expect(results[0]?.error).toBe(true);
     expect(results[0]?.output).toContain("sub-agent failed");
     await nodeFs.rm(repo, { recursive: true, force: true });
+  });
+});
+
+/**
+ * The verdict channel, proven through the real `runSubagent`. These are the
+ * regression tests for the old text check (`/^\s*PASS\b/i` on the return string),
+ * which read every infrastructure failure as a rejection.
+ */
+describe("runSubagent as a review channel", () => {
+  // core cannot import @arterm/tools (the dependency direction is one-way), so
+  // this mirrors submitVerdictTool: same name, same allow/read, same echo.
+  const verdictTool: Tool = {
+    name: VERDICT_TOOL_NAME,
+    description: "",
+    parameters: {},
+    permission: "allow",
+    category: "read",
+    execute: async (args) => formatVerdictEcho(args),
+  };
+
+  const base = {
+    model: "x",
+    tools: [],
+    permissions: new PermissionManager({}, "yolo"),
+    ask: async () => "deny" as const,
+    cwd: process.cwd(),
+    taskDone: verdictTool,
+    maxSteps: 2,
+  };
+
+  it("delivers an explicit rejection with its items", async () => {
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat() {
+        yield {
+          type: "tool_call",
+          call: {
+            id: "1",
+            name: "submit_verdict",
+            arguments: { pass: false, summary: "no parser", mustFix: ["add src/parser.ts"] },
+          },
+        };
+        yield { type: "done" };
+      },
+    };
+    const capture = captureVerdict();
+    const out = await runSubagent("review it", { ...base, provider, onEvent: capture.onEvent });
+    const decision = decideVerdict(capture.result());
+    expect(decision).toMatchObject({ pass: false, judged: true, mustFix: ["add src/parser.ts"] });
+    // The tool doubles as the run's terminal signal, so its summary is the output.
+    expect(out).toBe("no parser");
+  });
+
+  it("ends the review at the verdict, without a second step", async () => {
+    let calls = 0;
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat() {
+        calls += 1;
+        if (calls === 1) {
+          yield {
+            type: "tool_call",
+            call: { id: "1", name: "submit_verdict", arguments: { pass: true, summary: "fine" } },
+          };
+        } else {
+          yield { type: "text", delta: "reviewed" };
+        }
+        yield { type: "done" };
+      },
+    };
+    const capture = captureVerdict();
+    await runSubagent("review it", { ...base, provider, maxSteps: 4, onEvent: capture.onEvent });
+    expect(capture.result().verdict).toMatchObject({ pass: true });
+    // The verdict tool is the run's terminal signal: one step, not four.
+    expect(calls).toBeLessThanOrEqual(2);
+  });
+
+  it("yields no verdict when the provider is dead, so the caller accepts", async () => {
+    // The bug this replaces: `"sub-agent failed: 401 …"` does not start with PASS,
+    // so a dead API key was scored as two rejections and stopped the run —
+    // blaming the worker for an auth failure.
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      // biome-ignore lint/correctness/useYield: the provider fails before yielding
+      async *chat() {
+        throw new Error("/chat/completions failed: 401 quota exhausted");
+      },
+    };
+    const capture = captureVerdict();
+    const out = await runSubagent("review it", { ...base, provider, onEvent: capture.onEvent });
+    expect(out).toContain("sub-agent failed:");
+    expect(capture.result().verdict).toBeUndefined();
+    expect(decideVerdict(capture.result())).toMatchObject({ pass: true, judged: false });
+  });
+
+  it("yields no verdict when the judge only writes prose", async () => {
+    // Prose is not a channel. A model that says "FAIL: broken" without calling
+    // the tool has not delivered a verdict, and the claim is accepted unreviewed.
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat() {
+        yield { type: "text", delta: "FAIL: this is completely broken" };
+        yield { type: "done" };
+      },
+    };
+    const capture = captureVerdict();
+    await runSubagent("review it", { ...base, provider, onEvent: capture.onEvent });
+    const c = capture.result();
+    expect(c.verdict).toBeUndefined();
+    expect(c.reason).toBe("not-submitted");
+    expect(decideVerdict(c).pass).toBe(true);
+  });
+
+  it("yields no verdict when the payload is unreadable", async () => {
+    let calls = 0;
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat() {
+        calls += 1;
+        if (calls === 1) {
+          yield {
+            type: "tool_call",
+            call: { id: "1", name: "submit_verdict", arguments: { pass: "maybe", summary: "hm" } },
+          };
+        } else {
+          yield { type: "text", delta: "gave up" };
+        }
+        yield { type: "done" };
+      },
+    };
+    const capture = captureVerdict();
+    await runSubagent("review it", { ...base, provider, onEvent: capture.onEvent });
+    expect(capture.result().malformed).toBe(1);
+    expect(decideVerdict(capture.result()).pass).toBe(true);
+  });
+});
+
+describe("runSubagent truncation", () => {
+  it("marks a result that stopped at a cap as unfinished", async () => {
+    // A worker that ran out of iterations used to report its last message as if it
+    // were an answer, so the parent could not tell truncation from completion.
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat() {
+        yield { type: "text", delta: "still working on it" };
+        yield { type: "tool_call", call: { id: "t", name: "noop", arguments: {} } };
+        yield { type: "done" };
+      },
+    };
+    const noop: Tool = {
+      name: "noop",
+      description: "",
+      parameters: {},
+      permission: "allow",
+      category: "read",
+      execute: async () => ({ output: "ok" }),
+    };
+    const out = await runSubagent("keep going", {
+      provider,
+      model: "x",
+      tools: [noop],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      cwd: process.cwd(),
+      taskDone,
+      maxSteps: 1,
+      maxIterations: 2,
+    });
+    expect(out).toContain("[truncated: iterations cap 2 reached");
+    expect(out).toContain("still working on it");
   });
 });

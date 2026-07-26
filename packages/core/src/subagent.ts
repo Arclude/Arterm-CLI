@@ -53,10 +53,19 @@ export interface SubagentOptions {
   permissions: PermissionManager;
   ask: PermissionAsker;
   cwd: string;
-  /** The `task_done` tool the autonomy engine injects to detect completion. */
+  /**
+   * The terminal tool the autonomy engine injects to detect completion —
+   * `task_done` for work, `submit_verdict` for a review.
+   */
   taskDone: Tool;
   context?: ContextStrategy;
   maxSteps?: number;
+  /**
+   * Tool round-trips per step (Agent default 12). Worth setting for a bounded,
+   * short-lived sub-agent: `maxSteps` alone caps *steps*, and each step can burn
+   * the full iteration budget, so `maxSteps: 6` is really up to 72 model calls.
+   */
+  maxIterations?: number;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -79,6 +88,12 @@ const BRIDGED_EVENTS = new Set<AgentEvent["type"]>([
   "autonomy_step",
   "usage",
   "error",
+  // Why a sub-agent stopped is as much a fact as what it said. Without these a
+  // worker that hit its iteration/token cap looked identical to one that
+  // finished, and the parent had no way to tell truncation from completion.
+  "run_limit",
+  "autonomy_stopped",
+  "autonomy_done",
 ]);
 
 /**
@@ -102,18 +117,22 @@ export async function runSubagent(
     cwd: opts.cwd,
     context: opts.context,
     systemPrompt: opts.systemPrompt,
+    ...(opts.maxIterations !== undefined ? { maxIterations: opts.maxIterations } : {}),
   };
   const agent = new Agent(agentOpts);
 
   let lastAssistant = "";
   let doneSummary: string | undefined;
   let lastError = "";
+  let limit: { kind: "iterations" | "tokens"; limit: number } | undefined;
   const off = bus.on((e) => {
     if (e.type === "assistant_message") {
       const text = e.message.content.trim();
       if (text) lastAssistant = text;
     } else if (e.type === "autonomy_done") {
       doneSummary = e.summary;
+    } else if (e.type === "run_limit") {
+      limit = { kind: e.kind, limit: e.limit };
     } else if (e.type === "error") {
       // The agent loop swallows provider errors into bus events; on this PRIVATE
       // bus nobody else sees them, so keep the last one to surface as the result
@@ -136,7 +155,14 @@ export async function runSubagent(
   } finally {
     off();
   }
-  if (doneSummary || lastAssistant) return doneSummary || lastAssistant;
+  // A worker that hit a cap in an earlier step and then declared itself done DID
+  // finish; only an undeclared result is suspect.
+  if (doneSummary) return doneSummary;
+  if (lastAssistant) {
+    return limit
+      ? `[truncated: ${limit.kind} cap ${limit.limit} reached — this result is UNFINISHED]\n${lastAssistant}`
+      : lastAssistant;
+  }
   // Nothing produced: report WHY instead of a blank shrug — a provider failure
   // (401 quota, unreachable host, …) was previously invisible to the caller.
   return lastError ? `sub-agent failed: ${lastError}` : "(sub-agent produced no output)";

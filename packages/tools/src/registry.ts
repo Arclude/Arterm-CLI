@@ -10,6 +10,7 @@ import { multiEditTool } from "./multiEdit.js";
 import { formatTool, lintTool, testTool } from "./project.js";
 import { readTool } from "./read.js";
 import { searchTool } from "./search.js";
+import { submitVerdictTool } from "./submitVerdict.js";
 import { symbolsTool } from "./symbols.js";
 import { taskDoneTool } from "./taskDone.js";
 import { toolSearchTool } from "./toolSearch.js";
@@ -42,8 +43,9 @@ export function defaultTools(): Tool[] {
   ];
 }
 
-// taskDoneTool is intentionally NOT in defaultTools — the autonomy engine injects
-// it only while a goal is running.
+// taskDoneTool and submitVerdictTool are intentionally NOT in defaultTools — both
+// are injected as a run's terminal tool (a goal's, a review's) rather than being
+// ambient, which also keeps them off the `permissions list` / `explain` surface.
 export {
   readTool,
   lsTool,
@@ -65,4 +67,5 @@ export {
   toolSearchTool,
   batchTool,
   taskDoneTool,
+  submitVerdictTool,
 };

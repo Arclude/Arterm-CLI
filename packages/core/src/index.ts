@@ -27,6 +27,7 @@ export * from "./blackboard.js";
 export * from "./memberMemory.js";
 export * from "./autonomy.js";
 export * from "./subagent.js";
+export * from "./verify.js";
 export * from "./team.js";
 export * from "./worktree.js";
 export * from "./runGate.js";

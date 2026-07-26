@@ -874,11 +874,12 @@ Integrate them: note concisely what is now done and what still remains. Do not c
     const steer = this.pendingSteer;
     this.pendingSteer = undefined;
     const steerLine = steer ? `\n\nSteering update from the user: "${steer}"` : "";
-    const intro =
-      "Work step by step using your tools. Take ONE concrete action now. When — and only when — " +
-      "the GOAL is fully achieved, call the `task_done` tool with a short summary.";
-    const cont =
-      "Take the next concrete action now. If it is fully complete, call `task_done` with a summary.";
+    // Name the tool the engine was actually given, not the literal `task_done`.
+    // A run whose terminal tool is something else (a review's `submit_verdict`)
+    // would otherwise be told to call a tool it does not have.
+    const done = `\`${this.taskDone.name}\``;
+    const intro = `Work step by step using your tools. Take ONE concrete action now. When — and only when — the GOAL is fully achieved, call the ${done} tool with a short summary.`;
+    const cont = `Take the next concrete action now. If it is fully complete, call ${done} with a summary.`;
     if (this.step === 1) {
       return `You are now working autonomously toward this GOAL:\n"${this.goal}"\n\n${intro}${steerLine}`;
     }
