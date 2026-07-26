@@ -370,3 +370,33 @@ healthy one. `lastError` is what makes the difference visible to a client that p
   stays accurate until the next switch.
 - A turn that the chain rescued produces a `lastFallback` and **no** `lastError`: the failure
   was absorbed, not surfaced. A turn that exhausted the chain produces both.
+
+## 11. Verification verdicts
+
+`autonomy_verify` carries the outcome of a result gate. Within `v: 1` every field past
+`pass` is additive and optional.
+
+```ts
+type AutonomyVerifyEvent = {
+  type: "autonomy_verify";
+  pass: boolean;
+  note?: string;                       // one line, already user-facing
+  by?: "command" | "judge";            // which half decided
+  mustFix?: string[];                  // concrete items (present on a rejection)
+  skipped?: boolean;                   // NO verdict was obtained; the claim passed by default
+  attempt?: number;                    // 1-based repair attempt
+  scope?: "goal" | "phase" | "round" | "task";
+  id?: string;                         // the phase/round/task id, when scope !== "goal"
+};
+```
+
+- **`skipped: true` must not render as verified.** It means the reviewer was
+  unreachable or produced nothing usable, and the claim was accepted rather than
+  rejected — "unverified", which is a different thing from "verified". A green
+  checkmark here would misreport an outage as a quality signal.
+- `pass: false` always arrives with a `note`, and usually with `mustFix`. Those items
+  are what the worker is about to be given, so showing them makes the next attempt legible.
+- `SddTaskState` gained `"blocked"`: a task that can never run because a dependency
+  failed. It is distinct from `failed` (this task never ran) and from `pending` (which
+  implies it still might), and `sdd_done.blocked` counts them. A board that only knows
+  the four original states should treat `blocked` as terminal, not as queued.

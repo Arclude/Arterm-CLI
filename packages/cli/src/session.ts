@@ -560,6 +560,14 @@ export async function buildSession(opts: SessionOptions): Promise<{
       maxQuestions: config.sdd?.maxQuestions,
       maxTasks: config.sdd?.maxTasks,
       fanout: config.fleet?.concurrency,
+      cwd,
+      // The gate must run in the tree the workers wrote to. /sdd's fleet defaults
+      // to `isolation: "none"`, so that is `cwd`; a worktree-isolated fleet with
+      // `mergeStrategy: "surface"` leaves the changes on a branch instead, and
+      // verifying `cwd` there would review a tree without the work in it.
+      ...(config.fleet?.isolation === "worktree" && config.fleet?.mergeStrategy !== "apply"
+        ? {}
+        : { verify: verifier }),
     },
   );
 

@@ -245,6 +245,18 @@ export class AutonomyEngine {
     return `An independent reviewer rejected the result: ${res.reason ?? "criteria not met"}${items}\nAddress this concretely before declaring the work done again.`;
   }
 
+  /**
+   * What a fan-out round claims: the leader's integration text, plus a per-worker
+   * ✓/✗ line. The reviewer needs to see that a slot failed — the leader's prose
+   * routinely reads as if everything landed.
+   */
+  private roundClaim(note: string, results: AutonomyTaskResult[]): string {
+    const rows = results
+      .map((r) => `${r.error ? "✗" : "✓"} ${r.role ?? r.id ?? "worker"}: ${r.task.slice(0, 120)}`)
+      .join("\n");
+    return [note, rows].filter(Boolean).join("\n\n");
+  }
+
   /** The run stopped because the verifier kept rejecting. Emitted from one place. */
   private stopRejected(): void {
     this._state = "stopped";
@@ -482,8 +494,16 @@ export class AutonomyEngine {
         const verdict = await this.agent.assess(this.goal, this.current.signal);
         this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
         if (verdict.done) {
-          this.finish(verdict.note || "goal complete");
-          return;
+          const claim = verdict.note || "goal complete";
+          if (await this.gateClaim(claim, { scope: "goal" })) {
+            this.finish(claim);
+            return;
+          }
+          if (this.stopped) break;
+          if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
+          // A rejection means more work, and "more work" in this mode is another
+          // round — the repair note is already queued for the next decompose().
+          continue;
         }
         this.idleStreak += 1;
         if (this.idleStreak >= 2) {
@@ -519,8 +539,13 @@ export class AutonomyEngine {
       const verdict = await this.agent.assess(this.goal, this.current.signal);
       this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
       if (verdict.done) {
-        this.finish(verdict.note || "goal complete");
-        return;
+        const claim = this.roundClaim(verdict.note || "goal complete", results);
+        if (await this.gateClaim(claim, { scope: "round", id: `r${round}` })) {
+          this.finish(verdict.note || "goal complete");
+          return;
+        }
+        if (this.stopped) break;
+        if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
       }
     }
     if (!this.stopped) {
@@ -587,9 +612,18 @@ export class AutonomyEngine {
         const verdict = await this.agent.assess(this.goal, this.current.signal);
         this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
         if (verdict.done) {
-          summary();
-          this.finish(verdict.note || "goal complete");
-          return;
+          const claim = verdict.note || "goal complete";
+          if (await this.gateClaim(claim, { scope: "goal" })) {
+            summary();
+            this.finish(claim);
+            return;
+          }
+          if (this.stopped) break;
+          if (this.verifyFails >= this.verifyAttempts) {
+            summary();
+            return this.stopRejected();
+          }
+          continue;
         }
         this.idleStreak += 1;
         if (this.idleStreak >= 2) {
@@ -674,9 +708,18 @@ export class AutonomyEngine {
       const verdict = await this.agent.assess(this.goal, this.current.signal);
       this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
       if (verdict.done) {
-        summary();
-        this.finish(verdict.note || "goal complete");
-        return;
+        const claim = this.roundClaim(verdict.note || "goal complete", results);
+        // summary() only after acceptance: a rejected round is not a finished team run.
+        if (await this.gateClaim(claim, { scope: "round", id: `r${round}` })) {
+          summary();
+          this.finish(verdict.note || "goal complete");
+          return;
+        }
+        if (this.stopped) break;
+        if (this.verifyFails >= this.verifyAttempts) {
+          summary();
+          return this.stopRejected();
+        }
       }
     }
     summary();
@@ -754,15 +797,51 @@ export class AutonomyEngine {
       });
       this.ckpt();
 
-      const summary = await this.runPhase(phase, i, phases.length, handoff);
+      // Repair attempts are scoped to this phase: a phase that needed two tries
+      // must not spend the next phase's budget.
+      this.verifyFails = 0;
+      let summary = await this.runPhase(phase, i, phases.length, handoff);
       if (this.stopped) return;
+
+      for (;;) {
+        await this.gate();
+        if (this.stopped) return;
+        if (await this.gateClaim(summary, { spec: phase.done, scope: "phase", id: phase.id }))
+          break;
+        if (this.stopped) return;
+        if (this.verifyFails >= this.verifyAttempts) {
+          // Out of attempts: carry the failure forward in the handoff rather than
+          // killing an eight-phase plan over one phase. The final goal gate decides.
+          summary = `${summary}\n\n[verification rejected this phase: ${
+            this.lastVerify?.reason ?? "criteria not met"
+          }]`;
+          break;
+        }
+        // runPhase consumes pendingSteer, so the retry receives the mustFix items.
+        summary = await this.runPhase(phase, i, phases.length, handoff);
+        if (this.stopped) return;
+      }
 
       handoff = summary;
       this.bus.emit({ type: "phase_done", id: phase.id, index: i, title: phase.title, summary });
     }
 
     const verdict = await this.agent.assess(this.goal, this.current?.signal);
-    this.finish(verdict.note || handoff || "all phases complete");
+    // This reflection was never emitted, and its verdict was thrown away — phased
+    // mode reported success even when its own assessment said the goal was not met.
+    this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
+    const claim = verdict.note || handoff || "all phases complete";
+    if (!verdict.done) {
+      this._state = "stopped";
+      this.bus.emit({
+        type: "autonomy_stopped",
+        reason: `all phases ran but the goal is not complete: ${verdict.note || "no reason given"}`,
+      });
+      return; // checkpoint survives — this run is resumable
+    }
+    this.verifyFails = 0;
+    if (!(await this.gateClaim(claim, { scope: "goal" }))) return this.stopRejected();
+    this.finish(claim);
   }
 
   /** Ask the leader for an ordered phase plan, parsed tolerantly with a fallback. */
@@ -775,7 +854,7 @@ export class AutonomyEngine {
 "${this.goal}"
 
 Break it into an ORDERED list of up to ${this.maxPhases} sequential phases (e.g. plan, implement, verify). Each phase runs after the previous one finishes.
-Reply with ONLY a JSON array shaped like ${jsonShape}, where "done" states how to know that phase is complete.${steerLine}`;
+Reply with ONLY a JSON array shaped like ${jsonShape}, where "done" states how to know that phase is complete. When a shell command can prove a phase is done, make the FIRST line of its "done" exactly \`verify: <command>\`.${steerLine}`;
     const raw = await this.agent.plan(prompt, this.current?.signal);
     return this.parsePhases(raw);
   }

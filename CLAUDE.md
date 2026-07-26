@@ -158,6 +158,53 @@ Don't edit the `run()` loop. Instead add/replace a middleware stage:
 4. The Brain Arbiter / risk-tier checks are the canonical extension point: extra
    `toolCall` middleware inserted `before` `execute`.
 
+## Verification: one gate, two parts
+
+`packages/core/src/verify.ts` decides whether a produced result is acceptable. It
+composes a **deterministic command gate** with an **LLM judge behind it**, and the
+two have deliberately opposite failure policies:
+
+- The command **fails closed**. An exit code is not an opinion, so it may block.
+- The judge **fails open**. Unreachable, confused, or too small to emit a tool
+  call — all accept the claim. Treating a judge's silence as a rejection turns
+  every infrastructure hiccup into lost finished work.
+
+That asymmetry is what makes verification safe to have on by default. Keep it.
+
+**The verdict is data, never prose.** The judge reports by calling
+`submit_verdict`, and the caller reads the arguments off the sub-agent's private
+bus (`captureVerdict`) — upstream of the permission pipeline, so a denial or a
+short-circuiting middleware cannot silently swallow it. The whole rule is:
+
+```ts
+verdict !== undefined && verdict.pass === false   // the only thing that blocks
+```
+
+Do not add a text check anywhere near this. `runSubagent` *returns* a failure
+string rather than throwing, so any "does the output say PASS" test reads a dead
+API key as a rejection — which is the bug this replaced.
+
+A rejection is never upgraded: `pass: false` with no `mustFix` still blocks, and a
+terse summary never invalidates a verdict. `refs` is reported, never gated on;
+`inspected` (the judge's non-verdict tool calls) is the evidence signal, because
+an integer cannot misfire the way a "does this sound vague" regex can.
+
+**`extractVerifyCommand` is the security boundary** — the one place free text
+becomes a command. It demands a whole line reading `verify: <cmd>`; prose that
+merely mentions verification yields nothing. The command reaches `sh -c` as a
+single positional argument (never `shell: true`), so the shell interprets
+metacharacters rather than Node.
+
+`AutonomyEngine.gateClaim()` is the single call site for every mode. A rejection
+queues its `mustFix` items into `pendingSteer`, which every mode's prompt builder
+already consumes — that is why no mode needs its own repair plumbing. `eternal`
+is exempt on purpose: it never makes a completion claim.
+
+**The judge runs where the worker wrote.** Never in a fresh worktree —
+`createWorktree` bases on `HEAD`, i.e. a tree with the change absent, where a
+verifier passes trivially. `/sdd` verification is therefore skipped entirely when
+`fleet.isolation` is `worktree` and `mergeStrategy` isn't `apply`.
+
 ## Permissions: one ladder, three callers
 
 `PermissionManager.evaluate()` is the whole policy — a pure function returning

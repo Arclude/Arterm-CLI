@@ -1227,7 +1227,9 @@ export function App({
         case "sdd_done":
           push({
             kind: "system",
-            text: `■ /sdd complete — ${event.done} done, ${event.failed} failed`,
+            text: `■ /sdd complete — ${event.done} done, ${event.failed} failed${
+              event.blocked ? `, ${event.blocked} blocked` : ""
+            }`,
           });
           break;
         case "error":

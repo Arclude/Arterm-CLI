@@ -4,6 +4,7 @@ import type { EventBus, SddTaskState } from "./eventBus.js";
 import { RunGate } from "./runGate.js";
 import type { SddStore } from "./sddStore.js";
 import { availableRoles } from "./subagent.js";
+import { type Verifier, extractVerifyCommand } from "./verify.js";
 
 /** Runs a batch of independent tasks concurrently and returns ordered results. */
 export type SddFleetRunner = (
@@ -46,6 +47,13 @@ export interface SddRunnerOptions {
   fanout?: number;
   /** Per-task cwd override (e.g. a git worktree). Defaults to the shared cwd. */
   cwdFor?: (taskId: string) => string | undefined;
+  /** The tree a declared verification command runs in — the one workers wrote to. */
+  cwd?: string;
+  /**
+   * Result verifier. A task whose output the verifier rejects is `failed`, which
+   * blocks its dependents — and those are now reported rather than vanishing.
+   */
+  verify?: Verifier;
   /** Supplies a timestamp + id; injectable for tests. Defaults to Date-based. */
   now?: () => string;
 }
@@ -135,7 +143,8 @@ Reply with ONLY a JSON array of strings. If the brief is already clear, reply wi
 
 First output the spec as markdown. Then output a task graph as a fenced \`\`\`json code block shaped like:
 {"tasks":[{"id":"t1","title":"...","description":"...","dependsOn":[],"role":"<optional: ${roles}>"}]}
-Keep it to at most ${this.maxTasks} tasks. "dependsOn" lists ids of tasks that must finish first.`;
+Keep it to at most ${this.maxTasks} tasks. "dependsOn" lists ids of tasks that must finish first.
+When a shell command can prove a task is done, make the FIRST line of its "description" exactly \`verify: <command>\` — that command then gates the task.`;
     const raw = await this.agent.plan(prompt, this.current?.signal);
 
     const graph = this.validateGraph(parseGraph(raw), brief);
@@ -189,17 +198,64 @@ Keep it to at most ${this.maxTasks} tasks. "dependsOn" lists ids of tasks that m
         continue;
       }
 
+      const verified = await Promise.all(
+        wave.map(async (t, i) => {
+          const r = results[i];
+          if (!this.opts.verify || !r || r.error === true) return undefined;
+          const res = await this.opts.verify({
+            goal: `${t.title}\n\n${t.description}`,
+            claim: r.output,
+            spec: t.description,
+            cwd: this.opts.cwdFor?.(t.id) ?? this.opts.cwd,
+            ...(this.current?.signal ? { signal: this.current.signal } : {}),
+          });
+          this.bus.emit({
+            type: "autonomy_verify",
+            pass: res.pass,
+            ...(res.reason ? { note: res.reason } : {}),
+            ...(res.by ? { by: res.by } : {}),
+            ...(res.mustFix?.length ? { mustFix: res.mustFix } : {}),
+            ...(res.skipped ? { skipped: true } : {}),
+            scope: "task",
+            id: t.id,
+          });
+          return res;
+        }),
+      );
+
       wave.forEach((t, i) => {
-        const output = results[i]?.output ?? "";
-        const ok = !output.startsWith("sub-agent failed");
+        const r = results[i];
+        // Trust the fleet's own flag rather than re-sniffing the output prefix: a
+        // patch conflict sets `error` WITHOUT changing the text, so a prefix test
+        // scored those as done.
+        const gate = verified[i];
+        const ok = !!r && r.error !== true && gate?.pass !== false;
         t.state = ok ? "done" : "failed";
-        t.output = output;
+        t.output =
+          gate?.pass === false
+            ? `${r?.output ?? ""}\n\n[verification failed: ${gate.reason ?? "criteria not met"}]`
+            : (r?.output ?? "");
         (ok ? done : failed).add(t.id);
         this.bus.emit({ type: "sdd_task_state", id: t.id, title: t.title, state: t.state });
       });
     }
 
-    this.bus.emit({ type: "sdd_done", id: this.specId, done: done.size, failed: failed.size });
+    // The loop exits only when no pending task has all its dependencies done, so
+    // everything still pending is permanently unreachable. A user /stop also leaves
+    // pending tasks, but those are cancelled rather than blocked — skip the sweep.
+    const blocked = this.gate.stopped ? [] : graph.tasks.filter((t) => t.state === "pending");
+    for (const t of blocked) {
+      t.state = "blocked";
+      this.bus.emit({ type: "sdd_task_state", id: t.id, title: t.title, state: "blocked" });
+    }
+
+    this.bus.emit({
+      type: "sdd_done",
+      id: this.specId,
+      done: done.size,
+      failed: failed.size,
+      blocked: blocked.length,
+    });
   }
 
   /** Drop unknown deps, break cycles, clamp roles, cap task count; non-empty fallback. */
@@ -242,7 +298,14 @@ Keep it to at most ${this.maxTasks} tasks. "dependsOn" lists ids of tasks that m
 }
 
 function taskPrompt(t: SddTask): string {
-  return `${t.title}\n\n${t.description}`;
+  // Tell the worker how it will be graded. A task that declares a command is
+  // only accepted when that command exits 0, so running it first is strictly
+  // cheaper than being rejected for it.
+  const cmd = extractVerifyCommand(t.description);
+  const gate = cmd
+    ? `\n\nThis task is only accepted when \`${cmd}\` exits 0. Run it yourself before you finish.`
+    : "";
+  return `${t.title}\n\n${t.description}${gate}`;
 }
 
 function defaultNow(): string {

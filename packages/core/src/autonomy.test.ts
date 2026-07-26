@@ -64,8 +64,11 @@ class FakeAgent {
   }
   // Scripted decomposition output, one entry per round (defaults to "[]").
   plans: string[] = [];
+  /** Prompts passed to plan() — decompose/roster/assign/phase-plan all go through it. */
+  planPrompts: string[] = [];
   private planN = 0;
-  async plan(): Promise<string> {
+  async plan(prompt?: string): Promise<string> {
+    if (prompt !== undefined) this.planPrompts.push(prompt);
     const out = this.plans[this.planN] ?? "[]";
     this.planN += 1;
     return out;
@@ -79,9 +82,12 @@ function makeEngine(
     mode?: AutonomyMode;
     maxSteps?: number;
     fanout?: number;
+    teamRounds?: number;
     runFleet?: AutonomyFleetRunner;
     blackboard?: Blackboard;
     memberMemory?: MemberMemory;
+    verify?: Verifier;
+    verifyAttempts?: number;
   },
 ) {
   return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, opts);
@@ -530,6 +536,98 @@ describe("AutonomyEngine (parallel mode)", () => {
     expect(engine.state).toBe("done");
   });
 
+  it("stops instead of claiming success when its own assessment says CONTINUE", async () => {
+    // Phased used to discard `verdict.done` entirely, so every run that reached
+    // the last phase reported success — even one that had just been told it was
+    // not finished.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"title":"build","description":"build it","done":"built"}]'];
+    agent.assessVerdict = { done: false, note: "the parser is still missing" };
+    const events = collect(bus);
+    const runFleet: AutonomyFleetRunner = async (tasks) =>
+      tasks.map((t) => ({ ...t, output: "did some of it" }));
+    const engine = makeEngine(agent, bus, { mode: "phased", maxSteps: 5, runFleet });
+
+    await engine.start("ship the parser");
+
+    expect(engine.state).toBe("stopped");
+    expect(events.some((e) => e.type === "autonomy_done")).toBe(false);
+    const stopped = events.find((e) => e.type === "autonomy_stopped");
+    expect(stopped && stopped.type === "autonomy_stopped" && stopped.reason).toContain(
+      "the parser is still missing",
+    );
+    // The reflection itself was never emitted either.
+    expect(events.some((e) => e.type === "autonomy_reflect")).toBe(true);
+  });
+
+  it("re-runs a phase the verifier rejected, handing it the mustFix items", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"title":"build","description":"build it","done":"built"}]'];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    let runs = 0;
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      runs += 1;
+      return tasks.map((t) => ({ ...t, output: `attempt ${runs}` }));
+    };
+    let judged = 0;
+    const engine = makeEngine(agent, bus, {
+      mode: "phased",
+      maxSteps: 5,
+      runFleet,
+      verify: async () => {
+        judged += 1;
+        return judged === 1
+          ? { pass: false, reason: "no tests", mustFix: ["cover the parser"] }
+          : { pass: true, reason: "ok" };
+      },
+    });
+
+    await engine.start("ship the parser");
+
+    expect(engine.state).toBe("done");
+    // The phase ran twice, and the retry's task carries the reviewer's item.
+    expect(runs).toBe(2);
+    const retry = agent.prompts.find((t) => t.includes("cover the parser"));
+    expect(retry).toBeDefined();
+  });
+
+  it("carries a phase forward when its repair attempts run out", async () => {
+    // One bad phase must not kill a whole plan — the failure rides the handoff and
+    // the final goal gate decides.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      '[{"title":"a","description":"first","done":"x"},{"title":"b","description":"second","done":"y"}]',
+    ];
+    agent.assessVerdict = { done: true, note: "DONE" };
+    const dispatched: AutonomyTask[][] = [];
+    const runFleet: AutonomyFleetRunner = async (tasks) => {
+      dispatched.push(tasks);
+      return tasks.map((t) => ({ ...t, output: "partial" }));
+    };
+    let n = 0;
+    const engine = makeEngine(agent, bus, {
+      mode: "phased",
+      maxSteps: 5,
+      runFleet,
+      verifyAttempts: 1,
+      verify: async () => {
+        n += 1;
+        // Reject phase 1 only; phase 2 and the goal gate pass.
+        return n === 1 ? { pass: false, reason: "incomplete" } : { pass: true };
+      },
+    });
+
+    await engine.start("ship it");
+
+    expect(engine.state).toBe("done");
+    // Phase 2 ran, and its task carries phase 1's rejection in the handoff.
+    expect(dispatched.length).toBeGreaterThanOrEqual(2);
+    expect(dispatched.at(-1)?.[0]?.task).toContain("verification rejected this phase");
+  });
+
   it("requires a fleet runner", async () => {
     const bus = new EventBus();
     const agent = new FakeAgent(bus);
@@ -860,5 +958,99 @@ describe("team mode", () => {
     const done = events.find((e) => e.type === "team_done");
     expect(done?.type === "team_done" && done.done).toBe(1);
     expect(done?.type === "team_done" && done.failed).toBe(1);
+  });
+});
+
+/**
+ * Verification in the fan-out modes. Neither needs a bespoke repair loop: their
+ * "continue" already means another round of work, and the repair note is queued
+ * where the next decompose/assign prompt reads it.
+ */
+describe("AutonomyEngine verification in fan-out modes", () => {
+  const runFleet: AutonomyFleetRunner = async (tasks) =>
+    tasks.map((t) => ({ ...t, output: `did ${t.task}` }));
+
+  it("parallel: a rejected round runs another one, carrying the mustFix items", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"task":"port the parser"}]', '[{"task":"add the tests"}]'];
+    agent.assessVerdicts = [
+      { done: true, note: "looks done" },
+      { done: true, note: "really done" },
+    ];
+    let n = 0;
+    const engine = makeEngine(agent, bus, {
+      mode: "parallel",
+      maxSteps: 4,
+      runFleet,
+      verify: async () => {
+        n += 1;
+        return n === 1
+          ? { pass: false, reason: "no tests", mustFix: ["cover the parser"] }
+          : { pass: true };
+      },
+    });
+
+    await engine.start("ship the parser");
+
+    expect(engine.state).toBe("done");
+    expect(n).toBe(2);
+    // The second decompose prompt carries the reviewer's item.
+    expect(agent.planPrompts.some((t) => t.includes("cover the parser"))).toBe(true);
+  });
+
+  it("parallel: shows the reviewer which slots failed, not just the leader's prose", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = ['[{"task":"a"},{"task":"b"}]'];
+    agent.assessVerdict = { done: true, note: "all good" };
+    let claim = "";
+    const engine = makeEngine(agent, bus, {
+      mode: "parallel",
+      maxSteps: 2,
+      runFleet: async (tasks) =>
+        tasks.map((t, i) => ({ ...t, output: "x", ...(i === 1 ? { error: true } : {}) })),
+      verify: async (req) => {
+        claim = req.claim;
+        return { pass: true };
+      },
+    });
+
+    await engine.start("do a and b");
+
+    expect(claim).toContain("all good");
+    expect(claim).toContain("✓");
+    expect(claim).toContain("✗");
+  });
+
+  it("team: a rejected round does not report the team run as finished", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.plans = [
+      '[{"name":"builder","instruction":"build"}]',
+      '[{"member":"builder","task":"port it"}]',
+      '[{"member":"builder","task":"test it"}]',
+    ];
+    agent.assessVerdicts = [
+      { done: true, note: "done" },
+      { done: true, note: "really done" },
+    ];
+    const events = collect(bus);
+    let n = 0;
+    const engine = makeEngine(agent, bus, {
+      mode: "team",
+      teamRounds: 3,
+      runFleet,
+      verify: async () => {
+        n += 1;
+        return n === 1 ? { pass: false, reason: "not yet" } : { pass: true };
+      },
+    });
+
+    await engine.start("ship it");
+
+    // team_done marks a finished run; the rejected round must not emit one.
+    expect(events.filter((e) => e.type === "team_done")).toHaveLength(1);
+    expect(engine.state).toBe("done");
   });
 });

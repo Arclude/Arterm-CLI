@@ -16,6 +16,9 @@ const COLUMNS: { state: SddTaskState; label: string; color: string }[] = [
   { state: "running", label: "RUNNING", color: "yellow" },
   { state: "done", label: "DONE", color: "green" },
   { state: "failed", label: "FAILED", color: "red" },
+  // A blocked task never ran because a dependency failed — its own column, so it
+  // is not mistaken for work still queued.
+  { state: "blocked", label: "BLOCKED", color: "gray" },
 ];
 
 const MAX_PER_COLUMN = 8;
@@ -87,6 +90,8 @@ function mark(state: SddTaskState): string {
       return "✓";
     case "failed":
       return "✗";
+    case "blocked":
+      return "⊘";
     default:
       return "·";
   }

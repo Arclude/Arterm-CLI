@@ -4,6 +4,7 @@ import type { AutonomyTask, AutonomyTaskResult } from "./autonomy.js";
 import { EventBus } from "./eventBus.js";
 import { SddRunner, type SddSpec, parseGraph, parseStringArray } from "./sdd.js";
 import type { SddStore } from "./sddStore.js";
+import type { Verifier } from "./verify.js";
 
 /** Scriptable Agent stand-in: plan() returns successive scripted strings. */
 class FakeAgent {
@@ -39,10 +40,12 @@ function makeRunner(
   bus: EventBus,
   runFleet: (t: AutonomyTask[], s: AbortSignal) => Promise<AutonomyTaskResult[]>,
   store: SddStore,
+  opts: { verify?: Verifier; cwd?: string } = {},
 ) {
   return new SddRunner(agent as unknown as Agent, bus, runFleet, store, {
     now: () => "TEST-ID",
     fanout: 8,
+    ...opts,
   });
 }
 
@@ -146,8 +149,65 @@ describe("SddRunner.execute", () => {
       if (e.type === "sdd_task_state") states.push({ id: e.id, state: e.state });
     });
     const runFleet = async (tasks: AutonomyTask[]) =>
-      tasks.map((t) => ({ ...t, output: "sub-agent failed: boom" }));
+      tasks.map((t) => ({ ...t, output: "sub-agent failed: boom", error: true }));
     const runner = makeRunner(agent, bus, runFleet, memStore());
+    let doneEvent: { done: number; failed: number; blocked: number } | undefined;
+    bus.on((e) => {
+      if (e.type === "sdd_done") doneEvent = { done: e.done, failed: e.failed, blocked: e.blocked };
+    });
+
+    await runner.execute({
+      tasks: [
+        { id: "t1", title: "first", description: "d", dependsOn: [], state: "pending" },
+        { id: "t2", title: "second", description: "d", dependsOn: ["t1"], state: "pending" },
+        { id: "t3", title: "third", description: "d", dependsOn: ["t2"], state: "pending" },
+      ],
+    });
+
+    // t1 ran and failed. t2 and t3 can never run — and saying so is the point:
+    // reporting "0 done, 1 failed" while two tasks silently never ran is a lie by
+    // omission, and it used to be exactly what happened (no event at all for them).
+    expect(states.some((s) => s.id === "t1" && s.state === "failed")).toBe(true);
+    expect(states.some((s) => s.id === "t2" && s.state === "blocked")).toBe(true);
+    expect(states.some((s) => s.id === "t3" && s.state === "blocked")).toBe(true);
+    expect(doneEvent).toEqual({ done: 0, failed: 1, blocked: 2 });
+  });
+
+  it("counts a patch conflict as failed, not done", async () => {
+    // runFleet flags a conflict with `error` WITHOUT changing the output text, so
+    // the old prefix sniff ("sub-agent failed…") scored those as successes.
+    const bus = new EventBus();
+    const agent = new FakeAgent();
+    const states: { id: string; state: string }[] = [];
+    bus.on((e) => {
+      if (e.type === "sdd_task_state") states.push({ id: e.id, state: e.state });
+    });
+    const runFleet = async (tasks: AutonomyTask[]) =>
+      tasks.map((t) => ({ ...t, output: "patch did not apply cleanly", error: true }));
+    const runner = makeRunner(agent, bus, runFleet, memStore());
+
+    await runner.execute({
+      tasks: [{ id: "t1", title: "first", description: "d", dependsOn: [], state: "pending" }],
+    });
+
+    expect(states.some((s) => s.id === "t1" && s.state === "failed")).toBe(true);
+  });
+
+  it("leaves a stopped run's tasks pending rather than calling them blocked", async () => {
+    // A user /stop cancels work; it does not make it unreachable.
+    const bus = new EventBus();
+    const agent = new FakeAgent();
+    const states: { id: string; state: string }[] = [];
+    bus.on((e) => {
+      if (e.type === "sdd_task_state") states.push({ id: e.id, state: e.state });
+    });
+    const runner = makeRunner(
+      agent,
+      bus,
+      async (tasks: AutonomyTask[]) => tasks.map((t) => ({ ...t, output: "ok" })),
+      memStore(),
+    );
+    runner.stop();
 
     await runner.execute({
       tasks: [
@@ -156,9 +216,7 @@ describe("SddRunner.execute", () => {
       ],
     });
 
-    // t1 ran and failed; t2 never ran (blocked).
-    expect(states.some((s) => s.id === "t1" && s.state === "failed")).toBe(true);
-    expect(states.some((s) => s.id === "t2")).toBe(false);
+    expect(states.some((s) => s.state === "blocked")).toBe(false);
   });
 
   it("emits sdd_done with done/failed counts", async () => {
@@ -204,5 +262,121 @@ describe("SddRunner.run", () => {
     expect(spec.id).toBe("TEST-ID");
     expect(store.saved).toHaveLength(1);
     expect(runner.state).toBe("done");
+  });
+});
+
+describe("SddRunner verification", () => {
+  it("marks a rejected task failed and reports its stranded dependents", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent();
+    const states: { id: string; state: string }[] = [];
+    let doneEvent: { done: number; failed: number; blocked: number } | undefined;
+    bus.on((e) => {
+      if (e.type === "sdd_task_state") states.push({ id: e.id, state: e.state });
+      if (e.type === "sdd_done") doneEvent = { done: e.done, failed: e.failed, blocked: e.blocked };
+    });
+    const runner = makeRunner(
+      agent,
+      bus,
+      async (tasks: AutonomyTask[]) => tasks.map((t) => ({ ...t, output: "claims it works" })),
+      memStore(),
+      { verify: async () => ({ pass: false, reason: "no tests", by: "judge" as const }) },
+    );
+
+    await runner.execute({
+      tasks: [
+        { id: "t1", title: "first", description: "d", dependsOn: [], state: "pending" },
+        { id: "t2", title: "second", description: "d", dependsOn: ["t1"], state: "pending" },
+      ],
+    });
+
+    // The worker said it worked; the reviewer disagreed, and the dependent is
+    // reported rather than silently never running.
+    expect(states.some((s) => s.id === "t1" && s.state === "failed")).toBe(true);
+    expect(doneEvent).toEqual({ done: 0, failed: 1, blocked: 1 });
+  });
+
+  it("emits a task-scoped verdict", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent();
+    const verdicts: { scope?: string; id?: string; pass: boolean }[] = [];
+    bus.on((e) => {
+      if (e.type === "autonomy_verify") verdicts.push({ scope: e.scope, id: e.id, pass: e.pass });
+    });
+    const runner = makeRunner(
+      agent,
+      bus,
+      async (tasks: AutonomyTask[]) => tasks.map((t) => ({ ...t, output: "ok" })),
+      memStore(),
+      { verify: async () => ({ pass: true, by: "command" as const }) },
+    );
+
+    await runner.execute({
+      tasks: [{ id: "t1", title: "first", description: "d", dependsOn: [], state: "pending" }],
+    });
+
+    expect(verdicts).toEqual([{ scope: "task", id: "t1", pass: true }]);
+  });
+
+  it("does not verify a task the fleet already failed", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent();
+    let judged = 0;
+    const runner = makeRunner(
+      agent,
+      bus,
+      async (tasks: AutonomyTask[]) =>
+        tasks.map((t) => ({ ...t, output: "sub-agent failed: boom", error: true })),
+      memStore(),
+      {
+        verify: async () => {
+          judged += 1;
+          return { pass: true };
+        },
+      },
+    );
+
+    await runner.execute({
+      tasks: [{ id: "t1", title: "first", description: "d", dependsOn: [], state: "pending" }],
+    });
+
+    expect(judged).toBe(0);
+  });
+
+  it("tells the worker about the command that will gate it", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent();
+    const dispatched: string[] = [];
+    const runner = makeRunner(
+      agent,
+      bus,
+      async (tasks: AutonomyTask[]) => {
+        for (const t of tasks) dispatched.push(t.task);
+        return tasks.map((t) => ({ ...t, output: "ok" }));
+      },
+      memStore(),
+    );
+
+    await runner.execute({
+      tasks: [
+        {
+          id: "t1",
+          title: "port it",
+          description: "verify: pnpm test",
+          dependsOn: [],
+          state: "pending",
+        },
+        {
+          id: "t2",
+          title: "doc it",
+          description: "write the readme",
+          dependsOn: [],
+          state: "pending",
+        },
+      ],
+    });
+
+    expect(dispatched[0]).toContain("only accepted when `pnpm test` exits 0");
+    expect(dispatched[1]).not.toContain("only accepted");
   });
 });

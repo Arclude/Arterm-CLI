@@ -162,7 +162,7 @@ export type AgentEvent =
       type: "team_member_state";
       id: string;
       name: string;
-      state: SddTaskState;
+      state: TeamMemberState;
       task?: string;
       filesChanged?: number;
     }
@@ -209,10 +209,33 @@ export type AgentEvent =
       tasks: { id: string; title: string; dependsOn: string[]; state: SddTaskState }[];
     }
   | { type: "sdd_task_state"; id: string; title: string; state: SddTaskState }
-  | { type: "sdd_done"; id: string; done: number; failed: number };
+  | {
+      type: "sdd_done";
+      id: string;
+      done: number;
+      failed: number;
+      /** Tasks that could never run because a dependency failed (see SddTaskState). */
+      blocked: number;
+    };
 
 /** Lifecycle state of a single /sdd task. */
-export type SddTaskState = "pending" | "running" | "done" | "failed";
+/**
+ * A team member's lifecycle. Kept separate from {@link SddTaskState} even though
+ * the four names coincide: a member is never "blocked" — nothing gates one member
+ * on another — and sharing one type meant widening the task states silently
+ * widened the member board too.
+ */
+export type TeamMemberState = "pending" | "running" | "done" | "failed";
+
+export type SddTaskState =
+  | TeamMemberState
+  /**
+   * Permanently unreachable: a dependency failed, or was itself blocked. Distinct
+   * from `failed` (this task never ran) and from `pending` (which implies it still
+   * might) — reporting "1 failed" while eleven tasks silently never ran is a lie
+   * by omission.
+   */
+  | "blocked";
 
 type Listener = (event: AgentEvent) => void;
 

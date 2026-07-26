@@ -23,6 +23,7 @@ const STATE_COLOR: Record<SddTaskState, string> = {
   running: "yellow",
   done: "green",
   failed: "red",
+  blocked: "gray",
 };
 
 function mark(state: SddTaskState): string {
@@ -33,6 +34,8 @@ function mark(state: SddTaskState): string {
       return "✓";
     case "failed":
       return "✗";
+    case "blocked":
+      return "⊘";
     default:
       return "·";
   }

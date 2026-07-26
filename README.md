@@ -263,6 +263,42 @@ unless you pass `--builtins-only`. `explain` exits 1 when the call would be
 blocked, so it works as a check in a script; `list` is an inventory and always
 exits 0.
 
+### Result verification
+
+Every completion claim an autonomous run makes — a finished goal, a phase, a
+round, an `/sdd` task — passes through one gate with two parts:
+
+1. **A deterministic command**, when the work declares one. Put a line reading
+   exactly `verify: <command>` in a goal, a phase's done-criteria, or a task's
+   description, and that command must exit 0. Nothing else in the text is ever
+   run as a command.
+2. **An independent reviewer**, in a fresh context with read-only tools. It
+   inspects the repository and reports a structured verdict; a rejection comes
+   back with concrete items, which are fed to the next attempt.
+
+```
+✓ verified (command) — build is green
+✗ verification failed (judge) phase, attempt 1 — no test covers the parser
+  • add a case for nested arrays in parser.test.ts
+⚠ verification unavailable — accepting the claim (no reviewer verdict arrived)
+```
+
+The third line is the important one. The reviewer **fails open**: an unreachable
+model, a dead key, or one too small to answer in the required form all accept the
+claim and say so, rather than rejecting finished work over an infrastructure
+problem. The command gate is the half that blocks. That is why this is on by
+default — it can catch a bad result, but it cannot break a working setup.
+
+```json
+{
+  "verify": { "enabled": true, "judge": true, "model": "qwen2.5-coder:14b", "attempts": 2 }
+}
+```
+
+`judge: false` keeps the free command gate without the model call; `model` points
+the reviewer at something better than the working model, which is worth doing if
+your main model is small. `enabled: false` turns the whole layer off.
+
 ### Fallback models
 
 When the active model fails with something a retry can't fix quickly — rate
