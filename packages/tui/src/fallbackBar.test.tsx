@@ -211,3 +211,43 @@ describe("/permissions", () => {
     unmount();
   });
 });
+
+/**
+ * Free-text slash commands must keep the text the user actually typed. The old
+ * parser split on whitespace and rejoined with single spaces, so a pasted
+ * multi-line goal was flattened — and a `verify: <cmd>` marker only counts when
+ * it opens a line, which made the deterministic gate unreachable from `/goal`.
+ */
+describe("slash commands preserve the body verbatim", () => {
+  it("keeps a multi-line goal intact", async () => {
+    const bus = new EventBus();
+    let started = "";
+    const session = fakeSession(bus, {
+      autonomy: {
+        state: "idle",
+        start: async (g: string) => {
+          started = g;
+        },
+        pause: () => {},
+        resume: () => {},
+        stop: () => {},
+        steer: () => {},
+        setMode: () => true,
+      },
+    } as unknown as Partial<Session>);
+    const { stdin, unmount } = render(createElement(App, { session }));
+    await tick();
+
+    // Bracketed paste is how a multi-line prompt actually arrives.
+    stdin.write("[200~/goal ship it\nverify: pnpm test[201~");
+    await tick();
+    stdin.write(ENTER);
+    await waitFor(
+      () => started,
+      (s) => s.length > 0,
+    );
+
+    expect(started).toBe("ship it\nverify: pnpm test");
+    unmount();
+  });
+});

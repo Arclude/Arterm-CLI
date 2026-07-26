@@ -1676,6 +1676,15 @@ export function App({
   const handleSlash = useCallback(
     async (raw: string): Promise<void> => {
       const [cmd, ...rest] = raw.slice(1).trim().split(/\s+/);
+      // The verbatim remainder after the command word. `rest.join(" ")` collapses
+      // every run of whitespace, which silently destroys the line structure of a
+      // pasted multi-line goal — and a `verify: <cmd>` marker only counts when it
+      // opens a line. Free-text commands take this; option-parsing ones keep `rest`.
+      const body = raw
+        .slice(1)
+        .trim()
+        .slice(cmd?.length ?? 0)
+        .trim();
       switch (cmd) {
         case "help":
         case "?":
@@ -1852,7 +1861,7 @@ export function App({
           applyMode(cmd);
           break;
         case "goal": {
-          const g = rest.join(" ").trim();
+          const g = body;
           if (!g) {
             push({ kind: "system", text: "usage: /goal <description>" });
           } else if (session.autonomy.state === "running" || session.autonomy.state === "paused") {
@@ -1863,10 +1872,10 @@ export function App({
           break;
         }
         case "autonomy": {
-          const [modeArg = "", ...goalParts] = rest.join(" ").trim().split(/\s+/);
+          const modeArg = rest[0] ?? "";
           const mode = modeArg.toLowerCase();
           const modes: AutonomyMode[] = ["once", "eternal", "parallel", "phased", "team"];
-          const g = goalParts.join(" ").trim();
+          const g = body.slice(modeArg.length).trim();
           if (!modes.includes(mode as AutonomyMode) || !g) {
             push({
               kind: "system",
@@ -1882,7 +1891,7 @@ export function App({
           break;
         }
         case "team": {
-          const g = rest.join(" ").trim();
+          const g = body;
           if (!g) {
             push({ kind: "system", text: "usage: /team <task>  (leader assembles an agent team)" });
           } else if (
@@ -1943,11 +1952,8 @@ export function App({
           break;
         }
         case "sdd": {
-          const skipInterview = /(^|\s)--yes\b/.test(` ${rest.join(" ")}`);
-          const brief = rest
-            .join(" ")
-            .replace(/(^|\s)--yes\b/g, "")
-            .trim();
+          const skipInterview = /(^|\s)--yes\b/.test(` ${body}`);
+          const brief = body.replace(/(^|\s)--yes\b/g, "").trim();
           if (!brief) {
             push({
               kind: "system",
@@ -1965,7 +1971,7 @@ export function App({
           break;
         }
         case "steer": {
-          const note = rest.join(" ").trim();
+          const note = body;
           if (!note) push({ kind: "system", text: "usage: /steer <note>" });
           else session.autonomy.steer(note);
           break;
