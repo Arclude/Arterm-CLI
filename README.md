@@ -205,6 +205,8 @@ Configuration lives in `~/.arterm/` and is created on demand.
 | `fallbackModels`   | Models to try, in order, when the active one is rate-limited or down. | `[]`    |
 | `temperature`      | Sampling temperature.                                | `0.7`                    |
 | `permissions`      | Per-tool overrides, persisted by "always allow".     | `{}`                     |
+| `budget.maxIterations` | Tool round-trips allowed in one turn.            | `50`                     |
+| `budget.turnTokens`| Per-turn token cap (unset = none).                   | —                        |
 
 ### Inspecting the permission policy
 

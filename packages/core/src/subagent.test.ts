@@ -619,3 +619,52 @@ describe("runSubagent truncation", () => {
     expect(out).toContain("still working on it");
   });
 });
+
+/**
+ * Config that reaches the main agent has to reach a sub-agent too. Each of these
+ * stopped at the boundary: the parent honored a limit while its workers — four at
+ * a time — did not, which is the same shape as a limit that does not exist.
+ */
+describe("runSubagent inherits the parent's limits", () => {
+  it("honors a turn token budget", async () => {
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat() {
+        yield { type: "text", delta: "working" };
+        yield { type: "tool_call", call: { id: "t", name: "noop", arguments: {} } };
+        yield {
+          type: "done",
+          usage: { promptTokens: 900, completionTokens: 100, totalTokens: 1000 },
+        };
+      },
+    };
+    const noop: Tool = {
+      name: "noop",
+      description: "",
+      parameters: {},
+      permission: "allow",
+      category: "read",
+      execute: async () => ({ output: "ok" }),
+    };
+    const limits: string[] = [];
+    const out = await runSubagent("keep going", {
+      provider,
+      model: "x",
+      tools: [noop],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      cwd: process.cwd(),
+      taskDone,
+      maxSteps: 1,
+      turnTokenBudget: 1500,
+      onEvent: (e) => {
+        if (e.type === "run_limit") limits.push(e.kind);
+      },
+    });
+
+    expect(limits).toContain("tokens");
+    expect(out).toContain("[truncated: tokens cap 1500");
+  });
+});

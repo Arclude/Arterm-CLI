@@ -229,6 +229,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     contextWindow: config.context?.window,
     compactAtPercent: config.context?.compactAtPercent,
     turnTokenBudget: config.budget?.turnTokens,
+    maxIterations: config.budget?.maxIterations,
     clearToolResults: config.context?.clearToolResults,
     clearAtPercent: config.context?.clearAtPercent,
     keepRecentToolResults: config.context?.keepRecentToolResults,
@@ -278,6 +279,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
       taskDone: taskDoneTool,
       context: createContextStrategy(config),
       maxSteps: config.autonomy?.maxSteps,
+      maxIterations: config.budget?.maxIterations,
+      turnTokenBudget: config.budget?.turnTokens,
+      contextWindow: config.context?.window,
+      compactAtPercent: config.context?.compactAtPercent,
       role,
     });
     bus.emit({ type: "subagent_done", output, role });
@@ -378,6 +383,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
         taskDone: taskDoneTool,
         context: createContextStrategy(config),
         maxSteps: config.autonomy?.maxSteps,
+        maxIterations: config.budget?.maxIterations,
+        turnTokenBudget: config.budget?.turnTokens,
+        contextWindow: config.context?.window,
+        compactAtPercent: config.context?.compactAtPercent,
         concurrency: config.fleet?.concurrency,
         isolation: config.fleet?.isolation ?? "none",
         onStart: (i, task, role) => {

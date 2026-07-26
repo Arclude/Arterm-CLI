@@ -66,6 +66,19 @@ export interface SubagentOptions {
    * the full iteration budget, so `maxSteps: 6` is really up to 72 model calls.
    */
   maxIterations?: number;
+  /**
+   * Per-turn token cap. Without it a configured budget stops at this boundary —
+   * a fleet of four would each spend without limit while the parent believed one
+   * cap covered the run.
+   */
+  turnTokenBudget?: number;
+  /**
+   * Context window and compaction threshold. Only load-bearing for a model the
+   * catalog doesn't know (a local GGUF): `effectiveContextWindow()` prefers the
+   * catalog, and with neither source a sub-agent never auto-compacts at all.
+   */
+  contextWindow?: number;
+  compactAtPercent?: number;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -118,6 +131,9 @@ export async function runSubagent(
     context: opts.context,
     systemPrompt: opts.systemPrompt,
     ...(opts.maxIterations !== undefined ? { maxIterations: opts.maxIterations } : {}),
+    ...(opts.turnTokenBudget !== undefined ? { turnTokenBudget: opts.turnTokenBudget } : {}),
+    ...(opts.contextWindow !== undefined ? { contextWindow: opts.contextWindow } : {}),
+    ...(opts.compactAtPercent !== undefined ? { compactAtPercent: opts.compactAtPercent } : {}),
   };
   const agent = new Agent(agentOpts);
 

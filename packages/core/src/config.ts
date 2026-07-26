@@ -71,6 +71,17 @@ export interface ArtermConfig {
      * cost). Unset = no token cap; the iteration cap still applies.
      */
     turnTokens?: number;
+    /**
+     * Tool round-trips allowed in one turn (default 50).
+     *
+     * This is a runaway guard, not a work budget: hitting it ends the turn with a
+     * `run_limit` event and a "send a message to continue" hint, so the only cost
+     * of a generous value is how long a genuinely stuck loop runs — and repeated
+     * identical calls are separately caught by the loop guard. A real task (read
+     * a few files, grep, edit, run tests, fix) routinely needs dozens, so a tight
+     * cap shows up as answers that stop mid-thought rather than as safety.
+     */
+    maxIterations?: number;
   };
   /** Autonomous goal-loop defaults (/goal). */
   autonomy: {
@@ -263,7 +274,7 @@ export function defaultConfig(): ArtermConfig {
     // maxSessions bounds disk usage. Set `session.mode: "off"` to disable.
     session: { mode: "jsonl", maxSessions: 100 },
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
-    budget: {},
+    budget: { maxIterations: 50 },
     autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
     verify: {
       enabled: true,
@@ -335,6 +346,7 @@ const configFileSchema = z
     budget: z
       .object({
         turnTokens: z.number().int().positive().optional(),
+        maxIterations: z.number().int().positive().optional(),
       })
       .partial(),
     autonomy: z
