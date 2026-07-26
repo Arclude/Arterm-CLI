@@ -140,6 +140,31 @@ describe("makeCompositeVerifier", () => {
     ]);
     expect(await composite({ goal: "g", claim: "c" })).toEqual({ pass: true });
   });
+
+  it("reports who actually decided, so a skip is not shown as verified", async () => {
+    // A green checkmark for an unreachable judge is worse than no checkmark.
+    const judged = makeCompositeVerifier([
+      async () => ({ pass: true, by: "command" as const }),
+      async () => ({ pass: true, by: "judge" as const }),
+    ]);
+    expect(await judged({ goal: "g", claim: "c" })).toMatchObject({ by: "judge" });
+
+    // A real decision outranks a skip, even when the skip came last.
+    const mixed = makeCompositeVerifier([
+      async () => ({ pass: true, by: "command" as const }),
+      async () => ({ pass: true, by: "judge" as const, skipped: true }),
+    ]);
+    const mixedRes = await mixed({ goal: "g", claim: "c" });
+    expect(mixedRes.by).toBe("command");
+    expect(mixedRes.skipped).toBeUndefined();
+
+    // Nothing judged: the skip IS the outcome.
+    const none = makeCompositeVerifier([
+      async () => ({ pass: true }),
+      async () => ({ pass: true, by: "judge" as const, skipped: true }),
+    ]);
+    expect(await none({ goal: "g", claim: "c" })).toMatchObject({ skipped: true });
+  });
 });
 
 describe("normalizeVerdict", () => {

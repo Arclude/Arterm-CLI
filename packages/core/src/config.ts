@@ -82,14 +82,36 @@ export interface ArtermConfig {
     maxPhases?: number;
     /** Phased mode: max sub-agents per parallel phase (default = fleet.concurrency). */
     phasedFanout?: number;
-    /**
-     * Verify goal completion with a fresh-context grader sub-agent before
-     * accepting task_done / assess-done (default false). The worker never
-     * grades its own output; a failed verify feeds back as a steer note.
-     */
+    /** @deprecated Superseded by the top-level `verify` block. Still honored. */
     verify?: boolean;
-    /** Model for the verify grader (default: the session model). */
+    /** @deprecated Superseded by `verify.model`. Still honored. */
     verifyModel?: string;
+  };
+  /**
+   * Result verification: a deterministic command gate, with an LLM judge behind it.
+   *
+   * On by default, and safe to be: the deterministic half costs nothing and is a
+   * no-op unless a task or phase explicitly declares `verify: <cmd>`, while the
+   * judge half runs only at completion boundaries and FAILS OPEN — a dead key, an
+   * unreachable host, or a model too small to emit a tool call all accept the
+   * claim. Turning it on can therefore only catch a bad result, never break a
+   * working setup.
+   */
+  verify: {
+    /** Master switch for the whole layer. */
+    enabled?: boolean;
+    /** Run the LLM judge behind the deterministic gate. */
+    judge?: boolean;
+    /** Model for the judge (default: the session model). */
+    model?: string;
+    /** Judge autonomy-step cap. */
+    maxSteps?: number;
+    /** Judge tool round-trips per step — with maxSteps, this bounds one verdict. */
+    maxIterations?: number;
+    /** Kill a declared verification command after this long. */
+    commandTimeoutMs?: number;
+    /** Verification attempts per unit of work before giving up. */
+    attempts?: number;
   };
   /** External MCP (Model Context Protocol) servers to connect over stdio. */
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
@@ -243,6 +265,14 @@ export function defaultConfig(): ArtermConfig {
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
     budget: {},
     autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
+    verify: {
+      enabled: true,
+      judge: true,
+      maxSteps: 2,
+      maxIterations: 10,
+      commandTimeoutMs: 180_000,
+      attempts: 2,
+    },
     mcpServers: {},
     plugins: {},
     team: {
@@ -315,6 +345,17 @@ const configFileSchema = z
         phasedFanout: z.number().int().positive().optional(),
         verify: z.boolean().optional(),
         verifyModel: z.string().optional(),
+      })
+      .partial(),
+    verify: z
+      .object({
+        enabled: z.boolean(),
+        judge: z.boolean(),
+        model: z.string(),
+        maxSteps: z.number().int().positive(),
+        maxIterations: z.number().int().positive(),
+        commandTimeoutMs: z.number().int().positive(),
+        attempts: z.number().int().positive(),
       })
       .partial(),
     mcpServers: z.record(

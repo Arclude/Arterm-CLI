@@ -17,6 +17,11 @@
  * Usage:
  *   node scripts/fault-server.mjs --mode quota-long [--port 8099] [--ok backup]
  *
+ * `--tool <name>` answers with a tool call instead of text. `--tool task_done`
+ * drives an autonomous run to a completion claim, which is what puts the result
+ * verification gate on the path — without it the fake model never claims anything
+ * and the gate is never consulted.
+ *
  * Modes:
  *   ok            always answers normally
  *   quota-long    429 + `Retry-After: 3600` — retrying is abandoned at once
@@ -52,6 +57,8 @@ const MODE = flag("mode", "quota-long");
 const PORT = Number(flag("port", "8099"));
 const OK_MODEL = flag("ok", "backup");
 const ANSWER = flag("answer", "This answer came from the fake server.");
+/** `--tool task_done` — answer with a tool call instead of text. */
+const CALL_TOOL = flag("tool", undefined);
 
 const flakyMatch = /^flaky:(\d+)$/.exec(MODE);
 const FLAKY_FAILURES = flakyMatch ? Number(flakyMatch[1]) : 0;
@@ -93,6 +100,30 @@ function refuse(res, status, headers, message) {
 function openaiStream(res) {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
   const frame = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  if (CALL_TOOL) {
+    // `--tool <name>` makes the fake model call a tool instead of answering. With
+    // `task_done` this is what drives an autonomous run to a completion CLAIM,
+    // which is the only thing that puts the verification gate on the path.
+    frame({
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_1",
+                type: "function",
+                function: { name: CALL_TOOL, arguments: JSON.stringify({ summary: ANSWER }) },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    res.write("data: [DONE]\n\n");
+    res.end();
+    return;
+  }
   frame({ choices: [{ delta: { content: ANSWER } }] });
   frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 9, completion_tokens: 7 } });
   res.write("data: [DONE]\n\n");

@@ -13,6 +13,7 @@ import {
   parseRoster,
 } from "./team.js";
 import type { AutonomyMode, Tool } from "./types.js";
+import type { Verifier, VerifyResult } from "./verify.js";
 
 export type AutonomyState = "idle" | "running" | "paused" | "done" | "stopped";
 
@@ -105,17 +106,18 @@ export interface AutonomyOptions {
    */
   memberMemory?: MemberMemory;
   /**
-   * Fresh-context completion grader ("the agent doing the work isn't the one
-   * grading it"). When present, a once-mode completion claim (task_done or
-   * assess-done) must pass it before finish(): a FAIL feeds back as a steer
-   * note and the loop continues; the second FAIL stops the run. Verifier
-   * errors never block completion (fail-open).
+   * Composite result verifier — a deterministic command gate with a fresh-context
+   * judge behind it ("the agent doing the work isn't the one grading it").
+   *
+   * Every completion claim a mode makes passes through it. A rejection queues its
+   * `mustFix` items as the next attempt's steer note, which every mode's prompt
+   * builder already consumes; a verifier that cannot produce a verdict accepts the
+   * claim, because verification is an extra net and never a new way to lose
+   * finished work.
    */
-  verify?: (
-    goal: string,
-    claim: string,
-    signal?: AbortSignal,
-  ) => Promise<{ pass: boolean; feedback: string }>;
+  verify?: Verifier;
+  /** Verification attempts per unit of work before giving up. Default 2. */
+  verifyAttempts?: number;
 }
 
 /**
@@ -164,30 +166,95 @@ export class AutonomyEngine {
     this.blackboard = opts.blackboard;
     this.memberMemory = opts.memberMemory;
     this.verify = opts.verify;
+    this.verifyAttempts = Math.min(5, Math.max(1, opts.verifyAttempts ?? 2));
   }
 
-  private readonly verify?: AutonomyOptions["verify"];
+  private readonly verify?: Verifier;
+  private readonly verifyAttempts: number;
   private verifyFails = 0;
+  private lastVerify?: VerifyResult;
 
   /**
-   * Gate a completion claim through the fresh-context verifier. True = accept.
-   * A rejection stores the feedback as the next step's steer note; a verifier
-   * failure accepts the claim (fail-open — verification is an extra net, not a
-   * new way to lose finished work).
+   * Gate a completion claim through the composite verifier. True = accept.
+   *
+   * A rejection queues the verifier's `mustFix` items as the next attempt's steer
+   * note, which every mode's prompt builder already consumes — so this one method
+   * delivers repair feedback to all of them with no extra plumbing. Two outcomes
+   * that are NOT rejections both return true: no verifier configured, and a
+   * verifier that threw. An abort mid-verify returns false without counting an
+   * attempt, so the caller's own pause/stop path runs instead.
    */
-  private async verifyDone(claim: string): Promise<boolean> {
+  private async gateClaim(
+    claim: string,
+    opts: { spec?: string; scope?: "goal" | "phase" | "round"; id?: string } = {},
+  ): Promise<boolean> {
     const verify = this.verify;
     if (!verify) return true;
+
+    let res: VerifyResult;
     try {
-      const res = await verify(this.goal, claim, this.current?.signal);
-      this.bus.emit({ type: "autonomy_verify", pass: res.pass, note: res.feedback });
-      if (res.pass) return true;
-      this.verifyFails += 1;
-      this.pendingSteer = `An independent verifier rejected the completion claim: ${res.feedback} Address this concretely before declaring the goal done again.`;
-      return false;
+      res = await verify({
+        goal: this.goal,
+        claim,
+        ...(opts.spec ? { spec: opts.spec } : {}),
+        ...(this.current?.signal ? { signal: this.current.signal } : {}),
+      });
     } catch {
+      // Emit even here. A silent catch made a crashed verifier indistinguishable
+      // from a verified pass, which is the whole reason this path is visible now.
+      this.bus.emit({
+        type: "autonomy_verify",
+        pass: true,
+        skipped: true,
+        note: "the verifier itself failed — accepting the claim",
+        ...(opts.scope ? { scope: opts.scope } : {}),
+      });
       return true;
     }
+    if (this.current?.signal.aborted) return false;
+
+    this.lastVerify = res;
+    this.bus.emit({
+      type: "autonomy_verify",
+      pass: res.pass,
+      ...(res.reason ? { note: res.reason } : {}),
+      ...(res.by ? { by: res.by } : {}),
+      ...(res.mustFix?.length ? { mustFix: res.mustFix } : {}),
+      ...(res.skipped ? { skipped: true } : {}),
+      attempt: this.verifyFails + 1,
+      ...(opts.scope ? { scope: opts.scope } : {}),
+      ...(opts.id ? { id: opts.id } : {}),
+    });
+
+    if (res.pass) {
+      // Reset, or two unrelated rejections rounds apart would kill a long run.
+      this.verifyFails = 0;
+      return true;
+    }
+    this.verifyFails += 1;
+    // Concat rather than overwrite: a pending user steer must not be dropped.
+    this.pendingSteer = [this.pendingSteer, this.repairNote(res)].filter(Boolean).join("; ");
+    return false;
+  }
+
+  /** A rejection, rewritten as instructions the worker can act on. */
+  private repairNote(res: VerifyResult): string {
+    const items = res.mustFix?.length
+      ? `\nFix exactly these:\n${res.mustFix.map((m) => `- ${m}`).join("\n")}`
+      : "";
+    return `An independent reviewer rejected the result: ${res.reason ?? "criteria not met"}${items}\nAddress this concretely before declaring the work done again.`;
+  }
+
+  /** The run stopped because the verifier kept rejecting. Emitted from one place. */
+  private stopRejected(): void {
+    this._state = "stopped";
+    this.bus.emit({
+      type: "autonomy_stopped",
+      reason: `the reviewer rejected the result ${this.verifyFails}× — last: ${
+        this.lastVerify?.reason ?? "criteria not met"
+      }`,
+    });
+    // Checkpoint survives: a rejected-but-claimed goal is resumable.
   }
 
   get state(): AutonomyState {
@@ -314,18 +381,12 @@ export class AutonomyEngine {
         if (this.paused()) continue; // paused mid-step; re-gate at loop top
 
         if (doneSummary !== undefined && !eternal) {
-          if (await this.verifyDone(doneSummary)) {
+          if (await this.gateClaim(doneSummary, { scope: "goal" })) {
             this.finish(doneSummary);
             return;
           }
-          if (this.verifyFails >= 2) {
-            this._state = "stopped";
-            this.bus.emit({
-              type: "autonomy_stopped",
-              reason: "completion claim rejected twice by the verifier",
-            });
-            return; // checkpoint survives — a rejected-but-claimed goal is resumable
-          }
+          if (this.stopped) break;
+          if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
           continue; // rejection feedback is queued as the next step's steer note
         }
 
@@ -334,18 +395,13 @@ export class AutonomyEngine {
           const verdict = await this.agent.assess(this.goal, this.current?.signal);
           this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
           if (verdict.done && !eternal) {
-            if (await this.verifyDone(verdict.note || "goal complete")) {
-              this.finish(verdict.note || "goal complete");
+            const claim = verdict.note || "goal complete";
+            if (await this.gateClaim(claim, { scope: "goal" })) {
+              this.finish(claim);
               return;
             }
-            if (this.verifyFails >= 2) {
-              this._state = "stopped";
-              this.bus.emit({
-                type: "autonomy_stopped",
-                reason: "completion claim rejected twice by the verifier",
-              });
-              return;
-            }
+            if (this.stopped) break;
+            if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
             continue;
           }
           this.idleStreak += 1;

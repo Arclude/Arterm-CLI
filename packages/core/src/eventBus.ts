@@ -88,7 +88,28 @@ export type AgentEvent =
   | { type: "autonomy_step"; step: number }
   | { type: "autonomy_reflect"; done: boolean; note?: string }
   // Fresh-context verifier's judgment on a completion claim (decision 3).
-  | { type: "autonomy_verify"; pass: boolean; note?: string }
+  // A result was gated. Every field past `pass` is additive and optional, so the
+  // desktop contract's "additive fields do NOT bump v" applies.
+  | {
+      type: "autonomy_verify";
+      pass: boolean;
+      note?: string;
+      /** Which half decided: the deterministic command gate, or the LLM judge. */
+      by?: "command" | "judge";
+      /** Concrete items the repair attempt must address (present on a rejection). */
+      mustFix?: string[];
+      /**
+       * True when NO verdict could be obtained and the claim passed by default.
+       * "Unverified" is not "verified" — a UI must be able to say which.
+       */
+      skipped?: boolean;
+      /** 1-based repair attempt this verdict belongs to. */
+      attempt?: number;
+      /** What was judged. */
+      scope?: "goal" | "phase" | "round" | "task";
+      /** The phase/round/task id, when scope is not "goal". */
+      id?: string;
+    }
   | { type: "autonomy_steer"; note: string }
   | { type: "autonomy_paused" }
   | { type: "autonomy_resumed" }

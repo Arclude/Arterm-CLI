@@ -186,8 +186,8 @@ export function decideVerdict(capture: VerdictCapture): VerdictDecision {
       judged: false,
       feedback:
         capture.reason === "malformed"
-          ? "the reviewer's verdict could not be read — accepting the claim"
-          : "no reviewer verdict arrived — accepting the claim",
+          ? "the reviewer's verdict could not be read"
+          : "no reviewer verdict arrived",
       mustFix: [],
     };
   }
@@ -256,14 +256,26 @@ export interface VerifyResult {
 
 export type Verifier = (req: VerifyRequest) => Promise<VerifyResult>;
 
-/** AND-compose: run in order, first failure wins, later parts are skipped. */
+/**
+ * AND-compose: run in order, first failure wins, later parts are skipped.
+ *
+ * On an all-pass the composite reports **who actually decided**, because "verified"
+ * and "nothing could verify this" must stay distinguishable downstream — a caller
+ * that cannot tell them apart shows a green checkmark for an unreachable judge.
+ * A part that really judged wins over one that was skipped; when nothing judged,
+ * the skip is reported as the outcome.
+ */
 export function makeCompositeVerifier(parts: readonly Verifier[]): Verifier {
   return async (req) => {
+    let decided: VerifyResult | undefined;
+    let skipped: VerifyResult | undefined;
     for (const part of parts) {
       const outcome = await part(req);
       if (!outcome.pass) return outcome;
+      if (outcome.skipped) skipped ??= outcome;
+      else if (outcome.by) decided = outcome;
     }
-    return { pass: true };
+    return decided ?? skipped ?? { pass: true };
   };
 }
 

@@ -872,14 +872,38 @@ export function App({
           });
           setCtxUsed(0);
           break;
-        case "autonomy_verify":
-          push({
-            kind: "system",
-            text: event.pass
-              ? `✓ verifier accepted the completion claim${event.note ? ` — ${event.note}` : ""}`
-              : `✗ verifier rejected the completion claim${event.note ? ` — ${event.note}` : ""}`,
-          });
+        case "autonomy_verify": {
+          const what = event.scope && event.scope !== "goal" ? ` ${event.scope}` : "";
+          const by = event.by ? ` (${event.by})` : "";
+          if (!event.pass) {
+            // The items are the actionable half — the worker is about to be given
+            // exactly these, so showing them makes the next attempt legible.
+            const items = event.mustFix?.length
+              ? `\n${event.mustFix.map((m) => `  • ${m}`).join("\n")}`
+              : "";
+            push({
+              kind: "system",
+              text: `✗ verification failed${by}${what}${
+                event.attempt ? `, attempt ${event.attempt}` : ""
+              }${event.note ? ` — ${event.note}` : ""}${items}`,
+            });
+          } else if (event.skipped) {
+            // "Unverified" is not "verified". A green check here would be a lie,
+            // and this line is what makes an unreachable verifier visible at all.
+            push({
+              kind: "system",
+              text: `⚠ verification unavailable — accepting the claim${
+                event.note ? ` (${event.note})` : ""
+              }`,
+            });
+          } else {
+            push({
+              kind: "system",
+              text: `✓ verified${by}${what}${event.note ? ` — ${event.note}` : ""}`,
+            });
+          }
           break;
+        }
         case "tool_results_cleared":
           push({
             kind: "system",

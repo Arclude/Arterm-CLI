@@ -7,6 +7,7 @@ import { type AgentEvent, EventBus } from "./eventBus.js";
 import { MemberMemory } from "./memberMemory.js";
 import { PermissionManager } from "./permissions.js";
 import type { AutonomyMode, ChatProvider, Tool } from "./types.js";
+import { type Verifier, makeCommandVerifier, makeCompositeVerifier } from "./verify.js";
 
 const taskDone: Tool = {
   name: "task_done",
@@ -93,12 +94,7 @@ function collect(bus: EventBus): AgentEvent[] {
 }
 
 describe("AutonomyEngine completion verifier (verify hook)", () => {
-  function makeVerifyEngine(
-    agent: FakeAgent,
-    bus: EventBus,
-    verify: (goal: string, claim: string) => Promise<{ pass: boolean; feedback: string }>,
-    maxSteps = 10,
-  ) {
+  function makeVerifyEngine(agent: FakeAgent, bus: EventBus, verify: Verifier, maxSteps = 10) {
     return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
       mode: "once",
       maxSteps,
@@ -114,7 +110,7 @@ describe("AutonomyEngine completion verifier (verify hook)", () => {
     let calls = 0;
     const engine = makeVerifyEngine(agent, bus, async () => {
       calls++;
-      return { pass: true, feedback: "looks complete" };
+      return { pass: true, reason: "looks complete", by: "judge" as const };
     });
 
     await engine.start("g");
@@ -132,8 +128,8 @@ describe("AutonomyEngine completion verifier (verify hook)", () => {
     const engine = makeVerifyEngine(agent, bus, async () => {
       n++;
       return n === 1
-        ? { pass: false, feedback: "tests still failing" }
-        : { pass: true, feedback: "now green" };
+        ? { pass: false, reason: "tests still failing", mustFix: ["make the suite green"] }
+        : { pass: true, reason: "now green" };
     });
 
     await engine.start("g");
@@ -151,7 +147,7 @@ describe("AutonomyEngine completion verifier (verify hook)", () => {
     const cleared: boolean[] = [];
     const engine = makeVerifyEngine(agent, bus, async () => ({
       pass: false,
-      feedback: "still not done",
+      reason: "still not done",
     }));
     engine.setCheckpointSink((snap) => {
       cleared.push(snap === null);
@@ -163,6 +159,70 @@ describe("AutonomyEngine completion verifier (verify hook)", () => {
     expect(events.some((e) => e.type === "autonomy_stopped")).toBe(true);
     // A rejected-but-claimed goal stays resumable — the checkpoint was never cleared.
     expect(cleared).not.toContain(true);
+  });
+
+  it("blocks a claim with the REAL deterministic gate, then accepts when it passes", async () => {
+    // End-to-end through the composite: no stub verdict, an actual exit code.
+    // The goal declares the command, which is the only way one is ever obtained.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"], ["task_done"]];
+    const events = collect(bus);
+    const attempt = 0;
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 4,
+      verify: makeCompositeVerifier([
+        makeCommandVerifier({ cwd: process.cwd(), timeoutMs: 20_000 }),
+        async () => ({ pass: true, by: "judge" as const }),
+      ]),
+    });
+
+    await engine.start('do the work\nverify: node -e "process.exit(5)"');
+
+    expect(engine.state).toBe("stopped");
+    const rejected = events.filter((e) => e.type === "autonomy_verify" && !e.pass);
+    expect(rejected.length).toBe(2);
+    expect(rejected[0]).toMatchObject({ by: "command" });
+    // The worker was told what to fix, in the prompt of the following attempt.
+    expect(agent.prompts[1]).toContain("must exit 0");
+  });
+
+  it("emits a visible skipped verdict when the verifier itself crashes", async () => {
+    // The old silent catch made a crashed verifier look identical to a verified
+    // pass. Accepting the claim is right; hiding it is not.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"]];
+    const events = collect(bus);
+    const engine = makeVerifyEngine(agent, bus, async () => {
+      throw new Error("verifier crashed");
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("done");
+    expect(events.some((e) => e.type === "autonomy_verify" && e.pass && e.skipped)).toBe(true);
+  });
+
+  it("resets the rejection count after a pass", async () => {
+    // Without the reset, two unrelated rejections rounds apart kill a long run.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"], ["task_done"], ["task_done"]];
+    let n = 0;
+    const engine = makeVerifyEngine(agent, bus, async () => {
+      n++;
+      // reject, pass, reject — the third must not be treated as "twice rejected".
+      if (n === 2) return { pass: true, reason: "fine" };
+      return { pass: false, reason: `no #${n}` };
+    });
+
+    await engine.start("g");
+
+    // The run ended on the pass, not on a two-strikes stop.
+    expect(engine.state).toBe("done");
+    expect(n).toBe(2);
   });
 
   it("fails open: a throwing verifier accepts the completion claim", async () => {

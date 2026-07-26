@@ -64,6 +64,7 @@ import {
   taskDoneTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
+import { createVerifier } from "./verifier.js";
 
 export interface SessionOptions {
   config: ArtermConfig;
@@ -524,46 +525,17 @@ export async function buildSession(opts: SessionOptions): Promise<{
     });
   }
 
-  // Fresh-context completion verifier (config `autonomy.verify`): a read-only
-  // sub-agent re-inspects the repo and grades the claim — the worker never
-  // grades itself. Plan mode + read-category tools make it mutation-proof.
-  const verifyFn =
-    config.autonomy?.verify === true
-      ? async (
-          goal: string,
-          claim: string,
-          signal?: AbortSignal,
-        ): Promise<{ pass: boolean; feedback: string }> => {
-          const instruction = [
-            "You are an independent completion verifier working in a fresh context.",
-            `The goal was:\n${goal}`,
-            `The worker claims it is complete:\n${claim}`,
-            "Inspect the repository with your read-only tools and judge whether the goal is genuinely met.",
-            "Reply with exactly PASS or FAIL on the first line, then one short paragraph explaining what is missing (for FAIL) or confirmed (for PASS).",
-          ].join("\n\n");
-          const out = await runSubagent(
-            instruction,
-            {
-              provider,
-              model: config.autonomy?.verifyModel ?? config.model,
-              tools: agent.tools.filter((t) => t.category === "read"),
-              permissions: new PermissionManager({}, "plan"),
-              ask: async () => "deny",
-              cwd,
-              taskDone: taskDoneTool,
-              context: createContextStrategy(config),
-              maxSteps: 6,
-              role: "verifier",
-            },
-            signal,
-          );
-          const text = out.trim();
-          return {
-            pass: /^\s*PASS\b/i.test(text),
-            feedback: text.replace(/^\s*(PASS|FAIL)\b[.:\s-]*/i, "").slice(0, 600) || text,
-          };
-        }
-      : undefined;
+  // Result verification: a deterministic command gate, with a fresh-context judge
+  // behind it. Built in verifier.ts so the judge runner is testable with a stub
+  // provider; getters (not values) so /model and /login propagate mid-session.
+  const verifier = createVerifier({
+    provider: () => provider,
+    model: () => agent.model,
+    tools: () => agent.tools,
+    context: () => createContextStrategy(config),
+    cwd,
+    config,
+  });
 
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
     mode: config.autonomy?.mode ?? "once",
@@ -575,7 +547,8 @@ export async function buildSession(opts: SessionOptions): Promise<{
     runFleet: (tasks, signal) => runFleetTasks(tasks, signal),
     blackboard,
     memberMemory,
-    verify: verifyFn,
+    verify: verifier,
+    verifyAttempts: config.verify?.attempts,
   });
 
   const sdd = new SddRunner(
