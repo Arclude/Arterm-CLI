@@ -1,4 +1,10 @@
-import type { AgentEvent, AutonomyMode } from "@arterm/core";
+import type {
+  AgentEvent,
+  AutonomyMode,
+  PendingPermission,
+  PermissionAnswer,
+  ProviderErrorKind,
+} from "@arterm/core";
 import type { Session } from "@arterm/tui";
 
 /**
@@ -46,6 +52,36 @@ export interface TeamMemberStatus {
 /** How many recent per-member activities to retain for the drill-down feed. */
 export const MEMBER_ACTIVITY_MAX = 5;
 
+/**
+ * The failure that ended the last turn (contract §5).
+ *
+ * Without this the desktop could only learn about a failure by watching the event
+ * stream go by — a client that connects after the fact, or one that only polls
+ * `/api/state`, saw a session sitting at `status: "idle"` and looking perfectly
+ * healthy. It carries the provider taxonomy so the UI can distinguish "out of
+ * quota" from "wrong API key" and offer the right button.
+ */
+export interface StatusError {
+  message: string;
+  /** Provider taxonomy, when the failure came from a provider call. */
+  kind?: ProviderErrorKind;
+  provider?: string;
+  status?: number;
+  /** True when the same request could plausibly succeed on a retry. */
+  retryable?: boolean;
+  /** Epoch ms when the failure was observed. */
+  at: number;
+}
+
+/** The last model switch the fallback chain made (contract §5). */
+export interface StatusFallback {
+  from: { provider: string; model: string };
+  to: { provider: string; model: string };
+  reason: ProviderErrorKind;
+  detail: string;
+  at: number;
+}
+
 type AutonomySnapshot = ReturnType<Session["autonomy"]["snapshot"]>;
 
 /** The full derived state pushed to the desktop (contract §5). */
@@ -70,6 +106,26 @@ export interface StatusSnapshot {
   activeAgents: number;
   /** The primary ("main") agent as a first-class node, symmetric with team[]. */
   main: { toolUseCount: number; recentActivities: string[] };
+  /**
+   * The permission prompt currently blocking the agent, answerable remotely via
+   * `POST /api/control {action:"permission"}` (contract §8). `null` when none is
+   * up — including in modes that never prompt (yolo/plan).
+   */
+  pendingPermission: PendingPermission | null;
+  /** Requests queued behind {@link pendingPermission} (sub-agents share one prompt). */
+  pendingPermissionQueue: number;
+  /**
+   * The failure that ended the most recent turn, or `null` when the last turn
+   * finished cleanly. Cleared when a new turn starts — it describes the session's
+   * current health, not its history (the event ring keeps that).
+   */
+  lastError: StatusError | null;
+  /**
+   * The most recent model switch made by the fallback chain, or `null`. Survives
+   * across turns: the chain landing on a backup model is a standing condition
+   * worth showing even after the turn it rescued has ended.
+   */
+  lastFallback: StatusFallback | null;
   seq: number;
 }
 
@@ -94,6 +150,8 @@ export class StatusState {
   private team: TeamMemberStatus[] = [];
   private mainToolUseCount = 0;
   private mainActivities: string[] = [];
+  private lastError: StatusError | null = null;
+  private lastFallback: StatusFallback | null = null;
   private readonly startedAt = Date.now();
   private readonly subscribers = new Set<Sink>();
   private readonly unsubscribe: () => void;
@@ -110,6 +168,9 @@ export class StatusState {
     switch (ev.type) {
       case "turn_start":
         this.status = "thinking";
+        // A new turn supersedes the old verdict: keeping a stale failure visible
+        // would leave the desktop showing "out of quota" over a healthy session.
+        this.lastError = null;
         break;
       case "tool_call":
         this.status = "tool";
@@ -137,6 +198,27 @@ export class StatusState {
       case "turn_end":
         this.status = "idle";
         this.activeTool = null;
+        break;
+      case "error":
+        // The agent emits `error` and then `turn_end`, so the snapshot settles on
+        // idle-with-a-reason rather than idle-looking-fine.
+        this.lastError = {
+          message: ev.error,
+          ...(ev.kind ? { kind: ev.kind } : {}),
+          ...(ev.provider ? { provider: ev.provider } : {}),
+          ...(ev.status !== undefined ? { status: ev.status } : {}),
+          ...(ev.retryable !== undefined ? { retryable: ev.retryable } : {}),
+          at: Date.now(),
+        };
+        break;
+      case "provider_fallback":
+        this.lastFallback = {
+          from: ev.from,
+          to: ev.to,
+          reason: ev.reason,
+          detail: ev.detail,
+          at: Date.now(),
+        };
         break;
       case "subagent_start":
         this.workers.push({ task: ev.task, role: ev.role, state: "running" });
@@ -273,6 +355,10 @@ export class StatusState {
         toolUseCount: this.mainToolUseCount,
         recentActivities: [...this.mainActivities],
       },
+      pendingPermission: this.session.permissionBroker.current(),
+      pendingPermissionQueue: this.session.permissionBroker.queuedCount(),
+      lastError: this.lastError,
+      lastFallback: this.lastFallback,
       seq: this.seq,
     };
   }
@@ -296,13 +382,28 @@ export class StatusState {
 
 const AUTONOMY_MODES: readonly AutonomyMode[] = ["once", "eternal", "parallel", "phased", "team"];
 
-/** Dispatch a control action to the autonomy engine (all methods are safe off-run). */
-export function control(
-  session: Session,
-  action: string,
-  note: string,
-  mode?: string,
-): { ok: boolean; error?: string } {
+const PERMISSION_ANSWERS: readonly PermissionAnswer[] = ["allow", "allow_always", "deny"];
+
+/** The `POST /api/control` body, already narrowed to strings (contract §2). */
+export interface ControlRequest {
+  action: string;
+  /** Steer text / new goal. */
+  note?: string;
+  /** Target AutonomyMode for `action: "mode"`. */
+  mode?: string;
+  /** The `pendingPermission.id` being answered, for `action: "permission"`. */
+  id?: string;
+  /** The answer for `action: "permission"`. */
+  answer?: string;
+}
+
+/**
+ * Dispatch a control action. Autonomy actions are safe off-run (all engine
+ * methods no-op when idle); `permission` answers the prompt currently blocking
+ * the agent and fails cleanly when there is none.
+ */
+export function control(session: Session, req: ControlRequest): { ok: boolean; error?: string } {
+  const { action, note = "", mode } = req;
   switch (action) {
     case "pause":
       session.autonomy.pause();
@@ -327,6 +428,14 @@ export function control(
       }
       const ok = session.autonomy.setMode(mode as AutonomyMode);
       return ok ? { ok: true } : { ok: false, error: "cannot change mode mid-run" };
+    }
+    case "permission": {
+      const { id, answer } = req;
+      if (!id) return { ok: false, error: "permission requires the pending request id" };
+      if (!answer || !PERMISSION_ANSWERS.includes(answer as PermissionAnswer)) {
+        return { ok: false, error: `permission requires answer: ${PERMISSION_ANSWERS.join(", ")}` };
+      }
+      return session.permissionBroker.answer(id, answer as PermissionAnswer);
     }
     default:
       return { ok: false, error: `unknown action "${action}"` };

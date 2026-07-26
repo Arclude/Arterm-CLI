@@ -7,6 +7,7 @@ import { App } from "./App.js";
 import type { Session } from "./types.js";
 
 const ENTER = "\r";
+const CTRL_DOWN = "\u001B[1;5B";
 const tick = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** Poll the rendered frame until `pred` holds, or throw after `timeout` ms. */
@@ -169,9 +170,10 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
     expect(seen()).toContain("patch applied");
     expect(planCall).toBe(2);
 
-    // Board navigation: ↓ selects the second member, Enter opens its activity
-    // feed (the bridged tool_call landed there), Esc closes it again.
-    stdin.write("[B"); // down arrow
+    // Board navigation: Ctrl+↓ selects the second member (plain ↑/↓ stay prompt
+    // history), Enter opens its activity feed (the bridged tool_call landed
+    // there), Esc closes it again.
+    stdin.write(CTRL_DOWN);
     await tick();
     stdin.write(ENTER);
     await waitFor(ui, (f) => f.includes("⚙ test-writer") && f.includes("⚙ write"));

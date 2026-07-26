@@ -81,13 +81,16 @@ controls are safe no-ops when no run is active.
 
 ```ts
 {
-  action: "pause" | "resume" | "stop" | "steer" | "goal" | "mode";
+  action: "pause" | "resume" | "stop" | "steer" | "goal" | "mode" | "permission";
   note?: string;   // REQUIRED for "steer" (steer text) and "goal" (the new goal)
   mode?: string;   // REQUIRED for "mode": an AutonomyMode ("once"|"eternal"|"parallel"|"phased"|"team")
+  id?: string;     // REQUIRED for "permission": the pendingPermission.id being answered
+  answer?: "allow" | "allow_always" | "deny";  // REQUIRED for "permission"
 }
 ```
 
 `mode` returns `ok:false` when a run is in progress (mode cannot change mid-run).
+`permission` answers the prompt currently blocking the agent — see §8.
 
 ## 3. SSE frames (`content-type: text/event-stream`)
 
@@ -175,7 +178,47 @@ type StatusSnapshot = {
     toolUseCount: number;          // main's own tool_call count this session
     recentActivities: string[];    // rolling window (max 5), newest last — member format
   };
+  pendingPermission: PendingPermission | null;  // the prompt blocking the agent (§8)
+  pendingPermissionQueue: number;               // further requests waiting behind it
+  lastError: StatusError | null;                // how the last turn failed (§10)
+  lastFallback: StatusFallback | null;          // last model switch by the fallback chain (§10)
   seq: number;                     // seq of the last stamped event folded into this snapshot
+};
+
+/** The failure that ended the most recent turn (§10). */
+type StatusError = {
+  message: string;         // already user-facing: provider prefix + actionable hint
+  kind?: "network" | "timeout" | "auth" | "quota" | "overloaded"
+       | "server" | "bad_request" | "unknown";   // absent for non-provider failures
+  provider?: string;       // e.g. "anthropic"
+  status?: number;         // HTTP status, 0/absent when the call never got a response
+  retryable?: boolean;     // true when the same request could plausibly succeed again
+  at: number;              // epoch ms
+};
+
+/** The last model switch made by the fallback chain (§10). */
+type StatusFallback = {
+  from: { provider: string; model: string };
+  to: { provider: string; model: string };
+  reason: StatusError["kind"];  // why the primary was abandoned — always present here
+  detail: string;               // first line of the underlying provider error
+  at: number;                   // epoch ms
+};
+
+/** A permission prompt awaiting an answer (§8). */
+type PendingPermission = {
+  id: string;              // quote this in the control call; a fresh id per request
+  tool: string;            // tool name, e.g. "write_file"
+  preview: string;         // the tool's own prompt preview — line 1 is the summary, the
+                           // rest (if any) a diff body; capped at ~4000 chars
+  args: Record<string, unknown>;  // tool args; string values over 500 chars are clipped
+  category: string;        // "read" | "edit" | "execute"
+  riskTier?: string;       // e.g. "destructive" — worth a stronger confirmation in the UI
+  requestedAt: number;     // epoch ms
+  origin?: {               // the sub-agent that raised it; ABSENT for the main agent
+    id?: string;           // its board-row id (same id as team_member_state / _event)
+    name: string;          // its role/member name, e.g. "explorer"
+  };
 };
 ```
 
@@ -188,9 +231,18 @@ the desktop shows "unsupported protocol — update Arterm CLI" for that session.
 Mirrors the CLI TUI (`packages/tui/src/App.tsx` bus switch):
 
 - `team_plan {members}` — reset the board; seed every member with `state: "pending"`.
+- `autonomy_fleet_round {round, tasks}` — a **parallel** or **phased** run's round. Each task
+  carries an `id` (`r<round>-<n>` / `p<phase>-<n>`), so this seeds the board the same way
+  `team_plan` does — one `pending` row per subtask — except the rows are **replaced** every
+  round rather than standing across rounds. A team run never emits this event; the two seeds
+  are mutually exclusive.
 - `team_member_state {id, state, task?, filesChanged?}` — update the member in place.
   While the new state is `running` the previous `activity` is kept; transitioning to any
   other state (`pending`/`done`/`failed`) clears `activity`.
+  Despite the name, this is emitted for **every** dispatched fleet task, not just team
+  members: a plain parallel subtask reports here too (its `name` is the role, or `"subtask"`
+  when the leader assigned none). Only team members additionally get per-member tools,
+  worktree isolation and patch auto-apply.
 - `team_member_event {id, event}` — updates `lastActivityAt`, and:
   - `tool_call` → `activity = "⚙ <tool name>"`, `toolUseCount += 1`, append to `recentActivities`.
   - `assistant_message` → `activity = "✎ writing"`, append to `recentActivities`.
@@ -247,13 +299,74 @@ activeAgents =
 
 The desktop's rail badge is `sum(activeAgents)` over all live (health-checked) sessions.
 
-## 8. CLI server lifecycle
+## 8. Remote permission answering
+
+A permission prompt normally blocks the agent until someone answers it **in the terminal**.
+That is useless when the CLI is running in a background tab, so the prompt has two possible
+answerers and the first one wins:
+
+- The CLI publishes the waiting request as `pendingPermission` in every snapshot, and emits
+  `permission_request { id, tool, preview, category, riskTier?, origin? }` on the stream when it goes
+  up. A consumer can render from either (the snapshot covers a late subscriber).
+- The desktop answers with `POST /api/control {action:"permission", id, answer}`. `answer` is
+  `"allow"` (once), `"allow_always"` (also persists a per-tool override, same as the TUI's
+  `[a]`), or `"deny"`.
+- Whoever answers first wins. A remote answer tears the TUI prompt down; a local answer makes
+  the next remote call fail with `ok:false`.
+- `id` MUST match the current `pendingPermission.id`. A stale id is rejected
+  (`ok:false, error:"stale permission id …"`) so a click on a prompt that just resolved in the
+  terminal can never approve the *next* tool call. `ok:false, error:"no permission request is
+  pending"` means nothing is waiting.
+- When the answer lands, `permission_resolved { id, tool, answer, via }` is emitted;
+  `via` is `"local"` (the terminal) or `"remote"` (this endpoint).
+- Sub-agents share one prompt queue: only the head is published as `pendingPermission`, and
+  `pendingPermissionQueue` counts the rest. Answering the head promotes the next one.
+- Every queue transition also emits `permission_queued { queued }`. Consumers that keep a
+  counter should follow it rather than waiting for the next snapshot: a fan-out whose workers
+  are ALL blocked produces no other events, so a count derived from unrelated activity sits
+  stale until something else happens.
+- `pendingPermission.origin` names the sub-agent behind the request (absent = the main agent).
+  Its `id` is the same board-row id used by `team_member_state`, so a UI can point at the row
+  that is waiting instead of showing a bare tool name — with five same-role workers on the
+  board, the tool name alone does not say which one is blocked.
+- Modes that never prompt (`yolo`, `plan`) simply never produce a `pendingPermission`.
+
+**Security**: this lets a token holder approve a tool call — including a destructive one. That
+is the same trust boundary as §4: a same-user process holding the token could already steer the
+run (`goal`/`steer`) or edit the repo directly. It does NOT widen the boundary to other users,
+web pages, or the network.
+
+## 9. CLI server lifecycle
 
 - Config block (`~/.arterm/config.json`): `statusServer: { enabled: boolean | "auto", port: number }`,
   default `{ enabled: "auto", port: 0 }`.
-- `"auto"` starts the server iff `process.env.ARTERM_TERMINAL` is set (the desktop sets it
-  for every PTY it spawns). `true` always starts, `false` never.
+- `"auto"` starts the server for **every interactive (TUI) session, in any terminal** — a CLI
+  launched from Konsole/Alacritty/tmux appears in the desktop's Agents list exactly like one
+  launched from Arterm's own terminal. Only the **headless** one-shot (`--print`) stays gated on
+  `process.env.ARTERM_TERMINAL` (the desktop sets it for every PTY it spawns): those runs live
+  for seconds and mostly come from scripts/CI, where a bound port and a discovery file are noise.
+  `true` always starts (headless included), `false` never.
 - CLI flags override config: `--status-port <port>` (implies enabled, pins the port),
   `--no-status-server` (disables).
 - Runs in both TUI and headless (`--print`) flows. Server start failure is a stderr warning,
   never fatal.
+
+## 10. Failure visibility
+
+A failed turn leaves the session at `status: "idle"`, which is indistinguishable from a
+healthy one. `lastError` is what makes the difference visible to a client that polls
+`/api/state` or connects after the failure has already scrolled past in the event stream.
+
+- **`lastError`** is set from the `error` bus event and **cleared on the next `turn_start`** —
+  it reports current health, not history. The event ring keeps the history.
+- `message` is already user-facing (provider prefix plus an actionable hint); render it as-is
+  rather than rebuilding one from `kind`.
+- `kind` is the routing key for the UI's offer: `auth` → open credentials, `quota` /
+  `overloaded` → offer a model switch, `network` / `timeout` → offer a retry. It is absent when
+  the failure did not come from a provider call.
+- **`lastFallback`** is set from the `provider_fallback` event and **is not cleared** by a new
+  turn. The chain moves off the primary only on a retryable refusal, and the replacement model
+  keeps answering afterwards — a badge showing which model is actually serving the session
+  stays accurate until the next switch.
+- A turn that the chain rescued produces a `lastFallback` and **no** `lastError`: the failure
+  was absorbed, not surfaced. A turn that exhausted the chain produces both.

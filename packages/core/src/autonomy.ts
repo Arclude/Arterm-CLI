@@ -20,8 +20,19 @@ export type AutonomyState = "idle" | "running" | "paused" | "done" | "stopped";
 export interface AutonomyTask {
   task: string;
   role?: string;
-  /** Stable team-member id (team mode) — threaded through fleet events. */
+  /**
+   * Stable identity for this unit of work, threaded through the fleet events so
+   * a UI can key a live row per task. Every task the engine dispatches carries
+   * one: a team member's own id in team mode, a synthetic `r<round>-<n>` in
+   * parallel/phased mode.
+   */
   id?: string;
+  /**
+   * True only for team-mode assignments. The composition root reads this to
+   * decide the member-only extras (per-member tools, worktree isolation, patch
+   * auto-apply); a plain parallel subtask has an {@link id} but no membership.
+   */
+  member?: boolean;
   /** Ad-hoc member brief, prefixed onto the task (wins over the role preset). */
   instruction?: string;
   /** A definition-backed member's full system prompt. */
@@ -548,6 +559,7 @@ export class AutonomyEngine {
           task,
           role: a.member.name,
           id: a.member.id,
+          member: true,
           instruction: a.member.adhoc ? a.member.instruction || undefined : undefined,
           systemPrompt: a.member.adhoc ? undefined : a.member.instruction,
           toolNames: a.member.toolNames,
@@ -766,11 +778,11 @@ Reply with ONLY a JSON array shaped like ${jsonShape}, where "done" states how t
       const jsonShape = '[{"task": "...", "role": "<role>"}]';
       const prompt = `${context}\n\nBreak THIS phase into up to ${this.fanout} INDEPENDENT subtasks that can run CONCURRENTLY.\nReply with ONLY a JSON array shaped like ${jsonShape} (role optional, one of: ${availableRoles().join(" | ")}).`;
       const raw = await this.agent.plan(prompt, this.current?.signal);
-      tasks = this.parseTasks(raw);
-      if (tasks.length === 0) tasks = [{ task: context }];
+      tasks = this.parseTasks(raw, `p${index + 1}`);
+      if (tasks.length === 0) tasks = [{ task: context, id: `p${index + 1}-1` }];
     } else {
       // Single focused sub-agent gets the full phase context incl. the handoff.
-      tasks = [{ task: context }];
+      tasks = [{ task: context, id: `p${index + 1}-1` }];
     }
 
     this.bus.emit({ type: "autonomy_fleet_round", round: index + 1, tasks });
@@ -811,11 +823,16 @@ Summarize concisely for the next phase: what is now DONE, what REMAINS, and any 
 Round ${round}. Break the NEXT chunk of work into up to ${this.fanout} INDEPENDENT subtasks that can run CONCURRENTLY without depending on one another.
 Reply with ONLY a JSON array shaped like ${jsonShape} (role optional, one of: ${roles}). If the GOAL is already complete or no parallel work remains, reply with exactly [].${steerLine}`;
     const raw = await this.agent.plan(prompt, this.current?.signal);
-    return this.parseTasks(raw);
+    return this.parseTasks(raw, `r${round}`);
   }
 
-  /** Tolerant parse of the leader's decomposition: first JSON array, validated + capped. */
-  private parseTasks(raw: string): AutonomyTask[] {
+  /**
+   * Tolerant parse of the leader's decomposition: first JSON array, validated +
+   * capped. `idPrefix` scopes the synthetic per-task ids to the round that
+   * produced them, so a board keyed on them replaces its rows each round instead
+   * of merging two rounds' subtasks into one.
+   */
+  private parseTasks(raw: string, idPrefix: string): AutonomyTask[] {
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) return [];
     let parsed: unknown;
@@ -836,7 +853,7 @@ Reply with ONLY a JSON array shaped like ${jsonShape} (role optional, one of: ${
         typeof roleRaw === "string" && valid.has(roleRaw.toLowerCase())
           ? roleRaw.toLowerCase()
           : undefined;
-      out.push({ task: task.trim(), role });
+      out.push({ task: task.trim(), role, id: `${idPrefix}-${out.length + 1}` });
       if (out.length >= this.fanout) break;
     }
     return out;

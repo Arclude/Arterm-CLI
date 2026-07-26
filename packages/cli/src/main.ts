@@ -55,10 +55,12 @@ import { ArtermUserError } from "./errors.js";
 import { runHeadless } from "./headless.js";
 import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
+import { runPermissionsExplain } from "./permissionsExplain.js";
+import { formatList, listPermissions, parseOnly, runPermissionsList } from "./permissionsList.js";
 import { buildSession } from "./session.js";
 import { type CliManagedSession, SessionManager } from "./sessionManager.js";
 import { runStatus } from "./status.js";
-import { type StatusServer, startStatusServer } from "./statusServer.js";
+import { type StatusServer, shouldPublish, startStatusServer } from "./statusServer.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
 const VERSION = "0.3.3";
@@ -162,14 +164,15 @@ interface GlobalOpts {
 
 /**
  * Start the desktop status server when enabled (docs/desktop-integration.md).
- * Precedence: --no-status-server > --status-port (implies on) > config.statusServer
- * ("auto" = only when ARTERM_TERMINAL is set). Failure warns and never blocks startup.
+ * Precedence: --no-status-server > --status-port (implies on) > config.statusServer,
+ * whose "auto" default publishes every interactive session regardless of terminal
+ * — see `shouldPublish`. Failure warns and never blocks startup.
  */
 async function maybeStartStatusServer(
   session: Session,
   config: ArtermConfig,
   globals: GlobalOpts,
-  opts?: { sessionId?: string; allowPinnedPort?: boolean },
+  opts?: { sessionId?: string; allowPinnedPort?: boolean; interactive?: boolean },
 ): Promise<StatusServer | undefined> {
   if (globals.statusServer === false) return undefined;
   let pinned: number | undefined;
@@ -182,11 +185,11 @@ async function maybeStartStatusServer(
       return undefined;
     }
   }
-  const enabled = config.statusServer?.enabled ?? "auto";
-  const on =
-    pinned !== undefined ||
-    enabled === true ||
-    (enabled === "auto" && Boolean(process.env.ARTERM_TERMINAL));
+  const on = shouldPublish({
+    enabled: config.statusServer?.enabled ?? "auto",
+    interactive: opts?.interactive ?? false,
+    pinnedPort: pinned !== undefined,
+  });
   if (!on) return undefined;
   // A pinned port can only serve one session; later sessions always bind port 0.
   const allowPinned = opts?.allowPinnedPort ?? true;
@@ -338,6 +341,34 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     session.skills = skills.list();
     session.getSkillBody = (name) => skills.get(name)?.body;
 
+    // `/permissions` is wired here rather than in buildSession because only this
+    // scope knows which tool came from where — and "this name arrived from a
+    // plugin" is the single most useful column in that table.
+    const mcpNames = new Set(mcpTools.map((t) => t.name));
+    const pluginNames = new Set(pluginTools.map((t) => t.name));
+    session.permissionsTable = (opts = {}) => {
+      // Read `agent.tools` at call time: a /mcp reload can add tools mid-session,
+      // and a stale snapshot would quietly under-report what the agent can do.
+      const entries = session.agent.tools.map((tool) => ({
+        tool,
+        source: mcpNames.has(tool.name)
+          ? ("mcp" as const)
+          : pluginNames.has(tool.name)
+            ? ("plugin" as const)
+            : ("built-in" as const),
+      }));
+      const only = parseOnly(opts.only);
+      // Default to the LIVE session mode, not `config.mode` — `--yolo` and
+      // Shift+Tab never touch the config, so config-derived rows would describe
+      // a stricter session than the one actually running.
+      return formatList(
+        listPermissions(session.config, entries, {
+          mode: opts.mode ?? session.permissionMode,
+          ...(only ? { only } : {}),
+        }),
+      );
+    };
+
     // Live health checks + reload for /mcp and /plugins (the TUI only sees the
     // summaries above; these closures give it the live manager instances).
     session.checkExtensions = async () => ({
@@ -403,6 +434,7 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     const statusServer = await maybeStartStatusServer(session, cfg, globals, {
       sessionId: id,
       allowPinnedPort: isFirst,
+      interactive: true,
     });
     return { id, session, statusServer, persist, digest };
   };
@@ -796,6 +828,37 @@ async function main(): Promise<void> {
     });
   auth.command("list").description("list stored key names").action(authList);
   auth.command("remove <name>").description("delete a stored key").action(authRemove);
+
+  const permissions = program
+    .command("permissions")
+    .description("inspect the permission policy without running anything");
+  permissions
+    .command("list", { isDefault: true })
+    .description("show every tool's effective permission and what the policy resolves to")
+    .option("--mode <mode>", "evaluate under ask | auto | plan | yolo (default: your config)")
+    .option("--only <outcome>", "show only allow | deny | prompt rows")
+    .option("--builtins-only", "skip MCP/plugin tools (does not start their servers)")
+    .option("--json", "emit the table as JSON")
+    .action(async (opts, cmd: Command) => {
+      await runPermissionsList({
+        ...opts,
+        json: cmd.optsWithGlobals<{ json?: boolean }>().json,
+      });
+    });
+  permissions
+    .command("explain <tool>")
+    .description("show what would happen if the agent called <tool>, and why")
+    .option("--args <json>", 'tool arguments as JSON, e.g. \'{"command":"rm -rf /"}\'')
+    .option("--mode <mode>", "evaluate under ask | auto | plan | yolo (default: your config)")
+    .option("--builtins-only", "skip MCP/plugin tools (does not start their servers)")
+    .option("--json", "emit the decision trace as JSON")
+    .action(async (tool: string, opts, cmd: Command) => {
+      await runPermissionsExplain({
+        tool,
+        ...opts,
+        json: cmd.optsWithGlobals<{ json?: boolean }>().json,
+      });
+    });
 
   const memory = program.command("memory").description("view this project's persistent memory");
   memory

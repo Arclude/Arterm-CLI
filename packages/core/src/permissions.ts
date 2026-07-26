@@ -23,6 +23,39 @@ export interface PermissionDecision {
   reason?: string;
 }
 
+/** What the policy resolves to before any human is involved. */
+export type PermissionOutcome = "allow" | "deny" | "prompt";
+
+/** One rule the policy consulted, in the order it ran. */
+export interface PermissionTraceStep {
+  /** Rule id — stable enough to match on (`tool-level`, `arbiter`, `mode:plan`, …). */
+  rule: string;
+  /** What that rule saw, in words. */
+  detail: string;
+  /** True on the single step that produced the outcome. */
+  decided: boolean;
+}
+
+/**
+ * The full reasoning behind a decision: the inputs the policy saw, every rule it
+ * consulted, and where it stopped. Produced by {@link PermissionManager.evaluate}
+ * — the same function `check()` runs — so an explanation can never drift from the
+ * behavior it describes.
+ */
+export interface PermissionEvaluation {
+  outcome: PermissionOutcome;
+  /** Present when a rule blocked the call and had something to say about it. */
+  reason?: string;
+  mode: PermissionMode;
+  category: ToolCategory;
+  /** Effective level after overrides — what the tool's own default resolved to. */
+  level: PermissionLevel;
+  /** True when the level came from an override rather than the tool's default. */
+  overridden: boolean;
+  riskTier?: string;
+  trace: PermissionTraceStep[];
+}
+
 /**
  * Resolves whether a tool call may run, consulting (in order):
  *   1. the session permission mode (yolo / plan / auto)
@@ -71,50 +104,94 @@ export class PermissionManager {
     return tool.category ?? "execute";
   }
 
-  async check(
-    tool: Tool,
-    args: Record<string, unknown>,
-    ask: PermissionAsker,
-  ): Promise<PermissionDecision> {
+  /**
+   * Run the policy ladder without involving a human and report what it found.
+   *
+   * This IS the decision — `check()` calls it and only adds the prompt when the
+   * outcome is "prompt". An explainer (`arterm permissions explain`) can
+   * therefore show exactly what would happen without executing anything, and
+   * cannot fall out of sync with the real behavior.
+   *
+   * Side-effect free: the arbiter's `decide` is a pure classifier, and nothing
+   * here touches overrides (only answering a prompt does).
+   */
+  evaluate(tool: Tool, args: Record<string, unknown>): PermissionEvaluation {
     const category = this.category(tool);
     const level = this.level(tool);
+    const trace: PermissionTraceStep[] = [];
+    const base: Omit<PermissionEvaluation, "outcome" | "reason"> = {
+      mode: this.mode,
+      category,
+      level,
+      overridden: this.overrides[tool.name] !== undefined,
+      ...(tool.riskTier ? { riskTier: tool.riskTier } : {}),
+      trace,
+    };
+    const step = (rule: string, detail: string, decided = false): void => {
+      trace.push({ rule, detail, decided });
+    };
+    const stop = (outcome: PermissionOutcome, reason?: string): PermissionEvaluation => {
+      const last = trace[trace.length - 1];
+      if (last) last.decided = true;
+      return { ...base, outcome, ...(reason ? { reason } : {}) };
+    };
 
     // A hard tool-level deny wins in every mode — including yolo (fail-closed).
-    if (level === "deny") return { allowed: false, persist: false };
+    if (level === "deny") {
+      step("tool-level", `${tool.name} is set to "deny"; this wins in every mode`);
+      return stop("deny");
+    }
+    step(
+      "tool-level",
+      `level "${level}"${base.overridden ? " (from an override)" : ""} — not a hard deny, so the ladder continues`,
+    );
 
     // Brain Arbiter runs in every mode so a "critical" call (e.g. rm -rf /) is blocked
     // even under yolo. "escalate" forces a human prompt; "allow" approves outright.
     let arbiterDecision: ArbiterDecision = "default";
     if (this.arbiter) {
       const verdict = this.arbiter.decide(tool, args, { mode: this.mode, category });
-      if (verdict.decision === "deny") {
-        return { allowed: false, persist: false, reason: verdict.reason };
-      }
+      const said =
+        verdict.decision === "default"
+          ? "no opinion — defers to the mode"
+          : `${verdict.decision}${verdict.reason ? ` — ${verdict.reason}` : ""}`;
+      step("arbiter", said);
+      if (verdict.decision === "deny") return stop("deny", verdict.reason);
       arbiterDecision = verdict.decision;
+    } else {
+      step("arbiter", "not configured — nothing screens command arguments");
     }
 
     // A tool tagged destructive re-prompts even in non-ask modes when the gate is on.
     const destructiveGate = this.confirmDestructive && tool.riskTier === "destructive";
     const forceAsk = arbiterDecision === "escalate" || destructiveGate;
+    if (destructiveGate) {
+      step("confirm-destructive", "tool is destructive and the gate is on — a prompt is forced");
+    }
 
     // yolo: approve everything that survived the deny/critical checks without prompting,
     // unless the destructive-confirm gate explicitly demands a prompt.
     if (this.mode === "yolo") {
-      if (destructiveGate) return this.prompt(tool, args, ask);
-      return { allowed: true, persist: false };
+      if (destructiveGate) return stop("prompt");
+      step("mode:yolo", "approves anything that survived the deny and arbiter checks");
+      return stop("allow");
     }
 
     // Plan mode is read-only: anything that mutates is blocked outright.
     if (this.mode === "plan" && category !== "read") {
-      return {
-        allowed: false,
-        persist: false,
-        reason: "plan mode is read-only — switch to ask/auto (Shift+Tab) to make changes",
-      };
+      const reason = "plan mode is read-only — switch to ask/auto (Shift+Tab) to make changes";
+      step("mode:plan", `category "${category}" mutates state`);
+      return stop("deny", reason);
     }
 
     if (!forceAsk && (level === "allow" || arbiterDecision === "allow")) {
-      return { allowed: true, persist: false };
+      step(
+        level === "allow" ? "tool-level" : "arbiter",
+        level === "allow"
+          ? 'this tool is "allow", so it never prompts'
+          : "approved this call outright",
+      );
+      return stop("allow");
     }
 
     // Auto mode silently approves file edits. It ALSO runs shell/execute commands
@@ -124,10 +201,37 @@ export class PermissionManager {
     // ones (rm -rf /, format, whole-drive wipes) were already denied. With no arbiter
     // there's nothing screening the command, so execute tools still prompt (fail-safe).
     if (!forceAsk && this.mode === "auto") {
-      if (category === "edit") return { allowed: true, persist: false };
-      if (category === "execute" && this.arbiter) return { allowed: true, persist: false };
+      if (category === "edit") {
+        step("mode:auto", "file edits are approved without a prompt");
+        return stop("allow");
+      }
+      if (category === "execute" && this.arbiter) {
+        step("mode:auto", "the arbiter screened this command, so it runs without a prompt");
+        return stop("allow");
+      }
+      if (category === "execute") {
+        step("mode:auto", "no arbiter is screening commands, so execute tools still prompt");
+      }
     }
 
+    step("prompt", forceAsk ? "a prompt was forced above" : "no rule pre-decided this call");
+    return stop("prompt");
+  }
+
+  async check(
+    tool: Tool,
+    args: Record<string, unknown>,
+    ask: PermissionAsker,
+  ): Promise<PermissionDecision> {
+    const evaluation = this.evaluate(tool, args);
+    if (evaluation.outcome === "allow") return { allowed: true, persist: false };
+    if (evaluation.outcome === "deny") {
+      return {
+        allowed: false,
+        persist: false,
+        ...(evaluation.reason ? { reason: evaluation.reason } : {}),
+      };
+    }
     return this.prompt(tool, args, ask);
   }
 

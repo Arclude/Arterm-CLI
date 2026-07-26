@@ -23,6 +23,14 @@ interface Props {
   cwd?: string;
   /** Multi-session summary for the badge: 1-based index, total, busy background count. */
   sessions?: { index: number; count: number; busyBackground: number };
+  /**
+   * Where the fallback chain landed, when it has moved off the configured model.
+   *
+   * Without it the bar keeps naming the model you *chose* while a different one
+   * is answering — the `↪` notice scrolls away and nothing on screen says your
+   * replies are now coming from somewhere else.
+   */
+  fallbackTo?: { provider: string; model: string } | null;
 }
 
 const VERSION = "0.3.3";
@@ -103,8 +111,15 @@ export function StatusBar({
   shiftSelect = false,
   cwd: cwdProp,
   sessions,
+  fallbackTo,
 }: Props): React.ReactElement {
   const selectHint = shiftSelect ? "shift+drag selects" : "drag selects text";
+  // Name both ends of the switch: "backup" alone would look like the model was
+  // changed, when in fact the configured one is still the one that failed.
+  const answering =
+    fallbackTo && (fallbackTo.provider !== provider || fallbackTo.model !== model)
+      ? `${model}↪${fallbackTo.provider === provider ? fallbackTo.model : `${fallbackTo.provider}/${fallbackTo.model}`}`
+      : model;
   // Computed inline (no per-second timer) so the UI does not repaint while idle.
   const clock = new Date().toLocaleTimeString();
   const dir = cwdProp ?? process.cwd();
@@ -140,7 +155,7 @@ export function StatusBar({
   // Wide panes get the dense two-row bar. Narrow panes stack each group on its
   // own truncating line so every detail stays visible instead of being clipped.
   if (columns < 84) {
-    const m = clip(`${provider}/${model}`, Math.max(8, columns - 1));
+    const m = clip(`${provider}/${answering}`, Math.max(8, columns - 1));
     return (
       <Box flexDirection="column" marginTop={1}>
         <Text wrap="truncate">
@@ -208,8 +223,8 @@ export function StatusBar({
         <Text color={statusColor}> {status}</Text>
         {sessionBadge}
         {sepW}
-        <Text color="magenta">
-          {provider}/{model}
+        <Text color={fallbackTo ? "yellow" : "magenta"}>
+          {provider}/{answering}
         </Text>{" "}
         <ModeBadge mode={mode} />
         {sepW}

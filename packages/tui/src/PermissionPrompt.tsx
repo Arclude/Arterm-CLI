@@ -1,14 +1,24 @@
-import type { Tool } from "@arterm/core";
+import type { PermissionOrigin, Tool } from "@arterm/core";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
+import { agentColor } from "./agentColor.js";
 
 export interface PendingPermission {
   tool: Tool;
   args: Record<string, unknown>;
   resolve: (answer: "allow" | "allow_always" | "deny") => void;
+  /** Which sub-agent is blocked on this, when it isn't the main agent. */
+  origin?: PermissionOrigin;
 }
 
-export function PermissionPrompt({ pending }: { pending: PendingPermission }): React.ReactElement {
+export function PermissionPrompt({
+  pending,
+  queued = 0,
+}: {
+  pending: PendingPermission;
+  /** Requests waiting behind this one — a fan-out shares one prompt queue. */
+  queued?: number;
+}): React.ReactElement {
   useInput((input, key) => {
     const ch = input.toLowerCase();
     if (ch === "y") pending.resolve("allow");
@@ -24,8 +34,29 @@ export function PermissionPrompt({ pending }: { pending: PendingPermission }): R
   // outlines in terminals that don't fully erase the previous dynamic frame.
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color="yellow" bold>
-        ⚠ Permission required — {head}
+      <Text wrap="truncate-end">
+        <Text color="yellow" bold>
+          ⚠ Permission required
+        </Text>
+        {/* Who is blocked: the worker's own accent colour, matching its board row
+            and its transcript lines, so a fan-out prompt is attributable at a
+            glance. Absent for the main agent. */}
+        {pending.origin ? (
+          <Text color={agentColor(pending.origin.id ?? pending.origin.name)} bold>
+            {" ⚑ "}
+            {pending.origin.name}
+          </Text>
+        ) : null}
+        <Text color="yellow" bold>
+          {" — "}
+          {head}
+        </Text>
+        {queued > 0 ? (
+          <Text color="gray" dimColor>
+            {"  +"}
+            {queued} queued
+          </Text>
+        ) : null}
       </Text>
       {body.length > 0 ? (
         <Box flexDirection="column" marginLeft={2}>

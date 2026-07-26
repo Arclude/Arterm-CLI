@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
+import { PermissionBroker, type Tool } from "@arterm/core";
 import type { Session } from "@arterm/tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { STATUS_DIR, type StatusServer, startStatusServer } from "./statusServer.js";
+import { STATUS_DIR, type StatusServer, shouldPublish, startStatusServer } from "./statusServer.js";
 
 type Listener = (event: { type: string; [k: string]: unknown }) => void;
 
@@ -36,6 +37,7 @@ function makeSession() {
     start: vi.fn().mockResolvedValue(undefined),
     setMode: vi.fn(() => true),
   };
+  const permissionBroker = new PermissionBroker();
   const session = {
     bus,
     agent: { model: "test-model" },
@@ -43,8 +45,9 @@ function makeSession() {
     permissionMode: "ask",
     toolCount: 3,
     autonomy,
+    permissionBroker,
   };
-  return { bus, autonomy, session: session as unknown as Session };
+  return { bus, autonomy, permissionBroker, session: session as unknown as Session };
 }
 
 /** Test helper: JSON responses are probed with arbitrary shapes. */
@@ -173,6 +176,41 @@ describe("statusServer", () => {
     expect((await asJson(unknown)).ok).toBe(false);
   });
 
+  it("answers a pending permission prompt over the control endpoint", async () => {
+    const { server, session } = await start();
+    session.permissionBroker.setAsker(() => new Promise(() => {})); // local prompt never settles
+    const writeTool = {
+      name: "write_file",
+      description: "writes",
+      parameters: { type: "object" },
+      permission: "ask",
+      category: "edit",
+      preview: () => "write a.ts",
+      execute: async () => ({ output: "" }),
+    } as unknown as Tool;
+
+    const answered = session.permissionBroker.ask(writeTool, { path: "a.ts" });
+
+    const state = await asJson(await fetch(`${server.url}/api/state?token=${server.token}`));
+    expect(state.state.pendingPermission).toMatchObject({
+      tool: "write_file",
+      preview: "write a.ts",
+    });
+
+    const res = await fetch(`${server.url}/api/control?token=${server.token}`, {
+      method: "POST",
+      body: JSON.stringify({
+        action: "permission",
+        id: state.state.pendingPermission.id,
+        answer: "allow",
+      }),
+    });
+    const body = await asJson(res);
+    expect(body.ok).toBe(true);
+    expect(body.state.pendingPermission).toBeNull();
+    await expect(answered).resolves.toBe("allow");
+  });
+
   it("rejects malformed control bodies with 400", async () => {
     const { server } = await start();
     const res = await fetch(`${server.url}/api/control?token=${server.token}`, {
@@ -258,5 +296,57 @@ describe("statusServer", () => {
     expect(server.port).toBeGreaterThan(0);
     expect(existsSync(staleFile)).toBe(false);
     expect(existsSync(staleSessionFile)).toBe(false);
+  });
+
+  it("unlinks the discovery file when the process is signalled", async () => {
+    const server = await startStatusServer({
+      session: makeSession().session,
+      cwd: "/w",
+      sessionId: "sid-signal",
+    });
+    cleanups.push(() => server.close());
+    const file = join(STATUS_DIR, `${process.pid}-sid-signal.json`);
+    expect(existsSync(file)).toBe(true);
+
+    // A second listener keeps the handler from re-raising the signal (which would
+    // kill this test worker) — and pins the "defer to other listeners" rule.
+    const guard = (): void => {};
+    process.on("SIGTERM", guard);
+    try {
+      process.emit("SIGTERM");
+    } finally {
+      process.off("SIGTERM", guard);
+    }
+    expect(existsSync(file)).toBe(false);
+  });
+});
+
+describe("shouldPublish (which sessions reach the desktop)", () => {
+  const auto = (o: Partial<Parameters<typeof shouldPublish>[0]>): boolean =>
+    shouldPublish({ enabled: "auto", interactive: false, artermTerminal: false, ...o });
+
+  it('publishes an interactive session on "auto" from ANY terminal', () => {
+    // The point of the default: a CLI in Konsole/tmux is listed too.
+    expect(auto({ interactive: true })).toBe(true);
+    expect(auto({ interactive: true, artermTerminal: true })).toBe(true);
+  });
+
+  it('keeps a headless one-shot on "auto" to the Arterm terminal only', () => {
+    expect(auto({ interactive: false })).toBe(false);
+    expect(auto({ interactive: false, artermTerminal: true })).toBe(true);
+  });
+
+  it("honours explicit true/false over everything but a pinned port", () => {
+    expect(shouldPublish({ enabled: true, interactive: false, artermTerminal: false })).toBe(true);
+    expect(shouldPublish({ enabled: false, interactive: true, artermTerminal: true })).toBe(false);
+    // --status-port asks for the server outright.
+    expect(
+      shouldPublish({
+        enabled: false,
+        interactive: false,
+        pinnedPort: true,
+        artermTerminal: false,
+      }),
+    ).toBe(true);
   });
 });

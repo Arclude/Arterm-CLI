@@ -11,6 +11,7 @@ import type {
   McpServerSummary,
   ModelInfo,
   PermissionAsker,
+  PermissionBroker,
   PermissionMode,
   PluginSummary,
   SddRunner,
@@ -41,6 +42,13 @@ export interface Session {
   yolo: boolean;
   /** Wire the permission UI into the agent's permission flow. */
   setAsker(asker: PermissionAsker): void;
+  /**
+   * The broker sitting between the agent and the prompt installed above. The
+   * status server reads its pending request into the snapshot and answers it
+   * remotely, so a prompt raised in a background terminal tab can be resolved
+   * from the desktop GUI (docs/desktop-integration.md §8).
+   */
+  permissionBroker: PermissionBroker;
   /** List models for the active provider. */
   listModels(): Promise<ModelInfo[]>;
   /** List models across all local + signed-in providers (the Alt+P picker). Each
@@ -116,6 +124,15 @@ export interface Session {
    */
   reloadExtensions?(): Promise<ExtensionsReload>;
   /**
+   * The effective permission table for `/permissions`, already formatted.
+   *
+   * Injected by the CLI because the policy and the tool list live there. It uses
+   * the tools this session actually loaded — so unlike `arterm permissions list`,
+   * which re-collects them, the table answers for the agent in front of you,
+   * including whatever MCP servers and plugins came up in this run.
+   */
+  permissionsTable?(opts?: { mode?: PermissionMode; only?: string }): string;
+  /**
    * Project-memory legend to show at session start (claude-mem-style), or "" when
    * there's nothing to recall. Rendered once as a system block above the prompt.
    */
@@ -142,7 +159,9 @@ export type DisplayItem =
       bytes?: number;
       tok?: number;
     }
-  | { kind: "system"; text: string }
+  /** A status line. `color` overrides the default gray — sub-agent lines use their
+   *  worker's accent colour (see agentColor.ts) so a fan-out is readable. */
+  | { kind: "system"; text: string; color?: string }
   /** Styled welcome banner shown once at startup. */
   | { kind: "banner"; provider: string; model: string }
   /** Styled command reference, shown on /help or `?`. */

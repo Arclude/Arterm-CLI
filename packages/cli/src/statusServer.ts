@@ -93,20 +93,75 @@ function sweepStaleDiscovery(): void {
 const liveDiscoveryFiles = new Set<string>();
 let exitUnlinkInstalled = false;
 
+/** Signals whose default action kills us WITHOUT running the "exit" handler. */
+const SHUTDOWN_SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"] as const;
+
+function unlinkDiscoveryFiles(): void {
+  for (const f of liveDiscoveryFiles) {
+    try {
+      unlinkSync(f);
+    } catch {
+      // best-effort
+    }
+  }
+  liveDiscoveryFiles.clear();
+}
+
 function trackDiscoveryFile(file: string): void {
   liveDiscoveryFiles.add(file);
   if (exitUnlinkInstalled) return;
   exitUnlinkInstalled = true;
-  process.on("exit", () => {
-    for (const f of liveDiscoveryFiles) {
-      try {
-        unlinkSync(f);
-      } catch {
-        // best-effort
+  process.on("exit", unlinkDiscoveryFiles);
+  // A `kill`, a `timeout`, or a service manager stopping us terminates the
+  // process without ever running the "exit" handler above, which would strand
+  // this session in the desktop's Agents list until the next sweep. So unlink on
+  // the way out, then let the signal do its job.
+  for (const signal of SHUTDOWN_SIGNALS) {
+    const handler = (): void => {
+      unlinkDiscoveryFiles();
+      // Registering a listener suppressed the default termination. If ours is the
+      // only one, restore it: drop the listener and re-raise, so the parent still
+      // sees "killed by <signal>" instead of a fabricated exit code. When
+      // something else listens too (an `arterm memory serve` owns SIGINT, Ink
+      // unmounts the TUI), the shutdown is theirs to finish — cleanup was the
+      // whole of our business here.
+      if (process.listenerCount(signal) === 1) {
+        process.removeListener(signal, handler);
+        process.kill(process.pid, signal);
       }
-    }
-    liveDiscoveryFiles.clear();
-  });
+    };
+    process.on(signal, handler);
+  }
+}
+
+/**
+ * Resolves whether a session publishes itself to the desktop (contract §1).
+ *
+ * `"auto"` (the default) means **every interactive session**, in ANY terminal —
+ * a CLI started in Konsole/Alacritty belongs in the desktop's Agents list just as
+ * much as one started in Arterm's own terminal. What "auto" still withholds is
+ * the headless one-shot (`-p`), which lives for seconds and mostly runs from
+ * scripts and CI: there a bound port and a discovery file are noise, so it
+ * publishes only inside the Arterm terminal (`ARTERM_TERMINAL`), where the
+ * desktop actually has a tab to attach it to.
+ *
+ * `true` publishes unconditionally (headless included), `false` never, and a
+ * pinned `--status-port` implies on. Kept pure and separate from the wiring so
+ * the policy is testable without binding a socket.
+ */
+export function shouldPublish(opts: {
+  enabled: boolean | "auto";
+  /** True for the TUI; false for a headless one-shot run. */
+  interactive: boolean;
+  /** A `--status-port` was given, which implies the server is wanted. */
+  pinnedPort?: boolean;
+  /** Set by the Arterm desktop's own terminal (defaults to the live env). */
+  artermTerminal?: boolean;
+}): boolean {
+  if (opts.pinnedPort) return true;
+  if (opts.enabled !== "auto") return opts.enabled;
+  if (opts.interactive) return true;
+  return opts.artermTerminal ?? Boolean(process.env.ARTERM_TERMINAL);
 }
 
 /** Atomically write one session's discovery file (contract §1). */
@@ -262,18 +317,23 @@ export function startStatusServer(opts: {
       });
       req.on("end", () => {
         if (overflow) return;
-        let parsed: { action?: unknown; note?: unknown; mode?: unknown };
+        let parsed: Record<string, unknown>;
         try {
-          parsed = JSON.parse(body || "{}");
+          parsed = JSON.parse(body || "{}") as Record<string, unknown>;
         } catch {
           json(res, 400, { error: "malformed JSON body" });
           resolve();
           return;
         }
-        const action = typeof parsed.action === "string" ? parsed.action : "";
-        const note = typeof parsed.note === "string" ? parsed.note : "";
-        const mode = typeof parsed.mode === "string" ? parsed.mode : undefined;
-        const result = control(opts.session, action, note, mode);
+        const str = (key: string): string | undefined =>
+          typeof parsed[key] === "string" ? (parsed[key] as string) : undefined;
+        const result = control(opts.session, {
+          action: str("action") ?? "",
+          note: str("note"),
+          mode: str("mode"),
+          id: str("id"),
+          answer: str("answer"),
+        });
         json(res, 200, { ...result, state: state.snapshot() });
         resolve();
       });

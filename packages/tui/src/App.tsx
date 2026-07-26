@@ -5,6 +5,7 @@ import {
   PERMISSION_MODES,
   type PermissionAsker,
   type PermissionMode,
+  type PermissionOrigin,
   type PluginSummary,
   type SddTaskState,
   cachedCatalogSync,
@@ -33,7 +34,8 @@ import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js"
 import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
-import { TeamBoard, type TeamBoardMember } from "./TeamBoard.js";
+import { TeamBoard, type TeamBoardKind, type TeamBoardMember } from "./TeamBoard.js";
+import { agentColor } from "./agentColor.js";
 import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
 import { osc52Sequence } from "./clipboard.js";
 import {
@@ -67,6 +69,7 @@ function InputLine({
   onHelp,
   onHistoryPrev,
   onHistoryNext,
+  onTab,
   externalArrows = false,
 }: {
   active: boolean;
@@ -78,7 +81,13 @@ function InputLine({
   onHelp: () => void;
   onHistoryPrev: () => void;
   onHistoryNext: () => void;
-  /** Fullscreen: ↑/↓ are owned by App's arrow router (wheel vs keyboard). */
+  /**
+   * Tab with nothing to complete. Ownership sits here rather than in a second
+   * always-on handler: completing changes the prompt, so a separate handler
+   * inspecting it in the same keypress would race the commit and both fire.
+   */
+  onTab?: () => void;
+  /** ↑/↓ are owned by App: its arrow router (fullscreen) or board navigation. */
   externalArrows?: boolean;
 }): React.ReactElement {
   const suggestion = commandSuggestion(value, commands);
@@ -103,14 +112,17 @@ function InputLine({
   useInput(
     (input, key) => {
       const v = valueRef.current;
-      // Fullscreen: never double-handle arrows — the arrow router separates
-      // wheel-synthesized arrows (scroll) from keyboard ones (history).
+      // Never double-handle arrows when App owns them — the fullscreen router
+      // separates wheel-synthesized arrows (scroll) from keyboard ones (history),
+      // and an open board drill-down steps its rows with them.
       if (externalArrows && (key.upArrow || key.downArrow)) return;
-      // Tab completes a slash command to its first match. Shift+Tab is the
-      // permission-mode cycle, handled in App — fall through and leave it.
+      // Tab completes a slash command to its first match; with nothing to
+      // complete it falls through to `onTab` (the board's row step). Shift+Tab is
+      // the permission-mode cycle, handled in App — leave it alone.
       if (key.tab && !key.shift) {
         const s = commandSuggestion(v, commands);
         if (s) onChange(v + s);
+        else onTab?.();
         return;
       }
       const action = reduceInput(v, input, key);
@@ -179,6 +191,7 @@ const COMMANDS = [
   "skills",
   "skill",
   "mode",
+  "permissions",
   "auto",
   "plan",
   "ask",
@@ -186,6 +199,13 @@ const COMMANDS = [
   "exit",
   "quit",
 ] as const;
+
+/** How a remotely-answered permission reads in the transcript. */
+const PERMISSION_ANSWER_LABEL: Record<string, string> = {
+  allow: "allowed once",
+  allow_always: "always allowed",
+  deny: "denied",
+};
 
 /** Modes cycled by Shift+Tab; yolo is deliberately excluded (set it via /mode yolo). */
 const MODE_CYCLE: PermissionMode[] = ["ask", "auto", "plan"];
@@ -504,6 +524,11 @@ export function App({
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<HistoryNav>(emptyHistory);
   const [model, setModel] = useState(session.agent.model);
+  /**
+   * Where the fallback chain last landed, so the status bar can say who is really
+   * answering. The `↪` transcript line scrolls away; this doesn't.
+   */
+  const [fallbackTo, setFallbackTo] = useState<{ provider: string; model: string } | null>(null);
   const [permMode, setPermMode] = useState<PermissionMode>(session.permissionMode);
   const [autoState, setAutoState] = useState<"idle" | "running" | "paused" | "done" | "stopped">(
     "idle",
@@ -511,6 +536,14 @@ export function App({
   const [goalText, setGoalText] = useState("");
   const [autoStep, setAutoStep] = useState(0);
   const [pending, setPending] = useState<PendingPermission | null>(null);
+  // Requests waiting behind the active prompt, tracked off `permission_queued`
+  // (the broker queues concurrent asks — a fan-out shares one prompt).
+  const [permQueued, setPermQueued] = useState(0);
+  // Set from `permission_request`, which the broker emits immediately BEFORE it
+  // calls our asker — so the prompt raised next knows which worker it belongs to.
+  const permOriginRef = useRef<PermissionOrigin | undefined>(undefined);
+  /** Board row currently marked "awaiting permission", so it can be handed back. */
+  const permRowRef = useRef<string | undefined>(undefined);
   const [inTok, setInTok] = useState(0);
   const [outTok, setOutTok] = useState(0);
   const [ctxUsed, setCtxUsed] = useState(0);
@@ -539,8 +572,13 @@ export function App({
   // Live /sdd kanban board — seeded from `sdd_graph`, updated per `sdd_task_state`.
   const [sddTasks, setSddTasks] = useState<SddBoardTask[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamBoardMember[]>([]);
-  // Board navigation: ↑/↓ (on an empty prompt) select a member, Enter opens its
-  // activity feed, Esc closes it. Feeds are per-member rings of formatted lines.
+  // Which fan-out mode the board is showing: a /team roster or a parallel run's
+  // per-round subtasks. Only the wording differs — the rows, the telemetry and
+  // the navigation are the same. `team` wins if both could apply.
+  const [boardKind, setBoardKind] = useState<TeamBoardKind>("team");
+  // Board navigation: Ctrl+↑/↓ select a row (plain ↑/↓ stay prompt history),
+  // Enter on an empty prompt opens its activity feed, and while that feed is open
+  // plain ↑/↓ and Tab step rows too. Esc closes it. Feeds are per-row line rings.
   const [teamSel, setTeamSel] = useState(0);
   const [teamDetailOpen, setTeamDetailOpen] = useState(false);
   // Ref mirrors for the always-active Esc handlers below — a handler can fire
@@ -548,6 +586,8 @@ export function App({
   // gates are read through refs instead of isActive/closures.
   const teamDetailOpenRef = useRef(false);
   teamDetailOpenRef.current = teamDetailOpen;
+  const memberCountRef = useRef(0);
+  memberCountRef.current = teamMembers.length;
   const autoStateRef = useRef(autoState);
   autoStateRef.current = autoState;
   const pendingRef = useRef<PendingPermission | null>(null);
@@ -589,6 +629,11 @@ export function App({
   // ownership would flap the modes on every session switch.
   const { stdout: rawStdout } = useStdout();
   const mouseCapture = fullscreen && (session.config.tui?.mouse ?? true);
+  // True when the arrow ROUTER owns ↑/↓ (it tells wheel-synthesized arrows from
+  // keypresses). Read through a ref by the always-active board handler below.
+  const routedArrows = fullscreen && !mouseCapture;
+  const routedArrowsRef = useRef(routedArrows);
+  routedArrowsRef.current = routedArrows;
 
   // ── Fullscreen scroll machinery ─────────────────────────────────────────────
   // Viewport height = terminal rows − the measured bottom region (input +
@@ -712,18 +757,32 @@ export function App({
   }, []);
   useEffect(() => resetLive, [resetLive]);
 
-  // Wire the permission prompt into the agent's permission flow (once).
+  // Wire the permission prompt into the agent's permission flow (once). The
+  // request's origin (which sub-agent asked) and the queue depth behind it come
+  // off the bus — see the `permission_request` / `permission_queued` cases below.
   useEffect(() => {
-    const asker: PermissionAsker = (tool, args) =>
+    const asker: PermissionAsker = (tool, args, signal) =>
       new Promise((resolve) => {
-        setPending({
+        const entry: PendingPermission = {
           tool,
           args,
+          origin: permOriginRef.current,
           resolve: (answer) => {
-            setPending(null);
+            setPending((cur) => (cur === entry ? null : cur));
             resolve(answer);
           },
-        });
+        };
+        // Answered elsewhere (the desktop, via the status server): tear this
+        // prompt down. The broker ignores what we resolve with at that point.
+        signal?.addEventListener(
+          "abort",
+          () => {
+            setPending((cur) => (cur === entry ? null : cur));
+            resolve("deny");
+          },
+          { once: true },
+        );
+        setPending(entry);
       });
     session.setAsker(asker);
   }, [session]);
@@ -879,27 +938,115 @@ export function App({
           push({ kind: "system", text: `■ autonomy stopped — ${event.reason}` });
           drainRef.current();
           break;
+        case "permission_request":
+          // Arrives synchronously just before the broker calls our asker; the ref
+          // is what the prompt reads for its "⚑ worker" line. A main-agent request
+          // carries no origin, which clears the previous one.
+          permOriginRef.current = event.origin;
+          // A blocked worker's board row should say so — otherwise the row just
+          // sits on its last tool call while the whole fan-out waits.
+          if (event.origin?.id) {
+            const id = event.origin.id;
+            permRowRef.current = id;
+            setTeamMembers((prev) =>
+              prev.map((m) => (m.id === id ? { ...m, activity: "⊙ awaiting permission" } : m)),
+            );
+          }
+          break;
+        case "permission_queued":
+          setPermQueued(event.queued);
+          break;
+        case "permission_resolved":
+          // Hand the row back to its tool: the sub-agent's next event may be a
+          // while away (the call it just got cleared to make), and leaving
+          // "awaiting permission" up would read as still blocked.
+          if (permRowRef.current) {
+            const id = permRowRef.current;
+            permRowRef.current = undefined;
+            const activity = event.answer === "deny" ? "⊘ denied" : `⚙ ${event.tool}`;
+            setTeamMembers((prev) => prev.map((m) => (m.id === id ? { ...m, activity } : m)));
+          }
+          // A prompt answered from the desktop tears itself down here with no
+          // keypress of yours — say so, or its disappearance reads as a glitch.
+          if (event.via === "remote") {
+            push({
+              kind: "system",
+              text: `⊙ ${event.tool}: ${PERMISSION_ANSWER_LABEL[event.answer]} from the desktop`,
+            });
+          }
+          break;
         case "subagent_start":
           push({
             kind: "system",
             text: `⟳ sub-agent${event.role ? ` (${event.role})` : ""}: ${event.task.slice(0, 80)}`,
+            color: agentColor(event.id ?? event.role ?? "sub-agent"),
           });
           break;
         case "subagent_done":
-          push({ kind: "system", text: `↩ sub-agent done: ${event.output.slice(0, 120)}` });
+          push({
+            kind: "system",
+            text: `↩ sub-agent${event.role ? ` (${event.role})` : ""} done: ${event.output.slice(
+              0,
+              120,
+            )}`,
+            color: agentColor(event.id ?? event.role ?? "sub-agent"),
+          });
           break;
         case "fleet_start":
           push({ kind: "system", text: `⛓ dispatching ${event.count} sub-agents in parallel…` });
+          // A bare `spawn_parallel` ships its rows here (nothing planned a round
+          // for it), so the board — and its ^↑↓ / ⏎ navigation — comes up for a
+          // plain fan-out too, not just /team and parallel autonomy.
+          if (event.tasks && event.tasks.length > 0) {
+            setBoardKind("fleet");
+            setTeamMembers(
+              event.tasks.map((t) => ({
+                id: t.id,
+                name: t.role ?? "subtask",
+                description: t.task,
+                adhoc: false,
+                state: "pending" as const,
+              })),
+            );
+            setTeamSel(0);
+            setTeamDetailOpen(false);
+            setTeamFeeds(new Map());
+          }
           break;
         case "fleet_done":
           push({ kind: "system", text: `⛓ fleet complete (${event.count} done)` });
           break;
-        case "autonomy_fleet_round":
+        case "autonomy_fleet_round": {
           push({
             kind: "system",
             text: `◆ round ${event.round}: dispatching ${event.tasks.length} subtask(s)`,
           });
+          // Seed the board with this round's subtasks so ↑↓/⏎ can inspect them
+          // live, exactly as in team mode. Only parallel and phased runs emit
+          // this event (a team run seeds from `team_plan`, whose roster stands
+          // across rounds), so replacing the rows wholesale is safe here.
+          {
+            const rows = event.tasks.filter(
+              (t): t is { id: string; task: string; role?: string } => typeof t.id === "string",
+            );
+            if (rows.length > 0) {
+              setBoardKind("fleet");
+              setTeamMembers(
+                rows.map((t) => ({
+                  id: t.id,
+                  name: t.role ?? "subtask",
+                  description: t.task,
+                  adhoc: false,
+                  state: "pending" as const,
+                })),
+              );
+              setTeamSel(0);
+              setTeamDetailOpen(false);
+              setTeamFeeds(new Map());
+            }
+          }
           break;
+        }
         case "autonomy_aggregate":
           push({
             kind: "system",
@@ -908,6 +1055,7 @@ export function App({
           break;
         case "team_plan":
           // Seed the live member board; the transcript keeps a one-line roster record.
+          setBoardKind("team");
           setTeamMembers(
             event.members.map((m) => ({
               id: m.id,
@@ -956,6 +1104,7 @@ export function App({
               text: `${event.state === "done" ? "✓" : "✗"} ${event.name}${
                 event.filesChanged ? ` — ${event.filesChanged} file(s) changed` : ""
               }`,
+              color: event.state === "failed" ? "red" : agentColor(event.id),
             });
           }
           break;
@@ -1058,7 +1207,19 @@ export function App({
           });
           break;
         case "error":
-          push({ kind: "system", text: `error: ${event.error}` });
+          // Tag the failure class when the provider supplied one, so "quota" and
+          // "auth" are distinguishable at a glance instead of by reading the body.
+          push({
+            kind: "system",
+            text: event.kind ? `error [${event.kind}]: ${event.error}` : `error: ${event.error}`,
+          });
+          break;
+        case "provider_fallback":
+          push({
+            kind: "system",
+            text: `↪ ${event.from.provider}/${event.from.model} ${event.reason} — falling back to ${event.to.provider}/${event.to.model}`,
+          });
+          setFallbackTo({ provider: event.to.provider, model: event.to.model });
           break;
         case "turn_end": {
           setStatus("idle");
@@ -1155,6 +1316,7 @@ export function App({
     (name: string) => {
       session.switchModel(name);
       setModel(name);
+      setFallbackTo(null);
       void session.persistNow?.();
       push({ kind: "system", text: `✓ model → ${name} (saved as default)` });
     },
@@ -1172,6 +1334,7 @@ export function App({
         }
         session.switchModel(m.name);
         setModel(m.name);
+        setFallbackTo(null);
         void session.persistNow?.();
         push({ kind: "system", text: `✓ ${session.providerLabel} / ${m.name} (saved as default)` });
       } catch (err) {
@@ -1213,6 +1376,7 @@ export function App({
         setSignedIn(session.signedInProviders());
         setProviderLabel(session.providerLabel);
         setModel(session.agent.model);
+        setFallbackTo(null);
         push({
           kind: "system",
           text: `✓ provider → ${p.id}${key ? " · key saved (encrypted)" : ""} — pick a model:`,
@@ -1241,6 +1405,7 @@ export function App({
           setSignedIn(session.signedInProviders());
           setProviderLabel(session.providerLabel);
           setModel(session.agent.model);
+          setFallbackTo(null);
           push({
             kind: "system",
             text: `✓ provider → openai-compat · ${trimmed}${apiKey ? " · key saved (encrypted)" : ""} — pick a model:`,
@@ -1511,6 +1676,7 @@ export function App({
           setCtxUsed(0);
           setSddTasks([]);
           setTeamMembers([]);
+          setBoardKind("team");
           setTeamSel(0);
           setTeamDetailOpen(false);
           setTeamFeeds(new Map());
@@ -1608,6 +1774,37 @@ export function App({
             }`,
           ];
           push({ kind: "system", text: lines.join("\n") });
+          break;
+        }
+        case "permissions": {
+          if (!session.permissionsTable) {
+            push({ kind: "system", text: "permissions table unavailable in this session" });
+            break;
+          }
+          // `/permissions [mode] [outcome]` — both optional, order-free, since
+          // "plan" and "deny" can't be confused for each other.
+          const args = rest.join(" ").trim().toLowerCase().split(/\s+/).filter(Boolean);
+          const mode = args.find((a) => (PERMISSION_MODES as string[]).includes(a));
+          const only = args.find((a) => ["allow", "deny", "prompt"].includes(a));
+          const unknown = args.find((a) => a !== mode && a !== only);
+          if (unknown) {
+            push({
+              kind: "system",
+              text: `unknown argument "${unknown}" — usage: /permissions [ask|auto|plan|yolo] [allow|deny|prompt]`,
+            });
+            break;
+          }
+          try {
+            push({
+              kind: "system",
+              text: session.permissionsTable({
+                ...(mode ? { mode: mode as PermissionMode } : {}),
+                ...(only ? { only } : {}),
+              }),
+            });
+          } catch (err) {
+            push({ kind: "system", text: `permissions: ${(err as Error).message}` });
+          }
           break;
         }
         case "mode": {
@@ -2039,6 +2236,53 @@ export function App({
     },
   );
 
+  // The one place the board selection moves from — shared by the key handler
+  // below and (in fullscreen) by the arrow router. Reads the row count through a
+  // ref, so it can never wrap against a stale one.
+  const stepMember = useCallback((d: number) => {
+    const count = memberCountRef.current;
+    if (count === 0) return;
+    setTeamSel((s) => (Math.min(s, count - 1) + d + count) % count);
+  }, []);
+
+  // Board keys, in order of how reliably a terminal transmits them:
+  //
+  //   ⇥ (Tab)      — steps to the next row while a board is up, unless the prompt
+  //                  has a slash-completion to offer (that keeps Tab). A bare
+  //                  0x09: no terminal can mangle it, so this is the one binding
+  //                  that always works. Wired through InputLine's `onTab`, not
+  //                  here — see the note on that prop.
+  //   Ctrl+↑/↓     — CSI "1;5A/B". Some terminals (Konsole among them) drop the
+  //                  modifier and send a plain arrow instead, which is why Tab and
+  //                  Alt exist below.
+  //   Alt+↑/↓      — ESC-prefixed arrow, transmitted where Ctrl+arrow isn't.
+  //   ↑/↓          — while a drill-down feed is open, inspecting IS the mode, so
+  //                  the bare arrows step rows there too. With the feed closed they
+  //                  stay prompt history, whatever the board is doing.
+  //
+  // All wrap at the ends. Shift+Tab is left alone — it cycles the permission mode.
+  //
+  // The plain-arrow branch is skipped when the arrow ROUTER owns arrows
+  // (fullscreen without mouse capture): there the terminal turns wheel ticks into
+  // arrow sequences, so a scroll would drag the selection along. That path steps
+  // the row from `arrowHistoryRef` below instead, after the router has classified
+  // the arrow as a keypress.
+  useInput(
+    (_input, key) => {
+      if (memberCountRef.current === 0) return;
+      const step = stepMember;
+      const plainArrows = teamDetailOpenRef.current && !routedArrowsRef.current;
+      if ((key.ctrl || key.meta) && key.upArrow) step(-1);
+      else if ((key.ctrl || key.meta) && key.downArrow) step(1);
+      else if (plainArrows && key.upArrow && !key.shift) step(-1);
+      else if (plainArrows && key.downArrow && !key.shift) step(1);
+    },
+    {
+      isActive:
+        visible && !pickerOpen && !loginOpen && !pending && !interview && teamSuggest === null,
+    },
+  );
+
   const submit = useCallback(
     async (value: string) => {
       const text = value.trim();
@@ -2103,24 +2347,15 @@ export function App({
     { isActive: visible && teamSuggest !== null },
   );
 
-  // Up/Down recall previously submitted prompts (shell-style history) — except
-  // while a team board is visible and the prompt is empty, where they move the
-  // member selection instead (the board hint documents this takeover).
-  const boardNav = teamMembers.length > 0 && input === "";
+  // Up/Down always recall previously submitted prompts (shell-style history).
+  // A visible board never shadows them — member selection lives on Ctrl+↑/↓ and
+  // on Tab while a drill-down is open (see the board-navigation hook above).
   const onHistoryPrev = (): void => {
-    if (boardNav) {
-      setTeamSel((s) => Math.max(0, s - 1));
-      return;
-    }
     const { nav, value } = historyUp(history, input);
     setHistory(nav);
     setInput(value);
   };
   const onHistoryNext = (): void => {
-    if (boardNav) {
-      setTeamSel((s) => Math.min(teamMembers.length - 1, s + 1));
-      return;
-    }
     const { nav, value } = historyDown(history, input);
     setHistory(nav);
     setInput(value);
@@ -2144,6 +2379,12 @@ export function App({
       scrollBy(dir === "up" ? 1 : -1);
       return;
     }
+    // An open drill-down owns the arrows: the router has already ruled this one a
+    // keypress rather than a wheel tick, so stepping the row here is safe.
+    if (teamDetailOpen && teamMembers.length > 0) {
+      stepMember(dir === "up" ? -1 : 1);
+      return;
+    }
     if (dir === "up") onHistoryPrev();
     else onHistoryNext();
   };
@@ -2163,6 +2404,7 @@ export function App({
           feed={
             teamFeeds.get(teamMembers[Math.min(teamSel, teamMembers.length - 1)]?.id ?? "") ?? []
           }
+          kind={boardKind}
         />
       ) : null}
       {teamSuggest ? (
@@ -2183,7 +2425,7 @@ export function App({
           current={interviewInput}
         />
       ) : pending ? (
-        <PermissionPrompt pending={pending} />
+        <PermissionPrompt pending={pending} queued={permQueued} />
       ) : pickerOpen ? (
         <ModelPicker
           models={filteredPickerModels}
@@ -2237,7 +2479,11 @@ export function App({
             onHelp={() => push({ kind: "help" })}
             onHistoryPrev={onHistoryPrev}
             onHistoryNext={onHistoryNext}
-            externalArrows={fullscreen && !mouseCapture}
+            // Tab with nothing to complete steps the board (no-op without rows).
+            onTab={() => stepMember(1)}
+            // App owns ↑/↓ in two cases: the fullscreen arrow router, and an open
+            // board drill-down (where they step rows instead of recalling history).
+            externalArrows={routedArrows || (teamDetailOpen && teamMembers.length > 0)}
           />
         </Box>
       )}
@@ -2265,6 +2511,7 @@ export function App({
         columns={columns}
         shiftSelect={mouseCapture}
         sessions={sessionsBadge}
+        fallbackTo={fallbackTo}
       />
     </>
   );

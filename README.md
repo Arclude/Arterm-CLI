@@ -202,8 +202,99 @@ Configuration lives in `~/.arterm/` and is created on demand.
 | `ollamaHost`       | Ollama server URL (env `OLLAMA_HOST` overrides).     | `http://127.0.0.1:11434` |
 | `openaiCompatHost` | OpenAI-compatible base URL (incl. `/v1`).            | `http://localhost:1234/v1` |
 | `modelsDir`        | Directory of `.gguf` files for `llamacpp`.           | `~/.arterm/models`       |
+| `fallbackModels`   | Models to try, in order, when the active one is rate-limited or down. | `[]`    |
 | `temperature`      | Sampling temperature.                                | `0.7`                    |
 | `permissions`      | Per-tool overrides, persisted by "always allow".     | `{}`                     |
+
+### Inspecting the permission policy
+
+Inside a session, `/permissions [mode] [outcome]` prints the same table for the
+tools that session actually loaded — including whatever MCP servers and plugins
+came up in this run — and evaluates against the mode you are really in, so
+`--yolo` and Shift+Tab are reflected rather than the config's default.
+
+From the shell, `arterm permissions list` answers the same question — every tool,
+its effective level, and what the policy resolves to:
+
+```bash
+arterm permissions list                      # the whole surface, under your config
+arterm permissions list --mode plan          # what a read-only session could do
+arterm permissions list --only prompt        # just the tools that will interrupt you
+arterm permissions list --json               # machine-readable rows
+```
+
+```
+mode: auto   19 tools
+
+  ✓ runs*  bash         execute ask    risk:destructive
+  ✓ runs   grep         read    allow
+  ✓ runs*  write        edit    ask    risk:caution
+  ? prompts  deploy     execute ask    override plugin
+
+  note: * the arbiter judges these from the actual arguments, and every row here was
+          evaluated with none — a `runs*` tool can still be escalated or denied per call
+          (`rm -rf /` never runs). `arterm permissions explain <tool> --args '{…}'` for one.
+```
+
+`arterm permissions explain` answers the follow-up — "what would happen if the
+agent called *this* tool with *these* arguments?" — without calling it:
+
+```bash
+arterm permissions explain bash --args '{"command":"rm -rf /"}'
+arterm permissions explain write --args '{"path":".env"}' --mode auto
+arterm permissions explain read --json          # machine-readable trace
+```
+
+```
+bash  →  ✗ blocked
+  blocked by arbiter (critical risk): destructive command: rm -rf /
+
+  mode: ask   category: execute   level: ask   risk: destructive   source: built-in
+
+  · tool-level           level "ask" — not a hard deny, so the ladder continues
+  ▸ arbiter              deny — blocked by arbiter (critical risk): destructive command: rm -rf /
+```
+
+Both run the real policy — the same one a session builds from your config, and
+the same evaluation the agent loop consults — so they cannot drift from actual
+behavior. Nothing is executed and no override is written. `--mode` tries a
+different mode without changing your config; MCP and plugin tools are included
+unless you pass `--builtins-only`. `explain` exits 1 when the call would be
+blocked, so it works as a check in a script; `list` is an inventory and always
+exits 0.
+
+### Fallback models
+
+When the active model fails with something a retry can't fix quickly — rate
+limit, overload, provider outage, dropped connection — Arterm can move down an
+ordered list instead of ending the turn:
+
+```json
+{
+  "fallbackModels": [
+    { "model": "llama3.2" },
+    { "provider": "anthropic", "model": "claude-haiku-4-5" }
+  ]
+}
+```
+
+`provider` defaults to the active one, so the first entry is a same-provider
+fallback and the second crosses vendors (and needs its own credentials). Two
+rules bound it: the chain only moves on a **retryable** failure — a rejected API
+key or a malformed request is reported immediately, since every target would
+reject it too — and only **before any output**, because switching models
+mid-answer would splice two different replies together. Each switch prints a
+`↪` line naming the model that took over, and the status bar keeps showing
+`configured↪answering` (e.g. `openai-compat/fake↪backup`) for as long as the
+chain is off your primary — the transcript line scrolls away, the footer doesn't.
+
+The chain also doesn't wait out a rate limit to reach it. When a server answers
+with `Retry-After` longer than 30 seconds, retrying is abandoned on the spot: a
+one-hour limit does not clear because we waited 30 seconds three times, and those
+90 seconds are pure delay before the fallback that would have worked. With no
+fallback configured you get the same benefit as a faster, more specific error —
+"rate limited, 58m to go" immediately, instead of after a minute and a half of
+silence.
 
 ## Development
 

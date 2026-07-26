@@ -1,3 +1,4 @@
+import { PermissionBroker, type Tool } from "@arterm/core";
 import type { Session } from "@arterm/tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MEMBER_ACTIVITY_MAX, RING_MAX, StatusState, control } from "./statusState.js";
@@ -32,6 +33,7 @@ function makeAutonomy(state = "idle") {
 
 function makeSession(autonomy = makeAutonomy()) {
   const bus = new FakeBus();
+  const permissionBroker = new PermissionBroker();
   const session = {
     bus,
     agent: { model: "test-model" },
@@ -39,8 +41,9 @@ function makeSession(autonomy = makeAutonomy()) {
     permissionMode: "ask",
     toolCount: 7,
     autonomy,
+    permissionBroker,
   };
-  return { bus, autonomy, session: session as unknown as Session };
+  return { bus, autonomy, permissionBroker, session: session as unknown as Session };
 }
 
 describe("StatusState", () => {
@@ -61,6 +64,72 @@ describe("StatusState", () => {
     const after = state.snapshot();
     expect(after.status).toBe("idle");
     expect(after.activeTool).toBeNull();
+    state.dispose();
+  });
+
+  it("surfaces a failed turn as lastError with the provider taxonomy", () => {
+    const { bus, session } = makeSession();
+    const state = new StatusState(session, { sessionId: "s1", cwd: "/w" });
+
+    expect(state.snapshot().lastError).toBeNull();
+    bus.emit({ type: "turn_start" });
+    bus.emit({
+      type: "error",
+      error: "anthropic: rate limited",
+      kind: "quota",
+      provider: "anthropic",
+      status: 429,
+      retryable: true,
+    });
+    bus.emit({ type: "turn_end" });
+
+    // The give-away failure mode this guards: status is back to "idle", so a
+    // client reading only `status` would call this session healthy.
+    const after = state.snapshot();
+    expect(after.status).toBe("idle");
+    expect(after.lastError).toMatchObject({
+      message: "anthropic: rate limited",
+      kind: "quota",
+      provider: "anthropic",
+      status: 429,
+      retryable: true,
+    });
+    expect(after.lastError?.at).toBeGreaterThan(0);
+    state.dispose();
+  });
+
+  it("clears lastError when the next turn starts", () => {
+    const { bus, session } = makeSession();
+    const state = new StatusState(session, { sessionId: "s1", cwd: "/w" });
+
+    bus.emit({ type: "error", error: "boom" });
+    bus.emit({ type: "turn_end" });
+    expect(state.snapshot().lastError).not.toBeNull();
+    bus.emit({ type: "turn_start" });
+    expect(state.snapshot().lastError).toBeNull();
+    state.dispose();
+  });
+
+  it("keeps the last fallback switch across turns", () => {
+    const { bus, session } = makeSession();
+    const state = new StatusState(session, { sessionId: "s1", cwd: "/w" });
+
+    expect(state.snapshot().lastFallback).toBeNull();
+    bus.emit({
+      type: "provider_fallback",
+      from: { provider: "anthropic", model: "claude-opus-5" },
+      to: { provider: "ollama", model: "qwen3" },
+      reason: "quota",
+      detail: "HTTP 429",
+    });
+    bus.emit({ type: "turn_end" });
+    // Unlike lastError, this outlives the turn: the session is still answering
+    // from the backup model, which is worth showing until it switches back.
+    bus.emit({ type: "turn_start" });
+    expect(state.snapshot().lastFallback).toMatchObject({
+      to: { provider: "ollama", model: "qwen3" },
+      reason: "quota",
+    });
     state.dispose();
   });
 
@@ -255,9 +324,9 @@ describe("StatusState", () => {
 describe("control", () => {
   it("dispatches pause/resume/stop to the autonomy engine", () => {
     const { session, autonomy } = makeSession();
-    expect(control(session, "pause", "")).toEqual({ ok: true });
-    expect(control(session, "resume", "")).toEqual({ ok: true });
-    expect(control(session, "stop", "")).toEqual({ ok: true });
+    expect(control(session, { action: "pause" })).toEqual({ ok: true });
+    expect(control(session, { action: "resume" })).toEqual({ ok: true });
+    expect(control(session, { action: "stop" })).toEqual({ ok: true });
     expect(autonomy.pause).toHaveBeenCalled();
     expect(autonomy.resume).toHaveBeenCalled();
     expect(autonomy.stop).toHaveBeenCalled();
@@ -265,30 +334,86 @@ describe("control", () => {
 
   it("requires text for steer and goal", () => {
     const { session, autonomy } = makeSession();
-    expect(control(session, "steer", "").ok).toBe(false);
-    expect(control(session, "goal", "").ok).toBe(false);
-    expect(control(session, "steer", "go left")).toEqual({ ok: true });
-    expect(control(session, "goal", "ship it")).toEqual({ ok: true });
+    expect(control(session, { action: "steer" }).ok).toBe(false);
+    expect(control(session, { action: "goal" }).ok).toBe(false);
+    expect(control(session, { action: "steer", note: "go left" })).toEqual({ ok: true });
+    expect(control(session, { action: "goal", note: "ship it" })).toEqual({ ok: true });
     expect(autonomy.steer).toHaveBeenCalledWith("go left");
     expect(autonomy.start).toHaveBeenCalledWith("ship it");
   });
 
   it("validates mode and surfaces mid-run rejection", () => {
     const { session, autonomy } = makeSession();
-    expect(control(session, "mode", "", "bogus").ok).toBe(false);
-    expect(control(session, "mode", "", "team")).toEqual({ ok: true });
+    expect(control(session, { action: "mode", mode: "bogus" }).ok).toBe(false);
+    expect(control(session, { action: "mode", mode: "team" })).toEqual({ ok: true });
     expect(autonomy.setMode).toHaveBeenCalledWith("team");
 
     autonomy.setMode.mockReturnValueOnce(false);
-    const rejected = control(session, "mode", "", "once");
+    const rejected = control(session, { action: "mode", mode: "once" });
     expect(rejected.ok).toBe(false);
     expect(rejected.error).toMatch(/mid-run/);
   });
 
   it("rejects unknown actions", () => {
     const { session } = makeSession();
-    const result = control(session, "explode", "");
+    const result = control(session, { action: "explode" });
     expect(result.ok).toBe(false);
     expect(result.error).toContain("explode");
+  });
+});
+
+describe("control: permission", () => {
+  const writeTool = {
+    name: "write_file",
+    description: "writes",
+    parameters: { type: "object" },
+    permission: "ask",
+    category: "edit",
+    riskTier: "destructive",
+    preview: (args: Record<string, unknown>) => `write ${String(args.path)}`,
+    execute: async () => ({ output: "" }),
+  } as unknown as Tool;
+
+  it("answers the pending request and surfaces it in the snapshot", async () => {
+    const { session, permissionBroker } = makeSession();
+    const state = new StatusState(session, { sessionId: "s1", cwd: "/w" });
+    // No local asker installed → the broker's default denies immediately, so
+    // install one that never settles: this test is about the remote answer.
+    permissionBroker.setAsker(() => new Promise(() => {}));
+
+    const answer = permissionBroker.ask(writeTool, { path: "a.ts" });
+    const snap = state.snapshot();
+    expect(snap.pendingPermission).toMatchObject({
+      tool: "write_file",
+      preview: "write a.ts",
+      category: "edit",
+      riskTier: "destructive",
+    });
+    expect(snap.pendingPermissionQueue).toBe(0);
+
+    const id = snap.pendingPermission?.id ?? "";
+    expect(control(session, { action: "permission", id, answer: "allow" })).toEqual({ ok: true });
+    await expect(answer).resolves.toBe("allow");
+    expect(state.snapshot().pendingPermission).toBeNull();
+    state.dispose();
+  });
+
+  it("validates id and answer", () => {
+    const { session, permissionBroker } = makeSession();
+    permissionBroker.setAsker(() => new Promise(() => {}));
+
+    expect(control(session, { action: "permission", answer: "allow" }).ok).toBe(false);
+    // Nothing pending yet.
+    expect(control(session, { action: "permission", id: "x", answer: "allow" }).error).toMatch(
+      /no permission request/,
+    );
+
+    void permissionBroker.ask(writeTool, { path: "a.ts" });
+    const id = permissionBroker.current()?.id ?? "";
+    expect(control(session, { action: "permission", id, answer: "maybe" }).ok).toBe(false);
+    expect(control(session, { action: "permission", id: "stale", answer: "allow" }).error).toMatch(
+      /stale/,
+    );
+    expect(control(session, { action: "permission", id, answer: "deny" })).toEqual({ ok: true });
   });
 });

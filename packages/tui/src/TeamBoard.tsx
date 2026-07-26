@@ -1,6 +1,7 @@
 import type { SddTaskState } from "@arterm/core";
 import { Box, Text } from "ink";
 import type React from "react";
+import { agentColor } from "./agentColor.js";
 
 /** One team member's live row on the /team board. */
 export interface TeamBoardMember {
@@ -40,12 +41,27 @@ function mark(state: SddTaskState): string {
 /** How many trailing feed lines the drill-down view shows. */
 const DETAIL_LINES = 12;
 
+/** Which kind of run the board is showing — only the wording differs. */
+export type TeamBoardKind = "team" | "fleet";
+
+const KIND_LABEL: Record<TeamBoardKind, { title: string; unit: string }> = {
+  team: { title: "⚑ team", unit: "member" },
+  fleet: { title: "⛓ fleet", unit: "subtask" },
+};
+
 /**
- * Live member board for a /team run: one row per member, updated in place by
+ * Live board for a fan-out run: one row per worker, updated in place by
  * `team_member_state` (assignment + state) and `team_member_event` (activity).
- * ↑/↓ (on an empty prompt) move the selection, Enter opens the selected
- * member's activity feed (drill-down), Esc closes it. Rendered in the bottom
- * region, like the /sdd kanban.
+ * Tab steps to the next row (the one binding no terminal can mangle), as do
+ * Ctrl+↑/↓ and Alt+↑/↓ where the terminal transmits them. Enter on an empty prompt
+ * opens the selected row's activity feed (drill-down), and while that feed is open
+ * plain ↑/↓ step rows too — inspecting is a mode, so the bare arrows are free
+ * there; with it closed they stay prompt history. Esc closes it. Rendered in the
+ * bottom region, like the /sdd kanban.
+ *
+ * Both fan-out modes render here: a /team run's rows are its standing roster
+ * (stable across rounds), a parallel run's rows are the current round's
+ * subtasks (replaced each round).
  */
 export function TeamBoard({
   members,
@@ -53,16 +69,19 @@ export function TeamBoard({
   selected,
   detailOpen,
   feed,
+  kind = "team",
 }: {
   members: TeamBoardMember[];
   /** Terminal width, used to truncate rows. */
   columns: number;
-  /** Index of the row the ↑/↓ selection is on. */
+  /** Index of the row the Ctrl+↑/↓ selection is on. */
   selected: number;
-  /** True when the selected member's activity feed is expanded. */
+  /** True when the selected row's activity feed is expanded. */
   detailOpen: boolean;
-  /** The selected member's feed lines (newest last). */
+  /** The selected row's feed lines (newest last). */
   feed: string[];
+  /** Team roster vs. parallel-round subtasks — wording only. */
+  kind?: TeamBoardKind;
 }): React.ReactElement {
   const done = members.filter((m) => m.state === "done").length;
   const failed = members.filter((m) => m.state === "failed").length;
@@ -82,7 +101,7 @@ export function TeamBoard({
     >
       <Text>
         <Text color="magenta" bold>
-          ⚑ team
+          {KIND_LABEL[kind].title}
         </Text>
         <Text color="gray">
           {"  — "}
@@ -90,11 +109,17 @@ export function TeamBoard({
           {failed ? ` · ${failed} failed` : ""}
         </Text>
         <Text color="gray" dimColor>
-          {"   ↑↓ member · ⏎ inspect · esc close"}
+          {`   ${detailOpen ? "↑↓/⇥" : "⇥/^↑↓"} ${KIND_LABEL[kind].unit}${
+            detailOpen ? "" : " · ⏎ inspect"
+          } · esc close`}
         </Text>
       </Text>
       {members.map((m, i) => {
+        // The state glyph keeps the state colour (▸ running, ✓ done, ✗ failed);
+        // the NAME wears the worker's own accent, so five same-role sub-agents are
+        // still tellable apart — and match their lines in the transcript.
         const color = STATE_COLOR[m.state];
+        const accent = m.state === "failed" ? "red" : agentColor(m.id);
         const isSel = i === Math.min(selected, members.length - 1);
         const label = `${m.name}${m.adhoc ? "*" : ""}`.padEnd(nameWidth);
         const detail = m.state === "pending" ? m.description : (m.task ?? m.description);
@@ -105,8 +130,9 @@ export function TeamBoard({
             <Text color={isSel ? "magenta" : "gray"} bold={isSel}>
               {isSel ? "❯ " : "  "}
             </Text>
-            <Text color={color} bold={isSel}>
-              {mark(m.state)} {label}
+            <Text color={color}>{mark(m.state)} </Text>
+            <Text color={accent} bold={isSel}>
+              {label}
             </Text>
             <Text color="gray"> {detail.slice(0, Math.max(10, columns - nameWidth - 22))}</Text>
             <Text color="cyan">{activity}</Text>
@@ -117,8 +143,11 @@ export function TeamBoard({
       {detailOpen && sel ? (
         <Box flexDirection="column" marginTop={1} paddingLeft={1}>
           <Text wrap="truncate-end">
-            <Text color="magenta" bold>
+            <Text color={sel.state === "failed" ? "red" : agentColor(sel.id)} bold>
               ⚙ {sel.name}
+            </Text>
+            <Text color="gray" dimColor>
+              {` (${Math.min(selected, members.length - 1) + 1}/${members.length})`}
             </Text>
             <Text color="gray"> — {(sel.task ?? sel.description).slice(0, columns - 20)}</Text>
           </Text>

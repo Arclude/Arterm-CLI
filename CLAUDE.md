@@ -36,6 +36,33 @@ Root scripts mirror these: `pnpm build`, `pnpm typecheck`, `pnpm test`,
 `pnpm lint`, `pnpm format`, and `pnpm arterm` (runs the CLI via the `@arterm/cli`
 filter).
 
+Out-of-band, after a build:
+
+```bash
+node scripts/provider-resilience-e2e.mjs   # fault injection against the real binary
+```
+
+It runs the built `arterm` against a fake OpenAI-compatible server that drops
+sockets, returns 401/429/503, and dies mid-answer, asserting both what the user
+sees and how many requests actually reached the server. It is separate from
+`pnpm test` because it spawns a real process — the only way to catch bugs that
+depend on process lifetime (an unref'd backoff timer once let the CLI exit 0
+mid-retry with no answer and no error, which no in-process test could see).
+
+To drive the same faults **by hand** — against the TUI, or while curling the
+status server — start the standalone fake instead:
+
+```bash
+node scripts/fault-server.mjs --mode quota-long          # see its header for the modes
+OPENAI_COMPAT_HOST=http://127.0.0.1:8099/v1 arterm -p openai-compat -m fake
+ANTHROPIC_BASE_URL=http://127.0.0.1:8099 ANTHROPIC_API_KEY=x arterm -p anthropic -m fake
+```
+
+It answers normally for one model (`backup` by default), so configuring
+`{"fallbackModels": [{"model": "backup"}]}` gives the chain somewhere to land.
+Read its request log rather than just the TUI: the gap between the refusal and
+the fallback is the thing the short-circuit exists for, and only the log shows it.
+
 ## Conventions
 
 - **ESM only** (`"type": "module"`). No CommonJS.
@@ -80,6 +107,13 @@ filter).
 3. For optional/native dependencies (as with `node-llama-cpp`), import them
    lazily via `await import(...)` and throw an actionable error if missing —
    don't make them a hard install requirement.
+3b. **Never let a vendor SDK own the retry loop.** Disable it (`maxRetries: 0`)
+   and route the SDK's transport through `fetchWithRetry` instead, as
+   `anthropic.ts` does. SDKs typically obey `Retry-After` verbatim with no cap —
+   the Anthropic SDK's own comment is "just do what it says" — so a one-hour rate
+   limit becomes a one-hour `sleep` *inside* the provider, where the fallback
+   chain cannot see it and the user sees a turn that simply never ends. Whatever
+   the SDK does with the final response is fine; the waiting has to be ours.
 4. Wire it into `packages/providers/src/registry.ts`: add a `case` in
    `createProvider()` and include it in `allProviders()`.
 5. If it needs config (host, paths, etc.), add fields to `ArtermConfig` in
@@ -123,3 +157,22 @@ Don't edit the `run()` loop. Instead add/replace a middleware stage:
    per-stage context shapes live in `kernel/pipeline.ts`.
 4. The Brain Arbiter / risk-tier checks are the canonical extension point: extra
    `toolCall` middleware inserted `before` `execute`.
+
+## Permissions: one ladder, three callers
+
+`PermissionManager.evaluate()` is the whole policy — a pure function returning
+`allow | deny | prompt` plus the trace of every rule it consulted. `check()` calls
+it and only adds the human prompt; `arterm permissions explain` calls it for one
+proposed call and prints the trace; `arterm permissions list` calls it once per
+tool and prints a table. Put new rules **in `evaluate()`**, never in `check()`, or
+the inspectors start describing a policy nobody runs.
+
+`createPermissionManager(config)` (in `permissionPolicy.ts`) is the only place
+config becomes a policy — `buildSession` and both inspection commands go through
+it for the same reason. The optional model gate (`arbiter.model`) is a separate
+pipeline stage that runs *before* this ladder and is not part of `evaluate()`.
+
+`list` evaluates with **empty arguments**, so any row the arbiter would judge from
+args (`category !== "read"`) is marked `argDependent` and printed with a `*`.
+Dropping that marker would make the table read as a guarantee it can't give — in
+`auto` mode every row would say "runs", including `bash`.

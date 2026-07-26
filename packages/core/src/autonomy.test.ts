@@ -364,13 +364,39 @@ describe("AutonomyEngine (parallel mode)", () => {
 
     await engine.start("ship it");
 
+    // Every dispatched subtask carries a round-scoped id — that is what the
+    // live board keys its rows on, and what the per-task telemetry quotes.
     expect(dispatched).toEqual([
-      { task: "a", role: undefined },
-      { task: "b", role: "tester" },
+      { task: "a", role: undefined, id: "r1-1" },
+      { task: "b", role: "tester", id: "r1-2" },
     ]);
     expect(engine.state).toBe("done");
     expect(events.some((e) => e.type === "autonomy_fleet_round")).toBe(true);
     expect(events.some((e) => e.type === "autonomy_aggregate")).toBe(true);
+  });
+
+  it("scopes subtask ids to their round and publishes them on the round event", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    // Two rounds: the second must not reuse the first round's ids, or a board
+    // keyed on them would merge both rounds' subtasks into one set of rows.
+    agent.plans = ['[{"task":"a"},{"task":"b"}]', '[{"task":"c"}]'];
+    agent.assessVerdicts = [
+      { done: false, note: "keep going" },
+      { done: true, note: "DONE" },
+    ];
+    const runFleet: AutonomyFleetRunner = async (tasks) =>
+      tasks.map((t) => ({ ...t, output: "ok" }));
+    const events = collect(bus);
+    const engine = makeEngine(agent, bus, { mode: "parallel", maxSteps: 5, runFleet });
+
+    await engine.start("g");
+
+    const rounds = events.filter((e) => e.type === "autonomy_fleet_round");
+    expect(rounds.map((r) => r.tasks.map((t) => t.id))).toEqual([["r1-1", "r1-2"], ["r2-1"]]);
+    // Plain parallel subtasks are NOT team members — the composition root keys
+    // the member-only extras (per-member tools, isolation, patch apply) on that.
+    expect(rounds.flatMap((r) => r.tasks).every((t) => !("member" in t))).toBe(true);
   });
 
   it("caps the fan-out at 16 subtasks per round", async () => {

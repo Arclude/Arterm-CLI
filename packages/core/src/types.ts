@@ -213,8 +213,18 @@ export interface ToolContext {
   tools?: readonly Tool[];
 }
 
+/** The three answers a permission prompt can produce. */
+export type PermissionAnswer = "allow" | "allow_always" | "deny";
+
 /** Callback the agent uses to ask the host (TUI/CLI) for permission. */
 export type PermissionAsker = (
   tool: Tool,
   args: Record<string, unknown>,
-) => Promise<"allow" | "allow_always" | "deny">;
+  /**
+   * Aborts when the request was already answered elsewhere — today that means
+   * the desktop answered it through the status server while the TUI prompt was
+   * still up (see `PermissionBroker`). The host should dismiss its prompt; the
+   * promise's eventual resolution is ignored.
+   */
+  signal?: AbortSignal,
+) => Promise<PermissionAnswer>;

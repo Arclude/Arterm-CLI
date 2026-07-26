@@ -153,6 +153,12 @@ export interface FleetTask {
   tools?: Tool[];
   isolation?: FleetIsolation;
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Asker for THIS task's permission prompts. The fleet shares one asker by
+   * default, which leaves a prompt unable to say which worker raised it; a host
+   * that cares passes a per-task asker tagged with the worker's identity.
+   */
+  ask?: PermissionAsker;
 }
 
 export interface FleetResult {
@@ -217,6 +223,7 @@ export async function runFleet(
         systemPrompt: t.systemPrompt ?? opts.systemPrompt,
         tools: t.tools ?? opts.tools,
         onEvent: t.onEvent ?? opts.onEvent,
+        ask: t.ask ?? opts.ask,
       };
       const isolate = (t.isolation ?? opts.isolation) === "worktree" && repoOk;
       let output = "";

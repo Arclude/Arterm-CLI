@@ -6,15 +6,16 @@ import {
   type AutonomySnapshot,
   type AutonomyTask,
   Blackboard,
+  type ChatProvider,
   Container,
   EventBus,
   MemberMemory,
   MemoryRecorder,
   type Message,
   type PermissionAsker,
+  PermissionBroker,
   PermissionManager,
   type PermissionMode,
-  RiskArbiter,
   RunController,
   SddRunner,
   Tokens,
@@ -23,6 +24,7 @@ import {
   createBrainArbiterStage,
   createContextStrategy,
   createMemoryStore,
+  createPermissionManager,
   createPipelines,
   createSddStore,
   digest as digestObservations,
@@ -49,6 +51,7 @@ import {
   removeApiKey,
   setOAuthTokens,
   storedKeyNames,
+  withFallbacks,
 } from "@arterm/providers";
 import {
   createMemorySearchTool,
@@ -92,20 +95,35 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const providerId = opts.providerId ?? config.provider;
   const model = opts.model ?? config.model;
 
+  const bus = new EventBus();
+
+  /**
+   * Wrap a provider in the configured fallback chain. Rebuilt on every provider
+   * switch so `/login` and `/model` can't leave the chain pointing at the old
+   * primary. With no `fallbackModels` configured this returns `base` untouched.
+   */
+  const withChain = (base: ChatProvider): ChatProvider =>
+    withFallbacks(
+      base,
+      (config.fallbackModels ?? []).map((f) => ({
+        provider: f.provider ? createProvider(config, f.provider) : base,
+        model: f.model,
+      })),
+      { onFallback: (notice) => bus.emit({ type: "provider_fallback", ...notice }) },
+    );
+
   // Reassignable: /login swaps the active provider in place. The closures below
   // (sub-agent spawn, summarize, listModels) read this binding at call time, so
   // a switch propagates to all of them.
-  let provider = createProvider(config, providerId);
-  const initialMode: PermissionMode = opts.yolo ? "yolo" : (config.mode ?? "ask");
-  const arbiter = config.arbiter?.enabled === false ? undefined : new RiskArbiter();
-  const confirmDestructive = opts.confirmDestructive ?? config.confirmDestructive ?? false;
-  const permissions = new PermissionManager(
-    config.permissions,
-    initialMode,
-    arbiter,
-    confirmDestructive,
-  );
-  const bus = new EventBus();
+  let provider = withChain(createProvider(config, providerId));
+  // Same factory the `permissions explain` command uses, so what it reports is
+  // the policy this session actually runs under.
+  const permissions = createPermissionManager(config, {
+    ...(opts.yolo !== undefined ? { yolo: opts.yolo } : {}),
+    ...(opts.confirmDestructive !== undefined
+      ? { confirmDestructive: opts.confirmDestructive }
+      : {}),
+  });
 
   // Composition root (kernel D1): the DI Container holds the session's service graph
   // by token. For now it is bound to the SAME instances the wiring below already
@@ -189,8 +207,12 @@ export async function buildSession(opts: SessionOptions): Promise<{
       ? async () => formatMemorySection(await memoryStore.recent(maxInject))
       : undefined;
 
-  // The TUI installs the real asker; until then deny by default.
-  let asker: PermissionAsker = async () => "deny";
+  // Every permission prompt goes through the broker: it publishes the pending
+  // request for the desktop status server and lets either side answer it. The
+  // TUI installs the real prompt via `setAsker`; until then it denies (headless
+  // `--print` never installs one, so its behaviour is unchanged).
+  const permissionBroker = new PermissionBroker(bus);
+  const asker: PermissionAsker = permissionBroker.ask;
 
   const agent = new Agent({
     provider,
@@ -249,16 +271,20 @@ export async function buildSession(opts: SessionOptions): Promise<{
       model: agent.model,
       tools: subagentTools(),
       permissions,
-      ask: (tool, args) => asker(tool, args),
+      // Tagged so the prompt says WHICH worker is blocked, not just the tool name.
+      ask: permissionBroker.askFor({ name: role ?? "sub-agent" }),
       cwd,
       taskDone: taskDoneTool,
       context: createContextStrategy(config),
       maxSteps: config.autonomy?.maxSteps,
       role,
     });
-    bus.emit({ type: "subagent_done", output });
+    bus.emit({ type: "subagent_done", output, role });
     return output;
   };
+
+  /** Bumped per bare `spawn_parallel` dispatch, so its minted row ids stay unique. */
+  let fleetRound = 0;
 
   // Team blackboard: a shared space members read/write across rounds (breaks the
   // star topology). Disabled → pure leader-only aggregation. Same instance is
@@ -277,25 +303,54 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // id-tagged event bridge to the shared bus, and patch auto-apply per
   // config.team.mergeStrategy once the round returns.
   const runFleetTasks = async (tasks: AutonomyTask[], signal?: AbortSignal) => {
-    bus.emit({ type: "fleet_start", count: tasks.length });
-    const teamRun = tasks.some((t) => t.id);
+    const teamRun = tasks.some((t) => t.member);
+    // A bare `spawn_parallel` call arrives id-less: nothing planned a round for
+    // it, so nothing seeded a board either. Mint round-scoped ids here (an id is
+    // what buys a task its live row and its id-tagged event bridge) and ship them
+    // on `fleet_start`, which is then this dispatch's plan event. Planned runs
+    // (team roster, autonomy rounds) already carry ids and have seeded the board
+    // themselves — they pass through untouched.
+    const unplanned = !teamRun && tasks.every((t) => !t.id);
+    const round = unplanned ? ++fleetRound : 0;
+    const fleet: AutonomyTask[] = unplanned
+      ? tasks.map((t, i) => ({ ...t, id: `f${round}-${i + 1}` }))
+      : tasks;
+    bus.emit({
+      type: "fleet_start",
+      count: fleet.length,
+      ...(unplanned
+        ? {
+            tasks: fleet.map((t) => ({ id: t.id as string, task: t.task, role: t.role })),
+          }
+        : {}),
+    });
     const isolationMode = config.team?.isolation ?? "auto";
-    const fleetTasks = tasks.map((t) => {
-      if (!t.id) return { task: t.task, role: t.role };
+    const fleetTasks = fleet.map((t) => {
       const id = t.id;
+      const name = t.role ?? (t.member ? "member" : "subtask");
+      // Every dispatched task — plain parallel subtask as much as team member —
+      // gets an id-tagged event bridge, so the live board can show what each
+      // sub-agent is doing right now instead of just "started" / "finished".
+      const onEvent = id
+        ? (e: AgentEvent) => bus.emit({ type: "team_member_event", id, name, event: e })
+        : undefined;
+      // Same reasoning as the event bridge: a prompt raised mid-fan-out has to name
+      // its worker, or the user sees "write_file" with five identical rows above it
+      // and no way to tell which one is waiting.
+      const ask = permissionBroker.askFor({ id, name });
+      // Only team members get the member-only extras below; an id alone just
+      // buys a task its board row. (`!id` can't happen for a member, but it
+      // would leave the tools below without an author, so treat it as plain.)
+      if (!t.member || !id) return { task: t.task, role: t.role, id, onEvent, ask };
       const memberTools = subagentTools(t.toolNames);
       // Team members always get a `message` tool (independent of their allowlist)
       // so they can post to / address teammates on the shared board.
       if (blackboard) {
-        memberTools.push(
-          makeMessageTool({ board: blackboard, selfId: id, selfName: t.role ?? "member", bus }),
-        );
+        memberTools.push(makeMessageTool({ board: blackboard, selfId: id, selfName: name, bus }));
       }
       // Likewise a `memo` tool, so a member can leave notes for its own next round.
       if (memberMemory) {
-        memberTools.push(
-          makeMemoTool({ memory: memberMemory, selfId: id, selfName: t.role ?? "member", bus }),
-        );
+        memberTools.push(makeMemoTool({ memory: memberMemory, selfId: id, selfName: name, bus }));
       }
       return {
         task: t.task,
@@ -306,8 +361,8 @@ export async function buildSession(opts: SessionOptions): Promise<{
         tools: memberTools,
         // "auto": writers isolate in a worktree, read-only members share the cwd.
         isolation: isolationMode === "auto" ? memberIsolation(memberTools) : isolationMode,
-        onEvent: (e: AgentEvent) =>
-          bus.emit({ type: "team_member_event", id, name: t.role ?? "member", event: e }),
+        onEvent,
+        ask,
       };
     });
     const results = await runFleet(
@@ -325,26 +380,26 @@ export async function buildSession(opts: SessionOptions): Promise<{
         concurrency: config.fleet?.concurrency,
         isolation: config.fleet?.isolation ?? "none",
         onStart: (i, task, role) => {
-          bus.emit({ type: "subagent_start", task, role });
-          const t = tasks[i];
+          bus.emit({ type: "subagent_start", task, role, id: fleet[i]?.id });
+          const t = fleet[i];
           if (t?.id) {
             bus.emit({
               type: "team_member_state",
               id: t.id,
-              name: t.role ?? "member",
+              name: t.role ?? (t.member ? "member" : "subtask"),
               state: "running",
               task: t.task,
             });
           }
         },
         onDone: (i, output, result) => {
-          bus.emit({ type: "subagent_done", output });
-          const t = tasks[i];
+          const t = fleet[i];
+          bus.emit({ type: "subagent_done", output, role: t?.role, id: t?.id });
           if (t?.id) {
             bus.emit({
               type: "team_member_state",
               id: t.id,
-              name: t.role ?? "member",
+              name: t.role ?? (t.member ? "member" : "subtask"),
               state: result?.error ? "failed" : "done",
               task: t.task,
               filesChanged: result?.worktree?.files.length,
@@ -556,8 +611,9 @@ export async function buildSession(opts: SessionOptions): Promise<{
     toolCount: agent.tools.length,
     yolo: opts.yolo ?? false,
     setAsker(next) {
-      asker = next;
+      permissionBroker.setAsker(next);
     },
+    permissionBroker,
     listModels: () => provider.listModels(),
     listAllModels: async () => {
       // Aggregate across local backends + every provider with a stored/env key,
@@ -572,7 +628,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       config.model = next;
     },
     switchProvider(id) {
-      provider = createProvider(config, id);
+      provider = withChain(createProvider(config, id));
       agent.setProvider(provider);
       config.provider = id;
     },
@@ -589,7 +645,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       }
       if (key) persistApiKey("openai-compat", key);
       config.provider = "openai-compat";
-      provider = createProvider(config, "openai-compat");
+      provider = withChain(createProvider(config, "openai-compat"));
       agent.setProvider(provider);
       // Persist host + headers now — a deliberate login action, so it's safe to
       // write these fields (the generic persist() overlay doesn't include them).
@@ -609,7 +665,13 @@ export async function buildSession(opts: SessionOptions): Promise<{
     signedInProviders: () => [...new Set(storedKeyNames().map((n) => n.replace(/-oauth$/, "")))],
     loginProviders: [...providerCatalog],
     compact: () => agent.compact("manual"),
-    permissionMode: initialMode,
+    // A getter, not a snapshot: this was read once at build time, so `--yolo` and
+    // every Shift+Tab afterwards left it reporting the config's default. The
+    // status snapshot publishes this field to the desktop, and `/permissions`
+    // evaluates against it — both were describing a mode nobody was running.
+    get permissionMode() {
+      return permissions.getMode();
+    },
     setMode(next) {
       permissions.setMode(next);
       config.mode = next;

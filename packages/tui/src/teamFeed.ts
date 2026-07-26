@@ -30,7 +30,9 @@ export function formatMemberEvent(event: AgentEvent): string | undefined {
       return text ? `✎ ${text}` : undefined;
     }
     case "error":
-      return `✗ ${squash(event.error, 88)}`;
+      return `✗ ${event.kind ? `[${event.kind}] ` : ""}${squash(event.error, 88)}`;
+    case "provider_fallback":
+      return `↪ ${event.reason} — ${event.to.provider}/${event.to.model}`;
     default:
       return undefined;
   }

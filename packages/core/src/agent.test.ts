@@ -7,6 +7,7 @@ import type { ContextStrategy } from "./contextStrategy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import { Container, RunController, Tokens, createPipelines } from "./kernel/index.js";
 import { PermissionManager } from "./permissions.js";
+import { ProviderError } from "./providerError.js";
 import type { ChatChunk, ChatProvider, ChatRequest, Message, Tool } from "./types.js";
 
 /**
@@ -724,5 +725,56 @@ describe("Agent.run pre-try I/O safety", () => {
     await expect(agent.run("hello")).resolves.toBeUndefined();
     expect(events.some((e) => e.type === "error")).toBe(true);
     expect(events.filter((e) => e.type === "turn_end")).toHaveLength(1);
+  });
+});
+
+describe("error event taxonomy", () => {
+  /** A provider that fails the way a real one does — with a typed error. */
+  class FailingProvider implements ChatProvider {
+    readonly id = "failing";
+    constructor(private readonly err: unknown) {}
+    supportsNativeTools(): boolean {
+      return true;
+    }
+    async listModels() {
+      return [];
+    }
+    // biome-ignore lint/correctness/useYield: it fails before producing anything
+    async *chat(): AsyncIterable<ChatChunk> {
+      throw this.err;
+    }
+  }
+
+  it("carries the provider taxonomy so a UI can tell quota from a dead key", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const agent = makeAgent(
+      new FailingProvider(
+        new ProviderError("rate limited", { provider: "anthropic", kind: "quota", status: 429 }),
+      ),
+      bus,
+    );
+
+    await agent.run("hello");
+
+    const error = events.find((e) => e.type === "error");
+    expect(error).toMatchObject({
+      kind: "quota",
+      provider: "anthropic",
+      status: 429,
+      retryable: true,
+    });
+  });
+
+  it("leaves the taxonomy absent for a failure that isn't a provider's", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const agent = makeAgent(new FailingProvider(new Error("something local broke")), bus);
+
+    await agent.run("hello");
+
+    const error = events.find((e) => e.type === "error");
+    expect(error).toMatchObject({ error: "something local broke" });
+    expect((error as { kind?: string }).kind).toBeUndefined();
   });
 });

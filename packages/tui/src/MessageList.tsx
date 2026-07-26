@@ -162,6 +162,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ["/mode [ask|auto|plan|yolo]", "set mode (no arg cycles)"],
       ["/auto /plan /ask /yolo", "shortcuts for /mode"],
+      ["/permissions [mode] [outcome]", "what every tool is allowed to do right now"],
     ],
   },
 ];
@@ -173,6 +174,10 @@ const HELP_FOOTER: [string, string][] = [
   ],
   ["Modes", "ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all"],
   ["Edit", "Backspace del char · Ctrl+W del word · Ctrl+U clear line"],
+  [
+    "Board",
+    "Tab (or Ctrl/Alt+↑↓) step sub-agent · Enter inspect (empty prompt) · ↑↓ step while open · Esc close",
+  ],
 ];
 
 const CMD_COL = 27;
@@ -305,7 +310,7 @@ export const Item = memo(function Item({ item }: { item: DisplayItem }): React.R
     case "system":
       return (
         <Box paddingLeft={1}>
-          <Text color="gray">{item.text}</Text>
+          <Text color={item.color ?? "gray"}>{item.text}</Text>
         </Box>
       );
     case "banner":

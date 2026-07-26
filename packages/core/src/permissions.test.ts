@@ -164,3 +164,90 @@ describe("PermissionManager", () => {
     expect(risky.allowed).toBe(false);
   });
 });
+
+describe("PermissionManager.evaluate", () => {
+  const destructive = (name: string): Tool => ({
+    ...tool(name, "ask", "execute"),
+    riskTier: "destructive",
+  });
+
+  it("resolves the same outcome check() acts on", async () => {
+    // The guarantee the explainer rests on: one ladder, two callers. If these
+    // ever disagree, `permissions explain` is describing a policy nobody runs.
+    const cases: Array<[Tool, Record<string, unknown>, PermissionManager]> = [
+      [tool("read", "allow", "read"), {}, new PermissionManager()],
+      [tool("write", "ask", "edit"), {}, new PermissionManager({}, "auto")],
+      [tool("write", "ask", "edit"), {}, new PermissionManager({}, "plan")],
+      [tool("rm", "deny"), {}, new PermissionManager({}, "yolo")],
+      [
+        tool("bash", "ask", "execute"),
+        { command: "rm -rf /" },
+        new PermissionManager({}, "auto", new RiskArbiter()),
+      ],
+    ];
+    for (const [t, args, pm] of cases) {
+      const evaluation = pm.evaluate(t, args);
+      const ask = vi.fn().mockResolvedValue("deny");
+      const decision = await pm.check(t, args, ask);
+      if (evaluation.outcome === "prompt") {
+        expect(ask).toHaveBeenCalledOnce();
+      } else {
+        expect(ask).not.toHaveBeenCalled();
+        expect(decision.allowed).toBe(evaluation.outcome === "allow");
+      }
+    }
+  });
+
+  it("never executes the tool or writes an override", () => {
+    const pm = new PermissionManager();
+    const exploding: Tool = {
+      ...tool("write", "ask", "edit"),
+      execute: async () => {
+        throw new Error("evaluate must not execute");
+      },
+    };
+    expect(pm.evaluate(exploding, {}).outcome).toBe("prompt");
+    expect(pm.snapshot()).toEqual({});
+  });
+
+  it("marks exactly one step as the decider", () => {
+    const pm = new PermissionManager({}, "auto", new RiskArbiter());
+    for (const [t, args] of [
+      [tool("read", "allow", "read"), {}],
+      [tool("bash", "ask", "execute"), { command: "ls" }],
+      [tool("bash", "ask", "execute"), { command: "rm -rf /" }],
+    ] as const) {
+      const decided = pm.evaluate(t, args).trace.filter((s) => s.decided);
+      expect(decided).toHaveLength(1);
+    }
+  });
+
+  it("reports the rule that blocked, not just that something did", () => {
+    const denied = new PermissionManager({ bash: "deny" }, "yolo").evaluate(
+      tool("bash", "ask", "execute"),
+      {},
+    );
+    expect(denied.outcome).toBe("deny");
+    expect(denied.trace.at(-1)).toMatchObject({ rule: "tool-level", decided: true });
+    expect(denied.overridden).toBe(true);
+
+    const planned = new PermissionManager({}, "plan").evaluate(tool("write", "ask", "edit"), {});
+    expect(planned.trace.at(-1)).toMatchObject({ rule: "mode:plan", decided: true });
+    expect(planned.reason).toMatch(/read-only/);
+  });
+
+  it("explains why auto still prompts for shell without an arbiter", () => {
+    const pm = new PermissionManager({}, "auto");
+    const evaluation = pm.evaluate(tool("bash", "ask", "execute"), { command: "ls" });
+    expect(evaluation.outcome).toBe("prompt");
+    expect(evaluation.trace.map((s) => s.detail).join(" ")).toMatch(/no arbiter/i);
+  });
+
+  it("surfaces the destructive gate as its own step", () => {
+    const pm = new PermissionManager({}, "yolo", undefined, true);
+    const evaluation = pm.evaluate(destructive("drop_db"), {});
+    expect(evaluation.outcome).toBe("prompt");
+    expect(evaluation.riskTier).toBe("destructive");
+    expect(evaluation.trace.some((s) => s.rule === "confirm-destructive")).toBe(true);
+  });
+});

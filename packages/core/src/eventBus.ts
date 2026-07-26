@@ -1,5 +1,12 @@
 import type { ProviderErrorKind } from "./providerError.js";
-import type { AutonomyMode, DiffRow, Message, TokenUsage, ToolCall } from "./types.js";
+import type {
+  AutonomyMode,
+  DiffRow,
+  Message,
+  PermissionAnswer,
+  TokenUsage,
+  ToolCall,
+} from "./types.js";
 
 /** Lifecycle + observability events emitted by the agent loop. */
 export type AgentEvent =
@@ -19,6 +26,33 @@ export type AgentEvent =
       path?: string;
     }
   | { type: "tool_denied"; callId: string; name: string; reason?: string }
+  // A permission prompt went up. Emitted so an out-of-band answerer (the desktop
+  // status server) can surface it live; the request itself also rides the status
+  // snapshot as `pendingPermission`, so a late subscriber still sees it.
+  | {
+      type: "permission_request";
+      id: string;
+      tool: string;
+      preview: string;
+      category: string;
+      riskTier?: string;
+      /** Which sub-agent asked, when it wasn't the main agent (see PermissionOrigin). */
+      origin?: { id?: string; name: string };
+    }
+  // A further request landed behind the active prompt. Its only job is to carry
+  // the new queue depth: a fleet whose sub-agents are ALL blocked emits nothing
+  // else, so without this both the TUI's counter and the desktop snapshot's
+  // `pendingPermissionQueue` sit at a stale number until unrelated work happens.
+  | { type: "permission_queued"; queued: number }
+  // The prompt above was answered — `via` says by whom (the host's own UI, or
+  // remotely through the status server's control endpoint).
+  | {
+      type: "permission_resolved";
+      id: string;
+      tool: string;
+      answer: PermissionAnswer;
+      via: "local" | "remote";
+    }
   | { type: "usage"; usage: TokenUsage }
   | { type: "context_compacted"; before: number; after: number; reason: "auto" | "manual" }
   // Stale tool outputs were replaced with placeholders (cheaper than compaction).
@@ -69,14 +103,26 @@ export type AgentEvent =
       step: number;
       savedAt?: number;
     }
-  // Sub-agent (fleet) lifecycle.
-  | { type: "subagent_start"; task: string; role?: string }
-  | { type: "subagent_done"; output: string }
-  | { type: "fleet_start"; count: number }
+  // Sub-agent (fleet) lifecycle. `id` (when the sub-agent has a board row) and
+  // `role` are what a UI keys a per-sub-agent accent colour on, so its transcript
+  // lines and its live row read as the same worker.
+  | { type: "subagent_start"; task: string; role?: string; id?: string }
+  | { type: "subagent_done"; output: string; role?: string; id?: string }
+  // `tasks` is present when the dispatch itself is the plan — a bare
+  // `spawn_parallel` call, which nothing planned a round for. It seeds the live
+  // board; planned runs (team roster, autonomy rounds) seed from their own plan
+  // event and omit it, so their rows survive the round.
+  | { type: "fleet_start"; count: number; tasks?: { id: string; task: string; role?: string }[] }
   | { type: "fleet_done"; count: number }
   | { type: "fleet_worktree"; path: string; branch: string }
-  // Parallel-autonomy rounds (leader decomposes → fleet → aggregate).
-  | { type: "autonomy_fleet_round"; round: number; tasks: { task: string; role?: string }[] }
+  // Parallel-autonomy rounds (leader decomposes → fleet → aggregate). Each task
+  // carries the id its live board row is keyed on; the same id then arrives on
+  // the `team_member_state` / `team_member_event` telemetry for that subtask.
+  | {
+      type: "autonomy_fleet_round";
+      round: number;
+      tasks: { id?: string; task: string; role?: string }[];
+    }
   | { type: "autonomy_aggregate"; round: number; count: number }
   // Phased coordinator (goal → ordered phases with handoff).
   | {
