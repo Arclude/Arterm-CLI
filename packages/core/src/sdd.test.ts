@@ -40,7 +40,7 @@ function makeRunner(
   bus: EventBus,
   runFleet: (t: AutonomyTask[], s: AbortSignal) => Promise<AutonomyTaskResult[]>,
   store: SddStore,
-  opts: { verify?: Verifier; cwd?: string } = {},
+  opts: { verify?: Verifier; cwd?: string; handoffChars?: number } = {},
 ) {
   return new SddRunner(agent as unknown as Agent, bus, runFleet, store, {
     now: () => "TEST-ID",
@@ -262,6 +262,144 @@ describe("SddRunner.run", () => {
     expect(spec.id).toBe("TEST-ID");
     expect(store.saved).toHaveLength(1);
     expect(runner.state).toBe("done");
+  });
+});
+
+/** Runs a graph, returning the prompt dispatched for each task id. */
+async function dispatch(
+  tasks: { id: string; title: string; description: string; dependsOn: string[] }[],
+  outputs: Record<string, string>,
+  opts: { handoffChars?: number } = {},
+): Promise<Map<string, string>> {
+  const prompts = new Map<string, string>();
+  const titles = new Map(tasks.map((t) => [t.title, t.id]));
+  const runner = makeRunner(
+    new FakeAgent(),
+    new EventBus(),
+    async (dispatched: AutonomyTask[]) => {
+      for (const d of dispatched) {
+        const id = titles.get(d.task.split("\n")[0] ?? "");
+        if (id) prompts.set(id, d.task);
+      }
+      return dispatched.map((d) => ({
+        ...d,
+        output: outputs[titles.get(d.task.split("\n")[0] ?? "") ?? ""] ?? "ok",
+      }));
+    },
+    memStore(),
+    opts,
+  );
+  await runner.execute({ tasks: tasks.map((t) => ({ ...t, state: "pending" as const })) });
+  return prompts;
+}
+
+describe("SddRunner dependency handoff", () => {
+  it("hands a finished dependency's output to the task that depends on it", async () => {
+    // The motivating case: read → analyze → fix. Without this, the fix step was
+    // handed the analysis step's *title*, never a word of what it found.
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "analyze", description: "read the logs", dependsOn: [] },
+        { id: "t2", title: "fix", description: "fix what analyze found", dependsOn: ["t1"] },
+      ],
+      { t1: "The crash comes from a null cursor in paginate()." },
+    );
+
+    const fix = prompts.get("t2") ?? "";
+    expect(fix).toContain("null cursor in paginate()");
+    expect(fix).toContain("### t1 — analyze");
+    // The upstream task itself has no upstream.
+    expect(prompts.get("t1")).not.toContain("tasks you depend on");
+  });
+
+  it("hands over every dependency, and only the dependencies", async () => {
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "schema", description: "d", dependsOn: [] },
+        { id: "t2", title: "api", description: "d", dependsOn: [] },
+        { id: "t3", title: "unrelated", description: "d", dependsOn: [] },
+        { id: "t4", title: "client", description: "d", dependsOn: ["t1", "t2"] },
+      ],
+      { t1: "SCHEMA-OUTPUT", t2: "API-OUTPUT", t3: "UNRELATED-OUTPUT" },
+    );
+
+    const client = prompts.get("t4") ?? "";
+    expect(client).toContain("SCHEMA-OUTPUT");
+    expect(client).toContain("API-OUTPUT");
+    expect(client).not.toContain("UNRELATED-OUTPUT");
+  });
+
+  it("keeps both ends of an output too long for the budget", async () => {
+    // Losing the tail would drop the conclusion, which is usually the whole point.
+    const long = `HEAD-MARKER${"x".repeat(5000)}TAIL-MARKER`;
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "survey", description: "d", dependsOn: [] },
+        { id: "t2", title: "act", description: "d", dependsOn: ["t1"] },
+      ],
+      { t1: long },
+      { handoffChars: 1000 },
+    );
+
+    const act = prompts.get("t2") ?? "";
+    expect(act).toContain("HEAD-MARKER");
+    expect(act).toContain("TAIL-MARKER");
+    expect(act).toContain("characters omitted from the middle");
+    expect(act.length).toBeLessThan(long.length);
+  });
+
+  it("gives each dependency a share rather than letting the first spend it all", async () => {
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "first", description: "d", dependsOn: [] },
+        { id: "t2", title: "second", description: "d", dependsOn: [] },
+        { id: "t3", title: "join", description: "d", dependsOn: ["t1", "t2"] },
+      ],
+      { t1: `A${"a".repeat(4000)}A-END`, t2: `B${"b".repeat(4000)}B-END` },
+      { handoffChars: 4000 },
+    );
+
+    const join = prompts.get("t3") ?? "";
+    expect(join).toContain("A-END");
+    expect(join).toContain("B-END");
+  });
+
+  it("keeps the verify gate last, after the handoff", async () => {
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "analyze", description: "d", dependsOn: [] },
+        { id: "t2", title: "fix", description: "verify: pnpm test", dependsOn: ["t1"] },
+      ],
+      { t1: "FINDINGS" },
+    );
+
+    const fix = prompts.get("t2") ?? "";
+    expect(fix.indexOf("FINDINGS")).toBeLessThan(fix.indexOf("only accepted when"));
+  });
+
+  it("omits the handoff when the budget is zero", async () => {
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "analyze", description: "d", dependsOn: [] },
+        { id: "t2", title: "fix", description: "d", dependsOn: ["t1"] },
+      ],
+      { t1: "FINDINGS" },
+      { handoffChars: 0 },
+    );
+
+    expect(prompts.get("t2")).not.toContain("FINDINGS");
+  });
+
+  it("does not quote a dependency that produced nothing", async () => {
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "analyze", description: "d", dependsOn: [] },
+        { id: "t2", title: "fix", description: "d", dependsOn: ["t1"] },
+      ],
+      { t1: "   " },
+    );
+
+    expect(prompts.get("t2")).not.toContain("tasks you depend on");
   });
 });
 

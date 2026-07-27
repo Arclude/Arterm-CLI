@@ -204,6 +204,12 @@ export interface ArtermConfig {
     maxQuestions?: number;
     /** Cap on generated tasks in the graph (default 12). */
     maxTasks?: number;
+    /**
+     * Character budget for the finished dependencies' output handed to a
+     * dependent task, split evenly among them (default 12000). 0 sends the
+     * task's title and description only, as before.
+     */
+    handoffChars?: number;
   };
   /** Persistent, project-scoped memory (claude-mem-style capture/digest/recall). */
   memory: {
@@ -301,7 +307,7 @@ export function defaultConfig(): ArtermConfig {
     catalog: { enabled: true, maxAgeHours: 24 },
     statusServer: { enabled: "auto", port: 0 },
     confirmDestructive: false,
-    sdd: { maxQuestions: 4, maxTasks: 12 },
+    sdd: { maxQuestions: 4, maxTasks: 12, handoffChars: 12_000 },
     memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20, engine: "legacy" },
   };
 }
@@ -420,6 +426,7 @@ const configFileSchema = z
       .object({
         maxQuestions: z.number().int().positive().optional(),
         maxTasks: z.number().int().positive().optional(),
+        handoffChars: z.number().int().nonnegative().optional(),
       })
       .partial(),
     memory: z

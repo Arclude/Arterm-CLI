@@ -204,6 +204,14 @@ queues its `mustFix` items into `pendingSteer`, which every mode's prompt builde
 already consumes — that is why no mode needs its own repair plumbing. `eternal`
 is exempt on purpose: it never makes a completion claim.
 
+**A `/sdd` task reads its dependencies' output, not their titles.** `SddRunner`
+builds each worker's prompt from the task *plus* the quoted output of every
+dependency that finished (`upstream()` → `handoff()`). This is the only channel
+between waves: a wave-2 worker is a fresh sub-agent with no memory of wave 1, and
+under `fleet.isolation: "worktree"` it cannot read wave 1's files either. Clipping
+keeps both ends of an over-budget output — the conclusion is at the bottom, so a
+plain `slice(0, n)` would throw away the part that matters most.
+
 **The judge runs where the worker wrote.** Never in a fresh worktree —
 `createWorktree` bases on `HEAD`, i.e. a tree with the change absent, where a
 verifier passes trivially. `/sdd` verification is therefore skipped entirely when

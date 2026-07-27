@@ -324,6 +324,28 @@ Lifecycle goes to stderr and the final summary to stdout, so `--print --goal …
 gives you just the answer. `--json` emits the run plus every verdict as one object,
 which is what you want in CI.
 
+### Spec-driven runs (`/sdd`)
+
+`/sdd` turns a brief into a spec document and a task DAG, then runs the graph
+wave by wave: every task whose dependencies are done is dispatched concurrently
+to its own sub-agent.
+
+A dependent task is handed **what its dependencies actually produced**, not just
+their titles — which is what makes a chain like *read the logs → analyze → fix*
+work at all. Each worker is a fresh sub-agent with no memory of the previous
+wave, and under worktree isolation it cannot even read the files the previous
+wave wrote, so those outputs are the only channel between the two.
+
+```json
+{ "sdd": { "maxQuestions": 4, "maxTasks": 12, "handoffChars": 12000 } }
+```
+
+`handoffChars` is the character budget for that handoff, split evenly among a
+task's dependencies. An output too long for its share keeps its head and its
+tail — a report's conclusion is at the bottom, so trimming from the end is the
+one thing that must not happen. `0` restores the old title-and-description-only
+behavior.
+
 ### Fallback models
 
 When the active model fails with something a retry can't fix quickly — rate

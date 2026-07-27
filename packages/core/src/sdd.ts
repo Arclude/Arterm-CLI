@@ -45,6 +45,11 @@ export interface SddRunnerOptions {
   maxTasks?: number;
   /** Max tasks dispatched per ready-wave (default = fleet concurrency). */
   fanout?: number;
+  /**
+   * Character budget for the upstream outputs handed to a dependent task
+   * (default 12000, split across its dependencies). 0 disables the handoff.
+   */
+  handoffChars?: number;
   /** Per-task cwd override (e.g. a git worktree). Defaults to the shared cwd. */
   cwdFor?: (taskId: string) => string | undefined;
   /** The tree a declared verification command runs in — the one workers wrote to. */
@@ -68,6 +73,7 @@ export class SddRunner {
   private readonly maxQuestions: number;
   private readonly maxTasks: number;
   private readonly fanout: number;
+  private readonly handoffChars: number;
   private current?: AbortController;
   private specId = "";
 
@@ -81,6 +87,7 @@ export class SddRunner {
     this.maxQuestions = Math.min(8, Math.max(1, opts.maxQuestions ?? 4));
     this.maxTasks = Math.min(40, Math.max(1, opts.maxTasks ?? 12));
     this.fanout = Math.min(16, Math.max(1, opts.fanout ?? 4));
+    this.handoffChars = Math.min(200_000, Math.max(0, opts.handoffChars ?? 12_000));
   }
 
   get state() {
@@ -185,7 +192,10 @@ When a shell command can prove a task is done, make the FIRST line of its "descr
       let results: AutonomyTaskResult[];
       try {
         results = await this.runFleet(
-          wave.map((t) => ({ task: taskPrompt(t), role: t.role })),
+          wave.map((t) => ({
+            task: taskPrompt(t, this.upstream(t, byId), this.handoffChars),
+            role: t.role,
+          })),
           this.current.signal,
         );
       } catch {
@@ -258,6 +268,21 @@ When a shell command can prove a task is done, make the FIRST line of its "descr
     });
   }
 
+  /**
+   * The finished dependencies of `t`, in declared order. A wave-2 worker is a
+   * fresh sub-agent with no memory of wave 1, and under worktree isolation it
+   * cannot even read the files wave 1 wrote — so these outputs are the only
+   * channel between a task and the work it was told to build on.
+   */
+  private upstream(t: SddTask, byId: Map<string, SddTask>): SddTask[] {
+    const out: SddTask[] = [];
+    for (const id of t.dependsOn) {
+      const dep = byId.get(id);
+      if (dep && dep.state === "done" && dep.output?.trim()) out.push(dep);
+    }
+    return out;
+  }
+
   /** Drop unknown deps, break cycles, clamp roles, cap task count; non-empty fallback. */
   private validateGraph(graph: TaskGraph, brief: string): TaskGraph {
     const roles = new Set(availableRoles());
@@ -297,15 +322,46 @@ When a shell command can prove a task is done, make the FIRST line of its "descr
   }
 }
 
-function taskPrompt(t: SddTask): string {
+/** Floor on each dependency's share, so a wide fan-in can't shrink them to noise. */
+const MIN_DEP_CHARS = 600;
+
+function taskPrompt(t: SddTask, upstream: SddTask[], budget: number): string {
   // Tell the worker how it will be graded. A task that declares a command is
   // only accepted when that command exits 0, so running it first is strictly
-  // cheaper than being rejected for it.
+  // cheaper than being rejected for it. Keep it last: it is the instruction the
+  // worker should read closest to acting, and a wide handoff can be long.
   const cmd = extractVerifyCommand(t.description);
   const gate = cmd
     ? `\n\nThis task is only accepted when \`${cmd}\` exits 0. Run it yourself before you finish.`
     : "";
-  return `${t.title}\n\n${t.description}${gate}`;
+  return `${t.title}\n\n${t.description}${handoff(upstream, budget)}${gate}`;
+}
+
+/** Quote the dependencies' outputs, sharing `budget` characters evenly among them. */
+function handoff(deps: SddTask[], budget: number): string {
+  if (deps.length === 0 || budget <= 0) return "";
+  const per = Math.max(MIN_DEP_CHARS, Math.floor(budget / deps.length));
+  const blocks = deps.map((d) => `### ${d.id} — ${d.title}\n\n${clip(d.output ?? "", per)}`);
+  return `\n\n## Results of the tasks you depend on
+
+These ran before you and are already done. What they report below is the only
+record of their work — do not redo it, and do not assume anything they did not
+say. Build on it.
+
+${blocks.join("\n\n")}`;
+}
+
+/**
+ * Trim to `max` characters keeping both ends: a report's setup is at the top and
+ * its conclusion at the bottom, and dropping either end is what makes a handoff
+ * useless. The middle is the safest thing to lose.
+ */
+function clip(text: string, max: number): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  const head = Math.floor(max * 0.6);
+  const tail = max - head;
+  return `${t.slice(0, head)}\n\n… (${t.length - max} characters omitted from the middle) …\n\n${t.slice(-tail)}`;
 }
 
 function defaultNow(): string {
