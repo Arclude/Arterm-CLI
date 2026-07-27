@@ -42,7 +42,21 @@ Out-of-band, after a build:
 node scripts/provider-resilience-e2e.mjs   # fault injection against the real binary
 ```
 
-It runs the built `arterm` against a fake OpenAI-compatible server that drops
+```bash
+node scripts/sdd-context-e2e.mjs               # what an /sdd worker is actually sent
+SDD_E2E_CONTEXT=off node scripts/sdd-context-e2e.mjs   # same run, context disabled
+```
+
+It drives the real TUI in a pty through a whole `/sdd` run against a recording
+fake model, then asserts on the request bodies: the spec and the dependencies'
+output reached the sub-agents. The `SDD_E2E_CONTEXT=off` run reproduces the
+pre-fix dispatch and must FAIL the context assertions — a context test that
+passes with the context switched off proves nothing. It also asserts on the
+screen, which is how the duplicate fleet board and the prompt boilerplate
+bleeding into the transcript were found; neither is visible to a unit test.
+
+`provider-resilience-e2e.mjs` runs the built `arterm` against a fake
+OpenAI-compatible server that drops
 sockets, returns 401/429/503, and dies mid-answer, asserting both what the user
 sees and how many requests actually reached the server. It is separate from
 `pnpm test` because it spawns a real process — the only way to catch bugs that

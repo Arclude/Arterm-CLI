@@ -200,6 +200,17 @@ const COMMANDS = [
   "quit",
 ] as const;
 
+/**
+ * Collapse a value to one transcript line. A sub-agent's task is no longer a
+ * sentence — an /sdd worker is handed the spec and its dependencies' output — so
+ * slicing raw text spills a document's second, third and fourth lines onto a line
+ * meant to be a label. The first line of a task is its title.
+ */
+function oneLine(text: string, max: number): string {
+  const first = text.split("\n")[0]?.trim() ?? "";
+  return first.length > max ? `${first.slice(0, max)}…` : first;
+}
+
 /** How a remotely-answered permission reads in the transcript. */
 const PERMISSION_ANSWER_LABEL: Record<string, string> = {
   allow: "allowed once",
@@ -586,8 +597,13 @@ export function App({
   // gates are read through refs instead of isActive/closures.
   const teamDetailOpenRef = useRef(false);
   teamDetailOpenRef.current = teamDetailOpen;
+  // The rows the board keys steer. A /team roster or a fan-out round owns them
+  // when one is up; otherwise it is the /sdd graph, whose kanban is the only board
+  // an /sdd run raises. Selection indexes THIS list, so both boards share one set
+  // of handlers and one feed lookup.
+  const boardRows: { id: string }[] = teamMembers.length > 0 ? teamMembers : sddTasks;
   const memberCountRef = useRef(0);
-  memberCountRef.current = teamMembers.length;
+  memberCountRef.current = boardRows.length;
   const autoStateRef = useRef(autoState);
   autoStateRef.current = autoState;
   const pendingRef = useRef<PendingPermission | null>(null);
@@ -1002,15 +1018,15 @@ export function App({
         case "subagent_start":
           push({
             kind: "system",
-            text: `⟳ sub-agent${event.role ? ` (${event.role})` : ""}: ${event.task.slice(0, 80)}`,
+            text: `⟳ sub-agent${event.role ? ` (${event.role})` : ""}: ${oneLine(event.task, 80)}`,
             color: agentColor(event.id ?? event.role ?? "sub-agent"),
           });
           break;
         case "subagent_done":
           push({
             kind: "system",
-            text: `↩ sub-agent${event.role ? ` (${event.role})` : ""} done: ${event.output.slice(
-              0,
+            text: `↩ sub-agent${event.role ? ` (${event.role})` : ""} done: ${oneLine(
+              event.output,
               120,
             )}`,
             color: agentColor(event.id ?? event.role ?? "sub-agent"),
@@ -1021,6 +1037,11 @@ export function App({
           // A bare `spawn_parallel` ships its rows here (nothing planned a round
           // for it), so the board — and its ^↑↓ / ⏎ navigation — comes up for a
           // plain fan-out too, not just /team and parallel autonomy.
+          //
+          // An /sdd wave never lands here: it carries the graph's task ids, so the
+          // fleet counts it as planned and ships no rows. That is deliberate — the
+          // kanban already has a row per task, and a second board for the same wave
+          // would say nothing new while printing each worker's whole prompt.
           if (event.tasks && event.tasks.length > 0) {
             setBoardKind("fleet");
             setTeamMembers(
@@ -2320,8 +2341,11 @@ export function App({
       const text = value.trim();
       setInput("");
       if (!text) {
-        // Enter on an empty prompt toggles the selected member's drill-down view.
-        if (teamMembers.length > 0) setTeamDetailOpen((v) => !v);
+        // Enter on an empty prompt toggles the selected row's drill-down view —
+        // a team member's, or an /sdd task's on the kanban.
+        // Read through the ref: `submit` is memoized, and a fresh `boardRows`
+        // array every render would either stale the closure or defeat the memo.
+        if (memberCountRef.current > 0) setTeamDetailOpen((v) => !v);
         return;
       }
       setHistory((h) => historyPush(h, text));
@@ -2334,7 +2358,7 @@ export function App({
       }
       await dispatch(text);
     },
-    [session, dispatch, teamMembers.length],
+    [session, dispatch],
   );
 
   // Drains the oldest queued prompt once the loop is idle again. Event-driven —
@@ -2413,7 +2437,7 @@ export function App({
     }
     // An open drill-down owns the arrows: the router has already ruled this one a
     // keypress rather than a wheel tick, so stepping the row here is safe.
-    if (teamDetailOpen && teamMembers.length > 0) {
+    if (teamDetailOpen && boardRows.length > 0) {
       stepMember(dir === "up" ? -1 : 1);
       return;
     }
@@ -2426,7 +2450,17 @@ export function App({
 
   const footer = (
     <>
-      {sddTasks.length > 0 ? <SddBoard tasks={sddTasks} columns={columns} /> : null}
+      {sddTasks.length > 0 ? (
+        <SddBoard
+          tasks={sddTasks}
+          columns={columns}
+          // Only one board is navigable at a time, and a /team roster wins — an
+          // /sdd run raises no roster, so in practice this is the kanban's.
+          selected={teamMembers.length > 0 ? -1 : teamSel}
+          detailOpen={teamMembers.length === 0 && teamDetailOpen}
+          feed={teamFeeds.get(sddTasks[Math.min(teamSel, sddTasks.length - 1)]?.id ?? "") ?? []}
+        />
+      ) : null}
       {teamMembers.length > 0 ? (
         <TeamBoard
           members={teamMembers}
@@ -2515,7 +2549,7 @@ export function App({
             onTab={() => stepMember(1)}
             // App owns ↑/↓ in two cases: the fullscreen arrow router, and an open
             // board drill-down (where they step rows instead of recalling history).
-            externalArrows={routedArrows || (teamDetailOpen && teamMembers.length > 0)}
+            externalArrows={routedArrows || (teamDetailOpen && boardRows.length > 0)}
           />
         </Box>
       )}

@@ -204,6 +204,12 @@ When a shell command can prove a task is done, make the FIRST line of its "descr
       try {
         results = await this.runFleet(
           wave.map((t) => ({
+            // The graph's own id, so every event the fleet emits for this worker —
+            // its state, its tool calls, a permission prompt it raises — is keyed to
+            // the task the board already shows. Without it the fleet mints a
+            // synthetic `f<round>-<n>`, and the run looks unplanned to a host that
+            // has had the whole DAG since `sdd_graph`.
+            id: t.id,
             task: taskPrompt(t, {
               upstream: this.upstream(t, byId),
               handoffChars: this.handoffChars,

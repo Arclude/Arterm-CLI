@@ -23,19 +23,37 @@ const COLUMNS: { state: SddTaskState; label: string; color: string }[] = [
 
 const MAX_PER_COLUMN = 8;
 
+/** How many trailing feed lines the drill-down view shows (matches TeamBoard). */
+const DETAIL_LINES = 12;
+
 /**
  * Live kanban board for a /sdd run: one column per task state, updated in place as
  * `sdd_task_state` events arrive. Rendered in the bottom region so the whole DAG
  * stays visible while the fleet works through it.
+ *
+ * Selection runs over the graph order (t1, t2, …) rather than over the columns: a
+ * task moves between columns as it runs, and a selection that jumped with it would
+ * be impossible to steer. The marker follows the selected task into whichever
+ * column it currently sits in.
  */
 export function SddBoard({
   tasks,
   columns,
+  selected = -1,
+  detailOpen = false,
+  feed = [],
 }: {
   tasks: SddBoardTask[];
   /** Terminal width, used to size the four columns. */
   columns: number;
+  /** Index into `tasks` of the selected row; -1 for no selection. */
+  selected?: number;
+  /** True when the selected task's activity feed is expanded. */
+  detailOpen?: boolean;
+  /** The selected task's feed lines (newest last). */
+  feed?: string[];
 }): React.ReactElement {
+  const sel = selected >= 0 ? tasks[Math.min(selected, tasks.length - 1)] : undefined;
   const total = tasks.length;
   const done = tasks.filter((t) => t.state === "done").length;
   const failed = tasks.filter((t) => t.state === "failed").length;
@@ -55,6 +73,9 @@ export function SddBoard({
           {running ? ` · ${running} running` : ""}
           {failed ? ` · ${failed} failed` : ""}
         </Text>
+        <Text color="gray" dimColor>
+          {`   ${detailOpen ? "↑↓/⇥" : "⇥/^↑↓"} task${detailOpen ? "" : " · ⏎ inspect"} · esc close`}
+        </Text>
       </Text>
       <Box>
         {COLUMNS.map((col) => {
@@ -65,8 +86,8 @@ export function SddBoard({
                 {col.label} ({items.length})
               </Text>
               {items.slice(0, MAX_PER_COLUMN).map((t) => (
-                <Text key={t.id} color={col.color} wrap="truncate-end">
-                  {mark(col.state)} {t.id} {t.title}
+                <Text key={t.id} color={col.color} wrap="truncate-end" bold={t.id === sel?.id}>
+                  {t.id === sel?.id ? "❯" : mark(col.state)} {t.id} {t.title}
                 </Text>
               ))}
               {items.length > MAX_PER_COLUMN ? (
@@ -78,6 +99,33 @@ export function SddBoard({
           );
         })}
       </Box>
+      {detailOpen && sel ? (
+        <Box flexDirection="column" marginTop={1} paddingLeft={1}>
+          <Text wrap="truncate-end">
+            <Text color={sel.state === "failed" ? "red" : "cyan"} bold>
+              ⚙ {sel.id} {sel.title}
+            </Text>
+            <Text color="gray" dimColor>
+              {` (${Math.min(selected, tasks.length - 1) + 1}/${tasks.length})`}
+            </Text>
+            {sel.dependsOn.length > 0 ? (
+              <Text color="gray"> — after {sel.dependsOn.join(", ")}</Text>
+            ) : null}
+          </Text>
+          {feed.length === 0 ? (
+            <Text color="gray" dimColor>
+              (no activity yet)
+            </Text>
+          ) : (
+            feed.slice(-DETAIL_LINES).map((line, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: feed lines are append-only
+              <Text key={i} color="gray" wrap="truncate-end">
+                {line}
+              </Text>
+            ))
+          )}
+        </Box>
+      ) : null}
     </Box>
   );
 }
