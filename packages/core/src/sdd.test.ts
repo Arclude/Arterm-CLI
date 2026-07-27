@@ -40,7 +40,7 @@ function makeRunner(
   bus: EventBus,
   runFleet: (t: AutonomyTask[], s: AbortSignal) => Promise<AutonomyTaskResult[]>,
   store: SddStore,
-  opts: { verify?: Verifier; cwd?: string; handoffChars?: number } = {},
+  opts: { verify?: Verifier; cwd?: string; handoffChars?: number; specChars?: number } = {},
 ) {
   return new SddRunner(agent as unknown as Agent, bus, runFleet, store, {
     now: () => "TEST-ID",
@@ -269,8 +269,9 @@ describe("SddRunner.run", () => {
 async function dispatch(
   tasks: { id: string; title: string; description: string; dependsOn: string[] }[],
   outputs: Record<string, string>,
-  opts: { handoffChars?: number } = {},
+  opts: { handoffChars?: number; specChars?: number; spec?: string } = {},
 ): Promise<Map<string, string>> {
+  const { spec, ...runnerOpts } = opts;
   const prompts = new Map<string, string>();
   const titles = new Map(tasks.map((t) => [t.title, t.id]));
   const runner = makeRunner(
@@ -287,9 +288,9 @@ async function dispatch(
       }));
     },
     memStore(),
-    opts,
+    runnerOpts,
   );
-  await runner.execute({ tasks: tasks.map((t) => ({ ...t, state: "pending" as const })) });
+  await runner.execute({ tasks: tasks.map((t) => ({ ...t, state: "pending" as const })) }, spec);
   return prompts;
 }
 
@@ -400,6 +401,95 @@ describe("SddRunner dependency handoff", () => {
     );
 
     expect(prompts.get("t2")).not.toContain("tasks you depend on");
+  });
+});
+
+describe("SddRunner spec context", () => {
+  const SPEC =
+    "# Auth rewrite\n\nSessions are cookie-backed. Never store the token in localStorage.";
+  const GRAPH = [
+    { id: "t1", title: "login", description: "d", dependsOn: [] },
+    { id: "t2", title: "logout", description: "d", dependsOn: ["t1"] },
+  ];
+
+  it("gives every task the spec its graph was cut from", async () => {
+    // The point of spec-driven development: the shared decisions live in the spec,
+    // and a task description is a sentence, not a design. Before this, the document
+    // was written to disk for the human and shown to no worker at all.
+    const prompts = await dispatch(GRAPH, {}, { spec: SPEC });
+
+    for (const id of ["t1", "t2"]) {
+      expect(prompts.get(id)).toContain("Never store the token in localStorage");
+    }
+  });
+
+  it("tells the worker to implement only its own task", async () => {
+    // Handing over the whole design invites implementing the whole design; two
+    // workers building the same section concurrently is worse than one doing it.
+    const prompts = await dispatch(GRAPH, {}, { spec: SPEC });
+
+    expect(prompts.get("t1")).toContain("implement ONLY the task above");
+  });
+
+  it("clips a spec too long for its budget, keeping both ends", async () => {
+    const long = `SPEC-HEAD${"y".repeat(5000)}SPEC-TAIL`;
+    const prompts = await dispatch(GRAPH, {}, { spec: long, specChars: 800 });
+
+    const t1 = prompts.get("t1") ?? "";
+    expect(t1).toContain("SPEC-HEAD");
+    expect(t1).toContain("SPEC-TAIL");
+    expect(t1).toContain("characters omitted from the middle");
+  });
+
+  it("orders the prompt: task, then spec, then upstream, then the gate", async () => {
+    const prompts = await dispatch(
+      [
+        { id: "t1", title: "analyze", description: "d", dependsOn: [] },
+        { id: "t2", title: "fix", description: "verify: pnpm test", dependsOn: ["t1"] },
+      ],
+      { t1: "UPSTREAM-FINDINGS" },
+      { spec: SPEC },
+    );
+
+    const fix = prompts.get("t2") ?? "";
+    expect(fix.indexOf("cookie-backed")).toBeLessThan(fix.indexOf("UPSTREAM-FINDINGS"));
+    expect(fix.indexOf("UPSTREAM-FINDINGS")).toBeLessThan(fix.indexOf("only accepted when"));
+  });
+
+  it("omits the spec when the budget is zero", async () => {
+    const prompts = await dispatch(GRAPH, {}, { spec: SPEC, specChars: 0 });
+
+    expect(prompts.get("t1")).not.toContain("localStorage");
+  });
+
+  it("dispatches unchanged when no spec is supplied", async () => {
+    const prompts = await dispatch(GRAPH, {});
+
+    expect(prompts.get("t1")).not.toContain("The spec this task comes from");
+  });
+
+  it("carries the spec through the full run(), not just execute()", async () => {
+    // The production path builds the spec and the graph in one step; a handoff that
+    // only works when execute() is called by hand would help nobody.
+    const bus = new EventBus();
+    const agent = new FakeAgent();
+    agent.plans = [
+      '# Design\n\nUse a ring buffer, not a list.\n```json\n{"tasks":[{"id":"t1","title":"a","dependsOn":[]}]}\n```',
+    ];
+    const dispatched: string[] = [];
+    const runner = makeRunner(
+      agent,
+      bus,
+      async (tasks: AutonomyTask[]) => {
+        for (const t of tasks) dispatched.push(t.task);
+        return tasks.map((t) => ({ ...t, output: "ok" }));
+      },
+      memStore(),
+    );
+
+    await runner.run("build it", undefined);
+
+    expect(dispatched[0]).toContain("Use a ring buffer, not a list.");
   });
 });
 

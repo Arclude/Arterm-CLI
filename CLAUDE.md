@@ -204,13 +204,20 @@ queues its `mustFix` items into `pendingSteer`, which every mode's prompt builde
 already consumes — that is why no mode needs its own repair plumbing. `eternal`
 is exempt on purpose: it never makes a completion claim.
 
-**A `/sdd` task reads its dependencies' output, not their titles.** `SddRunner`
-builds each worker's prompt from the task *plus* the quoted output of every
-dependency that finished (`upstream()` → `handoff()`). This is the only channel
-between waves: a wave-2 worker is a fresh sub-agent with no memory of wave 1, and
-under `fleet.isolation: "worktree"` it cannot read wave 1's files either. Clipping
-keeps both ends of an over-budget output — the conclusion is at the bottom, so a
-plain `slice(0, n)` would throw away the part that matters most.
+**A `/sdd` worker's prompt is the task plus its context, built in `taskPrompt()`:**
+the spec the graph was cut from (`specBlock()`) and the quoted output of every
+dependency that finished (`upstream()` → `handoff()`), with the verify-gate line
+last. The dependency outputs are the only channel between waves — a wave-2 worker
+is a fresh sub-agent with no memory of wave 1, and under `fleet.isolation:
+"worktree"` it cannot read wave 1's files either. Clipping keeps both ends of an
+over-budget text: the conclusion is at the bottom, so a plain `slice(0, n)` throws
+away the part that matters most.
+
+`specBlock()`'s scope sentence ("implement ONLY the task above") is load-bearing,
+not padding. Handing a worker the whole design invites it to build the whole
+design, and two workers writing the same section concurrently is worse than either
+doing it alone. `execute(graph, spec?)` takes the spec as a parameter rather than
+reading instance state, so the fleet prompt is a pure function of what it is given.
 
 **The judge runs where the worker wrote.** Never in a fresh worktree —
 `createWorktree` bases on `HEAD`, i.e. a tree with the change absent, where a

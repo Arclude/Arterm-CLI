@@ -50,6 +50,11 @@ export interface SddRunnerOptions {
    * (default 12000, split across its dependencies). 0 disables the handoff.
    */
   handoffChars?: number;
+  /**
+   * Character budget for the spec document quoted into every task's prompt
+   * (default 6000). 0 dispatches tasks without the spec they came from.
+   */
+  specChars?: number;
   /** Per-task cwd override (e.g. a git worktree). Defaults to the shared cwd. */
   cwdFor?: (taskId: string) => string | undefined;
   /** The tree a declared verification command runs in — the one workers wrote to. */
@@ -74,6 +79,7 @@ export class SddRunner {
   private readonly maxTasks: number;
   private readonly fanout: number;
   private readonly handoffChars: number;
+  private readonly specChars: number;
   private current?: AbortController;
   private specId = "";
 
@@ -88,6 +94,7 @@ export class SddRunner {
     this.maxTasks = Math.min(40, Math.max(1, opts.maxTasks ?? 12));
     this.fanout = Math.min(16, Math.max(1, opts.fanout ?? 4));
     this.handoffChars = Math.min(200_000, Math.max(0, opts.handoffChars ?? 12_000));
+    this.specChars = Math.min(200_000, Math.max(0, opts.specChars ?? 6_000));
   }
 
   get state() {
@@ -124,7 +131,7 @@ export class SddRunner {
       })),
     });
 
-    if (!this.gate.stopped) await this.execute(spec.graph);
+    if (!this.gate.stopped) await this.execute(spec.graph, spec.spec);
     this.gate.finish();
     return spec;
   }
@@ -164,8 +171,12 @@ When a shell command can prove a task is done, make the FIRST line of its "descr
    * Execute the task DAG wave-by-wave: each wave dispatches up to `fanout` ready
    * tasks (all deps done) concurrently through the fleet. Honors pause/stop between
    * waves. Tasks whose deps failed stay blocked; the run ends when nothing is ready.
+   *
+   * `spec` is the markdown document the graph was cut from. Every worker gets it:
+   * it is where the shared decisions live (the approach taken, the names agreed,
+   * what was ruled out), and a task description is a sentence, not a design.
    */
-  async execute(graph: TaskGraph): Promise<void> {
+  async execute(graph: TaskGraph, spec?: string): Promise<void> {
     const byId = new Map(graph.tasks.map((t) => [t.id, t]));
     const done = new Set<string>();
     const failed = new Set<string>();
@@ -193,7 +204,12 @@ When a shell command can prove a task is done, make the FIRST line of its "descr
       try {
         results = await this.runFleet(
           wave.map((t) => ({
-            task: taskPrompt(t, this.upstream(t, byId), this.handoffChars),
+            task: taskPrompt(t, {
+              upstream: this.upstream(t, byId),
+              handoffChars: this.handoffChars,
+              spec: spec ?? "",
+              specChars: this.specChars,
+            }),
             role: t.role,
           })),
           this.current.signal,
@@ -325,16 +341,45 @@ When a shell command can prove a task is done, make the FIRST line of its "descr
 /** Floor on each dependency's share, so a wide fan-in can't shrink them to noise. */
 const MIN_DEP_CHARS = 600;
 
-function taskPrompt(t: SddTask, upstream: SddTask[], budget: number): string {
+/** Everything a worker gets beyond its own title and description. */
+interface TaskContext {
+  /** Finished dependencies whose output this task builds on. */
+  upstream: SddTask[];
+  handoffChars: number;
+  /** The markdown spec the whole graph was cut from. */
+  spec: string;
+  specChars: number;
+}
+
+function taskPrompt(t: SddTask, ctx: TaskContext): string {
   // Tell the worker how it will be graded. A task that declares a command is
   // only accepted when that command exits 0, so running it first is strictly
   // cheaper than being rejected for it. Keep it last: it is the instruction the
-  // worker should read closest to acting, and a wide handoff can be long.
+  // worker should read closest to acting, and the context above can be long.
   const cmd = extractVerifyCommand(t.description);
   const gate = cmd
     ? `\n\nThis task is only accepted when \`${cmd}\` exits 0. Run it yourself before you finish.`
     : "";
-  return `${t.title}\n\n${t.description}${handoff(upstream, budget)}${gate}`;
+  const spec = specBlock(ctx.spec, ctx.specChars);
+  const upstream = handoff(ctx.upstream, ctx.handoffChars);
+  return `${t.title}\n\n${t.description}${spec}${upstream}${gate}`;
+}
+
+/**
+ * Quote the shared spec. The scope sentence is load-bearing: handing a worker the
+ * whole design invites it to implement the whole design, and two workers doing the
+ * same section concurrently is worse than either doing it alone.
+ */
+function specBlock(spec: string, budget: number): string {
+  const text = spec.trim();
+  if (!text || budget <= 0) return "";
+  return `\n\n## The spec this task comes from
+
+Shared design for the whole run — the decisions, names, and constraints every
+task in it follows. Other tasks cover the rest of it and are running right now,
+so implement ONLY the task above; use the spec to stay consistent with them.
+
+${clip(text, budget)}`;
 }
 
 /** Quote the dependencies' outputs, sharing `budget` characters evenly among them. */

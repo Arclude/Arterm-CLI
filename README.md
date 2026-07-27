@@ -330,21 +330,25 @@ which is what you want in CI.
 wave by wave: every task whose dependencies are done is dispatched concurrently
 to its own sub-agent.
 
-A dependent task is handed **what its dependencies actually produced**, not just
-their titles — which is what makes a chain like *read the logs → analyze → fix*
-work at all. Each worker is a fresh sub-agent with no memory of the previous
-wave, and under worktree isolation it cannot even read the files the previous
-wave wrote, so those outputs are the only channel between the two.
+Every worker gets two things beyond its own task:
+
+- **The spec**, so it follows the same decisions as the tasks running alongside
+  it. A task description is a sentence; the design is in the document.
+- **What its dependencies actually produced**, not just their titles — which is
+  what makes a chain like *read the logs → analyze → fix* work at all. Each
+  worker is a fresh sub-agent with no memory of the previous wave, and under
+  worktree isolation it cannot even read the files that wave wrote, so those
+  outputs are the only channel between the two.
 
 ```json
-{ "sdd": { "maxQuestions": 4, "maxTasks": 12, "handoffChars": 12000 } }
+{ "sdd": { "maxQuestions": 4, "maxTasks": 12, "specChars": 6000, "handoffChars": 12000 } }
 ```
 
-`handoffChars` is the character budget for that handoff, split evenly among a
-task's dependencies. An output too long for its share keeps its head and its
-tail — a report's conclusion is at the bottom, so trimming from the end is the
-one thing that must not happen. `0` restores the old title-and-description-only
-behavior.
+`specChars` budgets the spec quoted into each prompt; `handoffChars` budgets the
+dependency outputs, split evenly among them. Anything too long for its share
+keeps its head and its tail — a report's conclusion is at the bottom, so trimming
+from the end is the one thing that must not happen. `0` on either omits that
+part, which is how you get the old title-and-description-only dispatch.
 
 ### Fallback models
 

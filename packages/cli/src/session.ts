@@ -569,6 +569,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       maxQuestions: config.sdd?.maxQuestions,
       maxTasks: config.sdd?.maxTasks,
       handoffChars: config.sdd?.handoffChars,
+      specChars: config.sdd?.specChars,
       fanout: config.fleet?.concurrency,
       cwd,
       // The gate must run in the tree the workers wrote to. /sdd's fleet defaults

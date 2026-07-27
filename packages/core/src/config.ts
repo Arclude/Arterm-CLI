@@ -210,6 +210,11 @@ export interface ArtermConfig {
      * task's title and description only, as before.
      */
     handoffChars?: number;
+    /**
+     * Character budget for the spec document quoted into every task's prompt
+     * (default 6000). 0 dispatches tasks without the spec they came from.
+     */
+    specChars?: number;
   };
   /** Persistent, project-scoped memory (claude-mem-style capture/digest/recall). */
   memory: {
@@ -307,7 +312,7 @@ export function defaultConfig(): ArtermConfig {
     catalog: { enabled: true, maxAgeHours: 24 },
     statusServer: { enabled: "auto", port: 0 },
     confirmDestructive: false,
-    sdd: { maxQuestions: 4, maxTasks: 12, handoffChars: 12_000 },
+    sdd: { maxQuestions: 4, maxTasks: 12, handoffChars: 12_000, specChars: 6_000 },
     memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20, engine: "legacy" },
   };
 }
@@ -427,6 +432,7 @@ const configFileSchema = z
         maxQuestions: z.number().int().positive().optional(),
         maxTasks: z.number().int().positive().optional(),
         handoffChars: z.number().int().nonnegative().optional(),
+        specChars: z.number().int().nonnegative().optional(),
       })
       .partial(),
     memory: z
