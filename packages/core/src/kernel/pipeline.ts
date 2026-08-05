@@ -1,4 +1,4 @@
-import type { DiffRow, Message, Tool, ToolCall } from "../types.js";
+import type { DiffRow, Message, TokenUsage, Tool, ToolCall } from "../types.js";
 
 /** Koa-style middleware: do work around `next()`, which runs the rest of the chain. */
 export type Middleware<Ctx> = (ctx: Ctx, next: () => Promise<void>) => Promise<void>;
@@ -69,10 +69,23 @@ export interface RequestCtx {
   system: Message;
   messages: Message[];
   native: boolean;
+  /**
+   * Set by a stage that refuses to let this request be sent (the run budget's
+   * hard ceiling), carrying the reason. Short-circuiting the chain alone is not
+   * enough — that only skips the remaining stages — so the loop reads this and
+   * ends the turn, the same contract `toolCall.permission` uses when it denies.
+   */
+  refused?: string;
 }
 export interface ResponseCtx {
   text: string;
   calls: ToolCall[];
+  /**
+   * What the provider said this response cost. Present only when the backend
+   * reports usage — local servers often don't — so a stage that meters spend
+   * must treat `undefined` as "unknown", never as zero.
+   */
+  usage?: TokenUsage;
 }
 export interface AssistantOutputCtx {
   message: Message;

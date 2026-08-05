@@ -1,6 +1,7 @@
 import type { Agent } from "./agent.js";
 import { listAgentDefinitions } from "./agentRegistry.js";
 import type { Blackboard } from "./blackboard.js";
+import type { RunBudget } from "./budget.js";
 import type { EventBus } from "./eventBus.js";
 import type { MemberMemory } from "./memberMemory.js";
 import { availableRoles } from "./subagent.js";
@@ -152,6 +153,12 @@ export interface AutonomyOptions {
    * that pinned a number means that number. Config alone never sets this.
    */
   hardCap?: boolean;
+  /**
+   * The run's spend counter (see `budget.ts`). The engine reads it at two
+   * points: a soft crossing becomes a wrap-up steer, a breach stops the run.
+   * Shared with the agent, so metering happens once in the response pipeline.
+   */
+  budget?: RunBudget;
 }
 
 /** What one autonomous step actually did — the input to the eternal journal. */
@@ -223,6 +230,7 @@ export class AutonomyEngine {
     this.cycleGapMs = Math.max(0, opts.cycleGapMs ?? 1_000);
     this.eternalCompletion = opts.eternalCompletion ?? "never";
     this.hardCap = opts.hardCap ?? false;
+    this.budget = opts.budget;
   }
 
   private readonly verify?: Verifier;
@@ -241,6 +249,7 @@ export class AutonomyEngine {
   private readonly cycleGapMs: number;
   private readonly eternalCompletion: "never" | "claim";
   private readonly hardCap: boolean;
+  private readonly budget: RunBudget | undefined;
   /** Tool calls + verification attempts since the last cap extension. */
   private progressSinceExtend = 0;
   /** Eternal journal: the last few steps, classified — prepended to each directive. */
@@ -395,6 +404,23 @@ export class AutonomyEngine {
     return [note, rows].filter(Boolean).join("\n\n");
   }
 
+  /**
+   * True when the run has spent its budget — stops it, with the figure in the
+   * reason so "why did this end" never needs a log dig.
+   *
+   * The soft threshold is handled elsewhere and deliberately differently: it
+   * queues a wrap-up note into `pendingSteer`, the same channel a verifier
+   * rejection uses, so all five modes inherit a graceful finish with no new
+   * plumbing. Stopping is the last resort; asking the run to land is the first.
+   */
+  private budgetStop(): boolean {
+    const budget = this.budget;
+    if (!budget || !budget.breached) return false;
+    this._state = "stopped";
+    this.bus.emit({ type: "autonomy_stopped", reason: `run budget spent (${budget.describe()})` });
+    return true;
+  }
+
   /** The run stopped because the verifier kept rejecting. Emitted from one place. */
   private stopRejected(): void {
     this._state = "stopped";
@@ -532,6 +558,15 @@ export class AutonomyEngine {
       ) {
         await this.gate();
         if (this.stopped) break;
+        // The budget bounds EVERY mode, eternal included: `unbounded` above only
+        // means "no step ceiling", and a run that cannot run out of steps is
+        // exactly the one that must be able to run out of money. Checked at the
+        // top of the step so a breached run stops before paying for another.
+        // `return`, not `break`: the post-loop block emits the cap reason for
+        // any exit that didn't set the private `stopped` flag, which would
+        // overwrite "run budget spent" with "reached step limit" — the same
+        // reason `stopRejected` and the loop-cut path return rather than break.
+        if (this.budgetStop()) return;
 
         this.step += 1;
         this.bus.emit({ type: "autonomy_step", step: this.step });
@@ -637,6 +672,19 @@ export class AutonomyEngine {
         }
       } else if (e.type === "loop_cut") {
         loopCut = true;
+      } else if (e.type === "budget_warning") {
+        // The soft threshold rides the same channel a verifier rejection uses,
+        // which is why no mode needs its own wrap-up plumbing: every prompt
+        // builder already consumes pendingSteer. Says what remains, so the
+        // model can size the landing rather than guess at it.
+        this.pendingSteer = [
+          this.pendingSteer,
+          `You are near this run's budget (${e.spent}). Wrap up NOW: finish or safely
+abandon the current edit, then call task_done with what was completed and what
+was not. Do not start new work.`.replace(/\n/g, " "),
+        ]
+          .filter(Boolean)
+          .join("; ");
       } else if (e.type === "error") {
         providerError = { retryable: e.retryable ?? false, message: e.error };
       }

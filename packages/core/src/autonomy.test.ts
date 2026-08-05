@@ -3,6 +3,7 @@ import { Agent } from "./agent.js";
 import { registerAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine, type AutonomyFleetRunner, type AutonomyTask } from "./autonomy.js";
 import { Blackboard } from "./blackboard.js";
+import { RunBudget } from "./budget.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import { MemberMemory } from "./memberMemory.js";
 import { PermissionManager } from "./permissions.js";
@@ -1420,5 +1421,113 @@ describe("AutonomyEngine loop-cut reaction (bounded modes)", () => {
     expect(stopped.reason).toBe("loop detected");
     // The first cut queued a pivot steer before the second one stopped the run.
     expect(events.some((e) => e.type === "autonomy_steer")).toBe(true);
+  });
+});
+
+describe("AutonomyEngine run budget", () => {
+  /**
+   * Stands in for the agent's `response.budgetMeter` stage: spend, then emit
+   * the soft signal exactly once — the engine only ever learns about the soft
+   * threshold through that event.
+   */
+  function spender(bus: EventBus, budget: RunBudget, perStep: number) {
+    return (): void => {
+      budget.spend({ promptTokens: perStep, totalTokens: perStep }, "m", "p");
+      if (budget.takeSoftSignal()) {
+        bus.emit({ type: "budget_warning", spent: budget.describe() });
+      }
+    };
+  }
+
+  it("stops the run when the budget is spent, naming the figure", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    // Never claims done: only the budget can end this.
+    agent.steps = Array.from({ length: 50 }, () => ["write"]);
+    const events = collect(bus);
+    const budget = new RunBudget({ tokens: 1000, catalog: [] });
+    agent.onRun = spender(bus, budget, 400);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 50,
+      budget,
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("stopped");
+    // The LAST stop event, not the first: a second one emitted after this would
+    // be what a reader (and `--json`'s summary) actually reports, so asserting
+    // on `find` would pass while the run explained itself wrongly.
+    const stops = events.filter((e) => e.type === "autonomy_stopped");
+    expect(stops).toHaveLength(1);
+    const stop = stops.at(-1);
+    expect(stop && "reason" in stop && stop.reason).toContain("run budget spent");
+    expect(stop && "reason" in stop && stop.reason).toContain("1,200/1,000 tokens");
+    // Stopped on the budget, nowhere near the step cap.
+    expect(agent.prompts.length).toBeLessThan(10);
+  });
+
+  it("bounds eternal mode too — the run that cannot run out of steps must run out of money", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = Array.from({ length: 100 }, () => ["write"]);
+    const budget = new RunBudget({ tokens: 500, catalog: [] });
+    agent.onRun = spender(bus, budget, 200);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "eternal",
+      // No hardCap: without a budget this loop is unbounded by construction.
+      cycleGapMs: 0,
+      budget,
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("stopped");
+    expect(agent.prompts.length).toBeLessThan(10);
+  });
+
+  it("turns the soft threshold into a wrap-up steer, not a stop", async () => {
+    // The soft signal must reach the NEXT prompt: pendingSteer is the channel a
+    // verifier rejection already uses, which is why no mode needs its own
+    // wrap-up plumbing.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["write"], ["task_done"]];
+    const budget = new RunBudget({ tokens: 1000, softRatio: 0.5, catalog: [] });
+    agent.onRun = spender(bus, budget, 300);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 5,
+      budget,
+    });
+
+    await engine.start("g");
+
+    // Step 1 spends 300 (30%): no signal yet. Step 2 reaches 600 (60%) and the
+    // wrap-up lands in step 3's prompt.
+    expect(agent.prompts[1]).not.toContain("Wrap up NOW");
+    expect(agent.prompts[2]).toContain("Wrap up NOW");
+    expect(agent.prompts[2]).toContain("task_done");
+    // Asked to land, not cut off: the run still reached its own completion.
+    expect(engine.state).toBe("done");
+  });
+
+  it("does nothing at all when no ceiling is configured", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["task_done"]];
+    const budget = new RunBudget({ catalog: [] });
+    agent.onRun = spender(bus, budget, 1_000_000);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 5,
+      budget,
+    });
+
+    await engine.start("g");
+
+    expect(engine.state).toBe("done");
+    expect(agent.prompts.some((p) => p.includes("Wrap up NOW"))).toBe(false);
   });
 });

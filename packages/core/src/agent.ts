@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import type { RunBudget } from "./budget.js";
 import type { CompactionResult, ContextStrategy } from "./contextStrategy.js";
 import type { EventBus } from "./eventBus.js";
 import {
@@ -68,6 +69,11 @@ export interface AgentOptions {
    * `{ enabled: false }` drops both stages entirely.
    */
   loopDetect?: LoopDetectOptions;
+  /**
+   * The run's spend counter (see `budget.ts`). Shared with sub-agents by
+   * default, so a fleet's tokens roll up into the parent's ceiling.
+   */
+  budget?: RunBudget;
   /** Skills advertised to the model in the system prompt (run via /skill). */
   skills?: SkillInfo[];
   /**
@@ -310,6 +316,23 @@ export class Agent {
     }
 
     const req = this.pipelines.request;
+    const budget = this.opts.budget;
+    if (budget && !budget.inactive && !req.has("budgetGate")) {
+      // Registered BEFORE buildSystem so a breach costs nothing: the check is
+      // pre-spend, at the request boundary. Gating mid-tool would throw away
+      // the work the tool just did, and throwing mid-turn would drop the
+      // assistant message about to land — so this short-circuits the chain
+      // (no `next()`) and lets the loop end the turn normally.
+      req.use("budgetGate", async (ctx, next) => {
+        if (budget.breached) {
+          ctx.refused = `run budget spent (${budget.describe()})`;
+          this.bus.emit({ type: "budget_exceeded", spent: budget.describe() });
+          return;
+        }
+        await next();
+      });
+    }
+
     if (!req.has("buildSystem")) {
       req.use("buildSystem", async (ctx, next) => {
         ctx.system = await this.buildSystem(ctx.native);
@@ -318,6 +341,20 @@ export class Agent {
     }
 
     const res = this.pipelines.response;
+    if (budget && !budget.inactive && !res.has("budgetMeter")) {
+      // Meter from the provider's OWN usage, never from an estimate: every
+      // iteration resends the history, so estimating from the message list
+      // double-counts the whole conversation on each lap. A soft crossing is
+      // announced once and turned into a wrap-up instruction by the autonomy
+      // engine — the run is asked to finish, not cut off mid-thought.
+      res.use("budgetMeter", async (ctx, next) => {
+        if (ctx.usage) budget.spend(ctx.usage, this.opts.model, this.opts.provider.id);
+        if (budget.takeSoftSignal()) {
+          this.bus.emit({ type: "budget_warning", spent: budget.describe() });
+        }
+        await next();
+      });
+    }
     if (!res.has("recoverToolCalls")) {
       // Tool-call fallback: when the provider yielded no native calls, recover JSON tool
       // calls from the text body (non-native models, and native ones that emit the call as
@@ -622,8 +659,20 @@ export class Agent {
           messages: this.messages,
           native,
         });
+        // A `request` stage refused to let this go out (the budget's hard
+        // ceiling). Ending here rather than mid-flight is the whole point: the
+        // history stays well-formed, nothing is half-paid for, and the turn
+        // closes with whatever it had already produced.
+        if (request.refused !== undefined) {
+          exhausted = false;
+          break;
+        }
         const raw = await this.streamRaw(request.system, request.messages, native, runSignal);
-        const response = await this.pipelines.response.run({ text: raw.text, calls: raw.calls });
+        const response = await this.pipelines.response.run({
+          text: raw.text,
+          calls: raw.calls,
+          ...(raw.usage ? { usage: raw.usage } : {}),
+        });
 
         const assistant: Message = { role: "assistant", content: response.text };
         if (response.calls.length > 0) assistant.toolCalls = response.calls;

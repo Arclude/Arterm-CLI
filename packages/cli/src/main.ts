@@ -171,6 +171,10 @@ interface GlobalOpts {
   autonomyMode?: string;
   /** Step-cap override; with eternal mode, a hard bound (CI/testing hook). */
   maxSteps?: string;
+  /** Whole-run token ceiling; the run stops rather than paying past it. */
+  maxTokens?: string;
+  /** Whole-run USD ceiling. */
+  maxUsd?: string;
 }
 
 /**
@@ -824,7 +828,9 @@ async function main(): Promise<void> {
       "--autonomy-mode <mode>",
       "autonomy mode for this run: once | eternal | parallel | phased | team",
     )
-    .option("--max-steps <n>", "override autonomy.maxSteps; with eternal mode, a hard bound");
+    .option("--max-steps <n>", "override autonomy.maxSteps; with eternal mode, a hard bound")
+    .option("--max-tokens <n>", "stop the run after this many tokens (whole run, not per turn)")
+    .option("--max-usd <amount>", "stop the run after this much spend, e.g. 2.50");
 
   program
     .command("chat", { isDefault: true })

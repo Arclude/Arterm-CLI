@@ -1,6 +1,7 @@
 import { Agent, type AgentOptions } from "./agent.js";
 import { getAgentDefinition, listAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine } from "./autonomy.js";
+import type { RunBudget } from "./budget.js";
 import type { ContextStrategy } from "./contextStrategy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import type { LoopDetectOptions } from "./loopDetector.js";
@@ -82,6 +83,13 @@ export interface SubagentOptions {
   compactAtPercent?: number;
   /** Loop/stuck detector thresholds — sub-agents loop like leaders do. */
   loopDetect?: LoopDetectOptions;
+  /**
+   * The run's spend counter. Pass the PARENT's so a fleet's tokens roll up into
+   * one ceiling — spawning workers must not be a way to spend more than the run
+   * was granted. `RunBudget.child()` is the opt-out for a worker that should be
+   * accounted (and capped) separately.
+   */
+  budget?: RunBudget;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -142,6 +150,7 @@ export async function runSubagent(
     ...(opts.contextWindow !== undefined ? { contextWindow: opts.contextWindow } : {}),
     ...(opts.compactAtPercent !== undefined ? { compactAtPercent: opts.compactAtPercent } : {}),
     ...(opts.loopDetect !== undefined ? { loopDetect: opts.loopDetect } : {}),
+    ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
   };
   const agent = new Agent(agentOpts);
 

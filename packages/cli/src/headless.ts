@@ -135,6 +135,22 @@ export interface HeadlessGoalResult {
     loopCuts: number;
     /** Each progress-gated step-cap grant, in order. */
     extensions: { newLimit: number; reason: string }[];
+    /**
+     * Run-budget spend, when a ceiling was configured. `wrapUpAsked` records
+     * that the soft threshold turned into a wrap-up instruction — the
+     * difference between a run that chose to finish and one that was cut off,
+     * which is otherwise invisible in the result.
+     */
+    budget?: {
+      tokens: number;
+      usd: number;
+      limitTokens?: number;
+      limitUsd?: number;
+      wrapUpAsked: boolean;
+      breached: boolean;
+      /** True when some spend had no catalog price: `usd` is a floor, not a total. */
+      unpriced: boolean;
+    };
   };
 }
 
@@ -162,6 +178,7 @@ export async function runHeadlessGoal(
   let steps = 0;
   let summary = "";
   let stoppedReason: string | undefined;
+  let wrapUpAsked = false;
   const log = (line: string): void => {
     if (!opts.json) process.stderr.write(`${line}\n`);
   };
@@ -171,6 +188,13 @@ export async function runHeadlessGoal(
       case "autonomy_step":
         steps = event.step;
         log(`▸ step ${event.step}`);
+        break;
+      case "budget_warning":
+        wrapUpAsked = true;
+        log(`◔ near the run budget (${event.spent}) — asking the run to wrap up`);
+        break;
+      case "budget_exceeded":
+        log(`■ run budget spent (${event.spent}) — no further requests`);
         break;
       case "autonomy_verify": {
         verdicts.push({
@@ -224,6 +248,22 @@ export async function runHeadlessGoal(
     await session.autonomy.start(goal);
   } finally {
     unsubscribe();
+  }
+
+  // Read the counter at the end rather than tracking spend per event: the
+  // budget is the authority on what was spent, and a run with no ceiling has
+  // nothing to report — an all-zero block would read as "it cost nothing".
+  const spend = session.budgetState?.();
+  if (spend && (spend.limitTokens !== undefined || spend.limitUsd !== undefined)) {
+    guards.budget = {
+      tokens: spend.tokens,
+      usd: spend.usd,
+      ...(spend.limitTokens !== undefined ? { limitTokens: spend.limitTokens } : {}),
+      ...(spend.limitUsd !== undefined ? { limitUsd: spend.limitUsd } : {}),
+      wrapUpAsked,
+      breached: spend.breached,
+      unpriced: spend.unpriced,
+    };
   }
 
   const state = stoppedReason === undefined ? "done" : "stopped";

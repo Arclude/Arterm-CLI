@@ -1,0 +1,210 @@
+import { type CatalogModel, cachedCatalogSync, findModelById } from "./modelsDev.js";
+import type { TokenUsage } from "./types.js";
+
+/**
+ * The run budget: what a whole autonomous run is allowed to spend, as opposed
+ * to `budget.turnTokens` (one turn) and `budget.maxIterations` (one turn's
+ * loop). Without it the only thing bounding `--autonomous` is the guards —
+ * `autoExtend` grows the step cap for as long as progress happens, so a run
+ * that keeps making progress toward nothing keeps buying more steps.
+ *
+ * Cost is the field's chosen stop signal rather than steps, because step count
+ * is not comparable across models: one answers in few long steps, another in
+ * many short ones, and a step cap tuned for one is meaningless for the other.
+ * Tokens stay a first-class limit anyway — a local Ollama or llama.cpp model
+ * costs $0, so a USD-only budget would be a no-op exactly where runaway loops
+ * are cheapest to start.
+ */
+
+/** What a run has spent so far. */
+export interface BudgetState {
+  tokens: number;
+  usd: number;
+  /** True once a limit is reached — the run must stop. */
+  breached: boolean;
+  /** How many times the soft threshold asked for a wrap-up. */
+  softHits: number;
+  /** Configured ceilings, echoed for reporting. */
+  limitTokens?: number;
+  limitUsd?: number;
+  /** True when at least one priced call had no catalog entry (usd under-counts). */
+  unpriced: boolean;
+}
+
+export interface RunBudgetOptions {
+  /** Hard ceiling on total tokens across the run (prompt + completion + cache). */
+  tokens?: number;
+  /** Hard ceiling on total USD across the run. */
+  usd?: number;
+  /**
+   * Fraction of a ceiling at which the run is asked to wrap up (default 0.75).
+   * Deliberately well below 1: the wrap-up itself costs tokens, and a model
+   * told to finish at 99% has no room to finish in.
+   */
+  softRatio?: number;
+  /** Price lookup override (tests). Defaults to the on-disk models.dev cache. */
+  catalog?: CatalogModel[];
+}
+
+/** Per-1M-token prices for one model, as far as the catalog knows them. */
+interface Price {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  known: boolean;
+}
+
+function priceFor(catalog: CatalogModel[], model: string, provider: string): Price {
+  const meta = findModelById(catalog, model, provider);
+  const input = meta?.inputCost ?? 0;
+  const output = meta?.outputCost ?? 0;
+  return {
+    input,
+    output,
+    // Providers publishing no cache price still bill cached reads at a
+    // discount; 10% of input is the rate both major vendors advertise, and
+    // guessing low here is the safe direction — it cannot invent spend that
+    // did not happen.
+    cacheRead: meta?.cacheReadCost ?? input * 0.1,
+    cacheWrite: meta?.cacheWriteCost ?? input * 1.25,
+    known: meta?.inputCost !== undefined || meta?.outputCost !== undefined,
+  };
+}
+
+/**
+ * USD for one response's usage. Cache reads and writes are priced on their own
+ * rates, and which tokens are left to bill at the full input rate follows the
+ * provider's declared shape (`cachedInPrompt`) rather than a guess: with
+ * prompt ≥ cache the two vendor conventions are indistinguishable from the
+ * numbers, and choosing wrong misprices every request in the run.
+ */
+export function priceUsage(
+  usage: TokenUsage,
+  model: string,
+  provider: string,
+  catalog: CatalogModel[] = cachedCatalogSync(),
+): { usd: number; tokens: number; priced: boolean } {
+  const p = priceFor(catalog, model, provider);
+  const cacheRead = usage.cacheReadTokens ?? 0;
+  const cacheWrite = usage.cacheWriteTokens ?? 0;
+  const prompt = usage.promptTokens ?? 0;
+  const completion = usage.completionTokens ?? 0;
+  // Tokens billed at the plain input rate: the prompt minus the cached part
+  // when the vendor folded it in, the whole prompt when it did not.
+  const plainPrompt = usage.cachedInPrompt ? Math.max(0, prompt - cacheRead - cacheWrite) : prompt;
+  const usd =
+    (plainPrompt * p.input +
+      completion * p.output +
+      cacheRead * p.cacheRead +
+      cacheWrite * p.cacheWrite) /
+    1_000_000;
+  // Everything the run actually consumed. `totalTokens` is trusted when the
+  // vendor reports one (it already reflects that vendor's convention);
+  // otherwise the cache is added only when it sits outside the prompt count.
+  const outsidePrompt = usage.cachedInPrompt ? 0 : cacheRead + cacheWrite;
+  const tokens = usage.totalTokens ?? prompt + completion + outsidePrompt;
+  return { usd, tokens, priced: p.known };
+}
+
+/**
+ * A run's spend counter. One instance per run; sub-agents share the parent's by
+ * default so a fleet cannot multiply the bill by spawning workers, and a worker
+ * handed its own budget accounts separately (see `child()`).
+ */
+export class RunBudget {
+  private tokens = 0;
+  private usd = 0;
+  private softHits = 0;
+  private announcedSoft = false;
+  private unpriced = false;
+  private readonly softRatio: number;
+  private readonly catalog: CatalogModel[] | undefined;
+
+  constructor(private readonly opts: RunBudgetOptions = {}) {
+    this.softRatio = Math.min(0.99, Math.max(0.1, opts.softRatio ?? 0.75));
+    this.catalog = opts.catalog;
+  }
+
+  /** True when neither ceiling is configured — every check is then a no-op. */
+  get inactive(): boolean {
+    return this.opts.tokens === undefined && this.opts.usd === undefined;
+  }
+
+  /** Record one response's usage. Called from the response pipeline, post-spend. */
+  spend(usage: TokenUsage, model: string, provider: string): void {
+    const priced = priceUsage(usage, model, provider, this.catalog ?? cachedCatalogSync());
+    this.tokens += priced.tokens;
+    this.usd += priced.usd;
+    if (!priced.priced && priced.tokens > 0) this.unpriced = true;
+  }
+
+  /** True once any configured ceiling is reached: the run must stop. */
+  get breached(): boolean {
+    const { tokens, usd } = this.opts;
+    return (
+      (tokens !== undefined && this.tokens >= tokens) || (usd !== undefined && this.usd >= usd)
+    );
+  }
+
+  /**
+   * True the FIRST time spend crosses the soft threshold — the caller turns
+   * that into one wrap-up instruction. Latched, because repeating it every
+   * iteration would spend the very budget it is trying to preserve.
+   */
+  takeSoftSignal(): boolean {
+    if (this.breached || this.announcedSoft) return false;
+    const { tokens, usd } = this.opts;
+    const over =
+      (tokens !== undefined && this.tokens >= tokens * this.softRatio) ||
+      (usd !== undefined && this.usd >= usd * this.softRatio);
+    if (!over) return false;
+    this.announcedSoft = true;
+    this.softHits += 1;
+    return true;
+  }
+
+  /** A human-readable line for the stop reason / wrap-up steer. */
+  describe(): string {
+    const parts: string[] = [];
+    if (this.opts.tokens !== undefined) {
+      parts.push(
+        `${this.tokens.toLocaleString("en-US")}/${this.opts.tokens.toLocaleString("en-US")} tokens`,
+      );
+    }
+    if (this.opts.usd !== undefined) parts.push(`$${this.usd.toFixed(4)}/$${this.opts.usd}`);
+    if (parts.length === 0) parts.push(`${this.tokens.toLocaleString("en-US")} tokens`);
+    return parts.join(", ");
+  }
+
+  state(): BudgetState {
+    return {
+      tokens: this.tokens,
+      usd: Number(this.usd.toFixed(6)),
+      breached: this.breached,
+      softHits: this.softHits,
+      ...(this.opts.tokens !== undefined ? { limitTokens: this.opts.tokens } : {}),
+      ...(this.opts.usd !== undefined ? { limitUsd: this.opts.usd } : {}),
+      unpriced: this.unpriced,
+    };
+  }
+
+  /**
+   * The budget a sub-agent runs on.
+   *
+   * With no argument the child gets THIS instance — shared accounting, so a
+   * fleet's spend rolls up and a parent ceiling bounds the whole tree. Given
+   * its own limits the child gets a separate counter, and its breach is that
+   * worker's problem rather than the run's: `runSubagent` already returns a
+   * failure string instead of throwing, so a budget-stopped worker reads as one
+   * that didn't finish, not as a dead run.
+   */
+  child(own?: RunBudgetOptions): RunBudget {
+    if (!own || (own.tokens === undefined && own.usd === undefined)) return this;
+    return new RunBudget({
+      ...own,
+      softRatio: own.softRatio ?? this.softRatio,
+      ...(this.catalog ? { catalog: this.catalog } : {}),
+    });
+  }
+}

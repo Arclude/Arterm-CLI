@@ -1,0 +1,168 @@
+import { describe, expect, it } from "vitest";
+import { RunBudget, priceUsage } from "./budget.js";
+import type { CatalogModel } from "./modelsDev.js";
+
+const CATALOG: CatalogModel[] = [
+  {
+    id: "priced",
+    provider: "test",
+    inputCost: 3, // $/1M
+    outputCost: 15,
+    cacheReadCost: 0.3,
+    cacheWriteCost: 3.75,
+  },
+  { id: "no-price", provider: "test" },
+];
+
+describe("priceUsage", () => {
+  it("prices prompt and completion at their own rates", () => {
+    const { usd, tokens } = priceUsage(
+      { promptTokens: 1_000_000, completionTokens: 1_000_000 },
+      "priced",
+      "test",
+      CATALOG,
+    );
+    expect(usd).toBeCloseTo(18, 6);
+    expect(tokens).toBe(2_000_000);
+  });
+
+  it("prices cached reads at the cache rate, not the input rate", () => {
+    // The trap this exists for: an agent loop is mostly cache hits after the
+    // first iterations, so charging cache at the input rate overstates a run by
+    // close to an order of magnitude. 1M cached reads cost $0.30, not $3.
+    const cached = priceUsage(
+      // Anthropic shape: the whole prompt was a cache hit, so input_tokens is 0.
+      { promptTokens: 0, cacheReadTokens: 1_000_000 },
+      "priced",
+      "test",
+      CATALOG,
+    );
+    expect(cached.usd).toBeCloseTo(0.3, 6);
+    const plain = priceUsage({ promptTokens: 1_000_000 }, "priced", "test", CATALOG);
+    expect(plain.usd).toBeCloseTo(3, 6);
+    expect(cached.usd * 10).toBeCloseTo(plain.usd, 6);
+  });
+
+  it("follows the provider's declared shape instead of guessing it", () => {
+    // Same bill, two conventions — and with prompt ≥ cache the numbers alone
+    // cannot tell them apart, which is why the provider declares the shape.
+    const expected = (100 * 3 + 900 * 0.3) / 1_000_000;
+
+    // OpenAI-compatible: prompt_tokens INCLUDES cached_tokens → subtract.
+    const inclusive = priceUsage(
+      { promptTokens: 1000, cacheReadTokens: 900, cachedInPrompt: true, completionTokens: 0 },
+      "priced",
+      "test",
+      CATALOG,
+    );
+    expect(inclusive.usd).toBeCloseTo(expected, 9);
+
+    // Anthropic: input_tokens EXCLUDES cache → bill the prompt in full.
+    const exclusive = priceUsage(
+      { promptTokens: 100, cacheReadTokens: 900, completionTokens: 0 },
+      "priced",
+      "test",
+      CATALOG,
+    );
+    expect(exclusive.usd).toBeCloseTo(expected, 9);
+
+    // The failure this pins: reading the inclusive shape as exclusive bills
+    // 1000 prompt tokens at the full rate — 5× the real cost.
+    const misread = priceUsage(
+      { promptTokens: 1000, cacheReadTokens: 900, completionTokens: 0 },
+      "priced",
+      "test",
+      CATALOG,
+    );
+    expect(misread.usd).toBeGreaterThan(expected * 4);
+  });
+
+  it("reports priced=false for a model the catalog does not know", () => {
+    // Tokens still count — a local model costs $0 but very much burns tokens.
+    const r = priceUsage({ promptTokens: 500, completionTokens: 500 }, "no-price", "test", CATALOG);
+    expect(r.usd).toBe(0);
+    expect(r.tokens).toBe(1000);
+    expect(r.priced).toBe(false);
+  });
+});
+
+describe("RunBudget", () => {
+  const usage = { promptTokens: 1000, completionTokens: 1000, totalTokens: 2000 };
+
+  it("is inactive with no ceiling, so every check is a no-op", () => {
+    const b = new RunBudget({ catalog: CATALOG });
+    expect(b.inactive).toBe(true);
+    b.spend(usage, "priced", "test");
+    expect(b.breached).toBe(false);
+    expect(b.takeSoftSignal()).toBe(false);
+  });
+
+  it("breaches on the token ceiling", () => {
+    const b = new RunBudget({ tokens: 3000, catalog: CATALOG });
+    b.spend(usage, "priced", "test");
+    expect(b.breached).toBe(false);
+    b.spend(usage, "priced", "test");
+    expect(b.breached).toBe(true);
+    expect(b.describe()).toContain("4,000/3,000 tokens");
+  });
+
+  it("breaches on the USD ceiling independently of tokens", () => {
+    // $0.018 per call at these rates; three calls cross $0.05.
+    const b = new RunBudget({ usd: 0.05, catalog: CATALOG });
+    b.spend(usage, "priced", "test");
+    b.spend(usage, "priced", "test");
+    expect(b.breached).toBe(false);
+    b.spend(usage, "priced", "test");
+    expect(b.breached).toBe(true);
+  });
+
+  it("counts tokens even when nothing can be priced — a local model is free, not idle", () => {
+    const b = new RunBudget({ tokens: 3000, usd: 999, catalog: CATALOG });
+    b.spend(usage, "no-price", "test");
+    b.spend(usage, "no-price", "test");
+    expect(b.breached).toBe(true);
+    expect(b.state().usd).toBe(0);
+    // The USD figure is a floor, not a total — say so rather than implying $0.
+    expect(b.state().unpriced).toBe(true);
+  });
+
+  it("fires the soft signal ONCE, and not at all once breached", () => {
+    const b = new RunBudget({ tokens: 4000, softRatio: 0.5, catalog: CATALOG });
+    b.spend(usage, "priced", "test"); // 2000 = 50%
+    expect(b.takeSoftSignal()).toBe(true);
+    // Latched: repeating the wrap-up every iteration would spend the very budget
+    // it is trying to preserve.
+    expect(b.takeSoftSignal()).toBe(false);
+    b.spend(usage, "priced", "test");
+    expect(b.breached).toBe(true);
+    expect(b.takeSoftSignal()).toBe(false);
+  });
+
+  it("child() shares the parent counter by default, so a fleet cannot multiply the bill", () => {
+    const parent = new RunBudget({ tokens: 3000, catalog: CATALOG });
+    const worker = parent.child();
+    expect(worker).toBe(parent);
+    worker.spend(usage, "priced", "test");
+    worker.spend(usage, "priced", "test");
+    expect(parent.breached).toBe(true);
+  });
+
+  it("child(own) accounts separately, and its breach does not stop the parent", () => {
+    const parent = new RunBudget({ tokens: 100_000, catalog: CATALOG });
+    const worker = parent.child({ tokens: 3000 });
+    expect(worker).not.toBe(parent);
+    worker.spend(usage, "priced", "test");
+    worker.spend(usage, "priced", "test");
+    expect(worker.breached).toBe(true);
+    expect(parent.breached).toBe(false);
+    expect(parent.state().tokens).toBe(0);
+  });
+
+  it("reports its ceilings so a run can be read without knowing the config", () => {
+    const b = new RunBudget({ tokens: 5000, usd: 1, catalog: CATALOG });
+    b.spend(usage, "priced", "test");
+    const s = b.state();
+    expect(s).toMatchObject({ tokens: 2000, limitTokens: 5000, limitUsd: 1, breached: false });
+    expect(s.usd).toBeCloseTo(0.018, 6);
+  });
+});

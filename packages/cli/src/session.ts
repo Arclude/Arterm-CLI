@@ -16,6 +16,7 @@ import {
   PermissionBroker,
   PermissionManager,
   type PermissionMode,
+  RunBudget,
   RunController,
   SddRunner,
   Tokens,
@@ -200,6 +201,15 @@ export async function buildSession(opts: SessionOptions): Promise<{
     cmem.attach(bus);
   }
 
+  // One counter for the whole run, shared with every sub-agent below: a fleet
+  // must not be able to multiply the bill by spawning workers, so spend rolls
+  // up into the parent ceiling rather than being re-granted per worker.
+  const budget = new RunBudget({
+    ...(config.budget?.runTokens !== undefined ? { tokens: config.budget.runTokens } : {}),
+    ...(config.budget?.runUsd !== undefined ? { usd: config.budget.runUsd } : {}),
+    ...(config.budget?.softRatio !== undefined ? { softRatio: config.budget.softRatio } : {}),
+  });
+
   const memoryStore = createMemoryStore(config, cwd);
   const memoryEnabled = !cmemActive && memoryStore.id !== "off";
   const recorder = new MemoryRecorder();
@@ -241,6 +251,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     clearAtPercent: config.context?.clearAtPercent,
     keepRecentToolResults: config.context?.keepRecentToolResults,
     loopDetect: config.loopDetect,
+    budget,
     recall: recallFn,
     container,
   });
@@ -296,6 +307,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       contextWindow: config.context?.window,
       compactAtPercent: config.context?.compactAtPercent,
       loopDetect: config.loopDetect,
+      budget,
       role,
     });
     bus.emit({ type: "subagent_done", output, role });
@@ -403,6 +415,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
         contextWindow: config.context?.window,
         compactAtPercent: config.context?.compactAtPercent,
         loopDetect: config.loopDetect,
+        budget,
         concurrency: config.fleet?.concurrency,
         isolation: config.fleet?.isolation ?? "none",
         onStart: (i, task, role) => {
@@ -582,6 +595,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     cycleGapMs: config.autonomy?.cycleGapMs,
     eternalCompletion: config.autonomy?.eternalCompletion,
     hardCap: opts.hardCap,
+    budget,
   });
 
   // Set while Shift+Tab's AUTONOMOUS slot is armed; calling it disarms. Doubles
@@ -714,6 +728,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // Read through the LIVE provider variable: switchProvider reassigns it, and
     // the report must come from whoever is actually answering.
     rateLimits: () => provider.rateLimits?.(),
+    budgetState: () => budget.state(),
     autonomy,
     sdd,
     mcpServers: [],

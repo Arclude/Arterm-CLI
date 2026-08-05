@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Agent } from "./agent.js";
+import { RunBudget } from "./budget.js";
 import type { ContextStrategy } from "./contextStrategy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import { Container, RunController, Tokens, createPipelines } from "./kernel/index.js";
@@ -811,5 +812,99 @@ describe("error event taxonomy", () => {
     const error = events.find((e) => e.type === "error");
     expect(error).toMatchObject({ error: "something local broke" });
     expect((error as { kind?: string }).kind).toBeUndefined();
+  });
+});
+
+describe("run budget (agent pipeline stages)", () => {
+  const noop: Tool = {
+    name: "noop",
+    description: "",
+    parameters: {},
+    permission: "allow",
+    category: "read",
+    execute: async () => ({ output: "ok" }),
+  };
+
+  function agentWith(budget: RunBudget, provider: StubProvider, bus: EventBus): Agent {
+    return new Agent({
+      provider,
+      model: "m",
+      tools: [noop],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      bus,
+      cwd: process.cwd(),
+      budget,
+    });
+  }
+
+  it("meters from the provider's OWN usage, never an estimate of the history", async () => {
+    // Every iteration resends the conversation, so estimating from the message
+    // list would re-bill the whole history on each lap.
+    const bus = new EventBus();
+    const provider = new StubProvider([
+      [
+        { type: "tool_call", call: { id: "1", name: "noop", arguments: {} } },
+        { type: "done", usage: { promptTokens: 700, completionTokens: 300, totalTokens: 1000 } },
+      ],
+      [
+        { type: "text", delta: "finished" },
+        { type: "done", usage: { totalTokens: 500 } },
+      ],
+    ]);
+    const budget = new RunBudget({ tokens: 100_000, catalog: [] });
+    await agentWith(budget, provider, bus).run("go");
+    expect(budget.state().tokens).toBe(1500);
+  });
+
+  it("refuses the next request once the ceiling is reached, instead of paying past it", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    // Each response asks for another tool call, so nothing but the budget ends this.
+    const provider = new StubProvider(
+      Array.from({ length: 10 }, () => [
+        { type: "tool_call" as const, call: { id: "1", name: "noop", arguments: {} } },
+        { type: "done" as const, usage: { totalTokens: 400 } },
+      ]),
+    );
+    const budget = new RunBudget({ tokens: 1000, catalog: [] });
+    await agentWith(budget, provider, bus).run("go");
+
+    // Three calls: the third crosses 1000, the fourth is refused before it is
+    // sent — the gate is pre-spend, so a breach costs nothing.
+    expect(provider.calls).toBe(3);
+    expect(events.some((e) => e.type === "budget_exceeded")).toBe(true);
+    expect(budget.breached).toBe(true);
+  });
+
+  it("announces the soft threshold once per run", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider(
+      Array.from({ length: 10 }, () => [
+        { type: "tool_call" as const, call: { id: "1", name: "noop", arguments: {} } },
+        { type: "done" as const, usage: { totalTokens: 300 } },
+      ]),
+    );
+    const budget = new RunBudget({ tokens: 1200, softRatio: 0.5, catalog: [] });
+    await agentWith(budget, provider, bus).run("go");
+
+    expect(events.filter((e) => e.type === "budget_warning")).toHaveLength(1);
+  });
+
+  it("installs neither stage when no ceiling is configured", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider([
+      [
+        { type: "text", delta: "hi" },
+        { type: "done", usage: { totalTokens: 9_999_999 } },
+      ],
+    ]);
+    const budget = new RunBudget({ catalog: [] });
+    await agentWith(budget, provider, bus).run("go");
+
+    expect(budget.state().tokens).toBe(0);
+    expect(events.some((e) => e.type.startsWith("budget_"))).toBe(false);
   });
 });

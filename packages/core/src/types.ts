@@ -28,6 +28,32 @@ export interface TokenUsage {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  /**
+   * Cached prompt tokens, reported separately because they are BILLED
+   * separately — providers charge a cache read at roughly a tenth of the
+   * standard input rate. An agent loop is mostly cache hits by the third
+   * iteration, so pricing these at the input rate overstates a run by close to
+   * an order of magnitude. Providers that report neither leave both undefined
+   * and pricing degrades to prompt/completion only.
+   *
+   * `promptTokens` stays the vendor's own figure — the context gauge needs the
+   * real prompt size, cached or not — so the shape is declared rather than
+   * guessed: see `cachedInPrompt`.
+   */
+  cacheReadTokens?: number;
+  /** Tokens written INTO the cache (billed above the input rate). */
+  cacheWriteTokens?: number;
+  /**
+   * True when `promptTokens` ALREADY counts the cache tokens (the
+   * OpenAI-compatible shape, where `prompt_tokens` includes
+   * `cached_tokens`); absent when it does not (Anthropic reports
+   * `input_tokens` exclusive of both cache fields).
+   *
+   * Declared by the provider rather than inferred, because the two shapes are
+   * indistinguishable from the numbers alone whenever prompt ≥ cache — and
+   * guessing wrong silently misprices every request in the run.
+   */
+  cachedInPrompt?: boolean;
 }
 
 export interface ModelInfo {

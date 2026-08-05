@@ -124,6 +124,12 @@ export type AgentEvent =
   // Progress-gated step extension: the cap was hit but the run made progress
   // since the last grant, so it gets `newLimit` instead of stopping.
   | { type: "autonomy_extended"; newLimit: number; reason: string }
+  // Run budget (`budget.runTokens` / `budget.runUsd`). `budget_warning` is the
+  // soft threshold asking the run to wrap up — emitted ONCE per run, since
+  // repeating it would spend the budget it is trying to preserve.
+  // `budget_exceeded` means the request was refused before it was sent.
+  | { type: "budget_warning"; spent: string }
+  | { type: "budget_exceeded"; spent: string }
   // Eternal mode: sleeping `ms` before the next step after a retryable
   // provider error. `attempt` counts consecutive backoffs (resets on success).
   | { type: "autonomy_backoff"; ms: number; attempt: number }

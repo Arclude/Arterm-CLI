@@ -42,6 +42,7 @@ interface OpenAIStreamChunk {
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
   };
 }
 
@@ -180,10 +181,15 @@ export class OpenAICompatProvider implements ChatProvider {
           }
         }
         if (obj.usage) {
+          // Cached prompt tokens bill at a fraction of the input rate. Unlike
+          // Anthropic's, OpenAI's `prompt_tokens` INCLUDES them, so the pricing
+          // side subtracts rather than adds — reported here as-is.
+          const cached = obj.usage.prompt_tokens_details?.cached_tokens;
           usage = {
             promptTokens: obj.usage.prompt_tokens,
             completionTokens: obj.usage.completion_tokens,
             totalTokens: obj.usage.total_tokens,
+            ...(cached ? { cacheReadTokens: cached, cachedInPrompt: true } : {}),
           };
         }
       }

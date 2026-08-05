@@ -82,6 +82,21 @@ export interface ArtermConfig {
      * cap shows up as answers that stop mid-thought rather than as safety.
      */
     maxIterations?: number;
+    /**
+     * Whole-RUN ceilings, as opposed to the per-turn caps above — the thing
+     * that bounds an unattended run in money rather than in steps. At
+     * `softRatio` of either ceiling the run is asked to wrap up; at the ceiling
+     * the next request is refused before it is sent, so nothing is lost
+     * mid-flight. Unset = unlimited, which is what `--autonomous` means today.
+     *
+     * Both exist because neither alone is enough: a step cap is not comparable
+     * across models (one answers in few long steps, another in many short
+     * ones), and a USD cap is a no-op on a local model that costs nothing.
+     */
+    runTokens?: number;
+    runUsd?: number;
+    /** Fraction of a ceiling that triggers the wrap-up request (default 0.75). */
+    softRatio?: number;
   };
   /** Autonomous goal-loop defaults (/goal). */
   autonomy: {
@@ -461,6 +476,9 @@ const configFileSchema = z
       .object({
         turnTokens: z.number().int().positive().optional(),
         maxIterations: z.number().int().positive().optional(),
+        runTokens: z.number().int().positive().optional(),
+        runUsd: z.number().positive().optional(),
+        softRatio: z.number().gt(0).lt(1).optional(),
       })
       .partial(),
     autonomy: z

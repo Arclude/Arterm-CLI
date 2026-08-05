@@ -3,6 +3,7 @@ import type {
   AgentDefSummary,
   ArtermConfig,
   AutonomyEngine,
+  BudgetState,
   CompactionResult,
   DiffRow,
   EventBus,
@@ -94,6 +95,11 @@ export interface Session {
    * backend never reports (e.g. Ollama). Injected by the CLI.
    */
   rateLimits?(): RateLimitSnapshot | undefined;
+  /**
+   * What this run has spent against its budget (for /limits and the headless
+   * `guards.budget` block). Absent in sessions the CLI didn't build.
+   */
+  budgetState?(): BudgetState;
   /**
    * Persist the current provider/model/mode to ~/.arterm/config.json right away
    * (normally that happens only on clean exit). Injected by the CLI; absent in

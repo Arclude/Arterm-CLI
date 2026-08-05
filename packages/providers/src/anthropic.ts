@@ -260,12 +260,22 @@ export class AnthropicProvider implements ChatProvider {
           };
         }
       }
+      // Cache tokens are reported (and billed) separately: a read costs ~10% of
+      // the input rate, so folding them into promptTokens would overstate an
+      // agent loop — which is mostly cache hits after the first iterations — by
+      // close to an order of magnitude. Anthropic's `input_tokens` EXCLUDES
+      // both, so the totals add rather than replace.
+      const cacheRead = final.usage.cache_read_input_tokens ?? 0;
+      const cacheWrite = final.usage.cache_creation_input_tokens ?? 0;
       yield {
         type: "done",
         usage: {
           promptTokens: final.usage.input_tokens,
           completionTokens: final.usage.output_tokens,
-          totalTokens: final.usage.input_tokens + final.usage.output_tokens,
+          totalTokens:
+            final.usage.input_tokens + final.usage.output_tokens + cacheRead + cacheWrite,
+          ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
+          ...(cacheWrite ? { cacheWriteTokens: cacheWrite } : {}),
         },
       };
     } finally {

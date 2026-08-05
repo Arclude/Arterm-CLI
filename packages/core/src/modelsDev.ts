@@ -23,6 +23,10 @@ export interface CatalogModel {
   inputCost?: number;
   /** USD per 1M output tokens. */
   outputCost?: number;
+  /** USD per 1M cached-read input tokens (~10% of `inputCost` where published). */
+  cacheReadCost?: number;
+  /** USD per 1M cache-write tokens (above `inputCost` where published). */
+  cacheWriteCost?: number;
   toolCall?: boolean;
 }
 
@@ -38,7 +42,12 @@ export function flattenCatalog(raw: unknown): CatalogModel[] {
         id?: string;
         name?: string;
         tool_call?: boolean;
-        cost?: { input?: number; output?: number };
+        cost?: {
+          input?: number;
+          output?: number;
+          cache_read?: number;
+          cache_write?: number;
+        };
         limit?: { context?: number; output?: number };
       };
       out.push({
@@ -49,6 +58,8 @@ export function flattenCatalog(raw: unknown): CatalogModel[] {
         maxOutput: model.limit?.output,
         inputCost: model.cost?.input,
         outputCost: model.cost?.output,
+        cacheReadCost: model.cost?.cache_read,
+        cacheWriteCost: model.cost?.cache_write,
         toolCall: model.tool_call,
       });
     }

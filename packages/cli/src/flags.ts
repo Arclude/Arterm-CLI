@@ -8,6 +8,10 @@ export interface AutonomousFlagOpts {
   autonomyMode?: string;
   /** Step-cap override; with eternal mode, a hard bound (CI/testing hook). */
   maxSteps?: string;
+  /** Whole-run token ceiling (`--max-tokens`). */
+  maxTokens?: string;
+  /** Whole-run USD ceiling (`--max-usd`). */
+  maxUsd?: string;
   /** Mutated to true by `--autonomous` (feeds the session's permission mode). */
   yolo?: boolean;
 }
@@ -63,6 +67,7 @@ export function applyAutonomousProfile(
       config.autonomy = { ...config.autonomy, mode: globals.autonomyMode as AutonomyMode };
     }
   }
+  applyBudgetFlags(config, globals, warn);
   let hardCap = false;
   if (globals.maxSteps !== undefined) {
     const n = Number(globals.maxSteps);
@@ -94,6 +99,41 @@ export function applyAutonomousProfile(
     warnUngatedRun(config, warn);
   }
   return { hardCap };
+}
+
+/**
+ * Overlay `--max-tokens` / `--max-usd` onto the config's run ceilings.
+ *
+ * Unlike the per-turn caps these bound the WHOLE run, which is what makes an
+ * unattended one bounded in money rather than only in steps — `autoExtend`
+ * keeps buying steps for as long as anything happens, so without this the only
+ * thing that ends a productive-looking loop is the loop detector.
+ *
+ * An unparseable value warns and is ignored rather than silently becoming
+ * "unlimited": a typo'd ceiling that reads as no ceiling is the worst outcome
+ * of the three.
+ */
+function applyBudgetFlags(
+  config: ArtermConfig,
+  globals: AutonomousFlagOpts,
+  warn: (msg: string) => void,
+): void {
+  if (globals.maxTokens !== undefined) {
+    const n = Number(globals.maxTokens);
+    if (!Number.isInteger(n) || n < 1) {
+      warn(`⚠ invalid --max-tokens "${globals.maxTokens}" — ignoring\n`);
+    } else {
+      config.budget = { ...config.budget, runTokens: n };
+    }
+  }
+  if (globals.maxUsd !== undefined) {
+    const n = Number(globals.maxUsd);
+    if (!Number.isFinite(n) || n <= 0) {
+      warn(`⚠ invalid --max-usd "${globals.maxUsd}" — ignoring\n`);
+    } else {
+      config.budget = { ...config.budget, runUsd: n };
+    }
+  }
 }
 
 /**
