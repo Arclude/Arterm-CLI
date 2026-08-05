@@ -908,3 +908,83 @@ describe("run budget (agent pipeline stages)", () => {
     expect(events.some((e) => e.type.startsWith("budget_"))).toBe(false);
   });
 });
+
+describe("context usage reporting", () => {
+  const noop: Tool = {
+    name: "noop",
+    description: "",
+    parameters: {},
+    permission: "allow",
+    category: "read",
+    execute: async () => ({ output: "ok" }),
+  };
+
+  it("reports the provider's figure when there is one", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider([
+      [
+        { type: "tool_call", call: { id: "1", name: "noop", arguments: {} } },
+        { type: "done", usage: { promptTokens: 1234, totalTokens: 1234 } },
+      ],
+      [{ type: "text", delta: "done" }, { type: "done" }],
+    ]);
+    await new Agent({
+      provider,
+      model: "m",
+      tools: [noop],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      bus,
+      cwd: process.cwd(),
+      contextWindow: 10_000,
+    }).run("go");
+
+    const usage = events.filter((e) => e.type === "context_usage");
+    const last = usage.at(-1);
+    expect(last && "used" in last && last.used).toBe(1234);
+    expect(last && "estimated" in last && last.estimated).toBe(false);
+  });
+
+  it("estimates when the provider reports nothing — a 0% gauge is a lie, not a default", async () => {
+    // Plenty of local servers send no usage at all. The meter used to read 0%
+    // right up until the agent compacted, which says "there is room" while
+    // there is none.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider([[{ type: "text", delta: "hello" }, { type: "done" }]]);
+    await new Agent({
+      provider,
+      model: "m",
+      tools: [noop],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      bus,
+      cwd: process.cwd(),
+      contextWindow: 10_000,
+    }).run("a reasonably long user message that certainly costs some tokens");
+
+    const first = events.find((e) => e.type === "context_usage");
+    expect(first && "used" in first && first.used).toBeGreaterThan(0);
+    expect(first && "estimated" in first && first.estimated).toBe(true);
+  });
+
+  it("agrees with the compaction decision — one definition, not two", async () => {
+    // The gauge and the auto-compactor read the same method, so the bar can
+    // never say "plenty of room" on the turn the agent decides to compact.
+    const bus = new EventBus();
+    const agent = new Agent({
+      provider: new StubProvider(),
+      model: "m",
+      tools: [noop],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      bus,
+      cwd: process.cwd(),
+      contextWindow: 10_000,
+    });
+    const usage = agent.contextUsage();
+    expect(usage.window).toBe(10_000);
+    expect(usage.estimated).toBe(true);
+  });
+});

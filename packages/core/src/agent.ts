@@ -650,6 +650,10 @@ export class Agent {
         // Auto-compaction runs as the `contextWindow` pipeline's default stage, so the
         // threshold policy is swappable without touching the loop.
         await this.pipelines.contextWindow.run({ messages: this.messages, reason: "auto" });
+        // Publish the same figure the stage above just acted on, so a gauge
+        // shows what the agent believes rather than only what a provider chose
+        // to report.
+        this.bus.emit({ type: "context_usage", ...this.contextUsage() });
 
         // request → assemble the prompt (default stage builds the system message);
         // streamRaw → call the provider; response → post-process (recovers JSON tool
@@ -814,13 +818,28 @@ export class Agent {
     if (this.opts.onMessage) await this.opts.onMessage(message);
   }
 
+  /**
+   * How full the context is right now, and whether that had to be estimated.
+   * One definition, used by the compaction decision, the clear-tool-results
+   * decision, and the gauge — so the meter can never disagree with the agent
+   * about how much room is left.
+   */
+  contextUsage(): { used: number; window?: number; estimated: boolean } {
+    const window = this.effectiveContextWindow();
+    const reported = this.lastPromptTokens;
+    return {
+      used: reported ?? estimateHistoryTokens(this.messages),
+      ...(window !== undefined ? { window } : {}),
+      estimated: reported === undefined,
+    };
+  }
+
   /** True when the working history is close enough to the context window to compact. */
   private shouldAutoCompact(): boolean {
-    const window = this.effectiveContextWindow();
     const strategy = this.opts.context;
+    const { used, window } = this.contextUsage();
     if (!window || !strategy || strategy.id === "none") return false;
-    const used = this.lastPromptTokens ?? estimateHistoryTokens(this.messages);
-    return used >= (this.opts.compactAtPercent ?? 0.85) * window;
+    return used >= (this.opts.compactAtPercent ?? 0.75) * window;
   }
 
   private shouldClearToolResults(): boolean {

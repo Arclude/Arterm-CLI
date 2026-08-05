@@ -96,7 +96,7 @@ export interface StatusSnapshot {
   provider: string;
   permissionMode: string;
   toolCount: number;
-  tokens: { in: number; out: number; ctx: number };
+  tokens: { in: number; out: number; ctx: number; ctxWindow?: number };
   activeTool: string | null;
   rounds: number;
   autonomy: AutonomySnapshot;
@@ -142,6 +142,7 @@ export class StatusState {
   private inTok = 0;
   private outTok = 0;
   private ctxUsed = 0;
+  private ctxWindow: number | undefined;
   private rounds = 0;
   private status: "idle" | "thinking" | "tool" = "idle";
   private activeTool: string | null = null;
@@ -190,7 +191,13 @@ export class StatusState {
       case "usage":
         this.inTok += ev.usage.promptTokens ?? 0;
         this.outTok += ev.usage.completionTokens ?? 0;
-        if (ev.usage.promptTokens) this.ctxUsed = ev.usage.promptTokens;
+        break;
+      // The agent's own context figure, so the desktop meter matches what the
+      // agent acts on — a provider that reports no usage used to leave this at
+      // 0 forever while the context filled up.
+      case "context_usage":
+        this.ctxUsed = ev.used;
+        this.ctxWindow = ev.window;
         break;
       case "context_compacted":
         this.ctxUsed = 0;
@@ -343,7 +350,12 @@ export class StatusState {
       provider: this.session.providerLabel,
       permissionMode: this.session.permissionMode,
       toolCount: this.session.toolCount,
-      tokens: { in: this.inTok, out: this.outTok, ctx: this.ctxUsed },
+      tokens: {
+        in: this.inTok,
+        out: this.outTok,
+        ctx: this.ctxUsed,
+        ...(this.ctxWindow !== undefined ? { ctxWindow: this.ctxWindow } : {}),
+      },
       activeTool: this.activeTool,
       rounds: this.rounds,
       autonomy,

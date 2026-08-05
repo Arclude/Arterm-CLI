@@ -52,7 +52,15 @@ export interface ArtermConfig {
     strategy: "none" | "window" | "summary";
     /** Model context window in tokens, used to decide when to auto-compact. */
     window?: number;
-    /** Compact once usage crosses this fraction of `window` (0–1). */
+    /**
+     * Compact once usage crosses this fraction of `window` (0–1, default 0.75).
+     *
+     * Not 0.9+: measured context rot starts well before the limit — the
+     * degradation zone opens around 70–80% of capacity, and information buried
+     * mid-context loses ~30% recall long before anything is truncated. The
+     * threshold is about where the model stops reasoning well, not where the
+     * window stops accepting tokens.
+     */
     compactAtPercent?: number;
     /** Window strategy: keep at most this many recent messages. */
     maxMessages?: number;
@@ -401,7 +409,7 @@ export function defaultConfig(): ArtermConfig {
     // Persist transcripts by default so --resume/--continue work out of the box;
     // maxSessions bounds disk usage. Set `session.mode: "off"` to disable.
     session: { mode: "jsonl", maxSessions: 100 },
-    context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
+    context: { strategy: "window", window: 8192, compactAtPercent: 0.75, maxMessages: 40 },
     budget: { maxIterations: 50 },
     autonomy: {
       mode: "once",

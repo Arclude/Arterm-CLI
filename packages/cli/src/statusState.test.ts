@@ -140,13 +140,31 @@ describe("StatusState", () => {
     bus.emit({ type: "usage", usage: { promptTokens: 100, completionTokens: 20 } });
     bus.emit({ type: "usage", usage: { promptTokens: 150, completionTokens: 30 } });
     const snap = state.snapshot();
-    expect(snap.tokens).toEqual({ in: 250, out: 50, ctx: 150 });
+    // in/out accumulate across the run; `ctx` is no longer derived from usage —
+    // see the context test below for why.
+    expect(snap.tokens).toEqual({ in: 250, out: 50, ctx: 0 });
     expect(snap.v).toBe(1);
     expect(snap.pid).toBe(process.pid);
     expect(snap.sessionId).toBe("s1");
     expect(snap.cwd).toBe("/w");
     expect(snap.model).toBe("test-model");
     expect(snap.provider).toBe("test-provider");
+    state.dispose();
+  });
+
+  it("takes context fullness from the agent, not from reported usage", () => {
+    // A provider that reports no usage left `ctx` at 0 forever while the
+    // context filled up — a meter reading "empty" right until the agent
+    // compacts. The agent now publishes the figure it actually acts on
+    // (reported when available, estimated otherwise), window included.
+    const { bus, session } = makeSession();
+    const state = new StatusState(session, { sessionId: "s1", cwd: "/w" });
+
+    bus.emit({ type: "context_usage", used: 12_000, window: 200_000, estimated: true });
+    expect(state.snapshot().tokens).toMatchObject({ ctx: 12_000, ctxWindow: 200_000 });
+
+    bus.emit({ type: "context_compacted", before: 40, after: 8, reason: "auto" });
+    expect(state.snapshot().tokens.ctx).toBe(0);
     state.dispose();
   });
 

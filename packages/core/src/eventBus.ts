@@ -55,6 +55,18 @@ export type AgentEvent =
     }
   | { type: "usage"; usage: TokenUsage }
   | { type: "context_compacted"; before: number; after: number; reason: "auto" | "manual" }
+  /**
+   * How full the context is, as the agent itself sees it — the SAME number the
+   * auto-compaction decision uses: the provider's reported prompt tokens when
+   * there are any, an estimate of the working history otherwise. Emitted once
+   * per iteration.
+   *
+   * Reported usage alone was not enough for a gauge: plenty of local servers
+   * send none, so the meter sat at 0% right up until the agent compacted —
+   * which reads as a broken meter, and is worse than no meter, because it says
+   * there is room when there is not.
+   */
+  | { type: "context_usage"; used: number; window?: number; estimated: boolean }
   // Stale tool outputs were replaced with placeholders (cheaper than compaction).
   | { type: "tool_results_cleared"; cleared: number }
   // The turn hit a hard cap (iteration count or token budget) and stopped early —

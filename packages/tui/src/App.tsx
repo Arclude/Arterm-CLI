@@ -922,10 +922,16 @@ export function App({
             text: `✗ denied ${event.name}${event.reason ? ` — ${event.reason}` : ""}`,
           });
           break;
+        // The agent's own view of how full the context is — reported tokens
+        // when the provider sends them, an estimate otherwise. Without this the
+        // gauge sat at 0% on every backend that reports no usage, right up
+        // until the agent compacted.
+        case "context_usage":
+          setCtxUsed(event.used);
+          break;
         case "usage":
           if (event.usage.promptTokens) {
             setInTok((t) => t + (event.usage.promptTokens ?? 0));
-            setCtxUsed(event.usage.promptTokens);
             turnRef.current.inTok += event.usage.promptTokens;
           }
           if (event.usage.completionTokens) {
