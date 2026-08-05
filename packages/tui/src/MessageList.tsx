@@ -126,6 +126,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
       ["/login", "sign in to a provider (provider + API key)"],
       ["/catalog [query]", "search the models.dev catalog (~5k)"],
       ["/copy [all]", "copy the last reply (or the whole conversation) to the clipboard"],
+      ["/rewind [n]", "undo a turn's file changes (no arg lists checkpoints); /redo goes forward"],
       ["/limits", "provider rate limits: what remains, when it resets"],
       ["/mouse", "toggle mouse capture (OFF: drag selects text; ON: wheel scrolls in-app)"],
       ["/clear", "reset the conversation"],

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { isAbsolute, join } from "node:path";
 import {
   Agent,
   type AgentEvent,
@@ -7,6 +9,7 @@ import {
   type AutonomyTask,
   Blackboard,
   type ChatProvider,
+  CheckpointStore,
   Container,
   EventBus,
   MemberMemory,
@@ -28,6 +31,7 @@ import {
   createPermissionManager,
   createPipelines,
   createSddStore,
+  declaredPaths,
   digest as digestObservations,
   estimateTokens,
   formatMemorySection,
@@ -105,6 +109,8 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const model = opts.model ?? config.model;
 
   const bus = new EventBus();
+  // Checkpoints are per session; the transcript id isn't known yet at build time.
+  const sessionCheckpointId = randomUUID();
 
   /**
    * Wrap a provider in the configured fallback chain. Rebuilt on every provider
@@ -255,6 +261,34 @@ export async function buildSession(opts: SessionOptions): Promise<{
     recall: recallFn,
     container,
   });
+
+  // Checkpoints: snapshot a file's contents BEFORE the tool that writes it, so
+  // a turn can be undone. Registered `before` the permission stage rather than
+  // before `execute` so a denied call costs nothing — capture is cheap, but
+  // snapshotting for work that never happens would fill the store with noise.
+  // Only path-declaring tools are covered; `bash` declares none, which is the
+  // documented hole rather than a silent one.
+  const checkpoints = new CheckpointStore(cwd, sessionCheckpointId);
+  // The turn's label comes from the prompt that started it — the picker has to
+  // read like the conversation, not like a list of ids.
+  container.resolve(Tokens.Pipelines).userInput.use("checkpointTurn", async (ctx, next) => {
+    checkpoints.beginTurn(ctx.input);
+    await next();
+  });
+  container.resolve(Tokens.Pipelines).toolCall.before("permission", async (ctx, next) => {
+    const paths = declaredPaths(ctx.call.name, ctx.call.arguments).map((p) =>
+      isAbsolute(p) ? p : join(cwd, p),
+    );
+    if (paths.length > 0) await checkpoints.capture(paths);
+    await next();
+  });
+  // Turn boundaries: the agent's own events, so a checkpoint covers exactly one
+  // user turn no matter which surface (TUI, headless, autonomy step) drove it.
+  bus.on((e) => {
+    if (e.type === "turn_end") void checkpoints.commitTurn();
+  });
+  // Housekeeping, best-effort and never blocking startup.
+  void checkpoints.prune().catch(() => {});
 
   // Optional gatekeeper (config `arbiter.model`): screen execute-category tool
   // calls with a cheap model BEFORE the permission chain (inserted `before` the
@@ -729,6 +763,11 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // the report must come from whoever is actually answering.
     rateLimits: () => provider.rateLimits?.(),
     budgetState: () => budget.state(),
+    checkpoints: {
+      list: () => checkpoints.list(),
+      restore: (id) => checkpoints.restore(id),
+      redoTarget: () => checkpoints.redoTarget,
+    },
     autonomy,
     sdd,
     mcpServers: [],

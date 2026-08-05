@@ -173,6 +173,30 @@ function InputLine({
   );
 }
 
+/**
+ * What a rewind cannot put back. Printed with every restore, because a partial
+ * undo that reads as a total one is how people lose work they believed was
+ * recoverable — shell side effects and worktree-isolated sub-agent edits are
+ * simply not in the store.
+ */
+const REWIND_LIMITS =
+  "  (not undone: anything `bash` did, sub-agent edits in isolated worktrees, " +
+  "directory changes, symlinked/hard-linked files, and network or DB effects)";
+
+/** One line describing what a restore actually touched. */
+function restoreSummary(r: {
+  restored: number;
+  deleted: number;
+  unchanged: number;
+  skippedLinks: number;
+}): string {
+  const parts = [`${r.restored} restored`];
+  if (r.deleted) parts.push(`${r.deleted} removed`);
+  if (r.unchanged) parts.push(`${r.unchanged} already matching`);
+  if (r.skippedLinks) parts.push(`${r.skippedLinks} skipped (links)`);
+  return parts.join(", ");
+}
+
 /** Slash commands offered for Tab-completion (mirrors the handleSlash switch). */
 const COMMANDS = [
   "help",
@@ -183,6 +207,8 @@ const COMMANDS = [
   "clear",
   "copy",
   "limits",
+  "rewind",
+  "redo",
   "mouse",
   "goal",
   "autonomy",
@@ -2051,6 +2077,60 @@ export function App({
               });
             }
           }
+          break;
+        }
+        case "rewind":
+        case "redo": {
+          // Undo what the agent wrote, per turn. The list is the picker: no
+          // argument prints it, an index restores. What rewind CANNOT undo is
+          // printed with it every time — a partial restore that looks total is
+          // how people lose work they thought was recoverable.
+          const store = session.checkpoints;
+          if (!store) {
+            push({ kind: "system", text: "checkpoints are not available in this session" });
+            break;
+          }
+          if (cmd === "redo") {
+            const target = store.redoTarget();
+            if (!target) {
+              push({ kind: "system", text: "nothing to redo — /rewind first" });
+              break;
+            }
+            const res = await store.restore(target);
+            push({ kind: "system", text: `↷ redone — ${restoreSummary(res)}` });
+            break;
+          }
+          const list = await store.list();
+          if (list.length === 0) {
+            push({ kind: "system", text: "no checkpoints yet — they are recorded per turn" });
+            break;
+          }
+          const which = rest[0];
+          if (!which) {
+            const rows = list
+              .map(
+                (c, i) =>
+                  `  ${String(i + 1).padStart(2)}. ${new Date(c.ts).toLocaleTimeString()}  ` +
+                  `${c.entries.length} file${c.entries.length === 1 ? "" : "s"}  ${c.label}`,
+              )
+              .join("\n");
+            push({
+              kind: "system",
+              text: `↶ checkpoints (newest last) — /rewind <n> to restore\n${rows}\n${REWIND_LIMITS}`,
+            });
+            break;
+          }
+          const n = Number(which);
+          const cp = Number.isInteger(n) ? list[n - 1] : undefined;
+          if (!cp) {
+            push({ kind: "system", text: `usage: /rewind <1-${list.length}>` });
+            break;
+          }
+          const res = await store.restore(cp.id);
+          push({
+            kind: "system",
+            text: `↶ rewound to before "${cp.label}" — ${restoreSummary(res)}\n${REWIND_LIMITS}`,
+          });
           break;
         }
         case "limits": {

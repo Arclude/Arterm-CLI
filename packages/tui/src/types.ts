@@ -4,6 +4,7 @@ import type {
   ArtermConfig,
   AutonomyEngine,
   BudgetState,
+  Checkpoint,
   CompactionResult,
   DiffRow,
   EventBus,
@@ -16,6 +17,7 @@ import type {
   PermissionMode,
   PluginSummary,
   RateLimitSnapshot,
+  RestoreResult,
   SddRunner,
   SkillInfo,
 } from "@arterm/core";
@@ -100,6 +102,15 @@ export interface Session {
    * `guards.budget` block). Absent in sessions the CLI didn't build.
    */
   budgetState?(): BudgetState;
+  /**
+   * Checkpoint / rewind (`/rewind`, `/redo`). Injected by the CLI; absent in
+   * headless and test sessions, where the command says so rather than pretending.
+   */
+  checkpoints?: {
+    list(): Promise<Checkpoint[]>;
+    restore(id: string): Promise<RestoreResult>;
+    redoTarget(): string | undefined;
+  };
   /**
    * Persist the current provider/model/mode to ~/.arterm/config.json right away
    * (normally that happens only on clean exit). Injected by the CLI; absent in
