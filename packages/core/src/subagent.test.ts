@@ -668,3 +668,42 @@ describe("runSubagent inherits the parent's limits", () => {
     expect(out).toContain("[truncated: tokens cap 1500");
   });
 });
+
+describe("runSubagent loop detection", () => {
+  it("forwards loopDetect to the sub-agent and bridges loop events to the parent", async () => {
+    // Repeats the identical call forever — only the loop detector ends this.
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat() {
+        yield { type: "tool_call", call: { id: "r", name: "noop", arguments: { n: 1 } } };
+        yield { type: "done" };
+      },
+    };
+    const noop: Tool = {
+      name: "noop",
+      description: "",
+      parameters: {},
+      permission: "allow",
+      category: "read",
+      execute: async () => ({ output: "ok" }),
+    };
+    const seen: AgentEvent["type"][] = [];
+    await runSubagent("spin", {
+      provider,
+      model: "x",
+      tools: [noop],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      cwd: process.cwd(),
+      taskDone,
+      maxSteps: 2,
+      maxIterations: 10,
+      loopDetect: { steerAfter: 2, cutAfter: 3 },
+      onEvent: (e) => seen.push(e.type),
+    });
+    expect(seen).toContain("loop_detected");
+    expect(seen).toContain("loop_cut");
+  });
+});

@@ -115,6 +115,26 @@ export type AgentEvent =
   | { type: "autonomy_resumed" }
   | { type: "autonomy_done"; summary: string }
   | { type: "autonomy_stopped"; reason: string }
+  // Loop detector: the same iteration fingerprint (tool names + first call's
+  // args) or the same call inside the sliding window repeated `streak` times.
+  // `loop_detected` = a corrective steer note was injected; `loop_cut` = the
+  // turn was ended early.
+  | { type: "loop_detected"; streak: number; note: string }
+  | { type: "loop_cut"; streak: number }
+  // Progress-gated step extension: the cap was hit but the run made progress
+  // since the last grant, so it gets `newLimit` instead of stopping.
+  | { type: "autonomy_extended"; newLimit: number; reason: string }
+  // Eternal mode: sleeping `ms` before the next step after a retryable
+  // provider error. `attempt` counts consecutive backoffs (resets on success).
+  | { type: "autonomy_backoff"; ms: number; attempt: number }
+  // Eternal mode: one journal line per step — what happened, classified. The
+  // last few of these are prepended to the next directive, and emitting them
+  // makes an unattended run auditable from the bus alone.
+  | {
+      type: "autonomy_journal";
+      status: "ok" | "idle" | "error" | "loop" | "verify-fail";
+      note: string;
+    }
   // A resumed session left an unfinished autonomy checkpoint on disk — surfaced
   // so the user can decide whether to relaunch the goal (never auto-restarted).
   | {

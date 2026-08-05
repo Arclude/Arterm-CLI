@@ -22,6 +22,7 @@ export * from "./contextStrategies.js";
 export * from "./contextRegistry.js";
 export * from "./toolProtocol.js";
 export * from "./agent.js";
+export * from "./loopDetector.js";
 export * from "./agentRegistry.js";
 export * from "./blackboard.js";
 export * from "./memberMemory.js";

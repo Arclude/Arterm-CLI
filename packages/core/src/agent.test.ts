@@ -20,6 +20,7 @@ class StubProvider implements ChatProvider {
   calls = 0;
   lastSignal?: AbortSignal;
   lastMessages?: Message[];
+  lastTools?: unknown;
   constructor(private readonly script: ChatChunk[][] = []) {}
   supportsNativeTools(): boolean {
     return true;
@@ -30,6 +31,7 @@ class StubProvider implements ChatProvider {
   async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {
     this.lastSignal = req.signal;
     this.lastMessages = req.messages;
+    this.lastTools = req.tools;
     const chunks = this.script[this.calls] ?? [{ type: "text", delta: "done" }];
     this.calls += 1;
     for (const chunk of chunks) yield chunk;
@@ -573,6 +575,36 @@ describe("Agent.assess / plan resilience", () => {
     const agent = makeAgent(new ThrowingProvider(), new EventBus());
     expect(await agent.plan("decompose the goal")).toBe("");
   });
+
+  it("plan() does not tell the model it has tools it was not given", async () => {
+    // `plan()` passes no `tools`. Sending the agentic system prompt anyway asks a
+    // capable model to act with tools it does not have, and it answers by
+    // NARRATING the call — a real Opus run replied to "write a spec and a task
+    // graph" with "Let me inspect the log file first. **Tool: read**". That parses
+    // as neither, so /sdd fell back to one task with a garbage spec and called it
+    // a success. Small local models never showed it.
+    const provider = new StubProvider();
+    const tool: Tool = {
+      name: "ls",
+      description: "list files",
+      parameters: { type: "object", properties: {} },
+      permission: "allow",
+      execute: async () => ({ output: "" }),
+    };
+    const agent = makeAgent(provider, new EventBus(), [tool]);
+
+    await agent.plan("Reply with ONLY a JSON array.");
+
+    const system = provider.lastMessages?.[0];
+    expect(system?.role).toBe("system");
+    const text = String(system?.content);
+    expect(text).not.toContain("ls: list files");
+    expect(text).toMatch(/no tools/i);
+    // The project layout still goes along — planning needs to know what is there.
+    expect(text).toContain("Working directory");
+    // And no tools were offered on the request either.
+    expect(provider.lastTools).toBeUndefined();
+  });
 });
 
 describe("Agent loop guards & limits (loopGuard stage / run_limit event)", () => {
@@ -630,10 +662,13 @@ describe("Agent loop guards & limits (loopGuard stage / run_limit event)", () =>
     ]);
     await makeAgent(provider, bus, [flaky]).run("go");
     const results = events.filter((e) => e.type === "tool_result");
-    // fail, ok, fail — no streak ever reaches 2, so no loop-guard note anywhere.
+    // fail, ok, fail — the SAME-ERROR streak never reaches 2, so the failure
+    // note never fires. (The repeat-window half may still flag the third
+    // identical call — that is repetition, a different fact than failure.)
     for (const r of results) {
-      expect((r as { output: string }).output).not.toContain("[loop-guard]");
+      expect((r as { output: string }).output).not.toContain("in a row");
     }
+    expect((results[1] as { output: string }).output).not.toContain("[loop-guard]");
   });
 
   it("flags the third identical successful call as no-progress", async () => {

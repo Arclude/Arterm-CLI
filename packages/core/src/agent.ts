@@ -9,6 +9,7 @@ import {
   Tokens,
   createPipelines,
 } from "./kernel/index.js";
+import { type LoopDetectOptions, type LoopDetector, createLoopDetector } from "./loopDetector.js";
 import { modelContextWindow } from "./modelsDev.js";
 import type { PermissionManager } from "./permissions.js";
 import { ProviderError } from "./providerError.js";
@@ -62,6 +63,11 @@ export interface AgentOptions {
   compactAtPercent?: number;
   /** Invoked for every message appended to history (for incremental logging). */
   onMessage?: (message: Message) => void | Promise<void>;
+  /**
+   * Loop/stuck detector thresholds (see `loopDetector.ts`). On by default;
+   * `{ enabled: false }` drops both stages entirely.
+   */
+  loopDetect?: LoopDetectOptions;
   /** Skills advertised to the model in the system prompt (run via /skill). */
   skills?: SkillInfo[];
   /**
@@ -166,8 +172,8 @@ export class Agent {
   private lastPromptTokens?: number;
   /** Loop-guard state, reset each run(): consecutive same-error streaks per tool. */
   private failStreaks = new Map<string, { sig: string; count: number }>();
-  /** Loop-guard state, reset each run(): consecutive identical tool calls. */
-  private callStreak = { key: "", count: 0 };
+  /** Loop/stuck detector (steer-then-cut); its fingerprint state outlives turns. */
+  private loopDetector?: LoopDetector;
   readonly bus: EventBus;
   /** Per-agent kernel container (session-supplied or an internal default). */
   private readonly container: Container;
@@ -273,17 +279,13 @@ export class Agent {
       });
     }
     if (!tc.has("loopGuard")) {
-      // Runs after `execute` (registration order). Two guards against silent
-      // error-compounding: the same tool failing repeatedly with the same error,
-      // and the exact same call being replayed with identical arguments. Both
-      // append a corrective note to the tool result — small local models escape
-      // these loops only when the failure is named explicitly.
+      // Runs after `execute` (registration order). Guards against silent
+      // error-compounding: the same tool failing repeatedly with the same error
+      // appends a corrective note to the tool result — small local models escape
+      // these loops only when the failure is named explicitly. (Identical-call
+      // repetition moved to the loop detector's sliding-window stage below,
+      // which also catches A-B-A-B alternation.)
       tc.use("loopGuard", async (ctx, next) => {
-        const key = `${ctx.call.name}:${JSON.stringify(ctx.call.arguments ?? {})}`;
-        this.callStreak =
-          this.callStreak.key === key
-            ? { key, count: this.callStreak.count + 1 }
-            : { key, count: 1 };
         if (ctx.isError) {
           const sig = (ctx.output ?? "").slice(0, 160);
           const prev = this.failStreaks.get(ctx.call.name);
@@ -294,9 +296,6 @@ export class Agent {
           }
         } else {
           this.failStreaks.delete(ctx.call.name);
-          if (this.callStreak.count >= 3) {
-            ctx.output = `${ctx.output}\n\n[loop-guard] This exact call has now run ${this.callStreak.count}x with identical arguments and is not making progress. Change the arguments or move on.`;
-          }
         }
         await next();
       });
@@ -345,6 +344,18 @@ export class Agent {
         this.bus.emit({ type: "assistant_message", message: ctx.message });
         await next();
       });
+    }
+
+    // Loop/stuck detector: registered last so the response stage sees calls that
+    // `recoverToolCalls` recovered from text, and the toolCall stage sees the
+    // final output `loopGuard` produced. Both halves share one closure, so the
+    // detector is created once per agent and its fingerprint state outlives
+    // individual turns — repetition ACROSS eternal-mode steps is the target.
+    if (this.opts.loopDetect?.enabled !== false) {
+      const det = createLoopDetector({ ...this.opts.loopDetect, bus: this.bus });
+      this.loopDetector = det;
+      if (!res.has("loopDetector")) res.use("loopDetector", det.responseStage);
+      if (!tc.has("repeatWindow")) tc.use("repeatWindow", det.toolCallStage);
     }
   }
 
@@ -445,7 +456,7 @@ export class Agent {
     const probe: Message = { role: "user", content: prompt };
     let text = "";
     try {
-      const system = await this.buildSystem(true);
+      const system = await this.planSystem();
       for await (const chunk of provider.chat({
         model,
         messages: [system, ...this.messages, probe],
@@ -468,6 +479,27 @@ export class Agent {
       description: t.description,
       parameters: t.parameters,
     }));
+  }
+
+  /**
+   * System prompt for the tool-free {@link plan} probe — deliberately NOT
+   * `buildSystem()`.
+   *
+   * That one tells the model it is an agent with tools and to act rather than
+   * describe, while `plan()` passes no `tools` at all. A capable model resolves
+   * that contradiction by NARRATING the call it cannot make — a real run against
+   * Opus answered a "write a spec and a task graph" probe with "Let me inspect
+   * the log file first. **Tool: read**". That parses as neither, so every caller
+   * fell back to its tolerant path: /sdd ran the whole brief as one task with a
+   * garbage spec, and reported success. Silent, and invisible to a small local
+   * model, which is what this was built against.
+   */
+  private async planSystem(): Promise<Message> {
+    const env = await this.environmentPrompt();
+    return {
+      role: "system",
+      content: `You are the planning half of a coding agent. In THIS turn you have no tools and cannot read files or run commands — do not call, request, or narrate a tool call, and do not say what you would inspect first. Answer from the question and the project layout below. When the question specifies a reply format, emit exactly that and nothing else.\n\n${env}`,
+    };
   }
 
   private async buildSystem(native: boolean): Promise<Message> {
@@ -549,7 +581,8 @@ export class Agent {
     const handle = this.runController.begin();
     handle.iterationLimit(maxIterations);
     this.failStreaks = new Map();
-    this.callStreak = { key: "", count: 0 };
+    // Per-turn half only — the iteration-fingerprint streak survives on purpose.
+    this.loopDetector?.resetTurn();
     const onExternalAbort = () => handle.abort("external");
     if (signal) {
       if (signal.aborted) handle.abort("external");

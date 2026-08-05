@@ -3,6 +3,7 @@ import { getAgentDefinition, listAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine } from "./autonomy.js";
 import type { ContextStrategy } from "./contextStrategy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
+import type { LoopDetectOptions } from "./loopDetector.js";
 import type { PermissionManager } from "./permissions.js";
 import type { ChatProvider, PermissionAsker, Tool } from "./types.js";
 import {
@@ -79,6 +80,8 @@ export interface SubagentOptions {
    */
   contextWindow?: number;
   compactAtPercent?: number;
+  /** Loop/stuck detector thresholds — sub-agents loop like leaders do. */
+  loopDetect?: LoopDetectOptions;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -107,6 +110,10 @@ const BRIDGED_EVENTS = new Set<AgentEvent["type"]>([
   "run_limit",
   "autonomy_stopped",
   "autonomy_done",
+  // A stuck worker is as much a fact as a stopped one: the parent board should
+  // show "looping" instead of a silent busy row.
+  "loop_detected",
+  "loop_cut",
 ]);
 
 /**
@@ -134,6 +141,7 @@ export async function runSubagent(
     ...(opts.turnTokenBudget !== undefined ? { turnTokenBudget: opts.turnTokenBudget } : {}),
     ...(opts.contextWindow !== undefined ? { contextWindow: opts.contextWindow } : {}),
     ...(opts.compactAtPercent !== undefined ? { compactAtPercent: opts.compactAtPercent } : {}),
+    ...(opts.loopDetect !== undefined ? { loopDetect: opts.loopDetect } : {}),
   };
   const agent = new Agent(agentOpts);
 
