@@ -5,6 +5,78 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-08-05
+
+### Added
+
+- **Result verification, on by default.** Every mode's completion claim now
+  passes one gate (`gateClaim()`): a deterministic command check that **fails
+  closed** — an exit code is not an opinion — with an LLM judge behind it that
+  **fails open**, so an unreachable judge can never turn finished work into a
+  rejection. The verdict is data, never prose: the judge reports via a
+  `submit_verdict` tool call read off its private bus, and only
+  `pass === false` blocks. A task can declare its own gate with a
+  `verify: <cmd>` line; `verify.command` / `--verify-cmd` is the **standing
+  gate** that runs when the work declares nothing — it comes from config or
+  argv, never from the model, so a worker can narrow the gate but never widen
+  or remove it. A rejection queues its `mustFix` items as steers into every
+  mode's next prompt; `--persist` keeps working past the rejection cap, up to
+  the mode's own step bound.
+- **Unattended runs: `--autonomous`.** One flag flips the five switches a
+  walk-away run needs — yolo permissions, verify-persist, sub-agent
+  auto-approve (workers get a fail-closed policy whose asker answers "deny"
+  instead of hanging on a prompt no one will answer), progress-gated step
+  extension, and the loop detector — and announces itself on stderr. It warns
+  when no standing gate exists (the judge only reads the result — it cannot
+  catch work that contradicts the goal), and the loop detector is the one
+  switch that overrides an explicit `loopDetect.enabled: false`, with its own
+  warning: persist plus auto-extend without the detector runs unbounded.
+- **Loop detector.** Fingerprints each iteration (tool names + first call's
+  args) and a sliding window of individual calls, so verbatim repetition and
+  A-B-A-B alternation are both caught: a corrective steer note at 3 repeats, a
+  turn cut at 5 — for the main agent and sub-agents alike, with
+  `loop_detected`/`loop_cut` bridged to the parent board.
+- **Progress-gated step cap.** `autonomy.autoExtend` grants more steps at the
+  cap only if tool calls or verification attempts happened since the last
+  grant; an explicit `--max-steps` is absolute (`hardCap`) and bounds eternal
+  too, which is what makes eternal runs testable in CI. Eternal itself gains
+  continuation mechanics: a journal of classified steps prepended to each
+  directive, a pivot to ONE different task after `failureBudget` consecutive
+  non-ok steps, abort-aware 2s→60s backoff on retryable provider errors, and
+  a stop after two exhausted budgets when the provider never once succeeded.
+- **Headless goal runs.** `arterm --print --goal "…"` drives any autonomy mode
+  without a terminal and streams its verdicts; `--json` adds a structured
+  run + verdict list plus a `guards` block (`loopSteers`, `loopCuts`,
+  `extensions`) — a run the loop detector killed twice no longer prints
+  exactly like a run that had nothing to do.
+- **Inspectable permissions + remote approval.** `arterm permissions explain
+  <tool>` prints the full rule trace for one proposed call and `arterm
+  permissions list` tables every tool — both through the same `evaluate()`
+  the runtime uses, so the inspectors cannot drift from the policy. Pending
+  permission prompts can be approved remotely through the status server.
+- **Provider resilience.** A bounded retry budget with a typed error taxonomy,
+  a fallback model chain (`fallbackModels`) that short-circuits refusals to
+  the next model, and a rule the Anthropic provider enforces: the vendor SDK
+  never owns the retry loop, so an hour-long `Retry-After` can no longer
+  become an hour-long sleep the fallback chain cannot see. Exercised by a
+  fault-injection e2e (`scripts/provider-resilience-e2e.mjs`) and a manual
+  fault server (`scripts/fault-server.mjs`).
+- **Concurrent sessions.** Multiple sessions in one TUI with a session panel,
+  Ctrl+X close, and recorded sessions resumable via `--resume <id>` /
+  `--continue`.
+- **/sdd workers get their context.** Each task's prompt now carries the spec
+  its graph was cut from and the quoted output of every finished dependency —
+  the only channel between waves — with a scope sentence that keeps a worker
+  on its own task. The kanban is navigable, runs are keyed by their own task
+  ids, and stranded work is surfaced instead of hidden.
+
+### Fixed
+
+- A turn now actually finishes when its work does, and sub-agents inherit the
+  parent's token/context limits instead of running uncapped.
+- Free-text slash commands no longer flatten what was typed after them.
+- Mouse capture modes are re-asserted on resize, healing host-emulator resets.
+
 ## [0.3.3] — 2026-07-12
 
 ### Added
