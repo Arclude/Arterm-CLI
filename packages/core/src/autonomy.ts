@@ -118,6 +118,54 @@ export interface AutonomyOptions {
   verify?: Verifier;
   /** Verification attempts per unit of work before giving up. Default 2. */
   verifyAttempts?: number;
+  /**
+   * Never give up on a rejection — keep taking steps instead of stopping once
+   * `verifyAttempts` is spent. The mode's own bound still ends the run, so this
+   * removes a give-up, not the ceiling.
+   */
+  verifyPersist?: boolean;
+  /**
+   * When the step/round cap is hit, grant `extendBy` more — but only if the run
+   * made progress (tool calls or verification attempts) since the last grant.
+   * No progress means genuinely stuck, and stuck stops with a clear reason.
+   * Off by default: the hard cap stays unless the user opts into unattended runs.
+   */
+  autoExtend?: boolean;
+  /** Steps granted per progress-gated extension (default 25). */
+  extendBy?: number;
+  /** Eternal mode: abort a single step after this long (default 5 min; 0 = off). */
+  stepTimeoutMs?: number;
+  /** Eternal mode: consecutive non-ok steps before the engine pivots (default 3). */
+  failureBudget?: number;
+  /**
+   * Eternal mode: pause between steps (default 1s; 0 = none). A real model
+   * paces the loop naturally, but a fast, erroring, or looping provider does
+   * not — without this gap an eternal run can spin at hundreds of steps a
+   * minute (observed live against a fake server). WrongStack's `cycleGapMs`.
+   */
+  cycleGapMs?: number;
+  /** Eternal mode's completion policy: "never" (default) ignores claims; "claim" gates them. */
+  eternalCompletion?: "never" | "claim";
+  /**
+   * The step cap was given EXPLICITLY (`--max-steps`): it is absolute. Bounds
+   * eternal mode too, and is never auto-extended — an operator or CI harness
+   * that pinned a number means that number. Config alone never sets this.
+   */
+  hardCap?: boolean;
+}
+
+/** What one autonomous step actually did — the input to the eternal journal. */
+interface StepOutcome {
+  sawTool: boolean;
+  doneSummary?: string;
+  /** Distinct tool names the step used, in first-use order. */
+  toolNames: string[];
+  /** The loop detector cut the step's turn (same actions repeating). */
+  loopCut: boolean;
+  /** The eternal per-step timeout aborted the turn. */
+  timedOut: boolean;
+  /** Last provider error the step surfaced, if any. */
+  providerError?: { retryable: boolean; message: string };
 }
 
 /**
@@ -167,12 +215,70 @@ export class AutonomyEngine {
     this.memberMemory = opts.memberMemory;
     this.verify = opts.verify;
     this.verifyAttempts = Math.min(5, Math.max(1, opts.verifyAttempts ?? 2));
+    this.verifyPersist = opts.verifyPersist ?? false;
+    this.autoExtend = opts.autoExtend ?? false;
+    this.extendBy = Math.max(1, opts.extendBy ?? 25);
+    this.stepTimeoutMs = Math.max(0, opts.stepTimeoutMs ?? 300_000);
+    this.failureBudget = Math.max(1, opts.failureBudget ?? 3);
+    this.cycleGapMs = Math.max(0, opts.cycleGapMs ?? 1_000);
+    this.eternalCompletion = opts.eternalCompletion ?? "never";
+    this.hardCap = opts.hardCap ?? false;
   }
 
   private readonly verify?: Verifier;
   private readonly verifyAttempts: number;
+  private readonly verifyPersist: boolean;
   private verifyFails = 0;
   private lastVerify?: VerifyResult;
+
+  // --- unattended-run hardening (autoExtend + eternal continuation mechanics) ---
+  private readonly autoExtend: boolean;
+  private readonly extendBy: number;
+  private readonly stepTimeoutMs: number;
+  private readonly failureBudget: number;
+  private readonly cycleGapMs: number;
+  private readonly eternalCompletion: "never" | "claim";
+  private readonly hardCap: boolean;
+  /** Tool calls + verification attempts since the last cap extension. */
+  private progressSinceExtend = 0;
+  /** Eternal journal: the last few steps, classified — prepended to each directive. */
+  private journal: { status: "ok" | "idle" | "error" | "loop" | "verify-fail"; note: string }[] =
+    [];
+  private consecutiveFailures = 0;
+  private backoffAttempt = 0;
+  /** Whether ANY step has ever succeeded — a dead provider must not loop silently. */
+  private everOk = false;
+  /** Full failure budgets burned with zero successful steps ever. */
+  private exhaustedBudgets = 0;
+  /** Consecutive steps the loop detector cut (bounded modes stop at 2). */
+  private loopCutStreak = 0;
+
+  /**
+   * Progress-gated cap extension. Called when `used` has reached the cap: grants
+   * `extendBy` more steps only when something happened since the last grant —
+   * WrongStack's "no progress ⇒ genuinely stuck ⇒ deny" rule.
+   */
+  private tryExtend(used: number): boolean {
+    // An explicit --max-steps is absolute: never extended, progress or not.
+    if (!this.autoExtend || this.stopped || this.hardCap) return false;
+    if (this.progressSinceExtend === 0) return false;
+    this.progressSinceExtend = 0;
+    this.maxSteps = used + this.extendBy;
+    this.bus.emit({
+      type: "autonomy_extended",
+      newLimit: this.maxSteps,
+      reason: "progress since the last extension",
+    });
+    return true;
+  }
+
+  /** The cap-stop reason, honest about whether extension was in play. */
+  private capReason(kind: "step" | "round"): string {
+    const base = `reached ${kind} limit (${this.maxSteps})`;
+    return this.autoExtend && !this.hardCap
+      ? `${base}; no progress since the last extension`
+      : base;
+  }
 
   /**
    * Gate a completion claim through the composite verifier. True = accept.
@@ -190,6 +296,9 @@ export class AutonomyEngine {
   ): Promise<boolean> {
     const verify = this.verify;
     if (!verify) return true;
+    // A verification attempt is progress: a run mid-repair-loop at the step cap
+    // deserves the extension a tool-calling run gets.
+    this.progressSinceExtend += 1;
 
     let res: VerifyResult;
     try {
@@ -235,6 +344,19 @@ export class AutonomyEngine {
     // Concat rather than overwrite: a pending user steer must not be dropped.
     this.pendingSteer = [this.pendingSteer, this.repairNote(res)].filter(Boolean).join("; ");
     return false;
+  }
+
+  /**
+   * Whether this run should give up after the rejections it has taken.
+   *
+   * Every loop asks this instead of comparing counters itself, so `verifyPersist`
+   * has one meaning in all five modes: the repair note is already queued, so
+   * "false" simply lets the loop take another lap. The mode's own bound —
+   * `maxSteps`, `maxPhases`, `teamRounds` — is what still ends the run, which is
+   * why persisting cannot spin forever.
+   */
+  private outOfAttempts(): boolean {
+    return !this.verifyPersist && this.verifyFails >= this.verifyAttempts;
   }
 
   /** A rejection, rewritten as instructions the worker can act on. */
@@ -343,6 +465,13 @@ export class AutonomyEngine {
     this.pendingSteer = undefined;
     this._phases = [];
     this._team = [];
+    this.progressSinceExtend = 0;
+    this.journal = [];
+    this.consecutiveFailures = 0;
+    this.backoffAttempt = 0;
+    this.everOk = false;
+    this.exhaustedBudgets = 0;
+    this.loopCutStreak = 0;
     this._state = "running";
     this.bus.emit({ type: "goal_set", goal: this.goal, mode: this.mode });
 
@@ -380,7 +509,11 @@ export class AutonomyEngine {
 
     try {
       const eternal = this.mode === "eternal";
-      while (!this.stopped && (eternal || this.step < this.maxSteps)) {
+      const unbounded = eternal && !this.hardCap;
+      while (
+        !this.stopped &&
+        (unbounded || this.step < this.maxSteps || this.tryExtend(this.step))
+      ) {
         await this.gate();
         if (this.stopped) break;
 
@@ -388,36 +521,68 @@ export class AutonomyEngine {
         this.bus.emit({ type: "autonomy_step", step: this.step });
         this.ckpt();
 
-        const { sawTool, doneSummary } = await this.runStep();
+        const outcome = await this.runStep();
         if (this.stopped) break;
         if (this.paused()) continue; // paused mid-step; re-gate at loop top
 
-        if (doneSummary !== undefined && !eternal) {
-          if (await this.gateClaim(doneSummary, { scope: "goal" })) {
-            this.finish(doneSummary);
+        if (eternal) {
+          // Eternal has its own reflect path: journal + failure budget + backoff
+          // instead of assess/idle-streak (see eternalReflect).
+          await this.eternalReflect(outcome);
+          // Read through the getter: TS narrows `_state` to the "running" it saw
+          // assigned in start() and cannot see eternalReflect's mutations.
+          if (this.state === "done") return;
+          // Breathing gap between steps: a real model paces the loop, a fast or
+          // looping provider does not — without this an eternal run spins at
+          // hundreds of steps a minute.
+          if (this.cycleGapMs > 0 && !this.stopped) {
+            await this.sleepInterruptible(this.cycleGapMs);
+          }
+          continue;
+        }
+
+        if (outcome.loopCut) {
+          // The loop detector ended the turn: same actions repeating. One cut
+          // queues a pivot steer; two in a row means steering did not land.
+          this.loopCutStreak += 1;
+          this.steer(
+            "the last steps repeated the same actions with no progress — take a DIFFERENT approach to the goal",
+          );
+          if (this.loopCutStreak >= 2) {
+            this._state = "stopped";
+            this.bus.emit({ type: "autonomy_stopped", reason: "loop detected" });
+            return;
+          }
+        } else {
+          this.loopCutStreak = 0;
+        }
+
+        if (outcome.doneSummary !== undefined) {
+          if (await this.gateClaim(outcome.doneSummary, { scope: "goal" })) {
+            this.finish(outcome.doneSummary);
             return;
           }
           if (this.stopped) break;
-          if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
+          if (this.outOfAttempts()) return this.stopRejected();
           continue; // rejection feedback is queued as the next step's steer note
         }
 
-        if (!sawTool) {
+        if (!outcome.sawTool) {
           // Model produced no actions — reflect on whether we're actually done.
           const verdict = await this.agent.assess(this.goal, this.current?.signal);
           this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
-          if (verdict.done && !eternal) {
+          if (verdict.done) {
             const claim = verdict.note || "goal complete";
             if (await this.gateClaim(claim, { scope: "goal" })) {
               this.finish(claim);
               return;
             }
             if (this.stopped) break;
-            if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
+            if (this.outOfAttempts()) return this.stopRejected();
             continue;
           }
           this.idleStreak += 1;
-          if (this.idleStreak >= 2 && !eternal) {
+          if (this.idleStreak >= 2) {
             this._state = "stopped";
             this.bus.emit({ type: "autonomy_stopped", reason: "no further actions were taken" });
             return;
@@ -428,12 +593,9 @@ export class AutonomyEngine {
         }
       }
       if (!this.stopped) {
-        // Hit the step cap in "once" mode.
+        // Hit the step cap ("once" mode, or a CLI-bounded eternal run).
         this._state = "stopped";
-        this.bus.emit({
-          type: "autonomy_stopped",
-          reason: `reached step limit (${this.maxSteps})`,
-        });
+        this.bus.emit({ type: "autonomy_stopped", reason: this.capReason("step") });
       }
     } finally {
       // Remove the injected task_done tool, restoring the normal tool set.
@@ -443,24 +605,162 @@ export class AutonomyEngine {
   }
 
   /** Runs one agent turn, watching the bus for tool activity + task_done. */
-  private async runStep(): Promise<{ sawTool: boolean; doneSummary?: string }> {
+  private async runStep(): Promise<StepOutcome> {
     let sawTool = false;
     let doneSummary: string | undefined;
+    const toolNames: string[] = [];
+    let loopCut = false;
+    let providerError: { retryable: boolean; message: string } | undefined;
     const off = this.bus.on((e) => {
       if (e.type === "tool_call") {
         sawTool = true;
+        this.progressSinceExtend += 1;
+        if (!toolNames.includes(e.call.name)) toolNames.push(e.call.name);
         if (e.call.name === this.taskDone.name) {
           doneSummary = String(e.call.arguments.summary ?? "");
         }
+      } else if (e.type === "loop_cut") {
+        loopCut = true;
+      } else if (e.type === "error") {
+        providerError = { retryable: e.retryable ?? false, message: e.error };
       }
     });
     this.current = new AbortController();
+    // Eternal steps get a wall-clock bound: an unattended loop cannot afford one
+    // hung provider call to become the whole night. The abort is indistinguishable
+    // from a user Esc to the agent; `timedOut` tells the journal what happened.
+    let timedOut = false;
+    const timer =
+      this.mode === "eternal" && this.stepTimeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            this.current?.abort();
+          }, this.stepTimeoutMs)
+        : undefined;
     try {
       await this.agent.run(this.stepPrompt(), this.current.signal);
     } finally {
+      if (timer) clearTimeout(timer);
       off();
     }
-    return { sawTool, doneSummary };
+    return { sawTool, doneSummary, toolNames, loopCut, timedOut, providerError };
+  }
+
+  /**
+   * Eternal mode's per-step reflection: classify what happened into the journal,
+   * gate an opted-in completion claim, back off on retryable provider errors, and
+   * pivot once the failure budget is spent. Replaces the bounded modes'
+   * assess/idle-streak pair — an eternal run reflects from its own record instead
+   * of paying a model call to ask "are we done" after every quiet step.
+   */
+  private async eternalReflect(outcome: StepOutcome): Promise<void> {
+    if (outcome.doneSummary !== undefined && this.eternalCompletion === "claim") {
+      // The one path where eternal accepts an end: the claim passes the same
+      // gate as every other mode. Rejection queues the repair note and loops —
+      // persist is inherent, there is no attempt cap here on purpose.
+      if (await this.gateClaim(outcome.doneSummary, { scope: "goal" })) {
+        this.finish(outcome.doneSummary);
+        return;
+      }
+      if (this.stopped || this.paused()) return;
+      this.pushJournal("verify-fail", this.lastVerify?.reason ?? "reviewer rejected the claim");
+      this.consecutiveFailures += 1;
+    } else if (outcome.loopCut) {
+      this.pushJournal("loop", "the loop detector cut this step — same actions repeating");
+      this.consecutiveFailures += 1;
+    } else if (outcome.timedOut) {
+      this.pushJournal("error", `step aborted after ${Math.round(this.stepTimeoutMs / 1000)}s`);
+      this.consecutiveFailures += 1;
+    } else if (!outcome.sawTool && outcome.providerError) {
+      this.pushJournal("error", outcome.providerError.message);
+      this.consecutiveFailures += 1;
+      if (outcome.providerError.retryable) await this.backoff();
+    } else if (!outcome.sawTool) {
+      this.pushJournal("idle", "no actions taken");
+      this.consecutiveFailures += 1;
+    } else {
+      this.pushJournal("ok", `used ${outcome.toolNames.join(", ")}`);
+      this.consecutiveFailures = 0;
+      this.backoffAttempt = 0;
+      this.everOk = true;
+    }
+    this.bus.emit({ type: "autonomy_reflect", done: false, note: this.journal.at(-1)?.note });
+
+    if (this.consecutiveFailures >= this.failureBudget) {
+      // A run that has NEVER succeeded and keeps erroring is a dead provider,
+      // not a hard goal: after a second full budget, stop with the real reason
+      // instead of hammering silently forever.
+      if (!this.everOk && this.journal.at(-1)?.status === "error") {
+        this.exhaustedBudgets += 1;
+        if (this.exhaustedBudgets >= 2) {
+          this.stopped = true;
+          this._state = "stopped";
+          this.bus.emit({
+            type: "autonomy_stopped",
+            reason: `no step has ever succeeded and the provider keeps failing: ${
+              outcome.providerError?.message ?? "see the journal"
+            }`,
+          });
+          return;
+        }
+      }
+      await this.pivot();
+      this.consecutiveFailures = 0;
+    }
+  }
+
+  /** Append to the (capped) journal and announce the entry on the bus. */
+  private pushJournal(
+    status: "ok" | "idle" | "error" | "loop" | "verify-fail",
+    note: string,
+  ): void {
+    const trimmed = note.length > 200 ? `${note.slice(0, 200)}…` : note;
+    this.journal.push({ status, note: trimmed });
+    if (this.journal.length > 5) this.journal.shift();
+    this.bus.emit({ type: "autonomy_journal", status, note: trimmed });
+  }
+
+  /** The journal rendered for the next directive ("" outside eternal mode). */
+  private journalBlock(): string {
+    if (this.mode !== "eternal" || this.journal.length === 0) return "";
+    const lines = this.journal.map((j) => `[${j.status}] ${j.note}`).join("\n");
+    return `\n\nRecent iterations (newest last):\n${lines}`;
+  }
+
+  /**
+   * Decision-source rotation, Arterm-flavored: after `failureBudget` non-ok
+   * steps, ask the planner for ONE different concrete task and queue it as the
+   * next step's steer note. Rotation, never a stop — and never a crash.
+   */
+  private async pivot(): Promise<void> {
+    const probe = `You are working autonomously toward the GOAL: "${this.goal}".
+The current approach has stalled ${this.failureBudget} step(s) in a row (recent record:${this.journalBlock() || " none"}).
+Name ONE different concrete task that would advance the GOAL — a specific next action, not a plan. Reply in one or two sentences.`;
+    try {
+      const reply = (await this.agent.plan(probe, this.current?.signal)).trim();
+      if (reply) this.steer(`pivot: ${reply.slice(0, 500)}`);
+    } catch {
+      // The pivot is best-effort; a dead planner must not kill the loop.
+    }
+  }
+
+  /**
+   * Exponential backoff for retryable provider errors: 2s doubling to 60s,
+   * slept in ≤250ms slices so stop/pause land mid-wait instead of after it.
+   */
+  private async backoff(): Promise<void> {
+    this.backoffAttempt += 1;
+    const ms = Math.min(60_000, 2_000 * 2 ** (this.backoffAttempt - 1));
+    this.bus.emit({ type: "autonomy_backoff", ms, attempt: this.backoffAttempt });
+    await this.sleepInterruptible(ms);
+  }
+
+  /** Sleep `ms` in ≤250ms slices so stop/pause land mid-wait instead of after it. */
+  private async sleepInterruptible(ms: number): Promise<void> {
+    const until = Date.now() + ms;
+    while (Date.now() < until && !this.stopped && !this.paused()) {
+      await new Promise((r) => setTimeout(r, Math.min(250, Math.max(1, until - Date.now()))));
+    }
   }
 
   /**
@@ -477,7 +777,7 @@ export class AutonomyEngine {
     }
 
     let round = 0;
-    while (!this.stopped && round < this.maxSteps) {
+    while (!this.stopped && (round < this.maxSteps || this.tryExtend(round))) {
       await this.gate();
       if (this.stopped) break;
 
@@ -500,7 +800,7 @@ export class AutonomyEngine {
             return;
           }
           if (this.stopped) break;
-          if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
+          if (this.outOfAttempts()) return this.stopRejected();
           // A rejection means more work, and "more work" in this mode is another
           // round — the repair note is already queued for the next decompose().
           continue;
@@ -533,6 +833,8 @@ export class AutonomyEngine {
       if (this.stopped) break;
       if (this.paused()) continue;
 
+      // A round of fleet results is this mode's unit of progress.
+      this.progressSinceExtend += results.length;
       await this.aggregate(round, results);
       this.bus.emit({ type: "autonomy_aggregate", round, count: results.length });
 
@@ -545,12 +847,12 @@ export class AutonomyEngine {
           return;
         }
         if (this.stopped) break;
-        if (this.verifyFails >= this.verifyAttempts) return this.stopRejected();
+        if (this.outOfAttempts()) return this.stopRejected();
       }
     }
     if (!this.stopped) {
       this._state = "stopped";
-      this.bus.emit({ type: "autonomy_stopped", reason: `reached round limit (${this.maxSteps})` });
+      this.bus.emit({ type: "autonomy_stopped", reason: this.capReason("round") });
     }
   }
 
@@ -619,7 +921,7 @@ export class AutonomyEngine {
             return;
           }
           if (this.stopped) break;
-          if (this.verifyFails >= this.verifyAttempts) {
+          if (this.outOfAttempts()) {
             summary();
             return this.stopRejected();
           }
@@ -716,7 +1018,7 @@ export class AutonomyEngine {
           return;
         }
         if (this.stopped) break;
-        if (this.verifyFails >= this.verifyAttempts) {
+        if (this.outOfAttempts()) {
           summary();
           return this.stopRejected();
         }
@@ -809,6 +1111,10 @@ export class AutonomyEngine {
         if (await this.gateClaim(summary, { spec: phase.done, scope: "phase", id: phase.id }))
           break;
         if (this.stopped) return;
+        // Deliberately NOT `outOfAttempts()`: this loop re-runs the phase itself,
+        // so it is the one place with no outer bound to fall back on — honoring
+        // `verifyPersist` here would spin on a single phase forever. It already
+        // does the persisting thing anyway, one level up: it carries on.
         if (this.verifyFails >= this.verifyAttempts) {
           // Out of attempts: carry the failure forward in the handoff rather than
           // killing an eight-phase plan over one phase. The final goal gate decides.
@@ -1015,10 +1321,13 @@ Integrate them: note concisely what is now done and what still remains. Do not c
     const done = `\`${this.taskDone.name}\``;
     const intro = `Work step by step using your tools. Take ONE concrete action now. When — and only when — the GOAL is fully achieved, call the ${done} tool with a short summary.`;
     const cont = `Take the next concrete action now. If it is fully complete, call ${done} with a summary.`;
+    // Eternal steps are fresh directives against one long history; the journal
+    // is what stops step N from re-attempting exactly what steps N-1..N-5 did.
+    const journal = this.journalBlock();
     if (this.step === 1) {
-      return `You are now working autonomously toward this GOAL:\n"${this.goal}"\n\n${intro}${steerLine}`;
+      return `You are now working autonomously toward this GOAL:\n"${this.goal}"\n\n${intro}${journal}${steerLine}`;
     }
-    return `Continue toward the GOAL: "${this.goal}". ${cont}${steerLine}`;
+    return `Continue toward the GOAL: "${this.goal}". ${cont}${journal}${steerLine}`;
   }
 
   /** Inject a steering note applied on the next step. */

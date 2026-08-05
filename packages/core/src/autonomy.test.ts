@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Agent } from "./agent.js";
 import { registerAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine, type AutonomyFleetRunner, type AutonomyTask } from "./autonomy.js";
@@ -88,9 +88,16 @@ function makeEngine(
     memberMemory?: MemberMemory;
     verify?: Verifier;
     verifyAttempts?: number;
+    verifyPersist?: boolean;
+    cycleGapMs?: number;
   },
 ) {
-  return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, opts);
+  // Tests drive steps synchronously — the eternal breathing gap would only
+  // slow them down (or hang fake-timer tests), so it is off by default here.
+  return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+    cycleGapMs: 0,
+    ...opts,
+  });
 }
 
 function collect(bus: EventBus): AgentEvent[] {
@@ -165,6 +172,62 @@ describe("AutonomyEngine completion verifier (verify hook)", () => {
     expect(events.some((e) => e.type === "autonomy_stopped")).toBe(true);
     // A rejected-but-claimed goal stays resumable — the checkpoint was never cleared.
     expect(cleared).not.toContain(true);
+  });
+
+  it("keeps working past the rejection cap under verifyPersist, bounded by maxSteps", async () => {
+    // Without this the run gives up on the second rejection, which is the wrong
+    // answer for "keep going until the suite is green": the repair note is already
+    // queued, so there is work to do. The step cap — not the verifier — ends it.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = Array.from({ length: 6 }, () => ["task_done"]);
+    const events = collect(bus);
+    let n = 0;
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 4,
+      verifyAttempts: 2,
+      verifyPersist: true,
+      verify: async () => {
+        n += 1;
+        return { pass: false, reason: `still red (${n})` };
+      },
+    });
+
+    await engine.start("g");
+
+    // Four rejections, not two: it kept going and only the step cap stopped it.
+    expect(n).toBe(4);
+    expect(engine.state).toBe("stopped");
+    const stop = events.find((e) => e.type === "autonomy_stopped");
+    expect(stop && "reason" in stop && stop.reason).toContain("step limit");
+    // Every lap still carried the reviewer's complaint into the next prompt.
+    expect(agent.prompts[3]).toContain("still red");
+  });
+
+  it("still stops at the cap when verifyPersist is off", async () => {
+    // The default has to stay a give-up — persisting is opt-in, and a run that
+    // cannot satisfy the reviewer twice usually needs a human, not another lap.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = Array.from({ length: 6 }, () => ["task_done"]);
+    const events = collect(bus);
+    let n = 0;
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 6,
+      verifyAttempts: 2,
+      verify: async () => {
+        n += 1;
+        return { pass: false, reason: "still red" };
+      },
+    });
+
+    await engine.start("g");
+
+    expect(n).toBe(2);
+    const stop = events.find((e) => e.type === "autonomy_stopped");
+    expect(stop && "reason" in stop && stop.reason).toContain("rejected the result");
   });
 
   it("blocks a claim with the REAL deterministic gate, then accepts when it passes", async () => {
@@ -1052,5 +1115,279 @@ describe("AutonomyEngine verification in fan-out modes", () => {
     // team_done marks a finished run; the rejected round must not emit one.
     expect(events.filter((e) => e.type === "team_done")).toHaveLength(1);
     expect(engine.state).toBe("done");
+  });
+});
+
+describe("AutonomyEngine progress-gated step extension (autoExtend)", () => {
+  it("extends past the cap when progress happened, then finishes normally", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["write"], ["write"], ["task_done"]];
+    const events = collect(bus);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 2,
+      autoExtend: true,
+      extendBy: 5,
+    });
+    await engine.start("g");
+    const extended = events.filter((e) => e.type === "autonomy_extended");
+    expect(extended.length).toBeGreaterThanOrEqual(1);
+    expect(extended[0]).toMatchObject({ newLimit: 7 });
+    expect(events.some((e) => e.type === "autonomy_done")).toBe(true);
+  });
+
+  it("denies the extension when nothing happened since the last one", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [[]]; // one idle step, then the cap
+    const events = collect(bus);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 1,
+      autoExtend: true,
+    });
+    await engine.start("g");
+    expect(events.some((e) => e.type === "autonomy_extended")).toBe(false);
+    const stopped = events.find((e) => e.type === "autonomy_stopped") as { reason: string };
+    expect(stopped.reason).toContain("no progress since the last extension");
+  });
+
+  it("keeps today's hard cap when autoExtend is off", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["write"], ["write"]];
+    const events = collect(bus);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 2,
+    });
+    await engine.start("g");
+    expect(events.some((e) => e.type === "autonomy_extended")).toBe(false);
+    const stopped = events.find((e) => e.type === "autonomy_stopped") as { reason: string };
+    expect(stopped.reason).toBe("reached step limit (2)");
+  });
+});
+
+describe("AutonomyEngine eternal hardening", () => {
+  function eternalEngine(
+    agent: FakeAgent,
+    bus: EventBus,
+    opts: Record<string, unknown> = {},
+  ): AutonomyEngine {
+    return new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "eternal",
+      hardCap: true,
+      maxSteps: 2,
+      cycleGapMs: 0,
+      ...opts,
+    });
+  }
+
+  it("feeds the journal of prior steps into the next directive", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], []];
+    const events = collect(bus);
+    await eternalEngine(agent, bus).start("g");
+    expect(agent.prompts[1]).toContain("Recent iterations (newest last):");
+    expect(agent.prompts[1]).toContain("[ok] used write");
+    const journal = events.filter((e) => e.type === "autonomy_journal");
+    expect(journal[0]).toMatchObject({ status: "ok" });
+    expect(journal[1]).toMatchObject({ status: "idle" });
+  });
+
+  it("default eternalCompletion 'never' ignores task_done claims entirely", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"], ["task_done"]];
+    const events = collect(bus);
+    let verifierCalls = 0;
+    await eternalEngine(agent, bus, {
+      verify: async () => {
+        verifierCalls++;
+        return { pass: true };
+      },
+    }).start("g");
+    expect(verifierCalls).toBe(0);
+    expect(events.some((e) => e.type === "autonomy_done")).toBe(false);
+    expect(events.some((e) => e.type === "autonomy_stopped")).toBe(true);
+  });
+
+  it("eternalCompletion 'claim': an accepted claim ends the run through the gate", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"]];
+    const events = collect(bus);
+    const engine = eternalEngine(agent, bus, {
+      eternalCompletion: "claim",
+      verify: async () => ({ pass: true, reason: "verified", by: "judge" as const }),
+    });
+    await engine.start("g");
+    expect(events.some((e) => e.type === "autonomy_done")).toBe(true);
+    expect(engine.state).toBe("done");
+  });
+
+  it("eternalCompletion 'claim': a rejection queues the repair note and keeps looping", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["task_done"], ["write"]];
+    const events = collect(bus);
+    await eternalEngine(agent, bus, {
+      eternalCompletion: "claim",
+      verify: async () => ({ pass: false, reason: "tests fail", mustFix: ["fix the tests"] }),
+    }).start("g");
+    expect(events.some((e) => e.type === "autonomy_done")).toBe(false);
+    const journal = events.filter((e) => e.type === "autonomy_journal");
+    expect(journal[0]).toMatchObject({ status: "verify-fail" });
+    // The mustFix repair note reaches the next step's prompt.
+    expect(agent.prompts[1]).toContain("fix the tests");
+  });
+
+  it("pivots via plan() after the failure budget is spent", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [[], []];
+    agent.plans = ["Read the failing test file and fix the assertion"];
+    const events = collect(bus);
+    await eternalEngine(agent, bus, { failureBudget: 2 }).start("g");
+    expect(agent.planPrompts.some((p) => p.includes("stalled"))).toBe(true);
+    const steers = events.filter((e) => e.type === "autonomy_steer") as { note: string }[];
+    expect(steers.some((s) => s.note.startsWith("pivot:"))).toBe(true);
+  });
+
+  it("a provider that never succeeds stops after two exhausted budgets", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [[], [], []];
+    agent.onRun = () => bus.emit({ type: "error", error: "invalid api key", retryable: false });
+    const events = collect(bus);
+    // Deliberately UNBOUNDED eternal: the stop must come from the dead-provider
+    // guard, not the step cap.
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "eternal",
+      failureBudget: 1,
+      cycleGapMs: 0,
+    });
+    await engine.start("g");
+    const stopped = events.find((e) => e.type === "autonomy_stopped") as { reason: string };
+    expect(stopped.reason).toContain("no step has ever succeeded");
+  });
+
+  it("pauses cycleGapMs between eternal steps, so a fast provider cannot hot-loop", async () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new EventBus();
+      const agent = new FakeAgent(bus);
+      agent.steps = [["write"], ["write"]];
+      const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+        mode: "eternal",
+        hardCap: true,
+        maxSteps: 2,
+        failureBudget: 99,
+        cycleGapMs: 1_000,
+      });
+      const run = engine.start("g");
+      await vi.advanceTimersByTimeAsync(10); // step 1 runs, then the gap starts
+      expect(agent.prompts.length).toBe(1); // step 2 is waiting out the gap
+      await vi.advanceTimersByTimeAsync(1_100); // gap elapses -> step 2
+      await vi.advanceTimersByTimeAsync(1_100); // step 2's gap, then the cap
+      await run;
+      expect(agent.prompts.length).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("backs off on retryable provider errors and stop() interrupts the wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new EventBus();
+      const agent = new FakeAgent(bus);
+      agent.steps = [[], [], [], []];
+      agent.onRun = () => bus.emit({ type: "error", error: "overloaded", retryable: true });
+      const events = collect(bus);
+      const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+        mode: "eternal",
+        failureBudget: 99,
+        cycleGapMs: 0,
+      });
+      const run = engine.start("g");
+      await vi.advanceTimersByTimeAsync(2100); // first backoff (2s) elapses
+      const backoffs = events.filter((e) => e.type === "autonomy_backoff") as {
+        ms: number;
+        attempt: number;
+      }[];
+      expect(backoffs[0]).toMatchObject({ ms: 2000, attempt: 1 });
+      // Second backoff (4s) is pending — stop mid-wait; the ≤250ms slices notice.
+      await vi.advanceTimersByTimeAsync(500);
+      engine.stop();
+      await vi.advanceTimersByTimeAsync(500);
+      await run;
+      expect(engine.state).toBe("stopped");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts a hung eternal step after stepTimeoutMs and journals an error", async () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new EventBus();
+      const agent = new FakeAgent(bus);
+      const events = collect(bus);
+      let calls = 0;
+      // First step hangs until the timeout aborts it; the second returns at once.
+      (agent as unknown as { run: (p: string, s?: AbortSignal) => Promise<void> }).run = (
+        _p,
+        signal,
+      ) => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        return Promise.resolve();
+      };
+      const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+        mode: "eternal",
+        hardCap: true,
+        maxSteps: 2,
+        stepTimeoutMs: 5_000,
+        failureBudget: 99,
+        cycleGapMs: 0,
+      });
+      const run = engine.start("g");
+      await vi.advanceTimersByTimeAsync(5_100);
+      await run;
+      const journal = events.filter((e) => e.type === "autonomy_journal") as {
+        status: string;
+        note: string;
+      }[];
+      expect(journal[0]?.status).toBe("error");
+      expect(journal[0]?.note).toContain("aborted after 5s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("AutonomyEngine loop-cut reaction (bounded modes)", () => {
+  it("stops after two consecutive cut steps with reason 'loop detected'", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = [["write"], ["write"], ["write"]];
+    agent.onRun = () => bus.emit({ type: "loop_cut", streak: 5 });
+    const events = collect(bus);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 10,
+    });
+    await engine.start("g");
+    const stopped = events.find((e) => e.type === "autonomy_stopped") as { reason: string };
+    expect(stopped.reason).toBe("loop detected");
+    // The first cut queued a pivot steer before the second one stopped the run.
+    expect(events.some((e) => e.type === "autonomy_steer")).toBe(true);
   });
 });

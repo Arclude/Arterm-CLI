@@ -93,10 +93,62 @@ export interface ArtermConfig {
     maxPhases?: number;
     /** Phased mode: max sub-agents per parallel phase (default = fleet.concurrency). */
     phasedFanout?: number;
+    /**
+     * When the step cap is hit, extend it by `extendBy` — but only if the run
+     * made progress (tool calls or verification attempts) since the last
+     * extension. A run that spins without touching anything stops with a clear
+     * reason instead. Off by default: the hard cap stays the behavior unless
+     * you opt into unattended runs.
+     */
+    autoExtend?: boolean;
+    /** Steps granted per progress-gated extension (default 25). */
+    extendBy?: number;
+    /** Eternal mode: abort a single step after this long (default 5 min). */
+    stepTimeoutMs?: number;
+    /**
+     * Eternal mode: pause between steps (default 1000ms; 0 = none). A real
+     * model paces the loop naturally; a fast, erroring, or looping provider
+     * does not, and without this gap an eternal run spins at hundreds of
+     * steps a minute.
+     */
+    cycleGapMs?: number;
+    /**
+     * Eternal mode: consecutive failed/idle/looping steps before the engine
+     * pivots — asks the model for one different concrete task instead of
+     * re-running the same directive (default 3). Rotation, not a stop.
+     */
+    failureBudget?: number;
+    /**
+     * Eternal mode's relationship to completion claims. "never" (default) keeps
+     * the historical semantics: claims are ignored and the loop runs until
+     * stopped. "claim" routes a completion claim through the same verification
+     * gate as every other mode — accepted ends the run, rejected queues the
+     * mustFix note and keeps looping (persist is inherent; there is no attempt
+     * cap in eternal).
+     */
+    eternalCompletion?: "never" | "claim";
     /** @deprecated Superseded by the top-level `verify` block. Still honored. */
     verify?: boolean;
     /** @deprecated Superseded by `verify.model`. Still honored. */
     verifyModel?: string;
+  };
+  /**
+   * Loop/stuck detector: fingerprints each iteration (tool names + first call's
+   * arguments) and watches a sliding window of individual calls, so both
+   * verbatim repetition and A-B-A-B alternation are caught. At `steerAfter`
+   * repeats a corrective note is injected; at `cutAfter` the turn is cut. The
+   * autonomy engine reacts to a cut by pivoting (eternal) or stopping (bounded
+   * modes). Applies to the main agent and sub-agents alike.
+   */
+  loopDetect: {
+    /** Master switch (default true). */
+    enabled?: boolean;
+    /** Identical repeats before a corrective steer note (default 3). */
+    steerAfter?: number;
+    /** Identical repeats before the turn is cut (default 5). */
+    cutAfter?: number;
+    /** Sliding-window size for the per-call repeat check (default 10). */
+    window?: number;
   };
   /**
    * Result verification: a deterministic command gate, with an LLM judge behind it.
@@ -123,6 +175,30 @@ export interface ArtermConfig {
     commandTimeoutMs?: number;
     /** Verification attempts per unit of work before giving up. */
     attempts?: number;
+    /**
+     * Command the deterministic gate falls back to when the work declares no
+     * `verify: <cmd>` line of its own — e.g. `"pnpm -r typecheck && pnpm -r test"`.
+     *
+     * Unset (the default), an undeclared unit is gated by the judge alone, which
+     * only READS: nothing ever runs the suite, so "the tests pass" is an opinion.
+     * This is the switch that makes it a fact. It comes from this file and never
+     * from model output — a declared `verify:` line still wins, and a model can
+     * only ever narrow the gate to its own task, not replace yours.
+     *
+     * It runs at every completion boundary, so a whole-repo suite here is paid
+     * once per phase/round, not once per run.
+     */
+    command?: string;
+    /**
+     * Keep working after `attempts` rejections instead of stopping the run.
+     *
+     * The rejection's `mustFix` items are already queued as the next step's steer
+     * note; this only removes the give-up. The mode's own bound (`autonomy.maxSteps`,
+     * `maxPhases`, `team.maxRounds`) stays the ceiling, so the run is still finite.
+     * Off by default: a run that cannot satisfy the reviewer twice usually needs a
+     * human, not another lap.
+     */
+    persist?: boolean;
   };
   /** External MCP (Model Context Protocol) servers to connect over stdio. */
   mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
@@ -164,6 +240,15 @@ export interface ArtermConfig {
     isolation?: "none" | "worktree";
     /** How concurrent worktree branches are reconciled. "surface" (default) only reports diffs. */
     mergeStrategy?: "surface" | "apply";
+    /**
+     * Sub-agents never block on a permission prompt: they get their own
+     * yolo-derived policy where escalations fail closed (deny with a reason)
+     * instead of waiting on a human. Explicit per-tool `deny` overrides and the
+     * arbiter's critical block still win — they sit above yolo in the ladder.
+     * Off by default; also implied by `--autonomous`. Without it, sub-agents in
+     * an `ask` session still route prompts to the user as before.
+     */
+    autoApprove?: boolean;
   };
   /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
   arbiter: {
@@ -286,7 +371,18 @@ export function defaultConfig(): ArtermConfig {
     session: { mode: "jsonl", maxSessions: 100 },
     context: { strategy: "window", window: 8192, compactAtPercent: 0.85, maxMessages: 40 },
     budget: { maxIterations: 50 },
-    autonomy: { mode: "once", maxSteps: 25, maxPhases: 8 },
+    autonomy: {
+      mode: "once",
+      maxSteps: 25,
+      maxPhases: 8,
+      autoExtend: false,
+      extendBy: 25,
+      stepTimeoutMs: 300_000,
+      failureBudget: 3,
+      cycleGapMs: 1_000,
+      eternalCompletion: "never",
+    },
+    loopDetect: { enabled: true, steerAfter: 3, cutAfter: 5, window: 10 },
     verify: {
       enabled: true,
       judge: true,
@@ -307,7 +403,7 @@ export function defaultConfig(): ArtermConfig {
       memory: true,
     },
     tui: { fullscreen: true, mouse: true },
-    fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface" },
+    fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface", autoApprove: false },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
     statusServer: { enabled: "auto", port: 0 },
@@ -366,8 +462,22 @@ const configFileSchema = z
         maxSteps: z.number().int().positive().optional(),
         maxPhases: z.number().int().positive().optional(),
         phasedFanout: z.number().int().positive().optional(),
+        autoExtend: z.boolean().optional(),
+        extendBy: z.number().int().positive().optional(),
+        stepTimeoutMs: z.number().int().positive().optional(),
+        failureBudget: z.number().int().positive().optional(),
+        cycleGapMs: z.number().int().nonnegative().optional(),
+        eternalCompletion: z.enum(["never", "claim"]).optional(),
         verify: z.boolean().optional(),
         verifyModel: z.string().optional(),
+      })
+      .partial(),
+    loopDetect: z
+      .object({
+        enabled: z.boolean().optional(),
+        steerAfter: z.number().int().positive().optional(),
+        cutAfter: z.number().int().positive().optional(),
+        window: z.number().int().positive().optional(),
       })
       .partial(),
     verify: z
@@ -379,6 +489,8 @@ const configFileSchema = z
         maxIterations: z.number().int().positive(),
         commandTimeoutMs: z.number().int().positive(),
         attempts: z.number().int().positive(),
+        command: z.string(),
+        persist: z.boolean(),
       })
       .partial(),
     mcpServers: z.record(
@@ -406,6 +518,7 @@ const configFileSchema = z
         concurrency: z.number().int().positive().optional(),
         isolation: z.enum(["none", "worktree"]).optional(),
         mergeStrategy: z.enum(["surface", "apply"]).optional(),
+        autoApprove: z.boolean().optional(),
       })
       .partial(),
     arbiter: z
