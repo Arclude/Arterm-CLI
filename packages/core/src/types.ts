@@ -70,6 +70,21 @@ export interface ChatProvider {
   supportsNativeTools(model: string): boolean | Promise<boolean>;
   listModels(): Promise<ModelInfo[]>;
   chat(req: ChatRequest): AsyncIterable<ChatChunk>;
+  /**
+   * The backend's most recent rate-limit report, when it sends one (Anthropic's
+   * `anthropic-ratelimit-*` and OpenAI-style `x-ratelimit-*` response headers).
+   * Undefined until a response carried the headers — and never invented: a
+   * backend that reports nothing simply has no snapshot to show.
+   */
+  rateLimits?(): RateLimitSnapshot | undefined;
+}
+
+/** A provider's most recent rate-limit report, harvested from response headers. */
+export interface RateLimitSnapshot {
+  /** ms epoch when the reporting response arrived (staleness signal). */
+  at: number;
+  /** Raw headers (lowercased name → value), vendor prefix and all. */
+  headers: Record<string, string>;
 }
 
 /** Result returned by a tool's execute(). */

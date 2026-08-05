@@ -230,6 +230,37 @@ describe("AutonomyEngine completion verifier (verify hook)", () => {
     expect(stop && "reason" in stop && stop.reason).toContain("rejected the result");
   });
 
+  it("setUnattended flips persist on a LIVE engine (the Shift+Tab arm path)", async () => {
+    // Constructed supervised, armed at runtime: the run must behave exactly as
+    // if verifyPersist had been set at build time — the arm path is not a
+    // second implementation, it is the same switch flipped later.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.steps = Array.from({ length: 6 }, () => ["task_done"]);
+    let n = 0;
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 4,
+      verifyAttempts: 2,
+      verify: async () => {
+        n += 1;
+        return { pass: false, reason: "still red" };
+      },
+    });
+
+    engine.setUnattended({ verifyPersist: true });
+    await engine.start("g");
+    // Persisted to the step cap (4 rejections), not the attempt cap (2).
+    expect(n).toBe(4);
+
+    // And disarming restores the give-up: a fresh run stops at the attempt cap.
+    agent.steps = Array.from({ length: 6 }, () => ["task_done"]);
+    n = 0;
+    engine.setUnattended({ verifyPersist: false });
+    await engine.start("g");
+    expect(n).toBe(2);
+  });
+
   it("blocks a claim with the REAL deterministic gate, then accepts when it passes", async () => {
     // End-to-end through the composite: no stub verdict, an actual exit code.
     // The goal declares the command, which is the only way one is ever obtained.

@@ -6,4 +6,5 @@ export * from "./openai-compat.js";
 export * from "./anthropic.js";
 export * from "./oauth.js";
 export * from "./registry.js";
+export * from "./rateLimits.js";
 export { parseNdjson } from "./ndjson.js";

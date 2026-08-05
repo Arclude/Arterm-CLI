@@ -14,6 +14,7 @@ import type {
   PermissionBroker,
   PermissionMode,
   PluginSummary,
+  RateLimitSnapshot,
   SddRunner,
   SkillInfo,
 } from "@arterm/core";
@@ -78,6 +79,21 @@ export interface Session {
   permissionMode: PermissionMode;
   /** Change the permission mode (Shift+Tab / /mode). */
   setMode(mode: PermissionMode): void;
+  /**
+   * Arm (true) / disarm (false) autonomous mode on the live session — the
+   * Shift+Tab slot past PLAN: yolo permissions, verify-persist, sub-agent
+   * auto-approve, and step auto-extend, flipped at runtime with NO config
+   * write, so quitting while armed cannot leak yolo into the saved config.
+   * Returns announcement lines to print (empty when the call was a no-op).
+   * Injected by the CLI; absent in headless/test sessions.
+   */
+  setAutonomous?(on: boolean): string[];
+  /**
+   * The provider's most recent rate-limit report (for /limits), harvested from
+   * response headers. Undefined until a reply carried the headers, or when the
+   * backend never reports (e.g. Ollama). Injected by the CLI.
+   */
+  rateLimits?(): RateLimitSnapshot | undefined;
   /**
    * Persist the current provider/model/mode to ~/.arterm/config.json right away
    * (normally that happens only on clean exit). Injected by the CLI; absent in

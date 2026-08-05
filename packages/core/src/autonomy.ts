@@ -227,12 +227,14 @@ export class AutonomyEngine {
 
   private readonly verify?: Verifier;
   private readonly verifyAttempts: number;
-  private readonly verifyPersist: boolean;
+  // Not readonly: `setUnattended` flips these two when a live session arms or
+  // disarms autonomous mode (the TUI's Shift+Tab counterpart of `--autonomous`).
+  private verifyPersist: boolean;
   private verifyFails = 0;
   private lastVerify?: VerifyResult;
 
   // --- unattended-run hardening (autoExtend + eternal continuation mechanics) ---
-  private readonly autoExtend: boolean;
+  private autoExtend: boolean;
   private readonly extendBy: number;
   private readonly stepTimeoutMs: number;
   private readonly failureBudget: number;
@@ -252,6 +254,20 @@ export class AutonomyEngine {
   private exhaustedBudgets = 0;
   /** Consecutive steps the loop detector cut (bounded modes stop at 2). */
   private loopCutStreak = 0;
+
+  /**
+   * Flip the unattended switches on a live engine — the runtime counterpart of
+   * the boot-time `--autonomous` profile, for a session that arms autonomous
+   * mode mid-flight (TUI Shift+Tab). Only these two live here; yolo permissions
+   * and `fleet.autoApprove` belong to the caller, and the loop detector is
+   * wired at Agent construction. Takes effect from the next check: a goal
+   * already past its rejection cap stays stopped, but a running one simply
+   * consults the new values on its next boundary.
+   */
+  setUnattended(patch: { verifyPersist?: boolean; autoExtend?: boolean }): void {
+    if (patch.verifyPersist !== undefined) this.verifyPersist = patch.verifyPersist;
+    if (patch.autoExtend !== undefined) this.autoExtend = patch.autoExtend;
+  }
 
   /**
    * Progress-gated cap extension. Called when `used` has reached the cap: grants

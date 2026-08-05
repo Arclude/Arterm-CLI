@@ -65,6 +65,7 @@ import {
   taskDoneTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
+import { armAutonomous } from "./flags.js";
 import { createVerifier } from "./verifier.js";
 
 export interface SessionOptions {
@@ -583,6 +584,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
     hardCap: opts.hardCap,
   });
 
+  // Set while Shift+Tab's AUTONOMOUS slot is armed; calling it disarms. Doubles
+  // as the armed/idempotency flag for `setAutonomous` below.
+  let disarmAutonomous: (() => string[]) | undefined;
+
   const sdd = new SddRunner(
     agent,
     bus,
@@ -691,6 +696,24 @@ export async function buildSession(opts: SessionOptions): Promise<{
       permissions.setMode(next);
       config.mode = next;
     },
+    // Shift+Tab's AUTONOMOUS slot. Runtime-only on purpose: unlike setMode
+    // above, this never writes config (the config is persisted on exit, and
+    // "quit while armed" must not mean "boot in yolo forever after").
+    setAutonomous(on) {
+      if (on) {
+        if (disarmAutonomous) return [];
+        const armed = armAutonomous({ config, permissions, engine: autonomy });
+        disarmAutonomous = armed.disarm;
+        return armed.messages;
+      }
+      if (!disarmAutonomous) return [];
+      const out = disarmAutonomous();
+      disarmAutonomous = undefined;
+      return out;
+    },
+    // Read through the LIVE provider variable: switchProvider reassigns it, and
+    // the report must come from whoever is actually answering.
+    rateLimits: () => provider.rateLimits?.(),
     autonomy,
     sdd,
     mcpServers: [],

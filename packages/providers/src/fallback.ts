@@ -22,6 +22,7 @@ import {
   type ChatRequest,
   type ModelInfo,
   type ProviderErrorKind,
+  type RateLimitSnapshot,
   isAbortError,
   normalizeProviderError,
 } from "@arterm/core";
@@ -85,6 +86,19 @@ export class FallbackChatProvider implements ChatProvider {
   /** The primary's catalog — the pinned fallback models are not offered as choices. */
   listModels(): Promise<ModelInfo[]> {
     return this.primary.provider.listModels();
+  }
+
+  /**
+   * The freshest report across the chain. Not just the primary's: after a
+   * fallback, the target actually answering is the one whose quota matters.
+   */
+  rateLimits(): RateLimitSnapshot | undefined {
+    let best: RateLimitSnapshot | undefined;
+    for (const t of this.targets) {
+      const snap = t.provider.rateLimits?.();
+      if (snap && (!best || snap.at > best.at)) best = snap;
+    }
+    return best;
   }
 
   async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {

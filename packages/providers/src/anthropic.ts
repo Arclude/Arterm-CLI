@@ -5,9 +5,11 @@ import type {
   ChatRequest,
   Message,
   ModelInfo,
+  RateLimitSnapshot,
   ToolSchema,
 } from "@arterm/core";
 
+import { harvestRateLimits } from "./rateLimits.js";
 import { withStreamReplay } from "./replay.js";
 import { fetchWithRetry } from "./retry.js";
 import { streamIdleGuard } from "./timeout.js";
@@ -42,14 +44,26 @@ const OAUTH_SYSTEM_IDENTITY = "You are Claude Code, Anthropic's official CLI for
  * bounded budget as the fetch-based providers — retry the transient, abandon a
  * refusal longer than we'd wait — while the SDK still turns the final response
  * into a typed `APIError` the taxonomy understands.
+ *
+ * Per-instance rather than module-level: the transport is also where the
+ * response's `anthropic-ratelimit-*` headers fly past, and harvesting them
+ * needs somewhere to live (`this.limits` → `rateLimits()`).
  */
-const RESILIENCE = {
-  maxRetries: 0,
-  fetch: ((input: string | URL, init?: RequestInit): Promise<Response> =>
-    fetchWithRetry(String(input), init ?? {}, {
-      ...(init?.signal ? { signal: init.signal } : {}),
-    })) as unknown as typeof fetch,
-} as const;
+function resilience(onResponse: (res: Response) => void): {
+  maxRetries: 0;
+  fetch: typeof fetch;
+} {
+  return {
+    maxRetries: 0,
+    fetch: (async (input: string | URL, init?: RequestInit): Promise<Response> => {
+      const res = await fetchWithRetry(String(input), init ?? {}, {
+        ...(init?.signal ? { signal: init.signal } : {}),
+      });
+      onResponse(res);
+      return res;
+    }) as unknown as typeof fetch,
+  };
+}
 
 /** Current Claude models surfaced in the picker (no network/key required). */
 const KNOWN_MODELS = [
@@ -132,6 +146,11 @@ export class AnthropicProvider implements ChatProvider {
   private readonly apiKey: string | undefined;
   private readonly baseUrl: string | undefined;
   private readonly getAccessToken: (() => Promise<string>) | undefined;
+  private limits: RateLimitSnapshot | undefined;
+  /** Shared across resolveClient() calls so every request funnels one harvest. */
+  private readonly transport = resilience((res) => {
+    this.limits = harvestRateLimits(res.headers) ?? this.limits;
+  });
 
   constructor(opts: AnthropicOptions = {}) {
     this.apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
@@ -153,18 +172,23 @@ export class AnthropicProvider implements ChatProvider {
         authToken: token,
         defaultHeaders: { "anthropic-beta": OAUTH_BETA },
         ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
-        ...RESILIENCE,
+        ...this.transport,
       });
     }
     return new Anthropic({
       apiKey: this.apiKey,
       ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
-      ...RESILIENCE,
+      ...this.transport,
     });
   }
 
   supportsNativeTools(): boolean {
     return true;
+  }
+
+  /** The latest `anthropic-ratelimit-*` report — refreshed by every response. */
+  rateLimits(): RateLimitSnapshot | undefined {
+    return this.limits;
   }
 
   async listModels(): Promise<ModelInfo[]> {

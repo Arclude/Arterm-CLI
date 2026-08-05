@@ -1,6 +1,6 @@
 import { defaultConfig } from "@arterm/core";
 import { describe, expect, it } from "vitest";
-import { applyAutonomousProfile } from "./flags.js";
+import { applyAutonomousProfile, armAutonomous } from "./flags.js";
 
 describe("applyAutonomousProfile (--autonomous / --autonomy-mode / --max-steps)", () => {
   it("--autonomous flips all five unattended switches and announces itself", () => {
@@ -113,5 +113,65 @@ describe("applyAutonomousProfile (--autonomous / --autonomy-mode / --max-steps)"
     const bad = applyAutonomousProfile(config, { maxSteps: "nope" }, () => {});
     expect(bad.hardCap).toBe(false);
     expect(config.autonomy.maxSteps).toBe(4);
+  });
+});
+
+describe("armAutonomous (the Shift+Tab runtime profile)", () => {
+  function hooks(config = defaultConfig()) {
+    const calls: { mode: string[]; unattended: object[] } = { mode: [], unattended: [] };
+    return {
+      calls,
+      config,
+      deps: {
+        config,
+        permissions: {
+          getMode: () => "plan" as const,
+          setMode: (m: string) => calls.mode.push(m),
+        },
+        engine: {
+          setUnattended: (p: object) => calls.unattended.push(p),
+        },
+      },
+    };
+  }
+
+  it("arms yolo + both engine switches, and never touches the config", () => {
+    const { calls, config, deps } = hooks();
+    const before = JSON.stringify(config);
+    const { messages } = armAutonomous(deps);
+    expect(calls.mode).toEqual(["yolo"]);
+    expect(calls.unattended).toEqual([{ verifyPersist: true, autoExtend: true }]);
+    expect(messages.join("")).toContain("AUTONOMOUS armed");
+    // The whole point of the runtime path: quitting while armed must not
+    // persist yolo — so arming may not write a single config field.
+    expect(JSON.stringify(config)).toBe(before);
+  });
+
+  it("disarm lands on ASK and restores the switches to what the config says", () => {
+    const { calls, deps } = hooks();
+    const { disarm } = armAutonomous(deps);
+    const lines = disarm();
+    expect(calls.mode).toEqual(["yolo", "ask"]);
+    // Config never had persist/autoExtend on, so restore means false/false.
+    expect(calls.unattended[1]).toEqual({ verifyPersist: false, autoExtend: false });
+    expect(lines.join("")).toContain("disarmed");
+  });
+
+  it("warns about the missing standing gate, and stays quiet when one is configured", () => {
+    const bare = armAutonomous(hooks().deps);
+    expect(bare.messages.join("")).toContain("no standing verification gate");
+    const gatedConfig = defaultConfig();
+    gatedConfig.verify = { ...gatedConfig.verify, command: "pnpm -r test" };
+    const gated = armAutonomous(hooks(gatedConfig).deps);
+    expect(gated.messages.join("")).not.toContain("no standing verification gate");
+  });
+
+  it("names the loop-guard gap when the detector was disabled at startup", () => {
+    const config = defaultConfig();
+    config.loopDetect = { ...config.loopDetect, enabled: false };
+    const { messages } = armAutonomous(hooks(config).deps);
+    // Unlike --autonomous, the runtime path cannot force the detector on (it is
+    // wired at Agent construction) — so it must say the guard is absent.
+    expect(messages.join("")).toContain("NO loop guard");
   });
 });

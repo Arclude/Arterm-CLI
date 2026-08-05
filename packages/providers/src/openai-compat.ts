@@ -5,10 +5,12 @@ import type {
   ChatRequest,
   Message,
   ModelInfo,
+  RateLimitSnapshot,
   TokenUsage,
   ToolSchema,
 } from "@arterm/core";
 import { providerErrorFromResponse } from "@arterm/core";
+import { harvestRateLimits } from "./rateLimits.js";
 import { withStreamReplay } from "./replay.js";
 import { fetchWithRetry } from "./retry.js";
 import { streamIdleGuard } from "./timeout.js";
@@ -68,12 +70,18 @@ export class OpenAICompatProvider implements ChatProvider {
   private baseUrl: string;
   private apiKey?: string;
   private extraHeaders: Record<string, string>;
+  private limits: RateLimitSnapshot | undefined;
 
   constructor(opts: OpenAICompatOptions) {
     this.id = opts.id ?? "openai-compat";
     this.baseUrl = opts.baseUrl.replace(/\/$/, "");
     this.apiKey = opts.apiKey;
     this.extraHeaders = opts.headers ?? {};
+  }
+
+  /** The latest `x-ratelimit-*` report (OpenAI/OpenRouter-style), when sent. */
+  rateLimits(): RateLimitSnapshot | undefined {
+    return this.limits;
   }
 
   /** These servers accept the OpenAI `tools` param across models. */
@@ -145,6 +153,9 @@ export class OpenAICompatProvider implements ChatProvider {
         },
         { signal: guard.signal },
       );
+      // Harvest before the ok-check: a 429's headers are exactly the report
+      // worth keeping (they say when the door reopens).
+      this.limits = harvestRateLimits(res.headers) ?? this.limits;
       if (!res.ok || !res.body) {
         throw await providerErrorFromResponse(this.id, res, "/chat/completions");
       }
