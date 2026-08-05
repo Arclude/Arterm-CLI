@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RiskArbiter } from "./arbiter.js";
+import { defaultConfig } from "./config.js";
+import { subagentPolicy } from "./permissionPolicy.js";
 import { PermissionManager } from "./permissions.js";
 import type { Tool } from "./types.js";
 
@@ -249,5 +251,70 @@ describe("PermissionManager.evaluate", () => {
     expect(evaluation.outcome).toBe("prompt");
     expect(evaluation.riskTier).toBe("destructive");
     expect(evaluation.trace.some((s) => s.rule === "confirm-destructive")).toBe(true);
+  });
+});
+
+describe("subagentPolicy (fail-closed auto policy for sub-agents)", () => {
+  const base = () => {
+    const config = defaultConfig();
+    config.permissions = {};
+    return config;
+  };
+
+  it("returns undefined in a supervised (ask/plan) session without fleet.autoApprove", () => {
+    const config = base();
+    expect(subagentPolicy(config, new PermissionManager({}, "ask"))).toBeUndefined();
+    expect(subagentPolicy(config, new PermissionManager({}, "plan"))).toBeUndefined();
+  });
+
+  it("derives the session's live mode in auto/yolo sessions", async () => {
+    const config = base();
+    const sub = subagentPolicy(config, new PermissionManager({}, "auto"));
+    expect(sub).toBeDefined();
+    // An edit-category tool passes silently under auto — no prompt to block on.
+    const d = await sub?.permissions.check(tool("write", "ask", "edit"), {}, sub.ask);
+    expect(d?.allowed).toBe(true);
+  });
+
+  it("fleet.autoApprove upgrades the derived policy to yolo even in an ask session", async () => {
+    const config = base();
+    config.fleet = { ...config.fleet, autoApprove: true };
+    const sub = subagentPolicy(config, new PermissionManager({}, "ask"));
+    expect(sub).toBeDefined();
+    const d = await sub?.permissions.check(tool("bash", "ask"), {}, sub.ask);
+    expect(d?.allowed).toBe(true);
+  });
+
+  it("explicit per-tool deny overrides still win under the derived yolo", async () => {
+    const config = base();
+    config.fleet = { ...config.fleet, autoApprove: true };
+    config.permissions = { rm: "deny" };
+    const sub = subagentPolicy(config, new PermissionManager({}, "ask"));
+    const d = await sub?.permissions.check(tool("rm", "ask"), {}, sub?.ask as never);
+    expect(d?.allowed).toBe(false);
+  });
+
+  it("the arbiter's critical block still wins under the derived yolo", async () => {
+    const config = base();
+    config.fleet = { ...config.fleet, autoApprove: true };
+    const sub = subagentPolicy(config, new PermissionManager({}, "ask"));
+    const d = await sub?.permissions.check(
+      tool("bash", "ask", "execute"),
+      { command: "rm -rf /" },
+      sub.ask,
+    );
+    expect(d?.allowed).toBe(false);
+    expect(d?.reason).toMatch(/critical/);
+  });
+
+  it("escalations FAIL CLOSED: the asker answers deny instead of hanging", async () => {
+    const config = base();
+    config.confirmDestructive = true; // forces a prompt even under yolo
+    config.fleet = { ...config.fleet, autoApprove: true };
+    const sub = subagentPolicy(config, new PermissionManager({}, "ask"));
+    const destructiveTool: Tool = { ...tool("bash", "ask", "execute"), riskTier: "destructive" };
+    // Would block forever on a human asker; the sub-agent one must resolve to deny.
+    const d = await sub?.permissions.check(destructiveTool, { command: "ls" }, sub.ask);
+    expect(d?.allowed).toBe(false);
   });
 });
