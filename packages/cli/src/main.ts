@@ -52,6 +52,7 @@ import type { Session } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
+import { applyAutonomousProfile } from "./flags.js";
 import { runHeadless, runHeadlessGoal } from "./headless.js";
 import { runInit } from "./init.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
@@ -160,6 +161,35 @@ interface GlobalOpts {
   statusPort?: string;
   /** False when --no-status-server was passed (commander negated boolean). */
   statusServer?: boolean;
+  /** Standing verification command for this run (config `verify.command`). */
+  verifyCmd?: string;
+  /** Keep working past the rejection cap (config `verify.persist`). */
+  persist?: boolean;
+  /** Unattended profile: yolo + verify-persist + sub-agent auto-approve + auto-extend. */
+  autonomous?: boolean;
+  /** Autonomy mode for this run (once | eternal | parallel | phased | team). */
+  autonomyMode?: string;
+  /** Step-cap override; with eternal mode, a hard bound (CI/testing hook). */
+  maxSteps?: string;
+}
+
+/**
+ * Overlay the run's verification flags onto the loaded config.
+ *
+ * `verify.command` deliberately has a flag as well as a config field, because
+ * config is global (`~/.arterm/config.json`) and a command is not: `pnpm -r test`
+ * as a standing gate is correct in this repo and fails closed in every directory
+ * that has no pnpm, blocking completion claims that were fine. Per-run is the
+ * honest default for it; the config field is for someone who lives in one repo.
+ */
+function applyVerifyFlags(config: ArtermConfig, globals: GlobalOpts): ArtermConfig {
+  if (globals.verifyCmd === undefined && !globals.persist) return config;
+  config.verify = {
+    ...config.verify,
+    ...(globals.verifyCmd !== undefined ? { command: globals.verifyCmd } : {}),
+    ...(globals.persist ? { persist: true } : {}),
+  };
+  return config;
 }
 
 /**
@@ -276,7 +306,8 @@ function probeCompatHostInBackground(
 }
 
 async function startChat(globals: GlobalOpts): Promise<void> {
-  const config = await loadConfig();
+  const config = applyVerifyFlags(await loadConfig(), globals);
+  const { hardCap } = applyAutonomousProfile(config, globals);
   const providerId = globals.provider ?? config.provider;
   requireKnownProvider(providerId);
 
@@ -409,6 +440,7 @@ async function startChat(globals: GlobalOpts): Promise<void> {
       model: globals.model,
       yolo: globals.yolo,
       confirmDestructive: globals.confirmDestructive,
+      hardCap,
       cwd: process.cwd(),
       initialMessages: isFirst ? initialMessages : undefined,
     });
@@ -512,7 +544,8 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   // are given the goal wins, because it is the more specific instruction — and
   // it used to be dropped on the floor here without a word.
   const prompt = globals.goal ? "" : (globals.print ?? (await readStdin()));
-  const config = await loadConfig();
+  const config = applyVerifyFlags(await loadConfig(), globals);
+  const { hardCap } = applyAutonomousProfile(config, globals);
   const providerId = globals.provider ?? config.provider;
   requireKnownProvider(providerId);
 
@@ -525,6 +558,7 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
     model: globals.model,
     yolo: globals.yolo,
     confirmDestructive: globals.confirmDestructive,
+    hardCap,
     cwd: process.cwd(),
     initialMessages: resumed?.messages,
   });
@@ -775,7 +809,21 @@ async function main(): Promise<void> {
     .option("--resume <id>", "resume a recorded session by id (see `arterm sessions`)")
     .option("--continue", "resume the most recent recorded session")
     .option("--status-port <port>", "pin the desktop status server port (implies enabled)")
-    .option("--no-status-server", "disable the desktop status server");
+    .option("--no-status-server", "disable the desktop status server")
+    .option(
+      "--verify-cmd <cmd>",
+      'command that must exit 0 before a result is accepted, e.g. "pnpm -r test"',
+    )
+    .option("--persist", "keep working after the verifier's rejection cap, up to the step limit")
+    .option(
+      "--autonomous",
+      "run unattended: yolo permissions, verify-persist, sub-agent auto-approve, step auto-extend",
+    )
+    .option(
+      "--autonomy-mode <mode>",
+      "autonomy mode for this run: once | eternal | parallel | phased | team",
+    )
+    .option("--max-steps <n>", "override autonomy.maxSteps; with eternal mode, a hard bound");
 
   program
     .command("chat", { isDefault: true })

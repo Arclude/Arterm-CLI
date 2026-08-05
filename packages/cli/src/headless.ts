@@ -118,6 +118,24 @@ export interface HeadlessGoalResult {
     note?: string;
     mustFix?: string[];
   }[];
+  /**
+   * What the unattended-run guards did. These are the events that distinguish a
+   * run that worked from one that spun and was cut off, and they used to reach
+   * only the desktop status feed — so `--print --json`, the scriptable channel,
+   * reported a clean-looking run for a turn the loop detector had killed.
+   *
+   * Steers and cuts are counted, not listed: a long run repeats them per turn,
+   * and an unbounded array would bury the verdicts it sits next to. Extensions
+   * are listed because there are few and each one is a decision.
+   */
+  guards: {
+    /** Corrective steers injected after repeated identical work. */
+    loopSteers: number;
+    /** Turns cut outright for repetition. */
+    loopCuts: number;
+    /** Each progress-gated step-cap grant, in order. */
+    extensions: { newLimit: number; reason: string }[];
+  };
 }
 
 /**
@@ -140,6 +158,7 @@ export async function runHeadlessGoal(
   session.setAsker(async () => "deny");
 
   const verdicts: HeadlessGoalResult["verdicts"] = [];
+  const guards: HeadlessGoalResult["guards"] = { loopSteers: 0, loopCuts: 0, extensions: [] };
   let steps = 0;
   let summary = "";
   let stoppedReason: string | undefined;
@@ -175,6 +194,21 @@ export async function runHeadlessGoal(
         }
         break;
       }
+      // The loop detector fires twice per repetition — once for the iteration
+      // fingerprint, once for the per-call repeat window — so the streak, not
+      // the event count, is what the reader should see.
+      case "loop_detected":
+        guards.loopSteers += 1;
+        log(`↻ loop guard: ${event.streak}× the same work — steering`);
+        break;
+      case "loop_cut":
+        guards.loopCuts += 1;
+        log(`✂ loop cut after ${event.streak} repetitions — turn ended`);
+        break;
+      case "autonomy_extended":
+        guards.extensions.push({ newLimit: event.newLimit, reason: event.reason });
+        log(`⤢ step limit extended to ${event.newLimit} — ${event.reason}`);
+        break;
       case "autonomy_done":
         summary = event.summary;
         log("■ goal complete");
@@ -199,6 +233,7 @@ export async function runHeadlessGoal(
     summary: summary || stoppedReason || "",
     steps,
     verdicts,
+    guards,
   };
 
   if (opts.json) {

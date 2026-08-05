@@ -80,6 +80,66 @@ describe("runHeadlessGoal", () => {
     err.mockRestore();
   });
 
+  it("reports what the guards did, so a cut-off run can't read as a clean one", async () => {
+    // These reached only the desktop status feed, so `--print --json` described a
+    // run the loop detector had killed as if nothing had happened.
+    const bus = new EventBus();
+    const session = fakeSession(bus, (b) => {
+      b.emit({ type: "autonomy_step", step: 1 });
+      b.emit({ type: "loop_detected", streak: 3, note: "same tool calls" });
+      b.emit({ type: "loop_detected", streak: 4, note: "same tool calls" });
+      b.emit({ type: "loop_cut", streak: 5 });
+      b.emit({
+        type: "autonomy_extended",
+        newLimit: 2,
+        reason: "progress since the last extension",
+      });
+      b.emit({ type: "autonomy_stopped", reason: "reached step limit (2)" });
+    });
+
+    const res = await runHeadlessGoal(session, "ship it", { json: true });
+
+    expect(res.guards.loopSteers).toBe(2);
+    expect(res.guards.loopCuts).toBe(1);
+    expect(res.guards.extensions).toEqual([
+      { newLimit: 2, reason: "progress since the last extension" },
+    ]);
+  });
+
+  it("reports quiet guards as zeroes, never as an absent field", async () => {
+    // A script asking "was this run cut?" must get an answer from every run, not
+    // `undefined` on the healthy ones.
+    const bus = new EventBus();
+    const session = fakeSession(bus, (b) => {
+      b.emit({ type: "autonomy_done", summary: "shipped" });
+    });
+
+    const res = await runHeadlessGoal(session, "ship it", { json: true });
+
+    expect(res.guards).toEqual({ loopSteers: 0, loopCuts: 0, extensions: [] });
+  });
+
+  it("streams guard activity to stderr in plain mode", async () => {
+    const err = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const bus = new EventBus();
+    const session = fakeSession(bus, (b) => {
+      b.emit({ type: "loop_cut", streak: 5 });
+      b.emit({
+        type: "autonomy_extended",
+        newLimit: 9,
+        reason: "progress since the last extension",
+      });
+      b.emit({ type: "autonomy_done", summary: "shipped" });
+    });
+
+    await runHeadlessGoal(session, "ship it");
+
+    const text = err.mock.calls.flat().join("");
+    expect(text).toContain("loop cut after 5");
+    expect(text).toContain("extended to 9");
+    err.mockRestore();
+  });
+
   it("refuses an empty goal", async () => {
     const bus = new EventBus();
     await expect(

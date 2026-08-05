@@ -209,14 +209,112 @@ merely mentions verification yields nothing. The command reaches `sh -c` as a
 single positional argument (never `shell: true`), so the shell interprets
 metacharacters rather than Node.
 
+A marker is the only command *model output* can supply, and it is optional — so
+without one the gate is a no-op and acceptance rests on a judge that only reads.
+`verify.command` (or `--verify-cmd`) is the **standing gate** that closes that:
+the fallback the command verifier runs when the work declared nothing. It comes
+from config or argv, never from the model, and a declared `verify:` line still
+wins — so a worker can narrow the gate to its own task and can never widen or
+remove it. It fires at every completion boundary, so a whole-repo suite there is
+paid once per phase/round. Prefer `--verify-cmd` to the config field: config is
+global (`~/.arterm/config.json`), and `pnpm -r test` as a permanent gate fails
+closed in every directory without pnpm.
+
+`verify.persist` (or `--persist`) stops a run from *giving up* after
+`verify.attempts` rejections. It changes nothing else: the `mustFix` note was
+already queued, so the loop simply takes another lap, and the mode's own bound
+(`autonomy.maxSteps`, `maxPhases`, `team.maxRounds`) is still the ceiling. Every
+mode asks `outOfAttempts()` rather than comparing counters, which is what keeps
+one meaning across all five — except the phased per-phase retry loop, which
+re-runs the phase itself and so has no outer bound to fall back on. That one
+stays capped on purpose.
+
 `arterm --print --goal "…"` runs the loop headlessly and streams its verdicts —
 the scriptable way to exercise any of this without a terminal. Add `--json` for a
-structured run + verdict list.
+structured run + verdict list, plus a `guards` block (`loopSteers`, `loopCuts`,
+`extensions`). That block is not decoration: without it a run the loop detector
+killed twice printed `state: stopped` and an empty `verdicts` array, which reads
+exactly like a run that simply had nothing to do. Steers and cuts are counted
+rather than listed, because a long run repeats them per turn and an unbounded
+array would bury the verdicts beside it. The self-contained way to see a whole
+gated run, no API key and no real model:
+
+```bash
+node scripts/fault-server.mjs --mode ok --tool task_done --port 8131 &
+arterm --print --json --goal "…" --verify-cmd 'node -e "process.exit(3)"' --persist
+```
+
+`--tool task_done` is what makes the fake model *claim* completion, which is the
+only thing that puts the gate on the path at all.
 
 `AutonomyEngine.gateClaim()` is the single call site for every mode. A rejection
 queues its `mustFix` items into `pendingSteer`, which every mode's prompt builder
 already consumes — that is why no mode needs its own repair plumbing. `eternal`
-is exempt on purpose: it never makes a completion claim.
+is exempt by default: it never makes a completion claim. Setting
+`autonomy.eternalCompletion: "claim"` opts it in — a claim then passes the same
+gate, an acceptance ends the run, and a rejection just keeps looping (persist is
+inherent; eternal never consults `outOfAttempts()`).
+
+## Unattended runs: `--autonomous` and the guards behind it
+
+`--autonomous` flips the five switches an unattended run needs — yolo
+permissions, `verify.persist`, `fleet.autoApprove` (sub-agents get a fail-closed
+policy from `subagentPolicy()` instead of blocking on a prompt no one will
+answer), `autonomy.autoExtend`, and the loop detector — and announces itself on
+stderr. Explicit per-tool `deny` overrides and the arbiter's critical block
+still win: they sit above yolo in `evaluate()`, and the sub-agent asker answers
+"deny", never hangs.
+
+The loop detector is the one switch that **overrides** an explicit
+`loopDetect.enabled: false` rather than defaulting under it, with its own
+warning when it does. The combination it forecloses is arithmetic:
+verify-persist keeps the run alive after rejections, auto-extend counts each
+verification attempt as progress, so with the detector off a run failing the
+same gate forever earns an extension forever — observed running unbounded until
+an external timeout killed it. Attended runs keep whatever the config says; an
+undetected unattended run is available only as bare `--yolo`, which promises
+nothing.
+
+It also warns when there is **no standing gate** — no `--verify-cmd` and no
+`verify.command` — because that run accepts completion on the judge alone, and
+the judge only reads the result. It never sees the diff, so it cannot catch work
+that contradicts the goal. Observed, not theorized: a fleet worker told not to
+change `slug()`'s behavior rewrote the function, committed it as `docs(…)`, and
+the judge passed it with "the function's behavior was not touched". An exit code
+was the only part of the gate that could have known. The warning is deliberately
+not a refusal — many goals have no command that can judge them, and making
+`--autonomous` unusable without one just pushes people to bare `--yolo`, which
+announces nothing. `verify.enabled: false` gets its own, blunter warning, since a
+configured `verify.command` is irrelevant when the layer that runs it is off.
+
+Note also what `--autonomous` licenses: yolo clears `git_commit`, so an
+unattended run can and does write to git history on its own.
+
+What keeps an unattended run from spinning is not the cap but the guards
+(the WrongStack lesson — see `loopDetector.ts`):
+
+- The **loop detector** (default stages `response.loopDetector` +
+  `toolCall.repeatWindow`, config `loopDetect`) steers at 3 identical
+  repetitions and cuts the turn at 5, for the main agent and sub-agents alike.
+  Its iteration fingerprint deliberately survives turn boundaries — eternal
+  steps are separate turns repeating one directive, and text-only replies are
+  skipped, not resets, for the same reason.
+- **`autonomy.autoExtend`** turns the step cap into a progress gate: at the cap
+  the run gets `extendBy` more steps only if tool calls or verification
+  attempts happened since the last grant. `--max-steps` is the exception: an
+  explicitly pinned cap is absolute (`hardCap`) — it bounds eternal too and is
+  never extended, which is what makes eternal runs testable in CI.
+- **Eternal continuation mechanics**: a 5-entry journal of classified steps
+  (`ok|idle|error|loop|verify-fail`) is prepended to every directive; after
+  `failureBudget` consecutive non-ok steps the engine pivots (asks `plan()` for
+  ONE different task and queues it as steer); retryable provider errors get
+  2s→60s abort-aware backoff; a provider that never once succeeded stops the
+  run after two exhausted budgets instead of hammering silently forever.
+
+When testing any of this against `fault-server.mjs` with a reused sandbox HOME,
+pin `openaiCompatHost` in that HOME's config per run: the CLI persists the full
+config on exit, so a stale saved host silently redirects the next run away from
+your fake server (zero requests, instant provider errors).
 
 **A `/sdd` worker's prompt is the task plus its context, built in `taskPrompt()`:**
 the spec the graph was cut from (`specBlock()`) and the quoted output of every

@@ -35,6 +35,7 @@ import {
   runFleet,
   runSubagent,
   saveConfig,
+  subagentPolicy,
 } from "@arterm/core";
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
 import {
@@ -73,6 +74,11 @@ export interface SessionOptions {
   yolo?: boolean;
   /** Re-prompt for destructive tools even in auto/yolo (overrides config). */
   confirmDestructive?: boolean;
+  /**
+   * Make `autonomy.maxSteps` bound eternal mode too (`--max-steps` was given
+   * explicitly). CLI/CI hook only — config alone never bounds eternal.
+   */
+  hardCap?: boolean;
   cwd: string;
   /** Seed the agent's history (e.g. resuming a recorded session). */
   initialMessages?: Message[];
@@ -233,6 +239,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     clearToolResults: config.context?.clearToolResults,
     clearAtPercent: config.context?.clearAtPercent,
     keepRecentToolResults: config.context?.keepRecentToolResults,
+    loopDetect: config.loopDetect,
     recall: recallFn,
     container,
   });
@@ -268,13 +275,17 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // deep) toward a task and returns its result.
   const spawnFn = async (task: string, role?: string): Promise<string> => {
     bus.emit({ type: "subagent_start", task, role });
+    // Resolved at dispatch time (the live mode is mutable): autonomous sessions
+    // give sub-agents a fail-closed auto policy so a fleet never blocks on a
+    // prompt; supervised sessions keep routing prompts to the user.
+    const sub = subagentPolicy(config, permissions);
     const output = await runSubagent(task, {
       provider,
       model: agent.model,
       tools: subagentTools(),
-      permissions,
+      permissions: sub?.permissions ?? permissions,
       // Tagged so the prompt says WHICH worker is blocked, not just the tool name.
-      ask: permissionBroker.askFor({ name: role ?? "sub-agent" }),
+      ask: sub?.ask ?? permissionBroker.askFor({ name: role ?? "sub-agent" }),
       cwd,
       taskDone: taskDoneTool,
       context: createContextStrategy(config),
@@ -283,6 +294,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       turnTokenBudget: config.budget?.turnTokens,
       contextWindow: config.context?.window,
       compactAtPercent: config.context?.compactAtPercent,
+      loopDetect: config.loopDetect,
       role,
     });
     bus.emit({ type: "subagent_done", output, role });
@@ -330,6 +342,8 @@ export async function buildSession(opts: SessionOptions): Promise<{
           }
         : {}),
     });
+    // One dispatch-time policy for the whole round (same reasoning as spawnFn).
+    const sub = subagentPolicy(config, permissions);
     const isolationMode = config.team?.isolation ?? "auto";
     const fleetTasks = fleet.map((t) => {
       const id = t.id;
@@ -343,7 +357,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       // Same reasoning as the event bridge: a prompt raised mid-fan-out has to name
       // its worker, or the user sees "write_file" with five identical rows above it
       // and no way to tell which one is waiting.
-      const ask = permissionBroker.askFor({ id, name });
+      const ask = sub?.ask ?? permissionBroker.askFor({ id, name });
       // Only team members get the member-only extras below; an id alone just
       // buys a task its board row. (`!id` can't happen for a member, but it
       // would leave the tools below without an author, so treat it as plain.)
@@ -377,8 +391,8 @@ export async function buildSession(opts: SessionOptions): Promise<{
         provider,
         model: agent.model,
         tools: subagentTools(),
-        permissions,
-        ask: (tool, args) => asker(tool, args),
+        permissions: sub?.permissions ?? permissions,
+        ask: sub?.ask ?? ((tool, args) => asker(tool, args)),
         cwd,
         taskDone: taskDoneTool,
         context: createContextStrategy(config),
@@ -387,6 +401,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
         turnTokenBudget: config.budget?.turnTokens,
         contextWindow: config.context?.window,
         compactAtPercent: config.context?.compactAtPercent,
+        loopDetect: config.loopDetect,
         concurrency: config.fleet?.concurrency,
         isolation: config.fleet?.isolation ?? "none",
         onStart: (i, task, role) => {
@@ -558,6 +573,14 @@ export async function buildSession(opts: SessionOptions): Promise<{
     memberMemory,
     verify: verifier,
     verifyAttempts: config.verify?.attempts,
+    verifyPersist: config.verify?.persist,
+    autoExtend: config.autonomy?.autoExtend,
+    extendBy: config.autonomy?.extendBy,
+    stepTimeoutMs: config.autonomy?.stepTimeoutMs,
+    failureBudget: config.autonomy?.failureBudget,
+    cycleGapMs: config.autonomy?.cycleGapMs,
+    eternalCompletion: config.autonomy?.eternalCompletion,
+    hardCap: opts.hardCap,
   });
 
   const sdd = new SddRunner(
