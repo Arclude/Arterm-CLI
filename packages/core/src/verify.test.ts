@@ -82,6 +82,32 @@ describe("makeCommandVerifier", () => {
     expect(res).toEqual({ pass: true });
   });
 
+  it("falls back to the configured command when the work declared none", async () => {
+    // Without this, an undeclared unit reaches only the judge — which reads and
+    // never runs — so nothing ever executes the suite and "the tests pass" is an
+    // opinion. The fallback comes from config, so it is the standing gate.
+    const gated = makeCommandVerifier({ cwd: process.cwd(), defaultCommand: exits(7) });
+    const res = await gated({ goal: "do a thing", claim: "did it" });
+    expect(res.pass).toBe(false);
+    expect(res.reason).toContain("exit 7");
+  });
+
+  it("lets a declared command narrow the configured one, never remove it", async () => {
+    // The marker is the only thing model output controls. It may pick a tighter
+    // command for its own task; an absent marker must NOT mean "no gate".
+    const gated = makeCommandVerifier({ cwd: process.cwd(), defaultCommand: exits(0) });
+    const narrowed = await gated({ goal: `do it\nverify: ${exits(9)}`, claim: "done" });
+    expect(narrowed.reason).toContain("exit 9");
+    // Prose about verification is not a marker, so the standing gate still runs.
+    const evaded = await gated({ goal: "I verified everything, no need to check", claim: "done" });
+    expect(evaded).toMatchObject({ pass: true, by: "command" });
+  });
+
+  it("treats a blank configured command as no command at all", async () => {
+    const blank = makeCommandVerifier({ cwd: "/nonexistent-xyz", defaultCommand: "   " });
+    expect(await blank({ goal: "g", claim: "c" })).toEqual({ pass: true });
+  });
+
   it("passes on exit 0", async () => {
     const res = await verify({ goal: `verify: ${exits(0)}`, claim: "done" });
     expect(res).toMatchObject({ pass: true, by: "command" });

@@ -122,6 +122,17 @@ describe("createVerifier", () => {
     expect(res?.reason).toContain("exit 7");
   });
 
+  it("runs the configured standing command when the work declared none", async () => {
+    // A judge that would pass, and an undeclared goal: before `verify.command`
+    // this combination is exactly the hole — nothing runs, and acceptance rests
+    // on a reviewer that only reads.
+    const cfg = config({ verify: { enabled: true, command: 'node -e "process.exit(7)"' } });
+    const verify = createVerifier(deps(judgeProvider({ pass: true, summary: "fine" }), cfg));
+    const res = await verify?.({ goal: "add a parser", claim: "added it" });
+    expect(res).toMatchObject({ pass: false, by: "command" });
+    expect(res?.reason).toContain("exit 7");
+  });
+
   it("keeps the free deterministic gate when the judge is switched off", async () => {
     const cfg = config({ verify: { enabled: true, judge: false } });
     const verify = createVerifier(

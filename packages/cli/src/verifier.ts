@@ -102,6 +102,10 @@ export function createVerifier(deps: VerifierDeps): Verifier | undefined {
       ...(deps.config.verify?.commandTimeoutMs !== undefined
         ? { timeoutMs: deps.config.verify.commandTimeoutMs }
         : {}),
+      // The standing gate: what runs when the work declares no `verify:` line of
+      // its own. Without it an undeclared unit is judged by a reviewer that only
+      // reads, so nothing ever executes the suite.
+      ...(deps.config.verify?.command ? { defaultCommand: deps.config.verify.command } : {}),
     }),
   ];
   // The judge is separately switchable: on a small local model it can be noise,

@@ -312,18 +312,28 @@ export interface CommandVerifierOptions {
   cwd: string;
   /** Kill and fail the command after this long. */
   timeoutMs?: number;
+  /**
+   * Command to run when the work declares none — the session's standing gate
+   * (`verify.command`). **Configuration only.** A declared `verify:` line still
+   * wins, so a model narrows this gate to its own task and can never widen or
+   * remove it; without a marker the fallback is what runs.
+   */
+  defaultCommand?: string;
 }
 
 /**
- * Run a task's declared verification command. No marker → a no-op pass; the
- * command is never invented. Exit 0 passes, and **anything else fails closed** —
- * this is the deterministic half, so it is allowed to block.
+ * Run a task's verification command: the one it declared, else the session's
+ * configured fallback, else nothing. The command is never *invented* — it comes
+ * from the work's own `verify:` marker or from the config file. Exit 0 passes,
+ * and **anything else fails closed** — this is the deterministic half, so it is
+ * allowed to block.
  */
 export function makeCommandVerifier(opts: CommandVerifierOptions): Verifier {
   const timeoutMs = opts.timeoutMs ?? 180_000;
+  const fallback = opts.defaultCommand?.trim() || undefined;
 
   return async (req) => {
-    const cmd = extractVerifyCommand(req.spec) ?? extractVerifyCommand(req.goal);
+    const cmd = extractVerifyCommand(req.spec) ?? extractVerifyCommand(req.goal) ?? fallback;
     if (!cmd) return { pass: true };
     if (req.signal?.aborted) return { pass: true, skipped: true, by: "command" };
 
