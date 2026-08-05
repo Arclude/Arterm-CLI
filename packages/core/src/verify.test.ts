@@ -11,6 +11,7 @@ import {
   makeCompositeVerifier,
   makeJudgeVerifier,
   normalizeVerdict,
+  verificationShell,
 } from "./verify.js";
 
 function toolCall(name: string, args: Record<string, unknown>): AgentEvent {
@@ -144,6 +145,39 @@ describe("makeCommandVerifier", () => {
     const res = await verify({ goal: `verify: ${exits(0)} && ${exits(3)}`, claim: "done" });
     expect(res.pass).toBe(false);
     expect(res.reason).toContain("exit 3");
+  });
+});
+
+describe("verificationShell", () => {
+  // Platform-pure, so the Windows contract is pinned from any machine — the bug
+  // it encodes was invisible on Linux and shipped a gate that PASSED anything
+  // on Windows for months.
+  const CMD = 'node -e "process.exit(3)"';
+
+  it("hands POSIX the command as one argument after -c", () => {
+    expect(verificationShell("linux", CMD)).toEqual({
+      file: "sh",
+      args: ["-c", CMD],
+      windowsVerbatimArguments: false,
+    });
+  });
+
+  it("uses Node's own cmd.exe recipe on Windows: /d /s /c, quoted, verbatim", () => {
+    // Exactly what child_process does for `shell: true` on win32. Dropping /s or
+    // the wrapping quotes lets cmd re-parse the inner quotes; dropping verbatim
+    // lets Node's argv escaping mangle them. Either way the command silently
+    // exits 0 and the deterministic gate stops being deterministic.
+    expect(verificationShell("win32", CMD)).toEqual({
+      file: "cmd.exe",
+      args: ["/d", "/s", "/c", `"${CMD}"`],
+      windowsVerbatimArguments: true,
+    });
+  });
+
+  it("wraps the command whole, so a chain stays one shell invocation", () => {
+    const chain = "a && b || c";
+    expect(verificationShell("win32", chain).args[3]).toBe(`"${chain}"`);
+    expect(verificationShell("darwin", chain).args[1]).toBe(chain);
   });
 });
 

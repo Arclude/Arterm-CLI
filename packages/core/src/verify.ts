@@ -302,9 +302,32 @@ export function extractVerifyCommand(text: string | undefined): string | undefin
   return undefined;
 }
 
-/** How to hand a command string to a shell as a single positional argument. */
-export function verificationShell(platform: NodeJS.Platform): [shell: string, ...args: string[]] {
-  return platform === "win32" ? ["cmd", "/d", "/c"] : ["sh", "-c"];
+/**
+ * How to hand a command string to a shell so the SHELL interprets it and Node
+ * does not — per platform, as a ready-to-spawn argv.
+ *
+ * Windows needs the exact recipe Node itself uses for `shell: true`:
+ * `cmd.exe /d /s /c "<command>"` with `windowsVerbatimArguments`. The naive
+ * `cmd /d /c <command>` sends the command through Node's argv escaping, which
+ * mangles anything containing quotes — `node -e "process.exit(3)"` arrived at
+ * cmd rewritten badly enough that it **exited 0**. That made the deterministic
+ * gate PASS on Windows no matter what the command did: `--verify-cmd` was
+ * decorative there, and a gate that fails open is worse than no gate at all.
+ * `/s` is what makes the wrapping quotes mean "strip the first and last, take
+ * the rest verbatim"; without it cmd re-parses the inner quotes.
+ */
+export function verificationShell(
+  platform: NodeJS.Platform,
+  command: string,
+): { file: string; args: string[]; windowsVerbatimArguments: boolean } {
+  if (platform === "win32") {
+    return {
+      file: "cmd.exe",
+      args: ["/d", "/s", "/c", `"${command}"`],
+      windowsVerbatimArguments: true,
+    };
+  }
+  return { file: "sh", args: ["-c", command], windowsVerbatimArguments: false };
 }
 
 export interface CommandVerifierOptions {
@@ -343,12 +366,14 @@ export function makeCommandVerifier(opts: CommandVerifierOptions): Verifier {
       // `shell: true`, which would let Node interpolate the whole string and turn
       // any metacharacter into an injection vector. `sh -c "<cmd>"` hands the
       // full string to the shell, which is the thing that should interpret it.
-      const [shell, ...shellArgs] = verificationShell(process.platform);
-      const child = spawn(shell, [...shellArgs, cmd], {
+      // (Windows takes the verbatim cmd.exe recipe — see verificationShell.)
+      const sh = verificationShell(process.platform, cmd);
+      const child = spawn(sh.file, sh.args, {
         cwd,
         shell: false,
         windowsHide: true,
         stdio: "ignore",
+        ...(sh.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         // Kill the process TREE, not just the shell: `sh -c "pnpm test"` leaves an
         // orphaned node behind otherwise. Same reasoning (and the same platform
         // split) as the shell tool — see packages/tools/src/bash.ts.
