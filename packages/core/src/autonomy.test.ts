@@ -1531,3 +1531,55 @@ describe("AutonomyEngine run budget", () => {
     expect(agent.prompts.some((p) => p.includes("Wrap up NOW"))).toBe(false);
   });
 });
+
+describe("autoExtend counts progress, not activity", () => {
+  const readTool: Tool = {
+    name: "look",
+    description: "",
+    parameters: {},
+    permission: "allow",
+    category: "read",
+    execute: async () => ({ output: "" }),
+  };
+
+  it("does not extend the cap for a run that only reads", async () => {
+    // The failure this closes: `progressSinceExtend` counted ANY tool call, so
+    // a read-only loop bought itself extension after extension while changing
+    // nothing at all.
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    agent.tools = [readTool];
+    agent.steps = Array.from({ length: 20 }, () => ["look"]);
+    const events = collect(bus);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 2,
+      autoExtend: true,
+      extendBy: 10,
+    });
+
+    await engine.start("g");
+
+    expect(events.some((e) => e.type === "autonomy_extended")).toBe(false);
+    expect(agent.prompts.length).toBe(2);
+  });
+
+  it("still extends for a run that writes", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    // `write` is the default FakeAgent tool and is category "edit".
+    agent.steps = Array.from({ length: 20 }, () => ["write"]);
+    const events = collect(bus);
+    const engine = new AutonomyEngine(agent as unknown as Agent, bus, taskDone, {
+      mode: "once",
+      maxSteps: 2,
+      autoExtend: true,
+      extendBy: 3,
+    });
+
+    await engine.start("g");
+
+    expect(events.some((e) => e.type === "autonomy_extended")).toBe(true);
+    expect(agent.prompts.length).toBeGreaterThan(2);
+  });
+});

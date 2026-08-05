@@ -665,7 +665,17 @@ export class AutonomyEngine {
     const off = this.bus.on((e) => {
       if (e.type === "tool_call") {
         sawTool = true;
-        this.progressSinceExtend += 1;
+        // Only work that CHANGES something counts toward another extension.
+        // Counting any tool call made a `read_file` loop look like progress, so
+        // the cap kept being extended for a run that was busy and going
+        // nowhere — the loop-detector analogue of the judge never seeing the
+        // diff. Reads still mark the step non-idle (`sawTool`); they just do
+        // not buy more steps. `bash` counts: a shell command is the one tool
+        // whose effects we cannot see, so assuming it did something is the
+        // safe direction.
+        if (this.agent.tools.find((t) => t.name === e.call.name)?.category !== "read") {
+          this.progressSinceExtend += 1;
+        }
         if (!toolNames.includes(e.call.name)) toolNames.push(e.call.name);
         if (e.call.name === this.taskDone.name) {
           doneSummary = String(e.call.arguments.summary ?? "");

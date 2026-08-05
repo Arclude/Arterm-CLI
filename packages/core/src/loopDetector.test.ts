@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Agent } from "./agent.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import type { ResponseCtx, ToolCallCtx } from "./kernel/pipeline.js";
-import { createLoopDetector } from "./loopDetector.js";
+import { createLoopDetector, tailCycle } from "./loopDetector.js";
 import { PermissionManager } from "./permissions.js";
 import type { ChatChunk, ChatProvider, ChatRequest, Tool, ToolCall } from "./types.js";
 
@@ -224,5 +224,195 @@ describe("loop detector wired into the Agent (default stages)", () => {
     await agent.run("go");
     expect(events.filter((e) => e.type === "loop_cut")).toHaveLength(0);
     expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(0);
+  });
+});
+
+describe("result-aware repetition", () => {
+  const iterate = async (
+    det: ReturnType<typeof createLoopDetector>,
+    calls: ToolCall[],
+    result: string,
+  ): Promise<void> => {
+    const res: ResponseCtx = { text: "", calls };
+    await det.responseStage(res, async () => {});
+    for (const c of calls) {
+      const ctx: ToolCallCtx = { call: c, output: result };
+      await det.toolCallStage(ctx, async () => {});
+    }
+  };
+
+  it("does not count identical calls whose RESULTS keep changing", async () => {
+    // The false positive that makes people disable a detector outright: a build
+    // watcher, a debugger step, a poll — identical calls by design, and every
+    // one of them is progress.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 5 });
+    for (let i = 0; i < 8; i++) {
+      await iterate(det, [call("bash", { command: "gdb next" })], `stopped at line ${i}`);
+    }
+    expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(0);
+    expect(events.filter((e) => e.type === "loop_cut")).toHaveLength(0);
+  });
+
+  it("still catches identical calls with identical results", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 5 });
+    for (let i = 0; i < 3; i++) {
+      await iterate(det, [call("read", { path: "a" })], "same output every time");
+    }
+    expect(events.filter((e) => e.type === "loop_detected").length).toBeGreaterThan(0);
+  });
+
+  it("ignores volatile noise — a timestamp is not progress", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 5 });
+    for (let i = 0; i < 3; i++) {
+      await iterate(det, [call("bash", { command: "date" })], `done in ${i * 7}ms at 12:00:0${i}`);
+    }
+    expect(events.filter((e) => e.type === "loop_detected").length).toBeGreaterThan(0);
+  });
+
+  it("exempts tools that repeat by design", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 2, cutAfter: 3, exempt: ["poll"] });
+    for (let i = 0; i < 6; i++) {
+      const ctx: ToolCallCtx = { call: call("poll"), output: "same" };
+      await det.toolCallStage(ctx, async () => {});
+    }
+    expect(events).toHaveLength(0);
+  });
+});
+
+describe("argument-agnostic error streak", () => {
+  it("catches the same failure reached through DIFFERENT calls", async () => {
+    // Structurally invisible to a call fingerprint, and the most common real
+    // stall: five different commands, all failing the same way.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 9 });
+    for (const path of ["a.ts", "b.ts", "c.ts"]) {
+      const ctx: ToolCallCtx = {
+        call: call("read", { path }),
+        output: `ENOENT: no such file or directory, open '${path}'`,
+        isError: true,
+      };
+      await det.toolCallStage(ctx, async () => {});
+    }
+    const notes = events.filter((e) => e.type === "loop_detected");
+    expect(notes).toHaveLength(1);
+    expect(notes[0] && "note" in notes[0] && notes[0].note).toContain("different calls");
+  });
+
+  it("nudges once per error identity, not once per step", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 2, cutAfter: 9 });
+    for (let i = 0; i < 6; i++) {
+      const ctx: ToolCallCtx = {
+        call: call("bash", { command: `try-${i}` }),
+        output: "permission denied",
+        isError: true,
+      };
+      await det.toolCallStage(ctx, async () => {});
+    }
+    expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(1);
+  });
+
+  it("a success resets the streak — the problem was fixed", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 9 });
+    const fail = async (n: number): Promise<void> => {
+      const ctx: ToolCallCtx = {
+        call: call("read", { path: `${n}.ts` }),
+        output: "ENOENT: missing",
+        isError: true,
+      };
+      await det.toolCallStage(ctx, async () => {});
+    };
+    await fail(1);
+    await fail(2);
+    const ok: ToolCallCtx = { call: call("write", { path: "1.ts" }), output: "written" };
+    await det.toolCallStage(ok, async () => {});
+    await fail(3);
+    expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(0);
+  });
+});
+
+describe("monologue (talking without acting)", () => {
+  const textOnlyTurn = async (det: ReturnType<typeof createLoopDetector>): Promise<ResponseCtx> => {
+    det.resetTurn();
+    const ctx: ResponseCtx = { text: "Let me think about this.", calls: [] };
+    await det.responseStage(ctx, async () => {});
+    return ctx;
+  };
+
+  it("tells the model after 3 consecutive turns with no tool call", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, monologueAfter: 3 });
+    await textOnlyTurn(det);
+    await textOnlyTurn(det);
+    expect(events).toHaveLength(0);
+    const third = await textOnlyTurn(det);
+    expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(1);
+    // No tool result exists to carry the note, so it rides the reply itself.
+    expect(third.text).toContain("no tool call");
+  });
+
+  it("a turn that used a tool resets it — productive turns end in text too", async () => {
+    // Every eternal step closes with a text-only reply; counting those would
+    // fire on a perfectly healthy run.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, monologueAfter: 3 });
+    for (let i = 0; i < 5; i++) {
+      det.resetTurn();
+      const ctx: ToolCallCtx = { call: call("read", { path: `${i}.ts` }), output: `file ${i}` };
+      await det.toolCallStage(ctx, async () => {});
+      const res: ResponseCtx = { text: "done", calls: [] };
+      await det.responseStage(res, async () => {});
+    }
+    expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(0);
+  });
+});
+
+describe("tailCycle", () => {
+  it("finds the period of a repeating tail", () => {
+    expect(tailCycle(["a", "a", "a"])).toMatchObject({ period: 1, repeats: 3 });
+    expect(tailCycle(["a", "b", "a", "b", "a", "b"])).toMatchObject({ period: 2, repeats: 3 });
+    expect(tailCycle(["a", "b", "c", "a", "b", "c"])).toMatchObject({ period: 3, repeats: 2 });
+  });
+
+  it("reports no cycle for a run that keeps moving", () => {
+    expect(tailCycle(["a", "b", "c", "d", "e"]).repeats).toBe(1);
+  });
+});
+
+describe("compaction does not erase the loop's evidence", () => {
+  it("keeps the fingerprint streak across a context compaction", async () => {
+    // A logged incident elsewhere: an agent looped ~50 identical iterations,
+    // context overflowed, compaction succeeded — and it resumed the SAME loop
+    // for 12 more iterations, because compaction had removed the evidence the
+    // detector was counting. Our detector holds its state in its own closure
+    // rather than in the message list, so compaction cannot reset it. That
+    // immunity is incidental unless something pins it.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 9 });
+    const iteration = async (): Promise<void> => {
+      const ctx: ResponseCtx = { text: "", calls: [call("read", { path: "a" })] };
+      await det.responseStage(ctx, async () => {});
+    };
+    await iteration();
+    await iteration();
+    // Compaction happens here: the agent rewrites `messages` wholesale. The
+    // detector is not told, and must not care.
+    await iteration();
+    expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(1);
   });
 });

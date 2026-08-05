@@ -164,6 +164,16 @@ export interface ArtermConfig {
     cutAfter?: number;
     /** Sliding-window size for the per-call repeat check (default 10). */
     window?: number;
+    /**
+     * Tools never counted as repeating. Some calls are identical by design —
+     * a debugger step, `tail -f`, polling a build — and the only published
+     * false-positive complaint against a shipped detector came from users
+     * whose correct behavior was killed, with a global off-switch as their
+     * only remedy.
+     */
+    exempt?: string[];
+    /** Consecutive tool-less turns before the model is told it is only talking (default 3). */
+    monologueAfter?: number;
   };
   /**
    * Result verification: a deterministic command gate, with an LLM judge behind it.
@@ -465,6 +475,8 @@ const configFileSchema = z
       .object({
         strategy: z.enum(["none", "window", "summary"]),
         window: z.number().int().positive().optional(),
+        exempt: z.array(z.string()).optional(),
+        monologueAfter: z.number().int().positive().optional(),
         compactAtPercent: z.number().min(0).max(1).optional(),
         maxMessages: z.number().int().positive().optional(),
         clearToolResults: z.boolean().optional(),
