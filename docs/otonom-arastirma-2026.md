@@ -27,10 +27,16 @@ OpenHands'in Stuck Detector'ı beş ayrı örüntü tanır (eşikler resmî dok�
 | Aynı eylem → **hata** tekrarı | 3+ |
 | Ajan monoloğu (kullanıcı girdisi olmadan ardışık mesaj) | 3+ |
 | A-B-A-B salınımı (ping-pong) | 6+ döngü |
-| **Context window hatası** tekrarı | tekrar eden |
+| ~~Context window hatası tekrarı~~ | **kaynakta uygulanmamış** |
 
-Karşılaştırma nesne kimliğiyle değil **semantik içerikle** yapılır (eylem: araç
-adı + içerik + düşünce; gözlem: içerik + araç adı; hata: hata mesajı). Mimari
+> **Dokümana değil kaynağa bakmak gerekti.** İkinci turda `stuck_detector.py`
+> okundu: `_is_stuck_context_window_error()` **sabit `False` döndürüyor** —
+> belgelenmiş ama yazılmamış bir kural. Ayrıca resmî dok. karşılaştırmanın
+> "semantik" olduğunu söylüyor, kaynak ise düz **alan eşitliği** yapıyor
+> (`source/thought/action/tool_name`). İlk turda bu satırı bizim eksiğimiz diye
+> yazmıştım; **doğrusu: bunu kimse uygulamıyor.**
+
+Mimari
 ders: OpenHands'te ajan durumsuzdur, döngüyü `Conversation` yürütür, olaylar
 append-only `EventLog`'a düşer; bellek sıkıştırma, alt-ajan devri, güvenlik
 incelemesi ve stuck detection **olay akışına asılan küçük yardımcı servislerdir**
@@ -167,14 +173,63 @@ yok. İzin merdiveni (deny > arbiter > yolo) mantıksal bir kapı; ama `--autono
 o kapıyı zaten açıyor. Devin ve Codex CVE'si tam bu yüzeyden vuruldu. En azından
 **egress kısıtı ve tehlikeli komut kategorileri için opsiyonel konteyner** gerek.
 
-**P1 — loop detector'da üç kör nokta.**
-1. **Tekrar eden hata**: fingerprint araç çağrısı üzerinde; "farklı çağrılar, hep
-   aynı hata" (OpenHands'in 3+ action-error kuralı) yakalanmıyor.
-2. **Context window hatası tekrarı** ayrı bir sinyal olarak izlenmiyor.
-3. **Monolog**: metin-only cevaplar bilinçli olarak *atlanıyor* (eternal turları
-   bozmasın diye). Ama araç çağırmadan durmadan konuşan bir model bugün hiç
-   yakalanmıyor — OpenHands bunu 3+ mesajda stuck sayıyor. Eternal semantiğini
-   bozmadan bir "araçsız ardışık tur" sayacı eklenebilir.
+**P1 — loop detector: parmak izi sonucu görmüyor, `autoExtend` ilerlemeyi
+yanlış tanımlıyor.** Yedi kaynak koduna bakan ikinci tur şu sırayı verdi:
+
+1. **Parmak izine sonuç hash'i (en yüksek değer).** Bugün anahtar `(araç, ilk
+   argümanlar)`. Bu hem fazla tetikte — `gdb next`, `tail -f`, derleme izleme
+   tasarımı gereği aynı çağrıdır — hem de kör: hafifçe farklı argümanlarla aynı
+   hataya varmayı göremez. Anahtar `(araç, argsHash, normalizeEdilmişSonuçHash)`
+   olmalı ve **sonuç değişince sayaç sıfırlanmalı** (zaman damgası, süre, pid,
+   temp yol temizlenir; kabuk için `exitCode/timedOut/stdout/stderr`). Bunu
+   yapan tek sistem OpenClaw ve sebebi net: **sonuçlar değişirken asla kesme**.
+   Beş topluluk PR'ı tam bu yüzden reddedildi — sert blok, ilerleyen işi
+   öldürüyordu. Kesme yolunu güvenli kılan tek değişiklik budur.
+2. **Argümandan bağımsız hata-kimliği serisi (eşik 3).** Bizim parmak izimiz
+   yapısal olarak göremez: "beş farklı komut, hep aynı `ENOENT`". Anahtar
+   normalize edilmiş hata kimliği (sınıf + ilk satır, rakam/yol maskeli), hangi
+   araç ürettiğinden bağımsız. Survey'de bunu yapan tek mekanizma Cline'ın
+   `MistakeTracker`'ı. Steer notunda hata birebir alıntılanmalı + "bunu 3 kez
+   **farklı argümanlarla** aldın; sorun argümanlar değil". Nudge'ı hata
+   kimliğine göre tekilleştir, yoksa donmuş seri her adım uyarır.
+3. **`autoExtend`'in ilerleme tanımı fazla cömert (kodda doğrulandı).**
+   `progressSinceExtend` araç çağrısı *veya* doğrulama denemesiyle artıyor —
+   yani salt `read_file` döngüsü "ilerleme" sayılıp uzatma kazanıyor. Literatür
+   bunu ayrı bir hata modu olarak adlandırıyor: "çalıştırma başarılı, faydalı
+   bilgi üretmiyor". Uzatmayı **durum değişimine** bağla: çalışma ağacı özeti
+   (`git status --porcelain` + değişen dosyaların içerik hash'i) bir öncekinden
+   farklı mı, ya da verdict gerçekten değişti mi. Bu, CLAUDE.md'deki "yargıç
+   diff'i hiç görmez" dersinin loop-detector karşılığı.
+4. **Post-compaction guard — bizde zaten güvenli (kodda doğrulandı).** OpenClaw'ın
+   2026-05-04 olayı: 57 dakika boyunca ~50 birebir aynı iterasyon; bağlam taştı,
+   auto-compaction başarıyla koştu, **ve ajan aynı döngüye 12 iterasyon daha
+   devam etti** — sıkıştırma döngünün kanıtını sildi, döngüyü değil. Bizde
+   detector durumu mesaj listesinden bağımsız bir closure'da (`recentHashes`)
+   yaşıyor ve `autoCompact` ona dokunmuyor; `resetTurn()` yalnızca tur-içi
+   pencereyi sıfırlıyor. Yani bu sınıf bizde kapalı — ama **kasıtlı olduğu
+   yazılı değil**, bir refactor sessizce bozabilir. Teste bağlanmalı.
+5. **Monolog kuralı (eşik 3).** Metin-only cevaplar bilinçli atlanıyor (eternal
+   turlarını bozmasın diye), dolayısıyla araç çağırmadan durmadan konuşan model
+   hiçbir şeye takılmıyor. 3 ardışık araçsız tur → steer.
+6. **k-periyodik döngüler (k ∈ 1..5).** Bizde yalnızca periyot 1 ve 2 var;
+   A-B-C-A-B-C üç dosyalık didişme yaygın. Gemini CLI 25'lik geçmişte 5'e kadar
+   tüm periyotları tarıyor.
+7. **Araç bazlı muafiyet.** Survey'deki tek "doğru davranış öldürüldü" şikâyeti
+   bu: Gemini CLI'da detector yalnızca **global** kapatılabiliyor. opencode
+   bunu izin sistemine bağlayıp araç bazlı `always` muafiyeti veriyor — bizde
+   `evaluate()` + trace zaten var, muafiyet `permissions explain` ile
+   denetlenebilir olur.
+8. **Jaccard yakın-döngü (yalnız steer).** Ardışık asistan mesajları arasında
+   kelime düzeyinde Jaccard ≥0.8, 3 adım sürerse steer. Aynı planı farklı
+   kelimelerle tekrar etmeyi hash yakalayamaz; taban ortalama 0.367 ölçülmüş.
+9. **LLM loop-yargıcı — en sona.** Eklenirse Gemini'nin kapılarıyla (30 turdan
+   sonra, her 10'da bir, güven ≥0.9, ikinci modelle teyit) ve **yalnız steer +
+   açık düşen** olmalı — `verify.ts`'in zaten taahhüt ettiği asimetri.
+
+İki kesişen kural: **kesmeden önce uyar** (sert duran sistemler şikâyet üretiyor:
+"AI hiç çalışamıyor"), ve **`--autonomous` altında her limit bir karara
+çözülmeli, prompt'a değil** — Cline auto-approve'da tam bunu yapıyor; bizim
+alt-ajan asker'ı da "deny" yanıtlıyor, kesme yolunun da aynı özelliği olmalı.
 
 **P1 — compaction eşiği araştırmanın gerisinde.** Bizde `compactAtPercent: 0.85`;
 2026 tavsiyesi **%70–75** çünkü bozulma %70–80'de başlıyor. `clearToolResults`
@@ -352,8 +407,9 @@ oturumda uyarıp devam etmek doğru, **gözetimsizde reddetmek** doğru.
 2. **Checkpoint/rewind.** İçerik-adresli depo, `toolCall.execute`'dan önce
    yakalama, tur başına granülerlik, symlink/hardlink atlama + sayı bildirme,
    redo = restore. Kullanıcının `.git`'ine asla yazma.
-3. **Loop detector'a üç sinyal**: tekrar eden hata, context-window hatası,
-   araçsız ardışık tur (monolog).
+3. **Loop detector**: parmak izine sonuç hash'i (kesmeyi güvenli kılan tek
+   değişiklik) + argümandan bağımsız hata serisi (3) + `autoExtend`'i durum
+   değişimine bağlama + monolog (3). Post-compaction bağışıklığını teste bağla.
 4. **`compactAtPercent` → 0.75.**
 5. **`--autonomous` sandbox eklesin** (bugün yalnızca kaldırıyor):
    `@anthropic-ai/sandbox-runtime` ile egress allowlist + FS confinement,
@@ -411,6 +467,16 @@ Güvenlik: [GHSA-w5fx-fh39-j5rw / CVE-2025-59532](https://github.com/advisories/
 [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) ·
 [CaMeL (arXiv 2505.22852)](https://arxiv.org/pdf/2505.22852) ·
 [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)
+
+Loop tespiti: [OpenHands stuck_detector.py (kaynak)](https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/conversation/stuck_detector.py) ·
+[Gemini CLI loopDetectionService.ts](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/loopDetectionService.ts) ·
+[OpenClaw loop detection](https://docs.openclaw.ai/tools/loop-detection) ·
+[OpenClaw 2026-05-04 post-compaction olayı](https://github.com/openclaw/openclaw/issues/77474) ·
+[gemini-cli #9276 (yanlış pozitif: yalnız global kapatma)](https://github.com/google-gemini/gemini-cli/issues/9276) ·
+[cline #11542 (tespitsiz kaçak: 870 istek)](https://github.com/cline/cline/issues/11542) ·
+[The Cognitive Companion (arXiv 2604.13759)](https://arxiv.org/abs/2604.13759) ·
+[Semantic Early-Stopping (arXiv 2606.27009)](https://arxiv.org/abs/2606.27009) ·
+[Failure-Aware Observability (arXiv 2606.01365)](https://arxiv.org/abs/2606.01365)
 
 Ölçme: [Harbor agents (adaptör arayüzü)](https://www.harborframework.com/docs/agents) ·
 [Harbor tasks](https://www.harborframework.com/docs/tasks) ·
