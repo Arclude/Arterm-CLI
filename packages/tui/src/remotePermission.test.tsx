@@ -77,7 +77,10 @@ describe("remote permission answering (desktop ↔ TUI)", () => {
     const bus = new EventBus();
     const broker = new PermissionBroker(bus);
     const { frames, unmount } = render(createElement(App, { session: fakeSession(bus, broker) }));
-    const seen = () => frames[frames.length - 1] ?? "";
+    // The LAST write is not always a UI frame: InputLine's unmount cleanup
+    // emits the bracketed-paste-off escape as its own stdout frame. Search
+    // backwards for a real frame instead (same trick as fallbackBar.test).
+    const seen = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();
 
     const answered = broker.ask(writeTool, { path: "a.ts" });
@@ -101,13 +104,22 @@ describe("remote permission answering (desktop ↔ TUI)", () => {
     const { stdin, frames, unmount } = render(
       createElement(App, { session: fakeSession(bus, broker) }),
     );
-    const seen = () => frames[frames.length - 1] ?? "";
+    // The LAST write is not always a UI frame: InputLine's unmount cleanup
+    // emits the bracketed-paste-off escape as its own stdout frame. Search
+    // backwards for a real frame instead (same trick as fallbackBar.test).
+    const seen = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();
 
     const answered = broker.ask(writeTool, { path: "a.ts" });
     await waitFor(seen, (f) => f.includes("Permission required"));
     const id = broker.current()?.id ?? "";
 
+    // One settle tick between "the prompt is painted" and the keypress: the
+    // frame string lands at commit time, but PermissionPrompt's useInput
+    // subscribes in the post-commit effect — a keypress inside that gap has no
+    // subscriber and is dropped. A human is always slower than an effect; the
+    // 20ms poll above is not.
+    await tick();
     stdin.write("n"); // deny, in the terminal
     await expect(answered).resolves.toBe("deny");
 
@@ -121,7 +133,10 @@ describe("remote permission answering (desktop ↔ TUI)", () => {
     const bus = new EventBus();
     const broker = new PermissionBroker(bus);
     const { frames, unmount } = render(createElement(App, { session: fakeSession(bus, broker) }));
-    const seen = () => frames[frames.length - 1] ?? "";
+    // The LAST write is not always a UI frame: InputLine's unmount cleanup
+    // emits the bracketed-paste-off escape as its own stdout frame. Search
+    // backwards for a real frame instead (same trick as fallbackBar.test).
+    const seen = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();
 
     // A fan-out is live on the board, then two of its workers ask at once.
@@ -165,7 +180,10 @@ describe("remote permission answering (desktop ↔ TUI)", () => {
     const bus = new EventBus();
     const broker = new PermissionBroker(bus);
     const { frames, unmount } = render(createElement(App, { session: fakeSession(bus, broker) }));
-    const seen = () => frames[frames.length - 1] ?? "";
+    // The LAST write is not always a UI frame: InputLine's unmount cleanup
+    // emits the bracketed-paste-off escape as its own stdout frame. Search
+    // backwards for a real frame instead (same trick as fallbackBar.test).
+    const seen = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();
 
     const answered = broker.ask(writeTool, { path: "a.ts" });

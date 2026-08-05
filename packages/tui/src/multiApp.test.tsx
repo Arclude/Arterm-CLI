@@ -221,11 +221,46 @@ describe("MultiApp (multi-session host)", () => {
     m.unmount();
   });
 
-  it("re-asserts SGR mouse modes on resize (heals a host-emulator reset)", async () => {
+  it("starts uncaptured (drag selects), /mouse captures the wheel, /mouse again releases", async () => {
     const bus = new EventBus();
     const instance = render(
       createElement(MultiApp, {
         initial: { id: "sess-a", session: fakeSession(bus, "A") },
+        fullscreen: true,
+      }),
+    );
+    const out = () => instance.frames.join("");
+    const seen = () => instance.frames.join("\n");
+    // Default: NO capture — plain left-drag select works from the first frame;
+    // the wheel rides the terminal's alternate-scroll arrows (?1007h).
+    await waitFor(out, (f) => f.includes(`${ESC}[?1007h`));
+    expect(out()).not.toContain(`${ESC}[?1006h`);
+
+    instance.stdin.write("/mouse");
+    await waitFor(seen, (f) => f.includes("/mouse"));
+    instance.stdin.write(ENTER);
+    // Opt IN: capture on the wire (?1006h) and announced.
+    await waitFor(seen, (f) => f.includes("mouse capture ON"));
+    await waitFor(out, (f) => f.includes(`${ESC}[?1006h`));
+
+    instance.stdin.write("/mouse");
+    await tick();
+    instance.stdin.write(ENTER);
+    // And back out: released (?1006l) with alternate scroll restored.
+    await waitFor(seen, (f) => f.includes("mouse capture OFF"));
+    await waitFor(out, (f) => f.includes(`${ESC}[?1006l`));
+    instance.unmount();
+  });
+
+  it("re-asserts SGR mouse modes on resize (heals a host-emulator reset)", async () => {
+    const bus = new EventBus();
+    // The rebind-heal scenario is about CAPTURE mode (?1006h downgraded to X10
+    // by a pool restore) — so this test opts into capture explicitly.
+    const session = fakeSession(bus, "A");
+    session.config.tui = { fullscreen: true, mouse: true };
+    const instance = render(
+      createElement(MultiApp, {
+        initial: { id: "sess-a", session },
         fullscreen: true,
       }),
     );

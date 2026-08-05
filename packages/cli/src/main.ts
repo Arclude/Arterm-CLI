@@ -508,6 +508,7 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     { id: first.id, session: first.session },
     {
       goal: globals.goal,
+      version: VERSION,
       createSession: async () => {
         const s = await manager.create();
         return { id: s.id, session: s.session };

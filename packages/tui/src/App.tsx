@@ -37,7 +37,7 @@ import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardKind, type TeamBoardMember } from "./TeamBoard.js";
 import { agentColor } from "./agentColor.js";
 import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
-import { osc52Sequence } from "./clipboard.js";
+import { OSC52_MAX_CHARS, copyToClipboard } from "./clipboard.js";
 import {
   type HistoryNav,
   commandSuggestion,
@@ -47,6 +47,7 @@ import {
   historyUp,
   reduceInput,
 } from "./editing.js";
+import { formatRateLimits } from "./limitsView.js";
 import { Markdown } from "./markdown.js";
 import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
@@ -64,6 +65,7 @@ function InputLine({
   value,
   commands,
   columns,
+  borderColor = "gray",
   onChange,
   onSubmit,
   onHelp,
@@ -76,6 +78,8 @@ function InputLine({
   value: string;
   commands: readonly string[];
   columns: number;
+  /** Frame color for the typing area — mirrors the mode badge. */
+  borderColor?: string;
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onHelp: () => void;
@@ -145,8 +149,12 @@ function InputLine({
   );
   // One width-bounded, wrapping <Text>: a long paste flows onto as many lines as
   // it needs and the box grows vertically, instead of overflowing or ghosting.
+  // The border is drawn on THIS box rather than a wrapper: adding a nesting
+  // level around InputLine sent MultiApp's layout into a measure/re-layout
+  // oscillation (unbounded re-renders, observed as an OOM in its tests) —
+  // decorating the existing node does not.
   return (
-    <Box width={columns}>
+    <Box width={columns} borderStyle="round" borderColor={borderColor} paddingX={1}>
       <Text wrap="wrap">
         <Text color="cyan" bold>
           {"› "}
@@ -174,6 +182,8 @@ const COMMANDS = [
   "catalog",
   "clear",
   "copy",
+  "limits",
+  "mouse",
   "goal",
   "autonomy",
   "team",
@@ -477,6 +487,9 @@ export function App({
   onCloseSession,
   onPendingChange,
   sessionsBadge,
+  mouseCapture: mouseCaptureProp,
+  onToggleMouse,
+  version,
 }: {
   session: Session;
   initialGoal?: string;
@@ -497,6 +510,16 @@ export function App({
   onPendingChange?: (pending: boolean) => void;
   /** Multi-session summary for the status bar badge. */
   sessionsBadge?: { index: number; count: number; busyBackground: number };
+  /**
+   * The host's LIVE mouse-capture state (MultiApp owns the terminal modes and
+   * the /mouse toggle can change it at runtime). Absent when standalone —
+   * then the config value stands.
+   */
+  mouseCapture?: boolean;
+  /** Flip mouse capture at runtime (for /mouse); returns the new state. */
+  onToggleMouse?: () => boolean;
+  /** CLI version for the status bar (single source: the binary). */
+  version?: string;
 }): React.ReactElement | null {
   const { exit } = useApp();
   const { rows, columns } = useTermSize();
@@ -541,6 +564,9 @@ export function App({
    */
   const [fallbackTo, setFallbackTo] = useState<{ provider: string; model: string } | null>(null);
   const [permMode, setPermMode] = useState<PermissionMode>(session.permissionMode);
+  // Shift+Tab's slot past PLAN: while armed, a plain prompt launches an
+  // autonomous goal run instead of a supervised single turn.
+  const [autoArmed, setAutoArmed] = useState(false);
   const [autoState, setAutoState] = useState<"idle" | "running" | "paused" | "done" | "stopped">(
     "idle",
   );
@@ -644,7 +670,9 @@ export function App({
   // resize re-pad) live in MultiApp — they are process-global, and per-App
   // ownership would flap the modes on every session switch.
   const { stdout: rawStdout } = useStdout();
-  const mouseCapture = fullscreen && (session.config.tui?.mouse ?? true);
+  // The host's live value wins: /mouse can flip capture at runtime, and this
+  // App's scroll/arrow machinery has to follow the modes actually on the wire.
+  const mouseCapture = mouseCaptureProp ?? (fullscreen && (session.config.tui?.mouse ?? false));
   // True when the arrow ROUTER owns ↑/↓ (it tells wheel-synthesized arrows from
   // keypresses). Read through a ref by the always-active board handler below.
   const routedArrows = fullscreen && !mouseCapture;
@@ -1397,9 +1425,33 @@ export function App({
   // Permission mode: cycle with Shift+Tab, set explicitly via /mode (and /auto, /plan…).
   const applyMode = useCallback(
     (next: PermissionMode): void => {
+      // An explicit mode choice always leaves AUTONOMOUS first — keeping the
+      // goal-launcher armed under a freshly chosen ASK would betray the badge.
+      if (autoArmed && session.setAutonomous) {
+        for (const text of session.setAutonomous(false)) push({ kind: "system", text });
+        setAutoArmed(false);
+      }
       session.setMode(next);
       setPermMode(next);
       push({ kind: "system", text: `▸ permission mode → ${next.toUpperCase()}` });
+    },
+    [session, push, autoArmed],
+  );
+
+  /**
+   * Arm/disarm autonomous mode (Shift+Tab past PLAN). All policy lives behind
+   * `session.setAutonomous` (injected by the CLI); the TUI only owns the
+   * gesture and the badge. Returns false when the session can't do it, so the
+   * cycle can fall through to ASK instead of trapping the user on PLAN.
+   */
+  const setAutonomous = useCallback(
+    (on: boolean): boolean => {
+      if (!session.setAutonomous) return false;
+      const lines = session.setAutonomous(on);
+      setAutoArmed(on);
+      setPermMode(on ? "yolo" : "ask");
+      for (const text of lines) push({ kind: "system", text });
+      return true;
     },
     [session, push],
   );
@@ -1497,10 +1549,17 @@ export function App({
     },
   );
 
-  // Shift+Tab cycles the permission mode (ASK → AUTO → PLAN).
+  // Shift+Tab cycles ASK → AUTO → PLAN → AUTONOMOUS → ASK. The last slot is
+  // not a permission mode: it arms the unattended profile on the live session
+  // and routes plain prompts into the autonomy engine.
   useInput(
     (_input, key) => {
       if (key.tab && key.shift) {
+        if (autoArmed) {
+          setAutonomous(false);
+          return;
+        }
+        if (permMode === "plan" && setAutonomous(true)) return;
         const i = MODE_CYCLE.indexOf(permMode);
         applyMode(MODE_CYCLE[(i + 1) % MODE_CYCLE.length] ?? "ask");
       }
@@ -1955,19 +2014,81 @@ export function App({
           break;
         }
         case "copy": {
-          // Copy the last assistant reply via OSC 52 — the terminal owns the
-          // clipboard write, so this works over SSH too, and it reaches replies
-          // longer than the screen (drag-select only covers what is visible).
+          // Copy via OSC 52 — the terminal owns the clipboard write, so this
+          // works over SSH too, and it reaches text no selection can: replies
+          // longer than the screen, and (with `all`) the whole conversation.
+          // `/copy` = last reply; `/copy all` = every user+assistant message.
+          const wantAll = rest[0] === "all";
           const last = [...items].reverse().find((i) => i.kind === "assistant");
-          if (!last || last.kind !== "assistant") {
-            push({ kind: "system", text: "nothing to copy yet — no assistant reply" });
-          } else if (!rawStdout) {
-            push({ kind: "system", text: "clipboard unavailable (no terminal stdout)" });
+          const text = wantAll
+            ? items
+                .filter((i) => i.kind === "user" || i.kind === "assistant")
+                .map((i) => (i.kind === "user" ? `› ${i.text}` : i.text))
+                .join("\n\n")
+            : last && last.kind === "assistant"
+              ? last.text
+              : "";
+          if (!text) {
+            push({ kind: "system", text: "nothing to copy yet — no conversation" });
           } else {
-            rawStdout.write(osc52Sequence(last.text));
+            // OS helper first on a local TTY, OSC 52 as the fallback — the
+            // terminal this app ships in drops OSC 52 silently, and a /copy
+            // that "worked" while the clipboard stayed empty is worse than an
+            // honest failure. The method lands in the message so a broken
+            // route is visible, not guessed.
+            const method = await copyToClipboard(text, {
+              ...(rawStdout ? { stdout: rawStdout } : {}),
+              tty: process.stdout.isTTY === true,
+            });
+            if (method === "none") {
+              push({ kind: "system", text: "clipboard unavailable (no helper, no terminal)" });
+            } else {
+              const clipped =
+                text.length > OSC52_MAX_CHARS ? ` — clipped to first ${OSC52_MAX_CHARS}` : "";
+              push({
+                kind: "system",
+                text: `⧉ copied ${wantAll ? "the conversation" : "the last reply"} to the clipboard (${text.length} chars${clipped} · ${method})`,
+              });
+            }
+          }
+          break;
+        }
+        case "limits": {
+          const snap = session.rateLimits?.();
+          if (!snap) {
             push({
               kind: "system",
-              text: `⧉ copied the last reply to the clipboard (${last.text.length} chars)`,
+              text: session.rateLimits
+                ? "no rate-limit report yet — the provider sends limits with each reply, so ask something first"
+                : "this session's provider does not report rate limits",
+            });
+          } else {
+            push({
+              kind: "system",
+              text: [`◔ ${providerLabel} rate limits`, ...formatRateLimits(snap)].join("\n"),
+            });
+          }
+          break;
+        }
+        case "mouse": {
+          // Runtime escape hatch for "I just want to select and copy some
+          // text": capture owns drag events for in-app wheel scroll, so plain
+          // selection needs it OFF (Shift+drag bypasses it while ON). Runtime
+          // only — `tui.mouse: false` is the persistent form.
+          if (!onToggleMouse) {
+            push({
+              kind: "system",
+              text: mouseCapture
+                ? "mouse capture is fixed here — use Shift+drag to select, or set tui.mouse: false"
+                : "mouse is not captured — drag already selects text",
+            });
+          } else {
+            const on = onToggleMouse();
+            push({
+              kind: "system",
+              text: on
+                ? "▸ mouse capture ON — wheel scrolls in-app; select text with Shift+drag"
+                : "▸ mouse capture OFF — drag selects text; /mouse again to re-capture the wheel",
             });
           }
           break;
@@ -2204,6 +2325,8 @@ export function App({
       rawStdout,
       rows,
       fullscreen,
+      mouseCapture,
+      onToggleMouse,
     ],
   );
 
@@ -2238,6 +2361,14 @@ export function App({
         session.autonomy.steer(text);
         return;
       }
+      // AUTONOMOUS armed and idle: the prompt IS the goal — hand it to the
+      // engine instead of running a supervised single turn. (While a goal is
+      // running the steering branch above already owns plain text.)
+      if (autoArmed) {
+        push({ kind: "user", text });
+        void session.autonomy.start(text);
+        return;
+      }
       // A large-looking prompt gets a y/N offer to run as an agent team instead
       // (config.team.suggest gates this; declining runs the normal single turn).
       if (
@@ -2251,7 +2382,7 @@ export function App({
       }
       await runPlain(text);
     },
-    [session, handleSlash, push, runPlain],
+    [session, handleSlash, push, runPlain, autoArmed],
   );
 
   // First message of a panel-created session (mirror of initialGoal, one-shot).
@@ -2418,7 +2549,9 @@ export function App({
   };
 
   const busy = status !== "idle";
-  const mode = permMode.toUpperCase();
+  // AUTONOMOUS is not a permission mode but it owns the badge while armed —
+  // the underlying yolo would be the misleading label here.
+  const mode = autoArmed ? "AUTONOMOUS" : permMode.toUpperCase();
 
   // Finished items are printed ONCE into the terminal's scrollback via <Static>;
   // everything below it is Ink's small in-place dynamic region. Keeping that
@@ -2540,6 +2673,9 @@ export function App({
             value={input}
             commands={COMMANDS}
             columns={columns}
+            // The frame makes "where do I type" visible; its color mirrors the
+            // mode badge (magenta while AUTONOMOUS is armed, red under yolo).
+            borderColor={autoArmed ? "magenta" : permMode === "yolo" ? "red" : "gray"}
             onChange={setInput}
             onSubmit={submit}
             onHelp={() => push({ kind: "help" })}
@@ -2578,6 +2714,7 @@ export function App({
         shiftSelect={mouseCapture}
         sessions={sessionsBadge}
         fallbackTo={fallbackTo}
+        version={version}
       />
     </>
   );

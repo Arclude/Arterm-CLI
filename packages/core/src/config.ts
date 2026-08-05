@@ -312,10 +312,13 @@ export interface ArtermConfig {
     /** Also digest mid-session after every N captured observations (default 20; 0 = off). */
     digestEvery?: number;
     /**
-     * Which memory engine to run. "legacy" (default) = the built-in flat-learning
-     * pipeline; "cmem" = the richer `@arterm/memory` engine (typed observations,
-     * progressive-disclosure legend, SQLite/FTS5, semantic search). Mutually
-     * exclusive per session, so recall/tools are never doubled.
+     * Which memory engine to run. "cmem" (default) = the richer `@arterm/memory`
+     * engine (typed observations, progressive-disclosure legend, dedup by
+     * content hash, semantic search); "legacy" = the older flat-learning
+     * pipeline. Mutually exclusive per session, so recall/tools are never
+     * doubled. cmem became the default once its whole loop was verified
+     * end-to-end — capture → digest → store → next-session recall — because a
+     * memory engine nobody enables is a memory engine nobody has.
      */
     engine?: "legacy" | "cmem";
     /** cmem only: use Ollama embeddings for semantic search (default true; false = offline hash). */
@@ -341,11 +344,15 @@ export interface ArtermConfig {
      */
     fullscreen?: boolean;
     /**
-     * Fullscreen only. true (default): capture the mouse (SGR reporting) so the
-     * wheel scrolls the chat deterministically — text selection then needs
-     * Shift+drag (the terminal's capture bypass), like Claude Code. false: no
-     * capture — plain drag selects natively and the wheel is routed through the
-     * terminal's alternate-scroll arrow keys instead.
+     * Fullscreen only. false (default): no capture — plain left-drag selects
+     * text natively (then Ctrl+Shift+C / right-click copies) and the wheel is
+     * routed through the terminal's alternate-scroll arrows. true: capture the
+     * mouse (SGR reporting) so the wheel scrolls the chat deterministically —
+     * selection then needs Shift+drag (the terminal's capture bypass), like
+     * Claude Code. Default flipped to false after real use: "select some text"
+     * happens far more often than "the wheel direction felt off", and a copy
+     * that needs a modifier or a slash command reads as broken. /mouse toggles
+     * the live session either way.
      */
     mouse?: boolean;
   };
@@ -402,14 +409,14 @@ export function defaultConfig(): ArtermConfig {
       blackboard: true,
       memory: true,
     },
-    tui: { fullscreen: true, mouse: true },
+    tui: { fullscreen: true, mouse: false },
     fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface", autoApprove: false },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
     statusServer: { enabled: "auto", port: 0 },
     confirmDestructive: false,
     sdd: { maxQuestions: 4, maxTasks: 12, handoffChars: 12_000, specChars: 6_000 },
-    memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20, engine: "legacy" },
+    memory: { mode: "jsonl", maxInject: 12, autoDigest: true, digestEvery: 20, engine: "cmem" },
   };
 }
 

@@ -69,10 +69,15 @@ function fakeSession(bus: EventBus, tui?: { fullscreen?: boolean; mouse?: boolea
 }
 
 describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
-  it("captured mouse (default): SGR wheel scrolls in-app, footer pinned in every frame", async () => {
+  it("captured mouse (tui.mouse: true): SGR wheel scrolls in-app, footer pinned in every frame", async () => {
     const bus = new EventBus();
+    // Capture is opt-in now — the default leaves the mouse to the terminal so
+    // plain left-drag selects text (the most common gesture of all).
     const { stdin, frames, unmount } = render(
-      createElement(App, { session: fakeSession(bus), fullscreen: true }),
+      createElement(App, {
+        session: fakeSession(bus, { fullscreen: true, mouse: true }),
+        fullscreen: true,
+      }),
     );
     const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();

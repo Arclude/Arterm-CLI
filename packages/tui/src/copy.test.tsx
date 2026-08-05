@@ -94,4 +94,34 @@ describe("/copy", () => {
 
     unmount();
   });
+
+  it("/copy all puts the whole conversation on the clipboard, OSC 52 payload included", async () => {
+    const bus = new EventBus();
+    const { stdin, frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
+    const seen = () => frames.join("\n");
+    await tick();
+
+    // A real submit: user items exist only through the input path (there is no
+    // user_message bus event — the transcript is the source of truth here).
+    stdin.write("soru bir");
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    bus.emit({
+      type: "assistant_message",
+      message: { role: "assistant", content: "cevap bir" },
+    });
+    await tick();
+
+    stdin.write("/copy all");
+    await tick();
+    stdin.write(ENTER);
+    await waitFor(seen, (f) => f.includes("⧉ copied the conversation"));
+    // The OSC 52 write itself must carry the conversation: user line prefixed
+    // with ›, messages joined by a blank line, base64 in the escape payload.
+    const b64 = Buffer.from("› soru bir\n\ncevap bir", "utf8").toString("base64");
+    expect(frames.join("")).toContain(`52;c;${b64}`);
+
+    unmount();
+  });
 });

@@ -31,9 +31,15 @@ interface Props {
    * replies are now coming from somewhere else.
    */
   fallbackTo?: { provider: string; model: string } | null;
+  /**
+   * The CLI's version string, threaded down from the binary. The bar used to
+   * hold its own hard-coded copy, and it drifted: v0.4.0 shipped with the
+   * footer still saying v0.3.3 because the release bump missed the duplicate.
+   * One source (main.ts VERSION, next to the package.json the release DOES
+   * bump) — or nothing.
+   */
+  version?: string;
 }
-
-const VERSION = "0.3.3";
 
 function gitBranch(dir: string): string {
   try {
@@ -90,6 +96,15 @@ function ModeBadge({ mode }: { mode: string }): React.ReactElement {
       </Text>
     );
   }
+  // Shift+Tab's armed state: prompts are goals and permissions are yolo — at
+  // least as consequential as YOLO, so it gets the same filled-badge treatment.
+  if (mode === "AUTONOMOUS") {
+    return (
+      <Text backgroundColor="magenta" color="whiteBright" bold>
+        {" ◆ AUTONOMOUS "}
+      </Text>
+    );
+  }
   return (
     <Text color={modeColor(mode)} bold>
       [{mode}]
@@ -110,6 +125,7 @@ export function StatusBar({
   columns,
   shiftSelect = false,
   cwd: cwdProp,
+  version,
   sessions,
   fallbackTo,
 }: Props): React.ReactElement {
@@ -162,7 +178,7 @@ export function StatusBar({
           <Text color="cyan" bold>
             ▌ARTERM
           </Text>
-          <Text color="gray"> v{VERSION}</Text>
+          {version ? <Text color="gray"> v{version}</Text> : null}
           {sepN}
           {dot}
           <Text color={statusColor}> {status}</Text>
@@ -217,7 +233,7 @@ export function StatusBar({
         <Text color="cyan" bold>
           ▌ARTERM
         </Text>
-        <Text color="gray"> v{VERSION}</Text>
+        {version ? <Text color="gray"> v{version}</Text> : null}
         {sepW}
         {dot}
         <Text color={statusColor}> {status}</Text>

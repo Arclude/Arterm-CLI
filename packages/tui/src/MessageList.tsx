@@ -125,7 +125,9 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
       ["/models", "open the model picker (type to filter)"],
       ["/login", "sign in to a provider (provider + API key)"],
       ["/catalog [query]", "search the models.dev catalog (~5k)"],
-      ["/copy", "copy the last reply to the clipboard"],
+      ["/copy [all]", "copy the last reply (or the whole conversation) to the clipboard"],
+      ["/limits", "provider rate limits: what remains, when it resets"],
+      ["/mouse", "toggle mouse capture (OFF: drag selects text; ON: wheel scrolls in-app)"],
       ["/clear", "reset the conversation"],
       ["/exit", "quit  (or Ctrl+C)"],
     ],
@@ -162,6 +164,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ["/mode [ask|auto|plan|yolo]", "set mode (no arg cycles)"],
       ["/auto /plan /ask /yolo", "shortcuts for /mode"],
+      ["Shift+Tab", "cycle ASK → AUTO → PLAN → AUTONOMOUS (armed: a prompt runs as a goal)"],
       ["/permissions [mode] [outcome]", "what every tool is allowed to do right now"],
     ],
   },

@@ -21,6 +21,8 @@ export async function runTui(
     goal?: string;
     createSession?: () => Promise<{ id: string; session: Session }>;
     closeSession?: (id: string) => Promise<void>;
+    /** CLI version shown in the status bar — the binary is the single source. */
+    version?: string;
   },
 ): Promise<void> {
   const session = initial.session;
@@ -49,6 +51,7 @@ export async function runTui(
         createSession: opts?.createSession,
         closeSession: opts?.closeSession,
         fullscreen,
+        version: opts?.version,
       }),
       { stdout: tty ? syncedStdout(process.stdout) : process.stdout },
     );

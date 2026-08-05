@@ -38,12 +38,15 @@ export function MultiApp({
   createSession,
   closeSession,
   fullscreen = false,
+  version,
 }: {
   initial: { id: string; session: Session };
   initialGoal?: string;
   createSession?: () => Promise<{ id: string; session: Session }>;
   closeSession?: (id: string) => Promise<void>;
   fullscreen?: boolean;
+  /** CLI version for the status bar (single source: the binary). */
+  version?: string;
 }): React.ReactElement {
   const [entries, setEntries] = useState<Entry[]>(() => [
     { id: initial.id, session: initial.session, meta: new SessionMeta(initial.session) },
@@ -88,7 +91,20 @@ export function MultiApp({
   // ── Process-global terminal modes (moved out of App so switches don't flap
   // them). Mouse behavior is uniform across sessions: all configs share tui.*.
   const { stdout: rawStdout } = useStdout();
-  const mouseCapture = fullscreen && (initial.session.config.tui?.mouse ?? true);
+  // /mouse flips capture at runtime (null = follow config): selection needs the
+  // capture OFF, the in-app wheel needs it ON, and restarting to switch between
+  // "copy this text" and "scroll the chat" is not a real workflow.
+  const [mouseOverride, setMouseOverride] = useState<boolean | null>(null);
+  // Default OFF: plain left-drag must select text — the single most common
+  // mouse gesture — without a modifier or a slash command. The wheel still
+  // scrolls via the terminal's alternate-scroll arrows; /mouse (or
+  // tui.mouse: true) opts back into deterministic in-app wheel capture.
+  const mouseCapture = fullscreen && (mouseOverride ?? initial.session.config.tui?.mouse ?? false);
+  const toggleMouse = useCallback((): boolean => {
+    const next = !mouseCapture;
+    setMouseOverride(next);
+    return next;
+  }, [mouseCapture]);
   useEffect(() => {
     if (!rawStdout) return;
     const ESC = String.fromCharCode(27);
@@ -314,6 +330,11 @@ export function MultiApp({
           onCycleSession={cycle}
           onCloseSession={() => closeEntry(e.id)}
           onPendingChange={(pending) => onPendingChange(e.id, pending)}
+          mouseCapture={mouseCapture}
+          // Only meaningful in fullscreen: classic mode captures nothing, so
+          // drag already selects and the toggle would be a no-op lie.
+          onToggleMouse={fullscreen ? toggleMouse : undefined}
+          version={version}
           sessionsBadge={
             entries.length > 1 ? { index: i + 1, count: entries.length, busyBackground } : undefined
           }
