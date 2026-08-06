@@ -59,10 +59,12 @@ The shared vocabulary the rest of the monorepo builds on:
 ## 3. Configuration (`src/config.ts`)
 
 - **`ArtermConfig`** — the full session config: `provider`/`model`, host URLs,
-  `temperature`, per-tool `permissions`, `mode`, and nested blocks for `session`
-  (transcript logging), `context` (compaction strategy + window + thresholds),
-  `budget` (per-turn token cap), `autonomy`, `team`, `fleet`, `arbiter`,
-  `catalog`, `statusServer`, `sdd`, `memory`, and `tui`.
+  `temperature`, per-tool `permissions`, `mode`, `confirmDestructive`, and nested
+  blocks for `session` (transcript logging), `context` (compaction strategy +
+  window + thresholds), `budget` (per-turn caps **and** whole-run token/USD
+  ceilings), `sandbox` (shell execution boundary), `telemetry` (OTel GenAI
+  export), `autonomy`, `loopDetect`, `verify`, `mcpServers`, `plugins`, `team`,
+  `fleet`, `arbiter`, `catalog`, `statusServer`, `sdd`, `memory`, and `tui`.
 - **`defaultConfig()`** provides all defaults (Ollama at `:11434`, `mode:"ask"`,
   `context.strategy:"window"`, etc.).
 - **Loading is defensive**: `loadConfig()` reads `~/.arterm/config.json`, and
@@ -145,11 +147,18 @@ Owns the lifecycle of **one turn**:
   | Pipeline | Ctx | Role in the loop |
   | --- | --- | --- |
   | `userInput` | `{input}` | persist the user message |
-  | `request` | `{system,messages,native}` | assemble the prompt (build system msg) |
-  | `response` | `{text,calls}` | post-process the model reply |
+  | `request` | `{system,messages,native,refused?}` | gate + assemble the prompt |
+  | `response` | `{text,calls,usage?}` | meter + post-process the model reply |
   | `assistantOutput` | `{message}` | record + announce the assistant message |
   | `toolCall` | `{call,signal,tool?,output?,isError?,diff?,path?}` | gate + run one tool |
   | `contextWindow` | `{messages,reason,before?,after?}` | compaction / clearing |
+
+  Two of those fields carry a contract worth knowing. `request.refused` is set by
+  a stage that will not let the request be sent (the run budget's hard ceiling):
+  short-circuiting alone only skips the remaining stages, so the loop reads this
+  field and ends the turn — the same convention `toolCall.permission` uses to
+  deny. `response.usage` is present **only** when the backend reported it, so a
+  stage that meters spend must treat `undefined` as "unknown", never as zero.
 
 ---
 
@@ -167,15 +176,53 @@ behavior by adding/replacing a named stage, never by editing `run()`.
   supplied `container` (the session's root container — see `buildSession` in
   `@arterm/cli`) or a `defaultAgentContainer()` fallback for sub-agents/tests.
 - **`installDefaultPipelines()`** registers the built-in stages, each guarded by
-  `pipeline.has(name)` so a feature/test that pre-registered the same name wins:
-  - `contextWindow`: `clearToolResults` (replace stale tool outputs with
-    placeholders once usage crosses ~0.6 of the window) then `autoCompact`.
-  - `toolCall`: `permission` (resolve tool, gate via `PermissionManager`,
-    short-circuit on unknown/denied) → `execute` (call `tool.execute` with
-    `{cwd,signal,tools}`) → `loopGuard` (append corrective notes when a tool
-    fails repeatedly or the identical call is replayed — a nudge for small models).
-  - `userInput.record`, `request.buildSystem`, `response.recoverToolCalls`
-    (JSON tool-call fallback via `parseToolCalls`), `assistantOutput.record`.
+  `pipeline.has(name)` so a feature/test that pre-registered the same name wins.
+  Order inside a pipeline is registration order, and it is load-bearing:
+
+  | Pipeline | Stages, in order | `*` = conditional |
+  | --- | --- | --- |
+  | `userInput` | `record` | |
+  | `request` | `budgetGate`\* → `buildSystem` | a ceiling is configured |
+  | `response` | `budgetMeter` → `recoverToolCalls` → `loopDetector`\* | detector on |
+  | `assistantOutput` | `record` | |
+  | `toolCall` | `permission` → `execute` → `loopGuard` → `repeatWindow`\* | detector on |
+  | `contextWindow` | `clearToolResults` → `autoCompact` | |
+
+  - `request.budgetGate` refuses before `buildSystem` assembles anything, so a
+    run at its ceiling spends nothing on a prompt it will not send. Installed
+    only when a run ceiling exists (`!budget.inactive`) — with none there is
+    nothing to gate on.
+  - `response.budgetMeter` records the provider's own usage (never an estimate —
+    each iteration resends the history, so estimating double-counts the whole
+    conversation per lap). Unlike the gate it is installed whenever a `RunBudget`
+    exists, ceiling or not: reporting spend is not conditional on limiting it,
+    and gating that on a limit made every unlimited run report zero cost.
+  - `toolCall.permission` resolves the tool and gates it via `PermissionManager`,
+    short-circuiting on unknown/denied → `execute` calls `tool.execute` with
+    `{cwd, signal, tools, sandbox?}` → `loopGuard` appends corrective notes when
+    a tool fails repeatedly or an identical call is replayed (a nudge for small
+    models) → `repeatWindow` is the loop detector's per-turn half.
+  - `response.loopDetector` + `toolCall.repeatWindow` are one detector's two
+    halves, created once per agent and installed as a pair — or dropped as a
+    pair by `loopDetect: {enabled:false}`. They share a closure, so the
+    iteration fingerprint outlives individual turns: repetition ACROSS
+    eternal-mode steps is the target, and resetting per turn would miss it.
+  - `contextWindow.clearToolResults` replaces stale tool outputs with
+    placeholders once usage crosses ~0.6 of the window, then `autoCompact`.
+  - `response.recoverToolCalls` is the JSON tool-call fallback (`parseToolCalls`).
+
+- **Stages the composition root adds on top** — `buildSession` in `@arterm/cli`,
+  registered *after* the agent is constructed but positioned by name, which is
+  the point of naming them:
+  - `userInput.checkpointTurn` (appended) and a file-snapshot stage `before`
+    `permission`, so a denied call costs no snapshot (see `CheckpointStore`);
+  - the optional model gate `before` `permission` (config `arbiter.model`) — it
+    can only BLOCK; the regex arbiter and the mode still decide the rest;
+  - `telemetry` on `request`/`response` (appended) and `before` `execute` on
+    `toolCall`, when OTel export is on.
+
+  These are session wiring rather than loop defaults, but they are what actually
+  runs — a chain read from `installDefaultPipelines()` alone is incomplete.
 
 ### `run(userInput, signal?)` — one turn
 1. Detect `native` tool support; `runController.begin()` opens a `RunHandle`. The
@@ -185,7 +232,10 @@ behavior by adding/replacing a named stage, never by editing `run()`.
    surface as `error` events and still tear down).
 3. Loop up to the iteration limit; each iteration:
    - `contextWindow.run` (auto-clear / auto-compact),
-   - `request.run` (build system prompt),
+   - `request.run` (gate, then build the system prompt). If it comes back with
+     `refused` set, the turn **breaks here** rather than mid-flight: history
+     stays well-formed, nothing is half-paid for, and the turn closes with what
+     it already produced,
    - `streamRaw()` calls `provider.chat`, collecting text + native tool calls and
      emitting `text_delta`/`tool_call`/`usage` events,
    - `response.run` (recover JSON tool calls if none came natively),
