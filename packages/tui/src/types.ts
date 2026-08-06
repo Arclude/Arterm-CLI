@@ -103,6 +103,12 @@ export interface Session {
    */
   budgetState?(): BudgetState;
   /**
+   * One line naming the execution boundary shell commands run inside, when one
+   * is in force. Absent means the host — which `permissionMode` alone cannot
+   * distinguish, since yolo looks the same either way.
+   */
+  sandboxDescription?: string;
+  /**
    * Checkpoint / rewind (`/rewind`, `/redo`). Injected by the CLI; absent in
    * headless and test sessions, where the command says so rather than pretending.
    */

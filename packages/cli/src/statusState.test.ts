@@ -340,41 +340,41 @@ describe("StatusState", () => {
 });
 
 describe("control", () => {
-  it("dispatches pause/resume/stop to the autonomy engine", () => {
+  it("dispatches pause/resume/stop to the autonomy engine", async () => {
     const { session, autonomy } = makeSession();
-    expect(control(session, { action: "pause" })).toEqual({ ok: true });
-    expect(control(session, { action: "resume" })).toEqual({ ok: true });
-    expect(control(session, { action: "stop" })).toEqual({ ok: true });
+    expect(await control(session, { action: "pause" })).toEqual({ ok: true });
+    expect(await control(session, { action: "resume" })).toEqual({ ok: true });
+    expect(await control(session, { action: "stop" })).toEqual({ ok: true });
     expect(autonomy.pause).toHaveBeenCalled();
     expect(autonomy.resume).toHaveBeenCalled();
     expect(autonomy.stop).toHaveBeenCalled();
   });
 
-  it("requires text for steer and goal", () => {
+  it("requires text for steer and goal", async () => {
     const { session, autonomy } = makeSession();
-    expect(control(session, { action: "steer" }).ok).toBe(false);
-    expect(control(session, { action: "goal" }).ok).toBe(false);
-    expect(control(session, { action: "steer", note: "go left" })).toEqual({ ok: true });
-    expect(control(session, { action: "goal", note: "ship it" })).toEqual({ ok: true });
+    expect((await control(session, { action: "steer" })).ok).toBe(false);
+    expect((await control(session, { action: "goal" })).ok).toBe(false);
+    expect(await control(session, { action: "steer", note: "go left" })).toEqual({ ok: true });
+    expect(await control(session, { action: "goal", note: "ship it" })).toEqual({ ok: true });
     expect(autonomy.steer).toHaveBeenCalledWith("go left");
     expect(autonomy.start).toHaveBeenCalledWith("ship it");
   });
 
-  it("validates mode and surfaces mid-run rejection", () => {
+  it("validates mode and surfaces mid-run rejection", async () => {
     const { session, autonomy } = makeSession();
-    expect(control(session, { action: "mode", mode: "bogus" }).ok).toBe(false);
-    expect(control(session, { action: "mode", mode: "team" })).toEqual({ ok: true });
+    expect((await control(session, { action: "mode", mode: "bogus" })).ok).toBe(false);
+    expect(await control(session, { action: "mode", mode: "team" })).toEqual({ ok: true });
     expect(autonomy.setMode).toHaveBeenCalledWith("team");
 
     autonomy.setMode.mockReturnValueOnce(false);
-    const rejected = control(session, { action: "mode", mode: "once" });
+    const rejected = await control(session, { action: "mode", mode: "once" });
     expect(rejected.ok).toBe(false);
     expect(rejected.error).toMatch(/mid-run/);
   });
 
-  it("rejects unknown actions", () => {
+  it("rejects unknown actions", async () => {
     const { session } = makeSession();
-    const result = control(session, { action: "explode" });
+    const result = await control(session, { action: "explode" });
     expect(result.ok).toBe(false);
     expect(result.error).toContain("explode");
   });
@@ -410,28 +410,133 @@ describe("control: permission", () => {
     expect(snap.pendingPermissionQueue).toBe(0);
 
     const id = snap.pendingPermission?.id ?? "";
-    expect(control(session, { action: "permission", id, answer: "allow" })).toEqual({ ok: true });
+    expect(await control(session, { action: "permission", id, answer: "allow" })).toEqual({
+      ok: true,
+    });
     await expect(answer).resolves.toBe("allow");
     expect(state.snapshot().pendingPermission).toBeNull();
     state.dispose();
   });
 
-  it("validates id and answer", () => {
+  it("validates id and answer", async () => {
     const { session, permissionBroker } = makeSession();
     permissionBroker.setAsker(() => new Promise(() => {}));
 
-    expect(control(session, { action: "permission", answer: "allow" }).ok).toBe(false);
+    expect((await control(session, { action: "permission", answer: "allow" })).ok).toBe(false);
     // Nothing pending yet.
-    expect(control(session, { action: "permission", id: "x", answer: "allow" }).error).toMatch(
-      /no permission request/,
-    );
+    expect(
+      (await control(session, { action: "permission", id: "x", answer: "allow" })).error,
+    ).toMatch(/no permission request/);
 
     void permissionBroker.ask(writeTool, { path: "a.ts" });
     const id = permissionBroker.current()?.id ?? "";
-    expect(control(session, { action: "permission", id, answer: "maybe" }).ok).toBe(false);
-    expect(control(session, { action: "permission", id: "stale", answer: "allow" }).error).toMatch(
-      /stale/,
-    );
-    expect(control(session, { action: "permission", id, answer: "deny" })).toEqual({ ok: true });
+    expect((await control(session, { action: "permission", id, answer: "maybe" })).ok).toBe(false);
+    expect(
+      (await control(session, { action: "permission", id: "stale", answer: "allow" })).error,
+    ).toMatch(/stale/);
+    expect(await control(session, { action: "permission", id, answer: "deny" })).toEqual({
+      ok: true,
+    });
+  });
+});
+
+describe("StatusState — what the desktop could not see before", () => {
+  it("reports spend with no ceiling configured, and says when nothing was reported", () => {
+    // The dashboard's first question about an unattended run is what it cost.
+    // A session whose backend counts nothing must read as UNKNOWN, not as free.
+    const { session } = makeSession();
+    const state = new StatusState(session, { sessionId: "s1", cwd: "/w" });
+    expect(state.snapshot().budget).toMatchObject({ totalTokens: 0, usd: 0, reported: false });
+
+    (session as unknown as { budgetState: () => unknown }).budgetState = () => ({
+      tokens: 1085,
+      usd: 0.02,
+      inputTokens: 150,
+      outputTokens: 30,
+      cacheTokens: 905,
+      reported: true,
+      breached: false,
+      softHits: 0,
+      unpriced: false,
+      limitUsd: 5,
+    });
+    expect(state.snapshot().budget).toMatchObject({
+      inputTokens: 150,
+      outputTokens: 30,
+      totalTokens: 1085,
+      usd: 0.02,
+      limitUsd: 5,
+      reported: true,
+    });
+    state.dispose();
+  });
+
+  it("reports the sandbox boundary, which permissionMode alone cannot tell", () => {
+    // yolo + confined and yolo + unconfined look identical in the mode field,
+    // and they are very different risk states.
+    const { session } = makeSession();
+    expect(new StatusState(session, { sessionId: "s", cwd: "/w" }).snapshot().sandbox).toBeNull();
+
+    (session as unknown as { sandboxDescription: string }).sandboxDescription =
+      "writes confined to /w; egress: 13 allowed domains";
+    const confined = new StatusState(session, { sessionId: "s", cwd: "/w" });
+    expect(confined.snapshot().sandbox).toContain("egress");
+    confined.dispose();
+  });
+
+  it("counts guard activity and keeps the last verdict", () => {
+    const { bus, session } = makeSession();
+    const state = new StatusState(session, { sessionId: "s1", cwd: "/w" });
+    // Zero is a real answer here — "nothing got stuck" — so it is always present.
+    expect(state.snapshot().guards).toEqual({
+      loopSteers: 0,
+      loopCuts: 0,
+      extensions: 0,
+      lastVerdict: null,
+    });
+
+    bus.emit({ type: "loop_detected", streak: 3, note: "same calls" });
+    bus.emit({ type: "loop_detected", streak: 4, note: "same calls" });
+    bus.emit({ type: "loop_cut", streak: 5 });
+    bus.emit({ type: "autonomy_extended", newLimit: 50, reason: "progress" });
+    bus.emit({ type: "autonomy_verify", pass: false, scope: "goal", note: "tests fail" });
+
+    expect(state.snapshot().guards).toEqual({
+      loopSteers: 2,
+      loopCuts: 1,
+      extensions: 1,
+      lastVerdict: { pass: false, scope: "goal", note: "tests fail" },
+    });
+    state.dispose();
+  });
+});
+
+describe("control: rewind", () => {
+  it("restores a checkpoint and reports what it could NOT put back", async () => {
+    const { session } = makeSession();
+    (session as unknown as { checkpoints: unknown }).checkpoints = {
+      list: async () => [{ id: "cp1", label: "fix the parser", ts: 5, entries: [] }],
+      restore: async (id: string) => {
+        expect(id).toBe("cp1");
+        return { restored: 3, unchanged: 1, skippedLinks: 2, missing: 0 };
+      },
+      redoTarget: () => undefined,
+    };
+    const res = await control(session, { action: "rewind", checkpointId: "cp1" });
+    expect(res.ok).toBe(true);
+    // A partial restore that reads as a full one is the failure this avoids.
+    expect(res.detail).toContain("restored 3");
+    expect(res.detail).toContain("skipped 2 link(s)");
+  });
+
+  it("refuses without an id, and without a store at all", async () => {
+    const { session } = makeSession();
+    expect((await control(session, { action: "rewind" })).error).toMatch(/no checkpoint store/);
+    (session as unknown as { checkpoints: unknown }).checkpoints = {
+      list: async () => [],
+      restore: async () => ({ restored: 0, unchanged: 0, skippedLinks: 0, missing: 0 }),
+      redoTarget: () => undefined,
+    };
+    expect((await control(session, { action: "rewind" })).error).toMatch(/checkpointId/);
   });
 });

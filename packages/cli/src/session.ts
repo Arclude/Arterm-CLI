@@ -872,6 +872,9 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // the report must come from whoever is actually answering.
     rateLimits: () => provider.rateLimits?.(),
     budgetState: () => budget.state(),
+    // The boundary as a fact about the session, not a startup log line that has
+    // long since scrolled away.
+    ...(sandbox ? { sandboxDescription: sandbox.describe } : {}),
     checkpoints: {
       list: () => checkpoints.list(),
       restore: (id) => checkpoints.restore(id),

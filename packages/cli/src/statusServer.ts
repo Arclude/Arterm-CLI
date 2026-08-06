@@ -315,7 +315,7 @@ export function startStatusServer(opts: {
           resolve();
         }
       });
-      req.on("end", () => {
+      req.on("end", async () => {
         if (overflow) return;
         let parsed: Record<string, unknown>;
         try {
@@ -327,12 +327,16 @@ export function startStatusServer(opts: {
         }
         const str = (key: string): string | undefined =>
           typeof parsed[key] === "string" ? (parsed[key] as string) : undefined;
-        const result = control(opts.session, {
+        // Awaited: `rewind` restores files and is the one action that cannot
+        // answer synchronously. The snapshot is taken AFTER, so the response
+        // already reflects what the action did.
+        const result = await control(opts.session, {
           action: str("action") ?? "",
           note: str("note"),
           mode: str("mode"),
           id: str("id"),
           answer: str("answer"),
+          checkpointId: str("checkpointId"),
         });
         json(res, 200, { ...result, state: state.snapshot() });
         resolve();

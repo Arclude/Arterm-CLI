@@ -20,6 +20,8 @@ export type StampedEvent = { seq: number; ts: number } & AgentEvent;
 
 export const RING_MAX = 500;
 const STATE_THROTTLE_MS = 250;
+/** Undoable turns carried on the state frame — enough to offer, not a history. */
+const CHECKPOINT_MAX = 10;
 
 export interface Worker {
   task: string;
@@ -126,7 +128,67 @@ export interface StatusSnapshot {
    * worth showing even after the turn it rescued has ended.
    */
   lastFallback: StatusFallback | null;
+  /**
+   * What this run has spent, and against which ceilings.
+   *
+   * Reported whether or not a ceiling is configured — spend is a fact, and an
+   * unattended run's cost is the number an operator checks first. `reported`
+   * separates "the backend counted nothing" from "this cost nothing": most
+   * local servers report no usage, and a dashboard that renders their runs as
+   * free would be stating a fiction.
+   */
+  budget: StatusBudget;
+  /**
+   * The execution boundary shell commands run inside, or `null` for a host-level
+   * run. `permissionMode: "yolo"` looks identical whether or not a sandbox is in
+   * force, and those are very different risk states — this is the half of the
+   * story the mode alone cannot tell.
+   */
+  sandbox: string | null;
+  /** What the unattended-run guards did this session (see `StatusGuards`). */
+  guards: StatusGuards;
+  /**
+   * Undoable turns, newest first and bounded — enough for a dashboard to offer
+   * a rewind without shipping the whole history on every state frame.
+   */
+  checkpoints: { id: string; label: string; at: number }[];
   seq: number;
+}
+
+/** Run spend, mirroring `BudgetState` minus its internal bookkeeping. */
+export interface StatusBudget {
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  /** Priced total — cache read/write counted at their own rates. */
+  totalTokens: number;
+  usd: number;
+  limitTokens?: number;
+  limitUsd?: number;
+  /** True once a ceiling is reached: the run must stop. */
+  breached: boolean;
+  /** True when some spend had no catalog price, so `usd` is a floor. */
+  unpriced: boolean;
+  /** False when the backend reported no token counts at all. */
+  reported: boolean;
+}
+
+/**
+ * What the guards did — the difference between a run that worked and one that
+ * spun and was cut off.
+ *
+ * Counted rather than listed: a long run repeats them per turn, and the events
+ * themselves already reach the dashboard's feed. Zero is a real answer here (it
+ * means "nothing got stuck"), unlike the unknown-vs-empty cases elsewhere in
+ * this snapshot, so these are always present.
+ */
+export interface StatusGuards {
+  loopSteers: number;
+  loopCuts: number;
+  /** Progress-gated step-cap grants. */
+  extensions: number;
+  /** The most recent verification verdict, or `null` if none has landed. */
+  lastVerdict: { pass: boolean; scope?: string; note?: string } | null;
 }
 
 /** A fan-out message: the transport (SSE framing) is applied by the subscriber. */
@@ -153,6 +215,14 @@ export class StatusState {
   private mainActivities: string[] = [];
   private lastError: StatusError | null = null;
   private lastFallback: StatusFallback | null = null;
+  // Guard activity accumulates across the whole session, not per turn: "did
+  // this run ever get stuck" is the question, and a per-turn counter answers a
+  // different, less useful one.
+  private loopSteers = 0;
+  private loopCuts = 0;
+  private extensions = 0;
+  private lastVerdict: StatusGuards["lastVerdict"] = null;
+  private checkpointList: StatusSnapshot["checkpoints"] = [];
   private readonly startedAt = Date.now();
   private readonly subscribers = new Set<Sink>();
   private readonly unsubscribe: () => void;
@@ -188,6 +258,22 @@ export class StatusState {
         this.rounds += 1;
         this.pushMainActivity("✎ writing");
         break;
+      case "loop_detected":
+        this.loopSteers += 1;
+        break;
+      case "loop_cut":
+        this.loopCuts += 1;
+        break;
+      case "autonomy_extended":
+        this.extensions += 1;
+        break;
+      case "autonomy_verify":
+        this.lastVerdict = {
+          pass: ev.pass,
+          ...(ev.scope ? { scope: ev.scope } : {}),
+          ...(ev.note ? { note: ev.note } : {}),
+        };
+        break;
       case "usage":
         this.inTok += ev.usage.promptTokens ?? 0;
         this.outTok += ev.usage.completionTokens ?? 0;
@@ -205,6 +291,10 @@ export class StatusState {
       case "turn_end":
         this.status = "idle";
         this.activeTool = null;
+        // Best-effort and unawaited: the checkpoint for the turn that just ended
+        // is written by now, and a dashboard offering a rewind needs a current
+        // list rather than a one-turn-stale one.
+        void this.refreshCheckpoints();
         break;
       case "error":
         // The agent emits `error` and then `turn_end`, so the snapshot settles on
@@ -371,8 +461,50 @@ export class StatusState {
       pendingPermissionQueue: this.session.permissionBroker.queuedCount(),
       lastError: this.lastError,
       lastFallback: this.lastFallback,
+      budget: this.budget(),
+      sandbox: this.session.sandboxDescription ?? null,
+      guards: {
+        loopSteers: this.loopSteers,
+        loopCuts: this.loopCuts,
+        extensions: this.extensions,
+        lastVerdict: this.lastVerdict,
+      },
+      checkpoints: this.checkpointList,
       seq: this.seq,
     };
+  }
+
+  /**
+   * Spend for the snapshot. A session with no budget wired (tests, headless
+   * stubs) reports zeros with `reported: false` — which reads as "unknown",
+   * not as "free", and is the same distinction the meter itself draws.
+   */
+  private budget(): StatusBudget {
+    const s = this.session.budgetState?.();
+    return {
+      inputTokens: s?.inputTokens ?? 0,
+      outputTokens: s?.outputTokens ?? 0,
+      cacheTokens: s?.cacheTokens ?? 0,
+      totalTokens: s?.tokens ?? 0,
+      usd: s?.usd ?? 0,
+      ...(s?.limitTokens !== undefined ? { limitTokens: s.limitTokens } : {}),
+      ...(s?.limitUsd !== undefined ? { limitUsd: s.limitUsd } : {}),
+      breached: s?.breached ?? false,
+      unpriced: s?.unpriced ?? false,
+      reported: s?.reported ?? false,
+    };
+  }
+
+  /** Refresh the undoable-turn list. Best-effort: never throws into the loop. */
+  private async refreshCheckpoints(): Promise<void> {
+    try {
+      const all = (await this.session.checkpoints?.list()) ?? [];
+      this.checkpointList = all
+        .slice(0, CHECKPOINT_MAX)
+        .map((c) => ({ id: c.id, label: c.label, at: c.ts }));
+    } catch {
+      // A store that cannot be read is not a reason to stop reporting state.
+    }
   }
 
   /** Ring backlog, oldest first; `since` filters to events with `seq > since`. */
@@ -407,6 +539,15 @@ export interface ControlRequest {
   id?: string;
   /** The answer for `action: "permission"`. */
   answer?: string;
+  /** The checkpoint id to restore, for `action: "rewind"`. */
+  checkpointId?: string;
+}
+
+/** What a control action reports back. `detail` carries a success note. */
+export interface ControlResult {
+  ok: boolean;
+  error?: string;
+  detail?: string;
 }
 
 /**
@@ -414,7 +555,7 @@ export interface ControlRequest {
  * methods no-op when idle); `permission` answers the prompt currently blocking
  * the agent and fails cleanly when there is none.
  */
-export function control(session: Session, req: ControlRequest): { ok: boolean; error?: string } {
+export async function control(session: Session, req: ControlRequest): Promise<ControlResult> {
   const { action, note = "", mode } = req;
   switch (action) {
     case "pause":
@@ -440,6 +581,33 @@ export function control(session: Session, req: ControlRequest): { ok: boolean; e
       }
       const ok = session.autonomy.setMode(mode as AutonomyMode);
       return ok ? { ok: true } : { ok: false, error: "cannot change mode mid-run" };
+    }
+    case "rewind": {
+      // Restoring files under a running agent is destructive and asynchronous,
+      // which is why this is the one action that returns a promise. The caller
+      // awaits; every other action stays synchronous rather than being made
+      // async for symmetry it does not need.
+      if (!session.checkpoints) {
+        return { ok: false, error: "this session has no checkpoint store" };
+      }
+      const { checkpointId } = req;
+      if (!checkpointId) return { ok: false, error: "rewind requires checkpointId" };
+      return session.checkpoints
+        .restore(checkpointId)
+        .then((r) => ({
+          ok: true,
+          // Reported, not swallowed: a partial restore that reads as a full one
+          // is the failure mode this whole feature exists to avoid.
+          detail: [
+            `restored ${r.restored}`,
+            `unchanged ${r.unchanged}`,
+            ...(r.skippedLinks > 0 ? [`skipped ${r.skippedLinks} link(s)`] : []),
+          ].join(", "),
+        }))
+        .catch((err: unknown) => ({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }));
     }
     case "permission": {
       const { id, answer } = req;
