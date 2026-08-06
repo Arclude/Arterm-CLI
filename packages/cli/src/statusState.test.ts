@@ -524,7 +524,10 @@ describe("control: rewind", () => {
     };
     const res = await control(session, { action: "rewind", checkpointId: "cp1" });
     expect(res.ok).toBe(true);
-    // A partial restore that reads as a full one is the failure this avoids.
+    // A partial restore that reads as a full one is the failure this avoids —
+    // and a client must be able to tell them apart from the COUNTS, not by
+    // matching a word in the sentence. The prose is for a human.
+    expect(res.rewind).toEqual({ restored: 3, unchanged: 1, skippedLinks: 2 });
     expect(res.detail).toContain("restored 3");
     expect(res.detail).toContain("skipped 2 link(s)");
   });

@@ -548,6 +548,16 @@ export interface ControlResult {
   ok: boolean;
   error?: string;
   detail?: string;
+  /**
+   * `rewind`'s counts, as DATA rather than as the prose in `detail`.
+   *
+   * A client has to tell a clean restore from one that left files behind, and
+   * making it match a word in a sentence puts a wording change on one side of
+   * an IPC boundary in charge of correctness on the other. That is the same
+   * rule `verify.ts` states for verdicts: the number is the contract, the
+   * sentence is for a human to read.
+   */
+  rewind?: { restored: number; unchanged: number; skippedLinks: number };
 }
 
 /**
@@ -597,7 +607,13 @@ export async function control(session: Session, req: ControlRequest): Promise<Co
         .then((r) => ({
           ok: true,
           // Reported, not swallowed: a partial restore that reads as a full one
-          // is the failure mode this whole feature exists to avoid.
+          // is the failure mode this whole feature exists to avoid. The counts
+          // go out as data; `detail` is the same fact phrased for a human.
+          rewind: {
+            restored: r.restored,
+            unchanged: r.unchanged,
+            skippedLinks: r.skippedLinks,
+          },
           detail: [
             `restored ${r.restored}`,
             `unchanged ${r.unchanged}`,
