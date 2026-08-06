@@ -1,5 +1,6 @@
 export * from "./registry.js";
 export { resolveWithin } from "./paths.js";
+export { createSandboxRunner, type SandboxAttempt } from "./sandbox.js";
 export {
   McpManager,
   mcpToolToArtermTool,

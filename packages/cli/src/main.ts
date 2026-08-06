@@ -175,6 +175,8 @@ interface GlobalOpts {
   maxTokens?: string;
   /** Whole-run USD ceiling. */
   maxUsd?: string;
+  /** `--sandbox` / `--no-sandbox`; undefined means unstated (see `flags.ts`). */
+  sandbox?: boolean;
 }
 
 /**
@@ -446,6 +448,10 @@ async function startChat(globals: GlobalOpts): Promise<void> {
       confirmDestructive: globals.confirmDestructive,
       hardCap,
       cwd: process.cwd(),
+      // The TUI has someone at the keyboard even when the run is autonomous —
+      // an unavailable sandbox can be reported and answered here, which is
+      // exactly what the headless path below cannot do.
+      unattended: false,
       initialMessages: isFirst ? initialMessages : undefined,
     });
 
@@ -565,6 +571,9 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
     confirmDestructive: globals.confirmDestructive,
     hardCap,
     cwd: process.cwd(),
+    // Headless: no terminal, no prompt, and under --autonomous no supervision
+    // at all. This is the run whose sandbox has to fail closed.
+    unattended: true,
     initialMessages: resumed?.messages,
   });
 
@@ -828,6 +837,11 @@ async function main(): Promise<void> {
       "--autonomy-mode <mode>",
       "autonomy mode for this run: once | eternal | parallel | phased | team",
     )
+    // `--sandbox` is declared FIRST so commander leaves the default undefined:
+    // a lone `--no-sandbox` would otherwise make the option default to true and
+    // silently turn the sandbox on for every attended session.
+    .option("--sandbox", "confine shell commands to this directory and an egress allowlist")
+    .option("--no-sandbox", "run shell commands unconfined, even under --autonomous")
     .option("--max-steps <n>", "override autonomy.maxSteps; with eternal mode, a hard bound")
     .option("--max-tokens <n>", "stop the run after this many tokens (whole run, not per turn)")
     .option("--max-usd <amount>", "stop the run after this much spend, e.g. 2.50");

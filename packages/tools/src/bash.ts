@@ -49,18 +49,38 @@ export const bashTool: Tool = {
     // Lazy: execa costs ~250ms to import — load it on first shell use, not at startup.
     const { execa } = await import("execa");
 
+    // When a boundary is in force the command is rewritten into argv that
+    // enters it (bwrap/seatbelt + the egress proxy), and it must be spawned
+    // ARGV-form: `shell: true` would re-run the wrapper's own quoting through a
+    // second shell, and a boundary that depends on quoting surviving two passes
+    // is not a boundary. A refusal here (cwd outside the write roots) is an
+    // error result, never a fall-through to an unsandboxed run.
+    let sandboxed: { argv: string[]; env: Record<string, string | undefined> } | undefined;
+    if (ctx.sandbox) {
+      try {
+        sandboxed = await ctx.sandbox.wrap(command, ctx.cwd, ctx.signal);
+      } catch (err) {
+        return { output: `Sandbox refused the command: ${asMessage(err)}`, isError: true };
+      }
+    }
+
     // Timeout/cancel must kill the whole process TREE, not just the shell:
     // with `shell: true` the direct child is cmd/sh, and an orphaned grandchild
     // keeps the output pipe open — so `await child` would hang forever (seen on
     // Windows) even after execa's own `timeout` fired. POSIX gets a process
     // group (detached) killed via -pid; Windows gets `taskkill /T /F`.
-    const child = execa(command, {
+    const shared = {
       cwd: ctx.cwd,
-      shell: true,
-      reject: false,
-      all: true,
+      reject: false as const,
+      all: true as const,
       detached: process.platform !== "win32",
-    });
+    };
+    const child = sandboxed
+      ? execa(sandboxed.argv[0] as string, sandboxed.argv.slice(1), {
+          ...shared,
+          env: sandboxed.env,
+        })
+      : execa(command, { ...shared, shell: true });
 
     let terminated: "timed out" | "cancelled" | undefined;
     const killTree = (reason: "timed out" | "cancelled") => {
@@ -94,10 +114,18 @@ export const bashTool: Tool = {
       const status = result.exitCode === 0 ? "" : `\n[exit code ${result.exitCode}]`;
       return { output: `${out}${status}`.trim() || "(no output)", isError: result.exitCode !== 0 };
     } catch (err) {
-      return { output: `Command failed: ${(err as Error).message}`, isError: true };
+      return { output: `Command failed: ${asMessage(err)}`, isError: true };
     } finally {
       clearTimeout(timer);
       ctx.signal?.removeEventListener("abort", onAbort);
+      // Per-command sandbox state (masked credential files, proxy leases) is
+      // released even when the command threw — leaking it would leave the next
+      // command reading a sentinel where the real file should be.
+      ctx.sandbox?.release();
     }
   },
 };
+
+function asMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

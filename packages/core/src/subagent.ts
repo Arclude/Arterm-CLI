@@ -6,6 +6,7 @@ import type { ContextStrategy } from "./contextStrategy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import type { LoopDetectOptions } from "./loopDetector.js";
 import type { PermissionManager } from "./permissions.js";
+import type { SandboxRunner } from "./sandbox.js";
 import type { ChatProvider, PermissionAsker, Tool } from "./types.js";
 import {
   type WorktreeHandle,
@@ -90,6 +91,13 @@ export interface SubagentOptions {
    * accounted (and capped) separately.
    */
   budget?: RunBudget;
+  /**
+   * The parent's execution boundary, passed down unchanged. A fleet worker is
+   * the same host with more concurrency — sandboxing the main agent while its
+   * workers run unconfined would leave the boundary open on the path that
+   * actually does the writing under `--autonomous`.
+   */
+  sandbox?: SandboxRunner;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -151,6 +159,7 @@ export async function runSubagent(
     ...(opts.compactAtPercent !== undefined ? { compactAtPercent: opts.compactAtPercent } : {}),
     ...(opts.loopDetect !== undefined ? { loopDetect: opts.loopDetect } : {}),
     ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
+    ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
   };
   const agent = new Agent(agentOpts);
 

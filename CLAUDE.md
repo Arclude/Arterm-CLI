@@ -336,6 +336,53 @@ reading instance state, so the fleet prompt is a pure function of what it is giv
 verifier passes trivially. `/sdd` verification is therefore skipped entirely when
 `fleet.isolation` is `worktree` and `mergeStrategy` isn't `apply`.
 
+## The sandbox: the one control `--autonomous` adds
+
+Every other switch `--autonomous` flips removes a control. `sandbox.ts` (policy,
+in `core`) plus `tools/src/sandbox.ts` (mechanism, over
+`@anthropic-ai/sandbox-runtime`) is the one that puts something back: `bash` runs
+confined to the session's write roots with egress restricted to an allowlist.
+The permission ladder cannot cover this ground — it decides *whether* a command
+runs, and yolo has already answered yes; it has nothing to say about what an
+allowed command can then reach.
+
+**The boundary never comes from model output.** Write roots are derived at boot
+from the session cwd and `realpath`'d; `wrap()` refuses a `cwd` outside them
+rather than widening to fit the caller. This is the most-repeated root cause in
+the 2025–26 incident record — CVE-2025-59532 (Codex CLI) used the model's `cwd`
+as the writable root, and Cursor's CVE-2026-50548 was the same bug again. A
+boundary a tool call can name is not a boundary. `withinWriteRoots` compares
+after `realpath` on both sides, because a prefix test on unresolved paths is what
+`/proc/self/root/...` walked through in the bubblewrap escape.
+
+The fail policy is asymmetric, and mirrors `verify.ts`: **unattended fails
+closed, attended fails open.** A warning is a control only if someone reads it,
+and `--autonomous` is defined by nobody being there — so `buildSession` throws
+before the agent exists, meaning the run did nothing rather than "did some of it,
+unconfined". An attended session warns and continues, because a boundary that
+breaks a developer's own toolchain gets switched off permanently the first time
+it does. `--no-sandbox` is a real, loud escape hatch for the same reason
+`--verify-cmd` is a warning and not a refusal: making `--autonomous` unusable
+without it pushes people to bare `--yolo`, which announces nothing.
+
+Defaults worth knowing: the allowlist lives in `defaultConfig()`, **not** in
+`resolveSandbox`, so `allowedDomains: []` in config means deny-all rather than
+"fall back to the defaults". The OS temp dir is a write root on purpose — build
+tools write there, and so do `fleet.isolation: "worktree"` workers, so isolation
+and confinement compose instead of the boundary refusing every `/sdd` command.
+
+`bash` spawns the wrapped **argv** directly, never through `shell: true`: the
+wrapper does its own quoting, and a boundary that depends on quoting surviving
+two shell passes is not one. A refusal is an error result, never a fall-through
+to an unsandboxed run.
+
+The vendor dep must be declared in **both** `@arterm/tools` and `arterm-cli`.
+The CLI's tsup inlines `@arterm/*` but externalizes its own dependencies; an
+undeclared one gets bundled into the single-file binary, where its CJS internals
+die at runtime with `Dynamic require of "crypto" is not supported`. That failure
+is invisible to `pnpm test` and typecheck alike — it only appears when the built
+binary runs, which is what the e2e scripts exist for.
+
 ## Permissions: one ladder, three callers
 
 `PermissionManager.evaluate()` is the whole policy — a pure function returning

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SandboxRunner } from "@arterm/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bashTool } from "./bash.js";
 
@@ -84,5 +85,60 @@ describe("bashTool", () => {
       isError: true,
     }));
     expect(res.isError).toBe(true);
+  });
+});
+
+describe("bashTool inside a sandbox", () => {
+  /** A boundary that just prefixes an env marker — enough to prove argv is used. */
+  const fakeSandbox = (overrides?: Partial<SandboxRunner>): SandboxRunner => ({
+    describe: "fake",
+    async wrap(command) {
+      return {
+        argv: ["node", "-e", `process.env.INSIDE = "1"; ${stripNode(command)}`],
+        env: { ...process.env, INSIDE: "1" },
+      };
+    },
+    release() {},
+    ...overrides,
+  });
+
+  /** Undo the test helper's `node -e "…"` so the fake can re-wrap the JS. */
+  const stripNode = (cmd: string) => cmd.replace(/^node -e "(.*)"$/, "$1");
+
+  it("runs the wrapped argv, not the raw command", async () => {
+    const res = await bashTool.execute(
+      { command: node("console.log(process.env.INSIDE ?? 'outside')") },
+      { ...ctx(), sandbox: fakeSandbox() },
+    );
+    expect(res.isError).toBeFalsy();
+    expect(res.output.trim()).toBe("1");
+  });
+
+  it("turns a refusal into an error result instead of running unconfined", async () => {
+    const marker = join(dir, "escaped.txt");
+    const res = await bashTool.execute(
+      { command: node(`require('fs').writeFileSync(${JSON.stringify(marker)}, 'x')`) },
+      {
+        ...ctx(),
+        sandbox: fakeSandbox({
+          wrap: async () => {
+            throw new Error("cwd is outside the sandbox boundary");
+          },
+        }),
+      },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("Sandbox refused");
+    // The whole point: a refused command did not run anyway.
+    await expect(fs.access(marker)).rejects.toThrow();
+  });
+
+  it("releases per-command state even when the command fails", async () => {
+    let released = 0;
+    await bashTool.execute(
+      { command: node("process.exit(3)") },
+      { ...ctx(), sandbox: fakeSandbox({ release: () => void released++ }) },
+    );
+    expect(released).toBe(1);
   });
 });

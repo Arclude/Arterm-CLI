@@ -14,6 +14,7 @@ import { type LoopDetectOptions, type LoopDetector, createLoopDetector } from ".
 import { modelContextWindow } from "./modelsDev.js";
 import type { PermissionManager } from "./permissions.js";
 import { ProviderError } from "./providerError.js";
+import type { SandboxRunner } from "./sandbox.js";
 import { estimateHistoryTokens } from "./tokenEstimate.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
@@ -37,6 +38,13 @@ export interface AgentOptions {
   ask: PermissionAsker;
   bus: EventBus;
   cwd: string;
+  /**
+   * Execution boundary for shell commands (see `sandbox.ts`). Passed straight
+   * through to every tool's `ToolContext`; only `bash` consumes it today. Shared
+   * with sub-agents, because a fleet worker running unconfined is the same host
+   * with more concurrency.
+   */
+  sandbox?: SandboxRunner;
   /** Seed the conversation with prior messages (e.g. resuming a recorded session). */
   initialMessages?: Message[];
   temperature?: number;
@@ -271,6 +279,7 @@ export class Agent {
             cwd: this.opts.cwd,
             signal: ctx.signal,
             tools: this.opts.tools,
+            ...(this.opts.sandbox ? { sandbox: this.opts.sandbox } : {}),
           });
           ctx.output = result.output;
           ctx.isError = result.isError ?? false;

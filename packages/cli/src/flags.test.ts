@@ -16,6 +16,52 @@ describe("applyAutonomousProfile (--autonomous / --autonomy-mode / --max-steps)"
     expect(warnings.join("")).toContain("autonomous mode");
   });
 
+  it("--autonomous supplies the one control it does not remove: the sandbox", () => {
+    const config = defaultConfig();
+    expect(config.sandbox.enabled).toBe(false); // attended default
+    const warnings: string[] = [];
+    applyAutonomousProfile(config, { autonomous: true }, (m) => warnings.push(m));
+    expect(config.sandbox.enabled).toBe(true);
+    // Unattended has to REFUSE rather than warn — nobody is reading stderr.
+    expect(config.sandbox.failIfUnavailable).toBe(true);
+    expect(warnings.join("")).toContain("sandbox ON");
+  });
+
+  it("--no-sandbox opts out loudly rather than silently", () => {
+    const config = defaultConfig();
+    const warnings: string[] = [];
+    applyAutonomousProfile(config, { autonomous: true, sandbox: false }, (m) => warnings.push(m));
+    expect(config.sandbox.enabled).toBe(false);
+    // The escape hatch exists so people don't fall back to bare --yolo, which
+    // announces nothing at all — so this one has to announce.
+    expect(warnings.join("")).toContain("--no-sandbox");
+    expect(warnings.join("")).toContain("unrestricted network");
+  });
+
+  it("--sandbox arms the boundary for a plain run, but fails OPEN there", () => {
+    const config = defaultConfig();
+    const warnings: string[] = [];
+    applyAutonomousProfile(config, { sandbox: true }, (m) => warnings.push(m));
+    expect(config.sandbox.enabled).toBe(true);
+    // Someone is at the keyboard: a broken boundary is reportable, not fatal.
+    expect(config.sandbox.failIfUnavailable).toBe(false);
+    expect(warnings.join("")).toBe("");
+  });
+
+  it("leaves the sandbox alone for a plain run with no flag", () => {
+    const config = defaultConfig();
+    applyAutonomousProfile(config, {}, () => {});
+    expect(config.sandbox.enabled).toBe(false);
+  });
+
+  it("keeps an explicit config failIfUnavailable over the unattended inference", () => {
+    const config = defaultConfig();
+    config.sandbox = { ...config.sandbox, failIfUnavailable: false };
+    applyAutonomousProfile(config, { autonomous: true }, () => {});
+    expect(config.sandbox.enabled).toBe(true);
+    expect(config.sandbox.failIfUnavailable).toBe(false);
+  });
+
   it("--autonomous forces the loop detector back on and says so", () => {
     const config = defaultConfig();
     // Explicitly disabled in config: persist + auto-extend with no detector is

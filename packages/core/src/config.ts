@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { PermissionMode } from "./permissions.js";
+import { DEFAULT_ALLOWED_DOMAINS, DEFAULT_DENIED_DOMAINS } from "./sandbox.js";
 import type { AutonomyMode, PermissionLevel, TrustTier } from "./types.js";
 
 export interface ArtermConfig {
@@ -105,6 +106,32 @@ export interface ArtermConfig {
     runUsd?: number;
     /** Fraction of a ceiling that triggers the wrap-up request (default 0.75). */
     softRatio?: number;
+  };
+  /**
+   * Execution boundary for `bash` — filesystem confinement plus an egress
+   * allowlist (see `sandbox.ts`). Off by default for attended sessions, where
+   * the permission prompt is the control; `--autonomous` turns it on, because
+   * that mode's whole point is that the prompt is gone.
+   */
+  sandbox: {
+    enabled?: boolean;
+    /**
+     * Refuse to run when the boundary cannot be established, rather than
+     * continuing without one. Defaults to true for unattended runs and false
+     * for attended ones — a warning nobody reads is not a control.
+     */
+    failIfUnavailable?: boolean;
+    /**
+     * Egress allowlist. Defaults to package registries and source hosts; set it
+     * to `[]` to mean exactly that — no network reaches out of `bash`.
+     */
+    allowedDomains?: string[];
+    /** Denials applied over the allowlist (default `["*:22"]` — no SSH). */
+    deniedDomains?: string[];
+    /** Extra writable paths beyond the session root and the temp dir. */
+    allowWrite?: string[];
+    /** Paths the sandboxed command may not read at all. */
+    denyRead?: string[];
   };
   /** Autonomous goal-loop defaults (/goal). */
   autonomy: {
@@ -411,6 +438,13 @@ export function defaultConfig(): ArtermConfig {
     session: { mode: "jsonl", maxSessions: 100 },
     context: { strategy: "window", window: 8192, compactAtPercent: 0.75, maxMessages: 40 },
     budget: { maxIterations: 50 },
+    // The allowlist lives here, not in `resolveSandbox`, so that emptying it in
+    // config means deny-all rather than "fall back to the defaults".
+    sandbox: {
+      enabled: false,
+      allowedDomains: [...DEFAULT_ALLOWED_DOMAINS],
+      deniedDomains: [...DEFAULT_DENIED_DOMAINS],
+    },
     autonomy: {
       mode: "once",
       maxSteps: 25,
@@ -499,6 +533,16 @@ const configFileSchema = z
         runTokens: z.number().int().positive().optional(),
         runUsd: z.number().positive().optional(),
         softRatio: z.number().gt(0).lt(1).optional(),
+      })
+      .partial(),
+    sandbox: z
+      .object({
+        enabled: z.boolean().optional(),
+        failIfUnavailable: z.boolean().optional(),
+        allowedDomains: z.array(z.string()).optional(),
+        deniedDomains: z.array(z.string()).optional(),
+        allowWrite: z.array(z.string()).optional(),
+        denyRead: z.array(z.string()).optional(),
       })
       .partial(),
     autonomy: z

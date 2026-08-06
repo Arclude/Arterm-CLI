@@ -12,6 +12,11 @@ export interface AutonomousFlagOpts {
   maxTokens?: string;
   /** Whole-run USD ceiling (`--max-usd`). */
   maxUsd?: string;
+  /**
+   * `--sandbox` / `--no-sandbox`. Undefined means "unstated", which is what lets
+   * `--autonomous` supply the boundary without overriding a deliberate choice.
+   */
+  sandbox?: boolean;
   /** Mutated to true by `--autonomous` (feeds the session's permission mode). */
   yolo?: boolean;
 }
@@ -39,6 +44,11 @@ const AUTONOMY_MODES = new Set(["once", "eternal", "parallel", "phased", "team"]
  * that line a lie. Overriding an explicit config choice is not done silently:
  * it gets its own warning. Anyone who truly wants an undetected unattended
  * run can still say bare `--yolo` — which promises nothing.
+ *
+ * Every switch named above REMOVES a control. `applySandboxFlag` (below) is the
+ * one that adds one back, and it is the reason this profile is defensible at
+ * all: without a boundary, "unattended" is a shell holding the operator's full
+ * identity, driven by a model, for hours, with nobody reading the output.
  *
  * It also names the gap it cannot close. An unattended run with no standing
  * command gate accepts completion on the judge's reading alone, and a judge
@@ -98,7 +108,64 @@ export function applyAutonomousProfile(
     );
     warnUngatedRun(config, warn);
   }
+  applySandboxFlag(config, globals, warn);
   return { hardCap };
+}
+
+/**
+ * Decide whether this run gets an execution boundary, and say so either way.
+ *
+ * `--autonomous` is the reason this exists. Every other switch it flips REMOVES
+ * a control: prompts off, sub-agent approval off, the rejection cap off. The
+ * sandbox is the only one that adds something back, and without it "unattended"
+ * means a shell with the operator's full identity, driven by a model, for hours,
+ * with nobody reading the output. The permission ladder cannot help here — it
+ * decides whether a command runs, and yolo has already answered yes.
+ *
+ * The default is deliberately asymmetric:
+ *   - unattended  → sandbox ON, and fail CLOSED if it cannot be established.
+ *   - attended    → sandbox OFF, because the prompt is the control and a
+ *                   boundary that breaks a developer's own toolchain gets
+ *                   switched off permanently the first time it does.
+ *
+ * `--no-sandbox` is a real escape hatch, not a formality: some hosts have no
+ * user namespaces, some workflows need egress this cannot express, and making
+ * `--autonomous` unusable without a working sandbox just pushes people back to
+ * bare `--yolo`, which announces nothing at all. It is loud instead of absent —
+ * the same reasoning as the ungated-run warning above.
+ */
+function applySandboxFlag(
+  config: ArtermConfig,
+  globals: AutonomousFlagOpts,
+  warn: (msg: string) => void,
+): void {
+  if (globals.sandbox === false) {
+    config.sandbox = { ...config.sandbox, enabled: false };
+    if (globals.autonomous) {
+      warn(
+        "⚠ --no-sandbox: shell commands run on the host with your identity and unrestricted " +
+          "network. With prompts off, nothing constrains what an allowed command can reach.\n",
+      );
+    }
+    return;
+  }
+  const on = globals.sandbox === true || globals.autonomous === true || config.sandbox?.enabled;
+  if (!on) return;
+  config.sandbox = {
+    ...config.sandbox,
+    enabled: true,
+    // Unattended fails closed. A warning is a control only if someone reads it,
+    // and the defining property of this mode is that nobody is there.
+    failIfUnavailable: config.sandbox?.failIfUnavailable ?? globals.autonomous === true,
+  };
+  if (globals.autonomous) {
+    const domains = config.sandbox.allowedDomains?.length ?? 0;
+    warn(
+      `◆ sandbox ON: shell commands are confined to this directory and reach ${
+        domains === 0 ? "no network" : `${domains} allowed domain${domains === 1 ? "" : "s"}`
+      }. The run stops if the boundary cannot be established (--no-sandbox to opt out).\n`,
+    );
+  }
 }
 
 /**

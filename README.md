@@ -97,6 +97,7 @@ arterm pull <model>          # download a model via Ollama
 | `-p, --provider <id>` | Provider: `ollama`, `llamacpp`, `openai-compat`, `anthropic`, or a hosted preset (`openai`, `gemini`, `xai`, `deepseek`, `groq`, `openrouter`, `mistral`). |
 | `-m, --model <name>`  | Model name (Ollama tag) or `.gguf` filename.          |
 | `--yolo`              | Skip all permission prompts for the session.          |
+| `--sandbox` / `--no-sandbox` | Confine shell commands to this directory and an egress allowlist. On automatically under `--autonomous`. |
 | `--print <prompt>`    | Headless: run one prompt, print the reply, exit (add `--json` for structured output). |
 | `--resume <id>` / `--continue` | Resume a recorded session / the most recent one. |
 | `--goal <text>`       | Start in autonomy mode with this goal.                |
@@ -171,10 +172,19 @@ built to be safe by default:
   and `grep` are confined to the working directory; paths and glob patterns that
   escape it (absolute paths, `..` segments, symlinks) are refused — even the
   auto-allowed search tools cannot read e.g. `~/.ssh` or `/etc`.
-- **`bash` is NOT sandboxed** — shell commands run with your full user
-  privileges and can touch anything outside the working directory. The
-  permission prompt (shown before every `bash` call unless you opt out) is the
-  real guard; treat "always allow" and `--yolo` accordingly.
+- **`bash` is unconfined unless you sandbox it** — by default shell commands run
+  with your full user privileges and can touch anything outside the working
+  directory. The permission prompt (shown before every `bash` call unless you opt
+  out) is the real guard; treat "always allow" and `--yolo` accordingly.
+- **Execution sandbox (`--sandbox`, on automatically under `--autonomous`)** —
+  confines shell commands to the working directory plus the temp dir, and
+  restricts network egress to an allowlist (package registries and source hosts
+  by default; SSH denied). Writes anywhere else fail with "read-only file
+  system" and a connection to an unlisted host is refused by the proxy. This is
+  the control `--autonomous` needs, because that mode turns the permission
+  prompt off: an unattended run refuses to start if the boundary cannot be
+  established, and `--no-sandbox` opts out loudly. Set `sandbox.allowedDomains`
+  to `[]` for no network at all.
 - **Permission prompts** — `write`, `edit`, and `bash` ask before every call
   unless you opt out per-tool ("always allow") or globally (`--yolo`). Even
   under `--yolo`, tools marked `deny` and calls the risk arbiter classifies as
@@ -207,6 +217,9 @@ Configuration lives in `~/.arterm/` and is created on demand.
 | `permissions`      | Per-tool overrides, persisted by "always allow".     | `{}`                     |
 | `budget.maxIterations` | Tool round-trips allowed in one turn.            | `50`                     |
 | `budget.turnTokens`| Per-turn token cap (unset = none).                   | —                        |
+| `sandbox.enabled`  | Confine `bash` to the working directory + an egress allowlist. | `false` (on under `--autonomous`) |
+| `sandbox.allowedDomains` | Hosts `bash` may reach; `[]` means no network.  | registries + source hosts |
+| `sandbox.allowWrite` | Extra writable paths beyond the working dir and temp dir. | `[]`             |
 
 ### Inspecting the permission policy
 

@@ -21,6 +21,7 @@ import {
   type PermissionMode,
   RunBudget,
   RunController,
+  type SandboxRunner,
   SddRunner,
   Tokens,
   type Tool,
@@ -37,6 +38,7 @@ import {
   formatMemorySection,
   loadConfig,
   memberIsolation,
+  resolveSandbox,
   runFleet,
   runSubagent,
   saveConfig,
@@ -62,6 +64,7 @@ import {
 import {
   createMemorySearchTool,
   createRememberTool,
+  createSandboxRunner,
   createSpawnParallelTool,
   createSpawnTool,
   defaultTools,
@@ -86,8 +89,51 @@ export interface SessionOptions {
    */
   hardCap?: boolean;
   cwd: string;
+  /**
+   * Nobody is at the keyboard (`--autonomous`, headless `--print`). Decides the
+   * sandbox's fail policy: unattended refuses to run without its boundary,
+   * attended warns and continues.
+   */
+  unattended?: boolean;
   /** Seed the agent's history (e.g. resuming a recorded session). */
   initialMessages?: Message[];
+}
+
+/**
+ * Build the run's execution boundary, or decide what to do without one.
+ *
+ * The asymmetry is the point, and it mirrors `verify.ts`'s: the boundary FAILS
+ * CLOSED for an unattended run and fails OPEN for an attended one. A warning is
+ * a control only when someone reads it, and `--autonomous` is defined by nobody
+ * being there — so for that run the absence of a sandbox has to be an error, not
+ * a note scrolling past at minute two of six hours.
+ *
+ * Throwing here is deliberate: `buildSession` is upstream of every tool, every
+ * sub-agent and every file write, so a refusal at this point means the run
+ * genuinely did nothing rather than "did some of it, unconfined".
+ */
+async function establishSandbox(
+  config: ArtermConfig,
+  cwd: string,
+  unattended: boolean,
+): Promise<SandboxRunner | undefined> {
+  const spec = resolveSandbox(config.sandbox, { cwd, unattended });
+  if (!spec) return undefined;
+  const attempt = await createSandboxRunner(spec);
+  if (attempt.ok) {
+    for (const w of attempt.warnings ?? []) process.stderr.write(`⚠ sandbox: ${w}\n`);
+    return attempt.runner;
+  }
+  if (spec.failIfUnavailable) {
+    const hint =
+      "This run asked for a boundary and cannot get one, so it is refusing to start. " +
+      "Install the sandbox prerequisites, or pass --no-sandbox to run unconfined.";
+    throw new Error(`sandbox could not be established: ${attempt.reason}\n${hint}`);
+  }
+  process.stderr.write(
+    `⚠ sandbox unavailable (${attempt.reason}) — shell commands run unconfined.\n`,
+  );
+  return undefined;
 }
 
 /** Builds the wired-up session (agent + provider + tools + permissions) for the TUI. */
@@ -238,6 +284,13 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const permissionBroker = new PermissionBroker(bus);
   const asker: PermissionAsker = permissionBroker.ask;
 
+  // The execution boundary, established BEFORE the agent exists. A run whose
+  // sandbox must hold and cannot be built has to stop here, with nothing
+  // spawned and nothing written — "start, then discover the boundary is
+  // missing" is the same as having none, because the first command has already
+  // run by then.
+  const sandbox = await establishSandbox(config, cwd, opts.unattended === true);
+
   const agent = new Agent({
     provider,
     model,
@@ -258,6 +311,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     keepRecentToolResults: config.context?.keepRecentToolResults,
     loopDetect: config.loopDetect,
     budget,
+    ...(sandbox ? { sandbox } : {}),
     recall: recallFn,
     container,
   });
@@ -342,6 +396,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       compactAtPercent: config.context?.compactAtPercent,
       loopDetect: config.loopDetect,
       budget,
+      ...(sandbox ? { sandbox } : {}),
       role,
     });
     bus.emit({ type: "subagent_done", output, role });
@@ -450,6 +505,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
         compactAtPercent: config.context?.compactAtPercent,
         loopDetect: config.loopDetect,
         budget,
+        // Worktree-isolated workers land under the OS temp dir, which is
+        // already a write root — so isolation and confinement compose rather
+        // than the boundary refusing every command a `/sdd` wave runs.
+        ...(sandbox ? { sandbox } : {}),
         concurrency: config.fleet?.concurrency,
         isolation: config.fleet?.isolation ?? "none",
         onStart: (i, task, role) => {

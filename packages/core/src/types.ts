@@ -3,6 +3,8 @@
  * implement them. This keeps the dependency direction one-way (everything → core).
  */
 
+import type { SandboxRunner } from "./sandbox.js";
+
 export type Role = "system" | "user" | "assistant" | "tool";
 
 export interface ToolCall {
@@ -246,6 +248,13 @@ export interface ToolContext {
   /** Working directory the agent operates within. */
   cwd: string;
   signal?: AbortSignal;
+  /**
+   * The execution boundary shell commands run inside, when one is established
+   * (see `sandbox.ts`). Absent means the command runs on the host with the
+   * user's own identity — which is what every run did before this existed, and
+   * what an attended run still does unless `sandbox.enabled` says otherwise.
+   */
+  sandbox?: SandboxRunner;
   /**
    * The agent's current tool roster, injected at execute time. Meta-tools use it:
    * `tool_search` lists/searches it and `batch` dispatches to it. Optional so
