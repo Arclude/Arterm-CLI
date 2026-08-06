@@ -120,6 +120,12 @@ function openaiStream(res) {
         },
       ],
     });
+    // Tool responses report usage too, on every real provider. Ending the
+    // stream without this frame made the fake the only backend in the world
+    // whose tool calls are free — which silently zeroed the run-usage report
+    // and the gen_ai.client.token.usage histogram for exactly the autonomous
+    // runs those exist to measure.
+    frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 9, completion_tokens: 7 } });
     res.write("data: [DONE]\n\n");
     res.end();
     return;

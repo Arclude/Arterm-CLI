@@ -383,6 +383,42 @@ die at runtime with `Dynamic require of "crypto" is not supported`. That failure
 is invisible to `pnpm test` and typecheck alike — it only appears when the built
 binary runs, which is what the e2e scripts exist for.
 
+## Telemetry: `gen_ai.*`, pinned
+
+`core/src/telemetry.ts` is the MAPPING (which seam becomes which span, under
+which attribute names); `cli/src/otel.ts` is the MECHANISM (the OTLP exporter,
+lazily imported). Same split as the sandbox, for the same reason: `core` takes
+no dependency on OpenTelemetry, and a session with telemetry off pays nothing.
+
+**Model and tool spans come from PIPELINE STAGES, not from the bus.** Duration
+is the whole point — `gen_ai.client.operation.duration` is what an operator
+alerts on — and deriving it from bus events folds tool time into the provider's,
+producing a latency graph that is wrong in the direction that hides a slow
+provider behind a slow tool. The `request`/`response` pipelines bracket exactly
+the provider call; `toolCall.before("execute")` brackets exactly one execution.
+The turn-level `invoke_agent` span is the one with no pipeline around it, so
+that one legitimately comes from `turn_start`/`turn_end`.
+
+**Attribute names are pinned to one semconv release** (`GENAI_SEMCONV_VERSION`),
+stated on every export as a resource attribute. The GenAI conventions are
+pre-stable and have already renamed keys under people — `gen_ai.system` became
+`gen_ai.provider.name` — and emitting a mix of two vintages is worse than
+emitting one old one consistently: a dashboard can migrate a known version, but
+it cannot group by a key that is sometimes one string and sometimes another.
+
+**Telemetry never fails a run.** The opposite policy to the sandbox's, on
+purpose: a missing package, a bad endpoint or an unreachable collector degrades
+to one stderr line. Observability that can take down what it observes is a worse
+trade than none. The flush lives inside `persist()` because that is the last
+call on every teardown path, and a batch processor that is never shut down drops
+exactly the spans anyone is looking for.
+
+A zero is a measurement: nothing is recorded for a provider that reported no
+usage, because contributing zeros drags every percentile beside it downward.
+Same reason `budgetMeter` is now installed whether or not a ceiling exists —
+spend accounting used to be a side effect of setting a limit, which made every
+unlimited run report zero tokens and zero cost.
+
 ## Measuring: `bench/harbor/`
 
 `bench/harbor/arterm_agent.py` is a Harbor `BaseInstalledAgent` — the adapter

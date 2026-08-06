@@ -133,6 +133,20 @@ export interface ArtermConfig {
     /** Paths the sandboxed command may not read at all. */
     denyRead?: string[];
   };
+  /**
+   * OpenTelemetry GenAI export (`gen_ai.*` spans and metrics). Off by default:
+   * an OTLP connection is not something a local-first tool should open without
+   * being asked. `endpoint` also reads the standard `OTEL_EXPORTER_OTLP_ENDPOINT`.
+   */
+  telemetry: {
+    enabled?: boolean;
+    /** OTLP/HTTP base URL; `/v1/traces` and `/v1/metrics` are appended. */
+    endpoint?: string;
+    /** `service.name` on the exported resource (default "arterm"). */
+    serviceName?: string;
+    /** Extra OTLP headers — auth tokens for hosted collectors. */
+    headers?: Record<string, string>;
+  };
   /** Autonomous goal-loop defaults (/goal). */
   autonomy: {
     /** "once" stops when the goal is done; "eternal" runs until stopped. */
@@ -445,6 +459,7 @@ export function defaultConfig(): ArtermConfig {
       allowedDomains: [...DEFAULT_ALLOWED_DOMAINS],
       deniedDomains: [...DEFAULT_DENIED_DOMAINS],
     },
+    telemetry: { enabled: false },
     autonomy: {
       mode: "once",
       maxSteps: 25,
@@ -543,6 +558,14 @@ const configFileSchema = z
         deniedDomains: z.array(z.string()).optional(),
         allowWrite: z.array(z.string()).optional(),
         denyRead: z.array(z.string()).optional(),
+      })
+      .partial(),
+    telemetry: z
+      .object({
+        enabled: z.boolean().optional(),
+        endpoint: z.string().optional(),
+        serviceName: z.string().optional(),
+        headers: z.record(z.string(), z.string()).optional(),
       })
       .partial(),
     autonomy: z

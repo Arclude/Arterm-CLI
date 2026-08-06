@@ -12,6 +12,7 @@ import {
   CheckpointStore,
   Container,
   EventBus,
+  GenAiTelemetry,
   MemberMemory,
   MemoryRecorder,
   type Message,
@@ -23,6 +24,7 @@ import {
   RunController,
   type SandboxRunner,
   SddRunner,
+  type TelemetrySubject,
   Tokens,
   type Tool,
   applyPatch,
@@ -74,6 +76,7 @@ import {
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
 import { armAutonomous } from "./flags.js";
+import { startOtel } from "./otel.js";
 import { createVerifier } from "./verifier.js";
 
 export interface SessionOptions {
@@ -134,6 +137,34 @@ async function establishSandbox(
     `⚠ sandbox unavailable (${attempt.reason}) — shell commands run unconfined.\n`,
   );
   return undefined;
+}
+
+/**
+ * Start the GenAI exporter, or say nothing and carry on.
+ *
+ * The opposite policy to the sandbox's, deliberately: a boundary that cannot be
+ * established may stop a run, but telemetry never may. Observability that takes
+ * down the thing it observes is a worse trade than none at all, so an
+ * unreachable collector or a missing package degrades to one stderr line.
+ */
+async function startTelemetry(
+  config: ArtermConfig,
+  subject: TelemetrySubject,
+): Promise<{ genai: GenAiTelemetry; shutdown: () => Promise<void> } | undefined> {
+  if (!config.telemetry?.enabled) return undefined;
+  const attempt = await startOtel({
+    ...(config.telemetry.endpoint ? { endpoint: config.telemetry.endpoint } : {}),
+    ...(config.telemetry.serviceName ? { serviceName: config.telemetry.serviceName } : {}),
+    ...(config.telemetry.headers ? { headers: config.telemetry.headers } : {}),
+  });
+  if (!attempt.ok) {
+    process.stderr.write(`⚠ telemetry disabled: ${attempt.reason}\n`);
+    return undefined;
+  }
+  return {
+    genai: new GenAiTelemetry(attempt.handle.sink, subject),
+    shutdown: () => attempt.handle.shutdown(),
+  };
 }
 
 /** Builds the wired-up session (agent + provider + tools + permissions) for the TUI. */
@@ -315,6 +346,25 @@ export async function buildSession(opts: SessionOptions): Promise<{
     recall: recallFn,
     container,
   });
+
+  // GenAI telemetry (`gen_ai.*` spans + metrics), when an exporter is
+  // configured. Installed as pipeline stages rather than read off the bus for
+  // the model and tool spans, because duration is the point and bus events
+  // would fold tool time into the provider's — see `core/src/telemetry.ts`.
+  const telemetry = await startTelemetry(config, () => ({
+    model: agent.model,
+    provider: providerId,
+  }));
+  if (telemetry) {
+    const pipelines = container.resolve(Tokens.Pipelines);
+    // One `stages()` call: both middlewares share the instance's pending-span
+    // slot, so calling it twice would only obscure that they are a pair.
+    const stages = telemetry.genai.stages();
+    pipelines.request.use("telemetry", stages.request);
+    pipelines.response.use("telemetry", stages.response);
+    pipelines.toolCall.before("execute", telemetry.genai.toolStage());
+    telemetry.genai.attach(bus);
+  }
 
   // Checkpoints: snapshot a file's contents BEFORE the tool that writes it, so
   // a turn can be undone. Registered `before` the permission stage rather than
@@ -837,6 +887,12 @@ export async function buildSession(opts: SessionOptions): Promise<{
   };
 
   const persist = async () => {
+    // Flush the exporter here rather than behind a fourth returned function:
+    // `persist` is the last call on EVERY teardown path (headless, session
+    // close, close-all), and a batch processor that is never shut down drops
+    // the spans of the run that just ended — the ones anyone is looking for.
+    // Never throws: a collector that went away must not fail a good run.
+    await telemetry?.shutdown().catch(() => {});
     config.provider = provider.id;
     config.permissions = permissions.snapshot();
     // Persist auto/plan/ask as the default, but never make yolo sticky.

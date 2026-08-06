@@ -892,7 +892,12 @@ describe("run budget (agent pipeline stages)", () => {
     expect(events.filter((e) => e.type === "budget_warning")).toHaveLength(1);
   });
 
-  it("installs neither stage when no ceiling is configured", async () => {
+  it("meters spend with no ceiling configured, but gates and announces nothing", async () => {
+    // Accounting used to be installed only when a limit existed, which made
+    // every unlimited run report zero tokens and zero cost — indistinguishable
+    // from a backend that counts nothing, and wrong for anything that reads
+    // spend (the `--json` usage block, GenAI token metrics, a bench trial).
+    // Reporting is not conditional on limiting; only the guard is.
     const bus = new EventBus();
     const events = collect(bus);
     const provider = new StubProvider([
@@ -904,7 +909,8 @@ describe("run budget (agent pipeline stages)", () => {
     const budget = new RunBudget({ catalog: [] });
     await agentWith(budget, provider, bus).run("go");
 
-    expect(budget.state().tokens).toBe(0);
+    expect(budget.state().tokens).toBe(9_999_999);
+    expect(budget.breached).toBe(false);
     expect(events.some((e) => e.type.startsWith("budget_"))).toBe(false);
   });
 });

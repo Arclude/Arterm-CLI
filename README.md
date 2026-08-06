@@ -220,6 +220,8 @@ Configuration lives in `~/.arterm/` and is created on demand.
 | `sandbox.enabled`  | Confine `bash` to the working directory + an egress allowlist. | `false` (on under `--autonomous`) |
 | `sandbox.allowedDomains` | Hosts `bash` may reach; `[]` means no network.  | registries + source hosts |
 | `sandbox.allowWrite` | Extra writable paths beyond the working dir and temp dir. | `[]`             |
+| `telemetry.enabled`| Export OpenTelemetry GenAI spans/metrics over OTLP.   | `false`                  |
+| `telemetry.endpoint` | OTLP/HTTP base URL (or `OTEL_EXPORTER_OTLP_ENDPOINT`). | —                    |
 
 ### Inspecting the permission policy
 
@@ -339,6 +341,24 @@ which is what you want in CI — including a `usage` block (input/output/cache
 tokens and USD) that is present whether or not a budget ceiling was set, with
 `reported: false` when the backend counted nothing, so an unmetered local model
 never reads as a free run.
+
+### Observability
+
+With `telemetry.enabled`, every run exports OpenTelemetry **GenAI** signals to
+any OTLP backend — `invoke_agent` spans per turn, `chat` per model call
+(carrying `gen_ai.usage.*`), `execute_tool` per tool, plus the
+`gen_ai.client.token.usage` and `gen_ai.client.operation.duration` histograms.
+That is the same vocabulary Copilot, Codex and Claude Code emit, so Arterm runs
+land in the same dashboards instead of needing their own.
+
+```json
+{ "telemetry": { "enabled": true, "endpoint": "http://localhost:4318" } }
+```
+
+The GenAI conventions are still pre-stable, so the attribute names are pinned to
+one semconv release and every export states which: the resource carries
+`gen_ai.semconv.version`. Telemetry never fails a run — an unreachable collector
+or a missing package degrades to one line on stderr.
 
 ### Benchmarking
 

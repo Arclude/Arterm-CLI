@@ -350,12 +350,20 @@ export class Agent {
     }
 
     const res = this.pipelines.response;
-    if (budget && !budget.inactive && !res.has("budgetMeter")) {
+    if (budget && !res.has("budgetMeter")) {
       // Meter from the provider's OWN usage, never from an estimate: every
       // iteration resends the history, so estimating from the message list
       // double-counts the whole conversation on each lap. A soft crossing is
       // announced once and turned into a wrap-up instruction by the autonomy
       // engine — the run is asked to finish, not cut off mid-thought.
+      //
+      // Installed whether or not a ceiling is configured. It used to be gated
+      // on `!budget.inactive`, which made spend accounting a side effect of
+      // having set a limit: every run without `--max-usd` reported zero tokens
+      // and zero cost, indistinguishable from a backend that counts nothing.
+      // Reporting is not conditional on limiting, and the cost of being right
+      // is one memoized catalog lookup per response. `takeSoftSignal()` is
+      // already a no-op with no ceiling, so nothing else changes.
       res.use("budgetMeter", async (ctx, next) => {
         if (ctx.usage) budget.spend(ctx.usage, this.opts.model, this.opts.provider.id);
         if (budget.takeSoftSignal()) {

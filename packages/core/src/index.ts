@@ -1,4 +1,5 @@
 export * from "./sandbox.js";
+export * from "./telemetry.js";
 export * from "./types.js";
 export * from "./diff.js";
 export * from "./eventBus.js";
