@@ -107,7 +107,9 @@ describe("GenAiTelemetry — chat spans", () => {
     // The whole reason these are pipeline stages and not bus subscribers: the
     // window is exactly the request, so a slow provider cannot hide behind a
     // slow tool (or the reverse).
-    expect(chat?.seconds).toBeGreaterThanOrEqual(0.015);
+    // Floor well under the 20ms sleep: Windows timer granularity is ~15.6ms, so
+    // asserting the full interval turns a correct measurement into a flake.
+    expect(chat?.seconds).toBeGreaterThan(0.005);
     expect(chat?.seconds).toBeLessThan(2);
   });
 });

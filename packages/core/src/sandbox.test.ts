@@ -1,6 +1,6 @@
 import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ALLOWED_DOMAINS,
@@ -18,16 +18,22 @@ describe("resolveSandbox", () => {
     expect(resolveSandbox({ enabled: false }, { cwd: tmp() })).toBeUndefined();
   });
 
-  it("derives the write root from the session cwd, resolved through symlinks", () => {
-    const real = tmp();
-    const link = join(tmp(), "link");
-    symlinkSync(real, link);
-    const spec = resolveSandbox({ enabled: true }, { cwd: link });
-    // The LINK was handed in; the REAL path is the boundary. A prefix test on
-    // the unresolved path is what a symlink escape defeats.
-    expect(spec?.writeRoots).toContain(real);
-    expect(spec?.writeRoots).not.toContain(link);
-  });
+  // Creating a directory symlink on Windows needs a privilege the CI runner may
+  // not have, and the property under test (realpath before comparing) is the
+  // POSIX escape route this defends against. Skipping beats a flaky red build.
+  it.skipIf(process.platform === "win32")(
+    "derives the write root from the session cwd, resolved through symlinks",
+    () => {
+      const real = tmp();
+      const link = join(tmp(), "link");
+      symlinkSync(real, link);
+      const spec = resolveSandbox({ enabled: true }, { cwd: link });
+      // The LINK was handed in; the REAL path is the boundary. A prefix test on
+      // the unresolved path is what a symlink escape defeats.
+      expect(spec?.writeRoots).toContain(real);
+      expect(spec?.writeRoots).not.toContain(link);
+    },
+  );
 
   it("includes the temp dir, so build tools and worktree workers can write", () => {
     const spec = resolveSandbox({ enabled: true }, { cwd: tmp() });
@@ -79,18 +85,20 @@ describe("withinWriteRoots", () => {
   it("rejects a sibling whose path merely shares the prefix string", () => {
     // Hand-built rather than resolved, because `resolveSandbox` always grants
     // the temp dir — which would contain both sides of this comparison and hide
-    // the very thing being tested.
+    // the very thing being tested. Paths go through `resolve` so this reads the
+    // same on Windows, where the separator is a backslash.
+    const root = resolve("/work/project");
     const spec = {
-      writeRoots: ["/work/project"],
+      writeRoots: [root],
       denyRead: [],
       allowedDomains: [],
       deniedDomains: [],
       failIfUnavailable: true,
     };
-    expect(withinWriteRoots(spec, "/work/project")).toBe(true);
-    expect(withinWriteRoots(spec, "/work/project/src")).toBe(true);
-    // Starts with `/work/project` as a STRING but is not inside it.
-    expect(withinWriteRoots(spec, "/work/project-evil")).toBe(false);
+    expect(withinWriteRoots(spec, root)).toBe(true);
+    expect(withinWriteRoots(spec, join(root, "src"))).toBe(true);
+    // Starts with the root as a STRING but is not inside it.
+    expect(withinWriteRoots(spec, `${root}-evil`)).toBe(false);
   });
 
   it("rejects an unrelated directory — the boundary is not widened to fit a caller", () => {

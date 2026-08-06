@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 
 /**
  * The execution boundary `bash` runs inside.
@@ -158,7 +158,11 @@ export function resolveSandbox(
  */
 export function withinWriteRoots(spec: SandboxSpec, dir: string): boolean {
   const target = canonical(dir);
-  return spec.writeRoots.some((root) => target === root || target.startsWith(`${root}/`));
+  // `sep`, not "/": on Windows a resolved path is separated by backslashes, so a
+  // hardcoded slash makes the prefix test never match and every command inside
+  // the boundary gets refused. The separator is what keeps `/work/project-evil`
+  // from passing as `/work/project`, so it has to be the real one.
+  return spec.writeRoots.some((root) => target === root || target.startsWith(`${root}${sep}`));
 }
 
 /** One line describing the boundary, for the banner and for `--autonomous`. */
