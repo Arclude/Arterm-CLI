@@ -47,17 +47,42 @@ const sha1 = (s: string): string => createHash("sha1").update(s).digest("hex");
 const RESULT_HASH_CHARS = 4000;
 
 /**
+ * A guard's own note, appended to a tool result at the start of a line.
+ *
+ * Anchored with `^` (multiline) rather than matched anywhere, so a tool that
+ * merely QUOTES the marker — `read` on this very file, a grep hit — keeps its
+ * content in the hash.
+ */
+const GUARD_NOTE = /(?:\r?\n){0,2}^\[loop-(?:guard|cut)\][^\n]*(?:\r?\n(?!\r?\n)[^\n]*)*/gm;
+
+/**
  * Strip the parts of a tool result that change on every run even when nothing
- * else does: timestamps, durations, pids, temp paths, hex ids.
+ * else does: timestamps, durations, pids, temp paths, hex ids — and the
+ * corrective notes the guards themselves append.
  *
  * Without this, result-awareness would be worthless — two identical `ls` runs
  * differ by a millisecond somewhere and would read as progress forever. With
  * too much of it (masking every number) "3 tests failed" and "5 tests failed"
  * collapse into one, which reads as a loop while the run is actually fixing
  * things. These patterns are the narrow, boring middle.
+ *
+ * The guard notes are the sharpest case, and they were a live bug: `loopGuard`
+ * appends "…has now failed 3x in a row…" to a failing tool's output, and
+ * `repeatWindow` runs after it in the chain and hashed that output. The count
+ * moves every iteration, so the results looked like they were changing, the
+ * streak reset to 1 every time, and the CUT never fired — on the most common
+ * real stall there is, a tool failing over and over. Measured: twelve identical
+ * failing calls produced twelve steers and zero cuts, and what finally ended
+ * the run was the step cap, not the guard that exists to end it. The invariant
+ * this restores is simple: **a guard's own note is not evidence of progress.**
+ *
+ * Stripped BEFORE the length cut, or a note straddling the 4000-char boundary
+ * would leave a moving fragment behind — which is also why the bug only bit
+ * short outputs and stayed invisible on long ones.
  */
 export function normalizeResult(text: string): string {
   return text
+    .replace(GUARD_NOTE, "")
     .slice(0, RESULT_HASH_CHARS)
     .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g, "<ts>")
     .replace(/\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b/g, "<time>")

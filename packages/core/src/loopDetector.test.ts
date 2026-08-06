@@ -275,6 +275,44 @@ describe("result-aware repetition", () => {
     expect(events.filter((e) => e.type === "loop_detected").length).toBeGreaterThan(0);
   });
 
+  it("does not read a GUARD'S OWN note as progress", async () => {
+    // The bug this exists for, measured before it was fixed: `loopGuard`
+    // appends "…has now failed 3x in a row…" to a failing tool's output, and
+    // `repeatWindow` runs after it in the chain and hashed that output. The
+    // count moves every iteration, so the results looked like they were
+    // changing, the streak reset to 1 every time, and the CUT never fired — on
+    // the most common real stall there is. Twelve identical failing calls
+    // produced twelve steers and zero cuts, and the step cap, not the guard,
+    // ended the run.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 5 });
+    for (let i = 1; i <= 6; i++) {
+      const note =
+        i >= 2 ? `\n\n[loop-guard] bash has now failed ${i}x in a row with the same error.` : "";
+      await iterate(det, [call("bash", { command: "pnpm build" })], `Tool error: boom${note}`);
+    }
+    expect(events.filter((e) => e.type === "loop_cut").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a tool result that merely QUOTES the marker mid-line", async () => {
+    // Reading this very file, or grepping for the marker, must not have its
+    // content silently truncated out of the hash — that would make two
+    // different reads look identical and invent a loop.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const det = createLoopDetector({ bus, steerAfter: 3, cutAfter: 5 });
+    for (let i = 0; i < 4; i++) {
+      await iterate(
+        det,
+        [call("read", { path: "loopDetector.ts" })],
+        `line ${i}: const note = "[loop-guard] take a different approach";`,
+      );
+    }
+    // Results genuinely differ line by line, so this is progress, not a loop.
+    expect(events.filter((e) => e.type === "loop_detected")).toHaveLength(0);
+  });
+
   it("exempts tools that repeat by design", async () => {
     const bus = new EventBus();
     const events = collect(bus);
