@@ -335,7 +335,25 @@ EOF
 
 Lifecycle goes to stderr and the final summary to stdout, so `--print --goal … 2>/dev/null`
 gives you just the answer. `--json` emits the run plus every verdict as one object,
-which is what you want in CI.
+which is what you want in CI — including a `usage` block (input/output/cache
+tokens and USD) that is present whether or not a budget ceiling was set, with
+`reported: false` when the backend counted nothing, so an unmetered local model
+never reads as a free run.
+
+### Benchmarking
+
+`bench/harbor/` runs Arterm under [Harbor](https://www.harborframework.com) /
+Terminal-Bench 2.x — an adapter file, no fork of the harness:
+
+```bash
+bash bench/harbor/pack.sh
+harbor run -d terminal-bench@2.0 --agent bench.harbor.arterm_agent:ArtermAgent \
+  --model anthropic/claude-opus-4-5 -k 5
+```
+
+Every run writes a `harness.json` next to its result, because the same model
+scores 46% vs 80% across scaffolds — a number without its harness is not
+comparable to anyone else's. See `bench/harbor/README.md`.
 
 ### Spec-driven runs (`/sdd`)
 

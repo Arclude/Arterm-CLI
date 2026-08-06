@@ -1,0 +1,37 @@
+{
+  "goal": "say hi",
+  "state": "done",
+  "summary": "This answer came from the fake server.",
+  "steps": 1,
+  "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheTokens": 0,
+    "totalTokens": 0,
+    "usd": 0,
+    "unpriced": false,
+    "reported": false
+  },
+  "verdicts": [
+    {
+      "pass": true,
+      "by": "judge",
+      "scope": "goal",
+      "skipped": true,
+      "note": "no reviewer verdict arrived"
+    }
+  ],
+  "guards": {
+    "loopSteers": 4,
+    "loopCuts": 1,
+    "extensions": [],
+    "budget": {
+      "tokens": 0,
+      "usd": 0,
+      "limitUsd": 5,
+      "wrapUpAsked": false,
+      "breached": false,
+      "unpriced": false
+    }
+  }
+}

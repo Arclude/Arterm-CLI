@@ -166,3 +166,49 @@ describe("RunBudget", () => {
     expect(s.usd).toBeCloseTo(0.018, 6);
   });
 });
+
+describe("RunBudget usage split (what an evaluation harness reads)", () => {
+  const CAT = CATALOG;
+
+  it("accumulates input/output/cache verbatim, not derived from the priced total", () => {
+    const b = new RunBudget({ catalog: CAT });
+    b.spend(
+      { promptTokens: 100, completionTokens: 20, cacheReadTokens: 900, cacheWriteTokens: 5 },
+      "priced",
+      "test",
+    );
+    b.spend({ promptTokens: 50, completionTokens: 10 }, "priced", "test");
+    const s = b.state();
+    expect(s.inputTokens).toBe(150);
+    expect(s.outputTokens).toBe(30);
+    expect(s.cacheTokens).toBe(905);
+    // The priced total prices cache at its own rate and is a different number
+    // on purpose: it is what a ceiling compares against, not a usage report.
+    expect(s.tokens).toBe(1085);
+  });
+
+  it("reports the split with no ceiling configured — spend is not conditional on a limit", () => {
+    const b = new RunBudget({ catalog: CAT });
+    expect(b.inactive).toBe(true);
+    b.spend({ promptTokens: 7, completionTokens: 3 }, "priced", "test");
+    expect(b.state()).toMatchObject({ inputTokens: 7, outputTokens: 3, reported: true });
+  });
+
+  it("says 'not reported' rather than 'nothing spent' when the backend counts nothing", () => {
+    // Most local servers report no usage at all. An all-zero row that claims to
+    // be a cost is the same lie the context gauge told before it stopped
+    // trusting reported usage alone.
+    const b = new RunBudget({ catalog: CAT });
+    b.spend({}, "priced", "test");
+    const s = b.state();
+    expect(s.reported).toBe(false);
+    expect(s.inputTokens).toBe(0);
+    expect(s.tokens).toBe(0);
+  });
+
+  it("counts a zero-token report as reported — the backend did answer", () => {
+    const b = new RunBudget({ catalog: CAT });
+    b.spend({ promptTokens: 0, completionTokens: 0 }, "priced", "test");
+    expect(b.state().reported).toBe(true);
+  });
+});

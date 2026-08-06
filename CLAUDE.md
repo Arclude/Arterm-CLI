@@ -383,6 +383,44 @@ die at runtime with `Dynamic require of "crypto" is not supported`. That failure
 is invisible to `pnpm test` and typecheck alike — it only appears when the built
 binary runs, which is what the e2e scripts exist for.
 
+## Measuring: `bench/harbor/`
+
+`bench/harbor/arterm_agent.py` is a Harbor `BaseInstalledAgent` — the adapter
+that runs `arterm` under Terminal-Bench 2.x (and then
+Long-Horizon-Terminal-Bench) with no fork of the harness. `bench/harbor/README.md`
+carries the operating detail; the parts that are policy rather than plumbing:
+
+**Never give a benchmark run a `--verify-cmd`.** The task's `tests/test.sh` is
+the hidden grader; pointing our own gate at it converts "did the work" into
+"made the grader pass", and Terminal-Bench trajectories are published and read.
+This is the one place in the codebase where the standing gate is deliberately
+absent, and `harness.json` records `verifyCmd: null` so the absence is a stated
+claim rather than an omission.
+
+**`--max-steps` is what keeps a timeout from erasing the work.** `autoExtend`
+buys steps while anything is happening, so under a task timeout the trial is
+killed mid-work and reports nothing; a pinned `--max-steps` is absolute, so the
+run stops and reports partial work instead. 79% of LH-TB failures are timeouts.
+
+**The container is the boundary, so the adapter passes `--no-sandbox`.** Nesting
+our bubblewrap inside Harbor's container buys nothing and hard-fails wherever
+nested user namespaces are refused. Both that and the task's network policy go
+into `harness.json`, because the same model scores 46% vs 80% across scaffolds
+and a harness change is worth 8–21 pass@1 points — a number without its harness
+is not comparable to anyone else's, or to our own from last week.
+
+`selfcheck.py` asserts the seam between the CLI's `--print --json` document and
+the adapter that parses it. No type system spans that boundary, so a rename on
+the TypeScript side would surface only as a benchmark run quietly reporting zero
+tokens and no cost. Run it (and regenerate `sample-result.json`) whenever
+`HeadlessGoalResult` changes.
+
+That is also why `HeadlessGoalResult.usage` is unconditional while
+`guards.budget` is not: a ceiling is optional, spend is a fact. `usage.reported`
+distinguishes "the backend reported nothing" from "the run cost nothing" —
+without it a local model and a broken meter produce the same row, which is the
+`9aaae14` context-gauge lesson in a second place.
+
 ## Permissions: one ladder, three callers
 
 `PermissionManager.evaluate()` is the whole policy — a pure function returning

@@ -1,0 +1,4 @@
+# Built by pack.sh — a 270K binary that changes on every build and is
+# reproducible from the tree, so it is never committed.
+dist/
+__pycache__/

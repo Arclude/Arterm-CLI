@@ -119,6 +119,54 @@ describe("runHeadlessGoal", () => {
     expect(res.guards).toEqual({ loopSteers: 0, loopCuts: 0, extensions: [] });
   });
 
+  it("reports usage with no ceiling configured — an eval harness needs it every run", async () => {
+    // `guards.budget` is about a CEILING and is rightly absent without one.
+    // Spend is not: a benchmark reports cost for every trial, and "the operator
+    // passed --max-usd" is not a fact about what the run consumed.
+    const bus = new EventBus();
+    const session = fakeSession(bus, (b) => {
+      b.emit({ type: "autonomy_done", summary: "shipped" });
+    });
+    (session as unknown as { budgetState: () => unknown }).budgetState = () => ({
+      tokens: 1085,
+      usd: 0.02,
+      inputTokens: 150,
+      outputTokens: 30,
+      cacheTokens: 905,
+      reported: true,
+      breached: false,
+      softHits: 0,
+      unpriced: false,
+    });
+
+    const res = await runHeadlessGoal(session, "ship it", { json: true });
+
+    expect(res.usage).toEqual({
+      inputTokens: 150,
+      outputTokens: 30,
+      cacheTokens: 905,
+      totalTokens: 1085,
+      usd: 0.02,
+      unpriced: false,
+      reported: true,
+    });
+    expect(res.guards.budget).toBeUndefined();
+  });
+
+  it("marks an unreported run as reported:false, not as a free one", async () => {
+    const bus = new EventBus();
+    const session = fakeSession(bus, (b) => {
+      b.emit({ type: "autonomy_done", summary: "shipped" });
+    });
+
+    const res = await runHeadlessGoal(session, "ship it", { json: true });
+
+    // No budgetState at all (the fake session has none) still yields the block,
+    // flagged as unreported — the one reading that can't be mistaken for $0.
+    expect(res.usage.reported).toBe(false);
+    expect(res.usage.totalTokens).toBe(0);
+  });
+
   it("streams guard activity to stderr in plain mode", async () => {
     const err = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     const bus = new EventBus();

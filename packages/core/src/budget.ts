@@ -20,6 +20,28 @@ import type { TokenUsage } from "./types.js";
 export interface BudgetState {
   tokens: number;
   usd: number;
+  /**
+   * The same spend split the way an evaluation harness asks for it (Harbor's
+   * `AgentContext` wants input/output/cache separately, not one total).
+   *
+   * Kept beside `tokens` rather than replacing it: `tokens` is what the ceiling
+   * is compared against and must stay the priced total, while these three are
+   * the vendor's own counters summed verbatim. A provider that reports nothing
+   * leaves all three at 0, which is what `reported` below exists to say.
+   */
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  /**
+   * True when at least one response actually carried token counts.
+   *
+   * Without it an all-zero report is ambiguous in the one way that matters:
+   * a local model that genuinely costs nothing and a backend that reports no
+   * usage produce the identical row. That is the same confusion the context
+   * gauge had before it stopped trusting reported usage alone — a number that
+   * says "nothing" when the truth is "unknown" is worse than no number.
+   */
+  reported: boolean;
   /** True once a limit is reached — the run must stop. */
   breached: boolean;
   /** How many times the soft threshold asked for a wrap-up. */
@@ -115,6 +137,10 @@ export function priceUsage(
 export class RunBudget {
   private tokens = 0;
   private usd = 0;
+  private reportedAny = false;
+  private inputTokens = 0;
+  private outputTokens = 0;
+  private cacheTokens = 0;
   private softHits = 0;
   private announcedSoft = false;
   private unpriced = false;
@@ -137,6 +163,15 @@ export class RunBudget {
     this.tokens += priced.tokens;
     this.usd += priced.usd;
     if (!priced.priced && priced.tokens > 0) this.unpriced = true;
+    // Reported split, accumulated verbatim rather than derived from `tokens`:
+    // the priced total folds cache reads and writes together at their own
+    // rates, which is right for a ceiling and wrong for a usage report.
+    this.inputTokens += usage.promptTokens ?? 0;
+    this.outputTokens += usage.completionTokens ?? 0;
+    this.cacheTokens += (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+    if (usage.promptTokens !== undefined || usage.completionTokens !== undefined) {
+      this.reportedAny = true;
+    }
   }
 
   /** True once any configured ceiling is reached: the run must stop. */
@@ -181,6 +216,10 @@ export class RunBudget {
     return {
       tokens: this.tokens,
       usd: Number(this.usd.toFixed(6)),
+      inputTokens: this.inputTokens,
+      outputTokens: this.outputTokens,
+      cacheTokens: this.cacheTokens,
+      reported: this.reportedAny,
       breached: this.breached,
       softHits: this.softHits,
       ...(this.opts.tokens !== undefined ? { limitTokens: this.opts.tokens } : {}),

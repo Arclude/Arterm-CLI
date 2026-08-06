@@ -107,6 +107,33 @@ export interface HeadlessGoalResult {
   state: "done" | "stopped";
   summary: string;
   steps: number;
+  /**
+   * What the run consumed, reported whether or not a ceiling was configured.
+   *
+   * `guards.budget` below is about a CEILING — limits, breach, wrap-up — and is
+   * rightly absent when there is none. Spend itself is not conditional on
+   * anyone having set a limit: an evaluation harness has to report cost for
+   * every trial, and "the operator passed --max-usd" is not a fact about the
+   * run's cost. `unpriced` is what keeps a local model's honest $0 apart from a
+   * priced model whose rates were missing from the catalog.
+   */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheTokens: number;
+    /** Priced total — cache read/write counted at their own rates. */
+    totalTokens: number;
+    usd: number;
+    /** True when at least one call had no catalog price, so `usd` under-counts. */
+    unpriced: boolean;
+    /**
+     * True when the backend actually reported token counts. False means the
+     * zeros above are "not reported", not "not spent" — most local servers
+     * report nothing, and a harness that recorded their runs as free would be
+     * publishing a fiction.
+     */
+    reported: boolean;
+  };
   /** Every verification verdict, in order. */
   verdicts: {
     pass: boolean;
@@ -272,6 +299,15 @@ export async function runHeadlessGoal(
     state,
     summary: summary || stoppedReason || "",
     steps,
+    usage: {
+      inputTokens: spend?.inputTokens ?? 0,
+      outputTokens: spend?.outputTokens ?? 0,
+      cacheTokens: spend?.cacheTokens ?? 0,
+      totalTokens: spend?.tokens ?? 0,
+      usd: spend?.usd ?? 0,
+      unpriced: spend?.unpriced ?? false,
+      reported: spend?.reported ?? false,
+    },
     verdicts,
     guards,
   };
