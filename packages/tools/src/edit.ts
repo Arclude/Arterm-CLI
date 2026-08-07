@@ -10,6 +10,12 @@ export const editTool: Tool = {
     "Replace a substring in a file. old_string must identify exactly one place unless " +
     "replace_all is true. Read the file first and copy the text; whitespace differences " +
     "are forgiven, but the match must still be unique.",
+  usageHint:
+    "Uniqueness is the whole difficulty: include the lines above and below the change until " +
+    "old_string appears in exactly one place, rather than shortening it. Whitespace is forgiven " +
+    "in four steps (exact, trailing space, indentation, then a fuzzy block anchor), and the step " +
+    "that matched is reported — so a match reported as 'block-anchor' is worth checking. " +
+    "replace_all only ever matches exactly, by design.",
   permission: "ask",
   category: "edit",
   mutating: true,

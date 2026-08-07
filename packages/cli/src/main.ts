@@ -62,6 +62,7 @@ import { buildSession } from "./session.js";
 import { type CliManagedSession, SessionManager } from "./sessionManager.js";
 import { runStatus } from "./status.js";
 import { type StatusServer, shouldPublish, startStatusServer } from "./statusServer.js";
+import { runToolsCost } from "./toolsCost.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
 const VERSION = "0.4.0";
@@ -936,6 +937,18 @@ async function main(): Promise<void> {
         tool,
         ...opts,
         json: cmd.optsWithGlobals<{ json?: boolean }>().json,
+      });
+    });
+
+  program
+    .command("tools")
+    .description("what the tool roster costs, per tool and per tier")
+    .argument("[tier]", "minimal | standard | full (default: show all three)")
+    .option("--json", "emit the measurement as JSON")
+    .action((tier: string | undefined, opts, cmd: Command) => {
+      runToolsCost({
+        ...(tier ? { tier } : {}),
+        json: opts.json ?? cmd.optsWithGlobals<{ json?: boolean }>().json,
       });
     });
 

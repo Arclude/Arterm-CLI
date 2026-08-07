@@ -118,6 +118,43 @@ export interface SubagentOptions {
   onEvent?: (event: AgentEvent) => void;
 }
 
+/**
+ * Tools a worker never gets, however it was spawned.
+ *
+ * Depth is one level by construction: a worker that can spawn is a fan-out
+ * with no bound, and nothing above it is counting. This was already enforced
+ * by a filter at the call site; it is a named list so the rule is findable
+ * from the sub-agent side too.
+ */
+export const NEVER_SUBAGENT_TOOLS = new Set(["spawn", "spawn_parallel"]);
+
+/**
+ * Tools a worker gets only when its spawn explicitly asks for them.
+ *
+ * `git_commit` is the case that matters: `--autonomous` clears it under yolo,
+ * so today a fleet worker can and does write to git history on its own. The
+ * leader is accountable for the run and can commit; a worker that was handed
+ * one task in one file has no way to know what else is staged, and its commit
+ * lands under the user's name. Hidden by default, grantable by naming it —
+ * exactly like the team-member `tools:` frontmatter already works.
+ */
+export const DEFAULT_HIDDEN_SUBAGENT_TOOLS = new Set(["git_commit"]);
+
+/**
+ * The roster a worker should see, given the parent's and an optional explicit
+ * allowlist. One function so the /team, /sdd and `spawn` paths cannot drift.
+ */
+export function subagentRoster<T extends { name: string }>(
+  parentTools: T[],
+  allow?: string[],
+): T[] {
+  return parentTools.filter((t) => {
+    if (NEVER_SUBAGENT_TOOLS.has(t.name)) return false;
+    if (allow) return allow.includes(t.name);
+    return !DEFAULT_HIDDEN_SUBAGENT_TOOLS.has(t.name);
+  });
+}
+
 /** Private-bus event types forwarded through `SubagentOptions.onEvent`. */
 const BRIDGED_EVENTS = new Set<AgentEvent["type"]>([
   "tool_call",

@@ -240,6 +240,29 @@ export interface Tool {
    * are gated even under yolo when `confirmDestructive` is on. Defaults to "safe".
    */
   riskTier?: RiskTier;
+  /**
+   * How to use the tool well — best practice, pitfalls, when NOT to reach for
+   * it. Deliberately NOT part of `description`, and deliberately not in the
+   * schema the model sees every turn: the roster is paid for on every request,
+   * so a paragraph per tool would cost more than it teaches. This is delivered
+   * once, attached to the tool's first failed call, where it is read at the
+   * moment it is needed.
+   */
+  usageHint?: string;
+  /**
+   * When another tool is the better answer. Rendered into the roster line as
+   * "use X instead when Y", because the roster is the only place a model is
+   * choosing between tools. Without it `grep` and `search` read as synonyms.
+   */
+  selection?: { doNotUseWhen: string; useInstead: string };
+  /**
+   * Ceiling on what this tool may put into the context, in bytes. Enforced
+   * centrally, so the cap is one number a reader can find rather than a
+   * different constant inside every tool.
+   */
+  maxOutputBytes?: number;
+  /** Wall-clock ceiling for one call, when the tool does not manage its own. */
+  timeoutMs?: number;
   /** Short human-readable summary of a pending call, shown in the permission prompt. */
   preview?(args: Record<string, unknown>): string;
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;

@@ -150,6 +150,18 @@ export interface ArtermConfig {
     deny?: string[];
   };
   /**
+   * How much of the tool roster the model is given.
+   *
+   * Every tool's schema is sent on every request, so the roster is a fixed tax
+   * on the session — a tool nobody calls still costs its schema every turn.
+   * `minimal` is for a small local model, where the roster competes with the
+   * context it is supposed to leave room for. `arterm tools cost` prints what
+   * each tier actually costs.
+   */
+  tools: {
+    tier?: "minimal" | "standard" | "full";
+  };
+  /**
    * OpenTelemetry GenAI export (`gen_ai.*` spans and metrics). Off by default:
    * an OTLP connection is not something a local-first tool should open without
    * being asked. `endpoint` also reads the standard `OTEL_EXPORTER_OTLP_ENDPOINT`.
@@ -478,6 +490,7 @@ export function defaultConfig(): ArtermConfig {
     // On by default and everywhere — the opposite of the sandbox, because the
     // channel it closes does not depend on nobody being at the keyboard.
     credentials: { scrub: true },
+    tools: { tier: "standard" },
     telemetry: { enabled: false },
     autonomy: {
       mode: "once",
@@ -584,6 +597,11 @@ const configFileSchema = z
         scrub: z.boolean().optional(),
         allow: z.array(z.string()).optional(),
         deny: z.array(z.string()).optional(),
+      })
+      .partial(),
+    tools: z
+      .object({
+        tier: z.enum(["minimal", "standard", "full"]).optional(),
       })
       .partial(),
     telemetry: z

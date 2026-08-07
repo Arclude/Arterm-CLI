@@ -216,6 +216,8 @@ export class Agent {
   private toolMap: Map<string, Tool>;
   /** Prompt tokens reported by the provider on the last turn (compaction signal). */
   private lastPromptTokens?: number;
+  /** Tools whose `usageHint` has already been delivered — once per session. */
+  private readonly hintedTools = new Set<string>();
   /** Loop-guard state, reset each run(): consecutive same-error streaks per tool. */
   private failStreaks = new Map<string, { sig: string; count: number }>();
   /** Loop/stuck detector (steer-then-cut); its fingerprint state outlives turns. */
@@ -318,6 +320,15 @@ export class Agent {
           ctx.isError = result.isError ?? false;
           ctx.diff = result.diff;
           ctx.path = result.path;
+          // `usageHint` is delivered here rather than in the roster: the roster
+          // is paid for on every request, so a paragraph per tool would cost
+          // far more than it teaches. Attached to the first FAILED call, it
+          // arrives at the moment it is needed — and once, because a hint
+          // repeated on every failure is just a longer error.
+          if (ctx.isError && ctx.tool.usageHint && !this.hintedTools.has(ctx.tool.name)) {
+            this.hintedTools.add(ctx.tool.name);
+            ctx.output = `${ctx.output}\n\nHow to use ${ctx.tool.name}: ${ctx.tool.usageHint}`;
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           ctx.output = `Tool error: ${msg}`;
@@ -599,8 +610,16 @@ export class Agent {
         // protocol. But small local models (e.g. qwen on Ollama) emit calls as TEXT
         // and readily INVENT tool names (`count`, `length`, …) that don't exist.
         // Listing the real tools and forbidding others curbs those hallucinated calls.
-        const roster = this.toolSchemas()
-          .map((t) => `- ${t.name}: ${t.description}`)
+        // The roster line carries `selection` when a tool has one: this is the
+        // one place a model is choosing BETWEEN tools, and without it `grep`
+        // and `search` read as synonyms.
+        const roster = this.opts.tools
+          .map((t) => {
+            const pick = t.selection
+              ? ` (not for ${t.selection.doNotUseWhen} — use ${t.selection.useInstead})`
+              : "";
+            return `- ${t.name}: ${t.description}${pick}`;
+          })
           .join("\n");
         toolHelp = `\n\nThese are the ONLY tools that exist — use exactly these names and never invent a tool. Call one tool at a time and wait for its result:\n${roster}`;
       } else {

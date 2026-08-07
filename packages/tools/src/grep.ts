@@ -8,6 +8,17 @@ const MAX_MATCHES = 100;
 export const grepTool: Tool = {
   name: "grep",
   description: "Search file contents for a regular expression and return matching lines.",
+  // `grep` and `search` are near-synonyms in the roster and answer different
+  // questions: one finds a literal string, the other finds relevant code. A
+  // model with both and no guidance reaches for grep and then greps again.
+  selection: {
+    doNotUseWhen: "finding code by what it does",
+    useInstead: "search (ranked over the code index)",
+  },
+  usageHint:
+    "The pattern is a JavaScript regular expression, not a shell glob — `foo.*bar`, not `foo*bar`. " +
+    "Narrow the search with `glob` (e.g. 'src/**/*.ts') rather than filtering the results afterwards. " +
+    "Files ignored by the project's .gitignore are never searched.",
   permission: "allow",
   category: "read",
   parameters: {

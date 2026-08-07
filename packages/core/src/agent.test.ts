@@ -994,3 +994,72 @@ describe("context usage reporting", () => {
     expect(usage.estimated).toBe(true);
   });
 });
+
+/**
+ * `usageHint` is the long-form "how to use this well" text. It is deliberately
+ * NOT in the roster the model sees every turn — the roster is paid for on every
+ * request, so a paragraph per tool would cost far more than it teaches.
+ */
+describe("usage hints", () => {
+  const failing = (usageHint?: string): Tool => ({
+    name: "picky",
+    description: "",
+    parameters: {},
+    permission: "allow",
+    category: "read",
+    ...(usageHint ? { usageHint } : {}),
+    execute: async () => ({ output: "no.", isError: true }),
+  });
+
+  /** A provider that calls the tool once, then answers. */
+  function callOnce(name: string): StubProvider {
+    return new StubProvider([
+      [{ type: "tool_call", call: { id: "c1", name, arguments: {} } }],
+      [{ type: "text", delta: "done" }],
+    ]);
+  }
+
+  /** A provider that calls the same tool twice, then answers. */
+  function callTwice(name: string): StubProvider {
+    return new StubProvider([
+      [{ type: "tool_call", call: { id: "c1", name, arguments: {} } }],
+      [{ type: "tool_call", call: { id: "c2", name, arguments: {} } }],
+      [{ type: "text", delta: "done" }],
+    ]);
+  }
+
+  it("attaches the hint to the tool's FIRST failure, where it is needed", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(callOnce("picky"), bus, [failing("hold it by the handle")]).run("go");
+    const result = events.find((e) => e.type === "tool_result");
+    expect((result as { output: string }).output).toContain("hold it by the handle");
+  });
+
+  it("says it once — a hint repeated on every failure is just a longer error", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(callTwice("picky"), bus, [failing("hold it by the handle")]).run("go");
+    const results = events.filter((e) => e.type === "tool_result");
+    expect(results).toHaveLength(2);
+    expect((results[0] as { output: string }).output).toContain("hold it by the handle");
+    expect((results[1] as { output: string }).output).not.toContain("hold it by the handle");
+  });
+
+  it("stays out of a SUCCESSFUL call's output", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    const ok: Tool = { ...failing("never shown"), execute: async () => ({ output: "fine" }) };
+    await makeAgent(callOnce("picky"), bus, [ok]).run("go");
+    const result = events.find((e) => e.type === "tool_result");
+    expect((result as { output: string }).output).toBe("fine");
+  });
+
+  it("is absent for a tool that does not define one", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(callOnce("picky"), bus, [failing()]).run("go");
+    const result = events.find((e) => e.type === "tool_result");
+    expect((result as { output: string }).output).toBe("no.");
+  });
+});

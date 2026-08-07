@@ -6,7 +6,13 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "./eventBus.js";
 import { PermissionManager } from "./permissions.js";
-import { availableRoles, roleInstruction, runFleet, runSubagent } from "./subagent.js";
+import {
+  availableRoles,
+  roleInstruction,
+  runFleet,
+  runSubagent,
+  subagentRoster,
+} from "./subagent.js";
 import type { ChatProvider, Tool } from "./types.js";
 import { VERDICT_TOOL_NAME, captureVerdict, decideVerdict, formatVerdictEcho } from "./verify.js";
 
@@ -705,5 +711,51 @@ describe("runSubagent loop detection", () => {
     });
     expect(seen).toContain("loop_detected");
     expect(seen).toContain("loop_cut");
+  });
+});
+
+/**
+ * What a worker is allowed to hold. The roster a sub-agent gets is not the
+ * parent's: depth is one level, and a worker handed one task in one file is
+ * not the right actor for some of the parent's tools.
+ */
+describe("subagentRoster", () => {
+  const tools = [
+    { name: "read" },
+    { name: "edit" },
+    { name: "bash" },
+    { name: "git" },
+    { name: "git_commit" },
+    { name: "spawn" },
+    { name: "spawn_parallel" },
+  ];
+
+  it("never hands a worker the means to spawn more workers", () => {
+    // A worker that can spawn is a fan-out with no bound and nothing counting.
+    const names = subagentRoster(tools).map((t) => t.name);
+    expect(names).not.toContain("spawn");
+    expect(names).not.toContain("spawn_parallel");
+  });
+
+  it("keeps spawn out even when a caller explicitly asks for it", () => {
+    const names = subagentRoster(tools, ["read", "spawn"]).map((t) => t.name);
+    expect(names).toEqual(["read"]);
+  });
+
+  it("hides git_commit by default", () => {
+    // --autonomous clears git_commit under yolo, so a fleet worker could write
+    // to git history on its own — under the user's name, with no idea what
+    // else is staged.
+    expect(subagentRoster(tools).map((t) => t.name)).not.toContain("git_commit");
+  });
+
+  it("grants git_commit when the spawn names it", () => {
+    const names = subagentRoster(tools, ["read", "git_commit"]).map((t) => t.name);
+    expect(names).toContain("git_commit");
+  });
+
+  it("passes the ordinary tools through untouched", () => {
+    const names = subagentRoster(tools).map((t) => t.name);
+    expect(names).toEqual(["read", "edit", "bash", "git"]);
   });
 });

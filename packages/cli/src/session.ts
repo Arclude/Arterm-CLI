@@ -45,6 +45,7 @@ import {
   runSubagent,
   saveConfig,
   subagentPolicy,
+  subagentRoster,
 } from "@arterm/core";
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
 import {
@@ -325,7 +326,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const agent = new Agent({
     provider,
     model,
-    tools: defaultTools(),
+    tools: defaultTools(config.tools?.tier),
     permissions: container.resolve(Tokens.PermissionPolicy),
     ask: (tool, args) => asker(tool, args),
     bus: container.resolve(Tokens.Bus),
@@ -415,11 +416,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // has folded in MCP/plugin tools, so sub-agents inherit them. The delegation
   // tools stay out (depth is one level), and an optional allowlist narrows the set
   // (team members with a `tools:` frontmatter list).
-  const subagentTools = (allow?: string[]): Tool[] =>
-    agent.tools.filter(
-      (t) =>
-        t.name !== "spawn" && t.name !== "spawn_parallel" && (!allow || allow.includes(t.name)),
-    );
+  const subagentTools = (allow?: string[]): Tool[] => subagentRoster(agent.tools, allow);
 
   // Sub-agent delegation: the main agent gets a `spawn` tool that runs a fresh
   // sub-agent (own history, the core tool set, no `spawn` of its own → one level
