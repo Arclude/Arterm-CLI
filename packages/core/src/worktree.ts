@@ -134,10 +134,41 @@ export async function removeWorktree(
 }
 
 /**
+ * The files a unified diff touches, read off its `+++ b/…` / `--- a/…` headers.
+ *
+ * Deliberately narrow: this parses a patch WE generated with `git diff`, and its
+ * only job is to know which paths to put back if the apply fails. A path it
+ * misses is a path left as git wrote it — the same outcome as before this
+ * existed — so a parsing gap degrades, it does not corrupt.
+ */
+function patchPaths(patch: string): string[] {
+  const paths = new Set<string>();
+  for (const line of patch.split("\n")) {
+    const m = /^(?:---|\+\+\+) [ab]\/(.+?)\s*$/.exec(line);
+    if (m?.[1] && m[1] !== "dev/null") paths.add(m[1]);
+  }
+  return [...paths];
+}
+
+/**
  * Apply a unified diff to the repo's working tree (`git apply --3way`, so patches
  * based on an earlier HEAD still land when possible). Never throws — a conflict
  * comes back as `{ ok: false }` with git's explanation, and the caller decides
  * what to surface (team mode keeps the member's branch for manual recovery).
+ *
+ * A FAILED APPLY LEAVES NOTHING BEHIND, and that is the part worth stating.
+ * `git apply --3way` does not merely refuse on conflict — it writes the conflict
+ * markers into the working tree and stages the conflicting blobs, then exits
+ * non-zero. So the caller was told "this did not apply" while the user's source
+ * files had already been replaced with text that does not parse. Observed on a
+ * three-member /team run whose members each implemented all three modules: every
+ * one of the three files came out starting with `<<<<<<< ours`, and the run
+ * carried on.
+ *
+ * Markers are also the wrong recovery channel for this caller. The member's
+ * BRANCH is kept precisely so the work can be recovered deliberately; a
+ * half-merged working tree is the outcome nobody asked for. So the paths the
+ * patch names are snapshotted first and put back on failure.
  */
 export async function applyPatch(
   repoCwd: string,
@@ -149,8 +180,33 @@ export async function applyPatch(
   try {
     const root = await gitRoot(repoCwd, signal);
     await fs.writeFile(file, patch.endsWith("\n") ? patch : `${patch}\n`, "utf8");
-    await git(root, ["apply", "--3way", file], signal);
-    return { ok: true };
+    const touched = patchPaths(patch);
+    // `null` records "this file did not exist", which has to be restorable too:
+    // a conflicted apply can create a file the tree never had.
+    const before = new Map<string, Buffer | null>();
+    for (const rel of touched) {
+      before.set(rel, await fs.readFile(join(root, rel)).catch(() => null));
+    }
+    try {
+      await git(root, ["apply", "--3way", file], signal);
+      return { ok: true };
+    } catch (err) {
+      for (const [rel, content] of before) {
+        const abs = join(root, rel);
+        try {
+          if (content === null) await fs.rm(abs, { force: true });
+          else await fs.writeFile(abs, content);
+        } catch {
+          // Best effort: a path we cannot put back is reported by the failure
+          // we are already returning. Never let cleanup mask git's reason.
+        }
+      }
+      // --3way also stages its conflicting blobs; unstage exactly what it touched.
+      if (touched.length > 0) {
+        await git(root, ["reset", "-q", "--", ...touched], signal).catch(() => {});
+      }
+      return { ok: false, detail: (err as Error).message };
+    }
   } catch (err) {
     return { ok: false, detail: (err as Error).message };
   } finally {
