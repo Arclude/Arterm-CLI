@@ -141,3 +141,66 @@ export function withheldNote(
 function upper(s: string): string {
   return s.toUpperCase();
 }
+
+/**
+ * Header names that carry a credential but do not look like one by the rule
+ * above. `Authorization` is the whole reason: `curl -H "Authorization: Bearer …"`
+ * is the ordinary way a secret reaches a command line, and no `_`-delimited
+ * alternative catches the word on its own.
+ */
+const CREDENTIAL_HEADER = /^(?:authorization|proxy-authorization|x-api-key|cookie)$/i;
+
+/** The placeholder a redacted value becomes. Distinct enough to be searchable. */
+const REDACTED = "«redacted»";
+
+/** True when a flag or variable NAME says the thing beside it is a credential. */
+function credentialName(name: string): boolean {
+  return CREDENTIAL_NAME.test(name.replace(/^-+/, "").replace(/-/g, "_"));
+}
+
+/**
+ * A command line safe to show and to store.
+ *
+ * The environment scrub keeps credentials out of what a command INHERITS; this
+ * keeps them out of what a command is RECORDED as. A background process's argv
+ * is written to the registry, printed by `/ps`, and read back by the model — so
+ * `curl -H "Authorization: Bearer …"` would put the secret in exactly the
+ * places `scrubEnv` exists to keep it out of.
+ *
+ * Same rule and same reason: judged by NAME, never by value. A blob that
+ * "looks like a token" is as likely to be a commit hash or a base64 fixture,
+ * and a redactor that eats those makes the process list unreadable — which is
+ * how a control stops being used.
+ */
+export function redactCommand(argv: readonly string[]): string[] {
+  const out: string[] = [];
+  let redactNext = false;
+  for (const raw of argv) {
+    const arg = raw ?? "";
+    if (redactNext) {
+      out.push(REDACTED);
+      redactNext = false;
+      continue;
+    }
+    // `--token=value` and `API_KEY=value`.
+    const assigned = /^([^=\s]+)=([\s\S]*)$/.exec(arg);
+    if (assigned?.[1] && credentialName(assigned[1])) {
+      out.push(`${assigned[1]}=${REDACTED}`);
+      continue;
+    }
+    // `Authorization: Bearer …`, usually inside a `-H` argument.
+    const header = /^([A-Za-z][\w-]*):\s*(\S[\s\S]*)$/.exec(arg);
+    if (header?.[1] && (CREDENTIAL_HEADER.test(header[1]) || credentialName(header[1]))) {
+      out.push(`${header[1]}: ${REDACTED}`);
+      continue;
+    }
+    // `--token value`: the flag names it, so the NEXT argument is the secret.
+    if (arg.startsWith("-") && credentialName(arg)) {
+      out.push(arg);
+      redactNext = true;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}

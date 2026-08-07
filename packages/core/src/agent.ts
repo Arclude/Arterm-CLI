@@ -14,6 +14,7 @@ import {
 import { type LoopDetectOptions, type LoopDetector, createLoopDetector } from "./loopDetector.js";
 import { modelContextWindow } from "./modelsDev.js";
 import type { PermissionManager } from "./permissions.js";
+import type { ProcessRegistry } from "./processRegistry.js";
 import { ProviderError } from "./providerError.js";
 import type { SandboxRunner } from "./sandbox.js";
 import { estimateHistoryTokens, estimateMessageTokens, estimateTokens } from "./tokenEstimate.js";
@@ -78,6 +79,12 @@ export interface AgentOptions {
    * the same shell on the same host, and it feeds the same transcript.
    */
   credentials?: CredentialSettings;
+  /**
+   * Where a detached child is recorded. Passed down to sub-agents unchanged for
+   * the same reason as the sandbox: a worker that backgrounds a process the
+   * parent's teardown cannot see leaves it running after the session ends.
+   */
+  processes?: ProcessRegistry;
   /** Seed the conversation with prior messages (e.g. resuming a recorded session). */
   initialMessages?: Message[];
   temperature?: number;
@@ -316,6 +323,7 @@ export class Agent {
             tools: this.opts.tools,
             ...(this.opts.sandbox ? { sandbox: this.opts.sandbox } : {}),
             ...(this.opts.credentials ? { credentials: this.opts.credentials } : {}),
+            ...(this.opts.processes ? { processes: this.opts.processes } : {}),
           });
           // The ceiling, enforced where every tool passes rather than inside
           // each one. A tool with an opinion sets `maxOutputBytes`; everything

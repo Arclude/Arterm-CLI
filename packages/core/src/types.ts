@@ -4,6 +4,7 @@
  */
 
 import type { CredentialSettings } from "./credentials.js";
+import type { ProcessRegistry } from "./processRegistry.js";
 import type { SandboxRunner } from "./sandbox.js";
 
 export type Role = "system" | "user" | "assistant" | "tool";
@@ -292,6 +293,13 @@ export interface ToolContext {
    * standalone tool calls and tests work without it.
    */
   tools?: readonly Tool[];
+  /**
+   * Where a detached child is recorded, so the session can stop what it
+   * started (see `processRegistry.ts`). Absent means background execution is
+   * REFUSED rather than done unregistered — an unregistered background process
+   * is the leak the registry exists to prevent.
+   */
+  processes?: ProcessRegistry;
 }
 
 /** The three answers a permission prompt can produce. */

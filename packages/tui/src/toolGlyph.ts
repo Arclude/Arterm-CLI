@@ -76,6 +76,7 @@ const TOOL_CATEGORY: Record<string, keyof typeof CATEGORY> = {
   memory_search: "search",
   ls: "list",
   bash: "shell",
+  exec: "shell",
   lint: "test",
   lsp_definition: "graph",
   lsp_diagnostics: "test",

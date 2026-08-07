@@ -4,6 +4,7 @@ import { batchTool } from "./batch.js";
 import { calleesTool, callersTool, codeStatsTool, deadCodeTool } from "./codebase.js";
 import { diffTool } from "./diff.js";
 import { editTool } from "./edit.js";
+import { createExecTool } from "./exec.js";
 import { gitCommitTool, gitTool } from "./git.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";

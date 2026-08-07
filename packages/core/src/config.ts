@@ -162,6 +162,18 @@ export interface ArtermConfig {
     tier?: "minimal" | "standard" | "full";
   };
   /**
+   * The `exec` tool: run a program with no shell in front of it.
+   *
+   * `allow` extends the built-in command allowlist. It is read from the USER's
+   * config and from nowhere else, which is the same rule the sandbox states: a
+   * boundary a cloned repository can widen by committing a file is not a
+   * boundary. `loadConfig` reads only `~/.arterm/config.json` today, and a test
+   * fails if that changes.
+   */
+  exec: {
+    allow?: string[];
+  };
+  /**
    * OpenTelemetry GenAI export (`gen_ai.*` spans and metrics). Off by default:
    * an OTLP connection is not something a local-first tool should open without
    * being asked. `endpoint` also reads the standard `OTEL_EXPORTER_OTLP_ENDPOINT`.
@@ -498,6 +510,7 @@ export function defaultConfig(): ArtermConfig {
     // channel it closes does not depend on nobody being at the keyboard.
     credentials: { scrub: true },
     tools: { tier: "standard" },
+    exec: {},
     telemetry: { enabled: false },
     autonomy: {
       mode: "once",
@@ -612,6 +625,7 @@ const configFileSchema = z
         deny: z.array(z.string()).optional(),
       })
       .partial(),
+    exec: z.object({ allow: z.array(z.string()).optional() }).partial(),
     tools: z
       .object({
         tier: z.enum(["minimal", "standard", "full"]).optional(),

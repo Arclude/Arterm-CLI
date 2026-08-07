@@ -1,5 +1,6 @@
 import type { Tool } from "@arterm/core";
 import { scrubEnv, withheldNote } from "@arterm/core";
+import { startBackground, startedNote } from "./background.js";
 import { requireString } from "./paths.js";
 
 /**
@@ -37,10 +38,15 @@ export const bashTool: Tool = {
     properties: {
       command: { type: "string", description: "Shell command to execute." },
       timeout_ms: { type: "number", description: "Timeout in milliseconds (default 60000)." },
+      background: {
+        type: "boolean",
+        description: "Start it and return an id instead of waiting (needs a process registry).",
+      },
     },
     required: ["command"],
   },
-  preview: (args) => `bash: ${String(args.command)}`,
+  preview: (args) =>
+    `bash${args.background === true ? " (background)" : ""}: ${String(args.command)}`,
   async execute(args, ctx) {
     const command = requireString(args, "command");
     if (DENY.some((re) => re.test(command))) {
@@ -63,6 +69,40 @@ export const bashTool: Tool = {
         sandboxed = await ctx.sandbox.wrap(command, ctx.cwd, ctx.signal);
       } catch (err) {
         return { output: `Sandbox refused the command: ${asMessage(err)}`, isError: true };
+      }
+    }
+
+    // Detached: the tool returns an id and the process keeps going. Refused
+    // when no registry is wired rather than started anyway — an unregistered
+    // background process is one nothing will ever stop, which is the leak this
+    // feature would otherwise BE.
+    if (args.background === true) {
+      if (!ctx.processes) {
+        return {
+          output: "This session has no process registry, so background commands are unavailable.",
+          isError: true,
+        };
+      }
+      try {
+        const record = await startBackground(
+          {
+            spawn: sandboxed?.argv ?? [command],
+            shell: sandboxed === undefined,
+            // Split on whitespace for DISPLAY only: redaction needs to see
+            // `--token` and the word after it as separate items. Nothing is
+            // executed from this — a real shell split is exactly the parsing
+            // `exec` exists to avoid.
+            label: command.split(/\s+/),
+            ...(sandboxed?.env ? { env: sandboxed.env } : {}),
+          },
+          ctx,
+          ctx.processes,
+        );
+        return { output: startedNote(record) };
+      } catch (err) {
+        return { output: `Could not start in the background: ${asMessage(err)}`, isError: true };
+      } finally {
+        ctx.sandbox?.release();
       }
     }
 

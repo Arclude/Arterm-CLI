@@ -173,6 +173,28 @@ export function assessRisk(tool: Tool, args: Record<string, unknown>): RiskAsses
   return base;
 }
 
+/**
+ * The text every command pattern is matched against.
+ *
+ * `bash` puts the whole command in `command`. `exec` splits it: `{command:
+ * "node", args: ["-e", "…"]}`. Reading only `command` would grade that call as
+ * the word "node" — so `exec` would become the bypass for the exact control it
+ * was added to improve on, since `OPAQUE_BASH` would never see the payload.
+ *
+ * Joining argv with spaces OVER-approximates: `exec("echo", ["rm -rf /"])` now
+ * reads as the dangerous command it merely quotes. That is the safe direction
+ * to be wrong in a deny-list — a refused `echo` costs a sentence, and the
+ * opposite error costs the machine.
+ */
+function inspectable(args: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (typeof args.command === "string") parts.push(args.command);
+  if (Array.isArray(args.args)) {
+    for (const a of args.args) if (typeof a === "string") parts.push(a);
+  }
+  return parts.length > 0 ? parts.join(" ") : JSON.stringify(args);
+}
+
 function assessByArgs(
   tool: Tool,
   args: Record<string, unknown>,
@@ -181,7 +203,7 @@ function assessByArgs(
   if (category === "read") return { level: "low" };
 
   if (category === "execute") {
-    const cmd = typeof args.command === "string" ? args.command : JSON.stringify(args);
+    const cmd = inspectable(args);
     for (const re of CRITICAL_BASH) {
       if (re.test(cmd))
         return { level: "critical", reason: `destructive command: ${cmd.slice(0, 60)}` };

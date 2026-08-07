@@ -49,5 +49,7 @@ export {
   type GraphStats,
 } from "./callGraph.js";
 export { resetCallGraphs, codebaseTools } from "./codebase.js";
+export { createExecTool, allowedCommands, type ExecToolOptions } from "./exec.js";
+export { startBackground, startedNote, killTree } from "./background.js";
 export { disposeLspClients, lspTools } from "./lsp/tools.js";
 export { langOf, parserFailure, CALL_GRAPH_EXTS, type CallLang } from "./treeSitter.js";

@@ -55,6 +55,7 @@ import {
 } from "./ink.js";
 import { formatRateLimits } from "./limitsView.js";
 import { Markdown } from "./markdown.js";
+import { formatProcesses, parsePsArgs } from "./psView.js";
 import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
 import { truncateDisplay } from "./terminalWidth.js";
@@ -237,6 +238,7 @@ const COMMANDS = [
   "compact",
   "context",
   "cost",
+  "ps",
   "config",
   "mcp",
   "plugins",
@@ -2122,6 +2124,36 @@ export function App({
             usd != null ? `estimated cost: $${usd.toFixed(4)}` : "",
           ].filter(Boolean);
           push({ kind: "system", text: lines.join("\n") });
+          break;
+        }
+        case "ps": {
+          const action = parsePsArgs(rest);
+          if (action.kind === "usage") {
+            push({
+              kind: "system",
+              text: `/ps — ${action.reason}\nUsage: /ps · /ps kill <id> · /ps kill all`,
+            });
+            break;
+          }
+          if (action.kind === "kill") {
+            const stopped = session.processes.kill(action.id);
+            push({
+              kind: "system",
+              text: stopped
+                ? `stopped ${stopped.id}: ${stopped.label}`
+                : `no such process: ${action.id}`,
+            });
+            break;
+          }
+          if (action.kind === "kill-all") {
+            const n = session.processes.killAll();
+            push({
+              kind: "system",
+              text: n === 0 ? "Nothing was running." : `Stopped ${n} process(es).`,
+            });
+            break;
+          }
+          push({ kind: "system", text: formatProcesses(session.processes.list(), Date.now()) });
           break;
         }
         case "config": {

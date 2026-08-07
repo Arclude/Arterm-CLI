@@ -22,6 +22,7 @@ import {
   PermissionManager,
   type PermissionMode,
   PlanStore,
+  ProcessRegistry,
   RunBudget,
   RunController,
   type SandboxRunner,
@@ -75,6 +76,7 @@ import {
 } from "@arterm/providers";
 import {
   type RollUpFn,
+  createExecTool,
   createFleetTools,
   createMemorySearchTool,
   createPlanTool,
@@ -206,6 +208,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // The model's own work list. Held outside the conversation so it survives
   // compaction — which is the whole reason it exists (see `todo.ts`).
   const todos = new TodoStore((items) => bus.emit({ type: "todo_changed", items }));
+  // Background children. Built here rather than beside the tools, because the
+  // teardown hook in `persist()` is the half that makes backgrounding safe and
+  // it has to close over the same instance.
+  const processes = new ProcessRegistry();
   // Checkpoints are per session; the transcript id isn't known yet at build time.
   const sessionCheckpointId = randomUUID();
   // A dependency graph the model can write, on the shape `/sdd` executes.
@@ -366,6 +372,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     budget,
     ...(sandbox ? { sandbox } : {}),
     ...(config.credentials ? { credentials: config.credentials } : {}),
+    processes,
     recall: recallFn,
     container,
   });
@@ -467,6 +474,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       budget,
       ...(sandbox ? { sandbox } : {}),
       ...(config.credentials ? { credentials: config.credentials } : {}),
+      processes,
       role,
     });
     bus.emit({ type: "subagent_done", output, role });
@@ -763,6 +771,11 @@ export async function buildSession(opts: SessionOptions): Promise<{
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
     ...createFleetTools({ registry: fleetRegistry, rollUp }),
+    createExecTool({
+      registry: processes,
+      // From the user's config only — see `ExecToolOptions.extraAllowed`.
+      ...(config.exec?.allow ? { extraAllowed: config.exec.allow } : {}),
+    }),
     ...(cmem
       ? cmem.tools()
       : memoryEnabled
@@ -891,6 +904,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
   }
 
   const session: Session = {
+    processes,
     agent,
     bus,
     config,
@@ -1012,6 +1026,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // ever closes them.
     await disposeLspClients().catch(() => {});
     resetCallGraphs();
+    // The reason background execution is safe to offer at all: what the session
+    // started, the session stops. Without this a dev server launched in minute
+    // two of a six-hour run still holds its port tomorrow.
+    processes.killAll();
     // Flush the exporter here rather than behind a fourth returned function:
     // `persist` is the last call on EVERY teardown path (headless, session
     // close, close-all), and a batch processor that is never shut down drops

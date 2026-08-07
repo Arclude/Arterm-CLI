@@ -38,6 +38,7 @@ export * from "./blackboard.js";
 export * from "./memberMemory.js";
 export * from "./autonomy.js";
 export * from "./subagent.js";
+export * from "./processRegistry.js";
 export * from "./fleetRegistry.js";
 export * from "./verify.js";
 export * from "./team.js";

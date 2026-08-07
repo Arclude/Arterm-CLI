@@ -7,6 +7,7 @@ import type { CredentialSettings } from "./credentials.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import type { LoopDetectOptions } from "./loopDetector.js";
 import type { PermissionManager } from "./permissions.js";
+import type { ProcessRegistry } from "./processRegistry.js";
 import type { SandboxRunner } from "./sandbox.js";
 import type { ChatProvider, PermissionAsker, Tool } from "./types.js";
 import {
@@ -105,6 +106,12 @@ export interface SubagentOptions {
    * next wave's prompt, so a key it printed travels further than the parent's.
    */
   credentials?: CredentialSettings;
+  /**
+   * The parent's process ledger, passed down unchanged — same argument as the
+   * sandbox above. A worker that backgrounds a dev server into a registry the
+   * session cannot see leaves it running after the session ends.
+   */
+  processes?: ProcessRegistry;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -250,6 +257,7 @@ export function createSubagentSession(opts: SubagentOptions): SubagentSession {
     ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
     ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
     ...(opts.credentials !== undefined ? { credentials: opts.credentials } : {}),
+    ...(opts.processes !== undefined ? { processes: opts.processes } : {}),
   };
   const agent = new Agent(agentOpts);
 

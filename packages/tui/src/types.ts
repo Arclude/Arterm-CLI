@@ -16,6 +16,7 @@ import type {
   PermissionBroker,
   PermissionMode,
   PluginSummary,
+  ProcessRegistry,
   RateLimitSnapshot,
   RestoreResult,
   SddRunner,
@@ -80,6 +81,12 @@ export interface Session {
   compact(): Promise<CompactionResult>;
   /** Current permission mode (ask | auto | plan | yolo). */
   permissionMode: PermissionMode;
+  /**
+   * Background children this session started (see `processRegistry.ts`). `/ps`
+   * reads and stops them — the user's half of a feature whose whole risk is
+   * leaving something running after the session ends.
+   */
+  processes: ProcessRegistry;
   /** Change the permission mode (Shift+Tab / /mode). */
   setMode(mode: PermissionMode): void;
   /**
