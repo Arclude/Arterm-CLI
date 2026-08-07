@@ -7,6 +7,7 @@ const MAX_MATCHES = 100;
 
 export const grepTool: Tool = {
   name: "grep",
+  maxOutputBytes: 131_072,
   description: "Search file contents for a regular expression and return matching lines.",
   // `grep` and `search` are near-synonyms in the roster and answer different
   // questions: one finds a literal string, the other finds relevant code. A

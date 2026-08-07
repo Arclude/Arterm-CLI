@@ -1063,3 +1063,64 @@ describe("usage hints", () => {
     expect((result as { output: string }).output).toBe("no.");
   });
 });
+
+/**
+ * The ceiling on what a tool may put into the context, enforced where every
+ * tool passes rather than inside each one — including MCP and plugin tools,
+ * written by someone else and capped at nothing.
+ */
+describe("tool output ceiling", () => {
+  const loud = (bytes: number, max?: number): Tool => ({
+    name: "loud",
+    description: "",
+    parameters: {},
+    permission: "allow",
+    category: "read",
+    ...(max !== undefined ? { maxOutputBytes: max } : {}),
+    execute: async () => ({ output: `HEAD${"x".repeat(bytes)}TAIL` }),
+  });
+
+  function callOnceNamed(name: string): StubProvider {
+    return new StubProvider([
+      [{ type: "tool_call", call: { id: "c1", name, arguments: {} } }],
+      [{ type: "text", delta: "done" }],
+    ]);
+  }
+
+  it("clamps a tool past its own ceiling, keeping both ends", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(callOnceNamed("loud"), bus, [loud(50_000, 2000)]).run("go");
+    const result = events.find((e) => e.type === "tool_result") as { output: string };
+    expect(result.output.length).toBeLessThan(5000);
+    expect(result.output).toContain("HEAD");
+    expect(result.output).toContain("TAIL");
+    expect(result.output).toContain("cut from the middle");
+  });
+
+  it("points at the full output on disk, so the command need not be re-run", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(callOnceNamed("loud"), bus, [loud(50_000, 2000)]).run("go");
+    const result = events.find((e) => e.type === "tool_result") as { output: string };
+    expect(result.output).toMatch(/\[full output: .+\]/);
+  });
+
+  it("leaves output under the ceiling exactly as the tool returned it", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(callOnceNamed("loud"), bus, [loud(10, 2000)]).run("go");
+    const result = events.find((e) => e.type === "tool_result") as { output: string };
+    expect(result.output).toBe(`HEAD${"x".repeat(10)}TAIL`);
+  });
+
+  it("applies a backstop to a tool that declares no ceiling", async () => {
+    // The MCP/plugin case: a megabyte of JSON from a third-party tool used to
+    // land in the context whole.
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(callOnceNamed("loud"), bus, [loud(400_000)]).run("go");
+    const result = events.find((e) => e.type === "tool_result") as { output: string };
+    expect(result.output).toContain("cut from the middle");
+  });
+});

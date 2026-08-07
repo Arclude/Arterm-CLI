@@ -17,6 +17,7 @@ import type { PermissionManager } from "./permissions.js";
 import { ProviderError } from "./providerError.js";
 import type { SandboxRunner } from "./sandbox.js";
 import { estimateHistoryTokens, estimateMessageTokens, estimateTokens } from "./tokenEstimate.js";
+import { DEFAULT_MAX_OUTPUT_BYTES, clampMiddle, spoolOutput } from "./toolOutput.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
   ChatProvider,
@@ -316,7 +317,21 @@ export class Agent {
             ...(this.opts.sandbox ? { sandbox: this.opts.sandbox } : {}),
             ...(this.opts.credentials ? { credentials: this.opts.credentials } : {}),
           });
-          ctx.output = result.output;
+          // The ceiling, enforced where every tool passes rather than inside
+          // each one. A tool with an opinion sets `maxOutputBytes`; everything
+          // else — including MCP and plugin tools, written by someone else and
+          // capped at nothing — gets the backstop. What is cut is spooled, so
+          // the model can grep the file instead of re-running the command.
+          const cap = ctx.tool.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+          const clamped = clampMiddle(result.output, cap);
+          if (clamped.truncated) {
+            const file = await spoolOutput(result.output, ctx.tool.name);
+            ctx.output = file
+              ? `${clamped.text}\n[full output: ${file}]`
+              : `${clamped.text}\n[full output was ${clamped.originalBytes} bytes]`;
+          } else {
+            ctx.output = result.output;
+          }
           ctx.isError = result.isError ?? false;
           ctx.diff = result.diff;
           ctx.path = result.path;

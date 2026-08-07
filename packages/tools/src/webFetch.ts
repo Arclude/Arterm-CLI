@@ -208,6 +208,7 @@ function combinedSignal(ctxSignal: AbortSignal | undefined): AbortSignal {
 
 export const webFetchTool: Tool = {
   name: "web_fetch",
+  maxOutputBytes: 131_072,
   description:
     "Fetch a URL over http(s) and return its readable text content (HTML is stripped " +
     "to plain text). Blocks private, loopback, and other internal addresses for safety, " +

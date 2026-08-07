@@ -32,6 +32,7 @@ function looksBinary(buf: Buffer): boolean {
 
 export const readTool: Tool = {
   name: "read",
+  maxOutputBytes: 262_144,
   description:
     "Read a UTF-8 text file with line numbers. Use `offset` and `limit` to read a window of a large file.",
   permission: "allow",

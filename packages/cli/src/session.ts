@@ -50,6 +50,7 @@ import {
   saveConfig,
   subagentPolicy,
   subagentRoster,
+  sweepSpool,
   taskPath,
 } from "@arterm/core";
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
@@ -912,6 +913,12 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // the spans of the run that just ended — the ones anyone is looking for.
     // Never throws: a collector that went away must not fail a good run.
     await telemetry?.shutdown().catch(() => {});
+    // Spooled tool outputs, swept here for the same reason: this is the last
+    // call on every teardown path. Done at the END of a session rather than on
+    // each write — the directory grows by a few files per run, and a sweep on
+    // the write path would add a directory listing to a tool call that is
+    // already over its budget.
+    await sweepSpool().catch(() => 0);
     config.provider = provider.id;
     config.permissions = permissions.snapshot();
     // Persist auto/plan/ask as the default, but never make yolo sticky.
