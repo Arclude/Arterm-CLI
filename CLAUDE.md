@@ -475,3 +475,26 @@ pipeline stage that runs *before* this ladder and is not part of `evaluate()`.
 args (`category !== "read"`) is marked `argDependent` and printed with a `*`.
 Dropping that marker would make the table read as a guarantee it can't give — in
 `auto` mode every row would say "runs", including `bash`.
+
+### The arbiter grades unreadability, not just danger
+
+`CRITICAL_BASH` and `HIGH_BASH` are deny-lists, and a deny-list fails **open** by
+construction: what it does not recognize it grades `medium`, and `medium` runs
+with no prompt under `auto` and `yolo`. `echo cm0gLXJmIC8K | base64 -d | sh` is
+`rm -rf /` that no pattern in either list can ever match, because the string the
+shell executes does not exist until after the pipe.
+
+`OPAQUE_BASH` is the fail-closed half. It does not try to guess the hidden
+payload — it matches the **hiding** (decode-then-execute, `eval` of a
+substitution, an interpreter handed a base64 blob, `-EncodedCommand`) and grades
+it `high`, which is the closed answer: attended gets a prompt, and every
+unattended asker — `subagentPolicy`'s and the `PermissionBroker`'s default —
+answers an escalation with "deny". `high` and not `critical` on purpose:
+`eval "$(direnv hook zsh)"` is a real thing developers run, so a prompt is the
+honest handling of "unreadable" while a block belongs to "readable and
+destructive".
+
+The documented hole is hiding **split across calls** — `curl … > /tmp/x` in one,
+`sh /tmp/x` in the next. Each half reads as ordinary alone, the two can sit turns
+apart, and a rule wide enough to catch them fires on `wget deps.tar && python3
+setup.py`. What bounds that case is the sandbox's egress allowlist, not a regex.

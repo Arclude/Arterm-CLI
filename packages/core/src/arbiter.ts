@@ -71,6 +71,57 @@ const HIGH_BASH: RegExp[] = [
   /\bset-mppreference\b[^\n]*-disablerealtimemonitoring/i,
 ];
 
+/**
+ * Commands that assemble themselves at runtime — graded on the fact that they
+ * cannot be read.
+ *
+ * Every list above it is a deny-list, and a deny-list fails OPEN by
+ * construction: what it does not recognize, it grades `medium`, and `medium`
+ * runs without a prompt under `auto` and `yolo`. `echo cm0gLXJmIC8K | base64 -d
+ * | sh` is `rm -rf /` that no pattern here will ever match, because the string
+ * the shell finally executes does not exist until after the pipe.
+ *
+ * So this list does not try to guess what the hidden command is. It matches the
+ * HIDING — decode-then-execute, fetch-then-execute, `eval` of a substitution,
+ * an interpreter handed a base64 blob — and grades it `high`, which is the
+ * closed answer: attended sessions get a prompt, and every unattended caller
+ * (sub-agents via `subagentPolicy`, the headless broker's default asker)
+ * answers an escalation with "deny". An analyzer that cannot see what runs
+ * should say so rather than return "medium" and mean "I found nothing".
+ *
+ * Deliberately `high` and not `critical`: `eval "$(direnv hook zsh)"` and
+ * `eval "$(ssh-agent)"` are real things developers run, and a flat refusal for
+ * everyone would be paid by the people whose shells work that way. A prompt is
+ * the honest handling of "unreadable", a block is the honest handling of
+ * "readable and destructive" — which is what CRITICAL_BASH already covers.
+ *
+ * The documented hole: hiding SPLIT ACROSS COMMANDS — `curl … > /tmp/x` in one
+ * call and `sh /tmp/x` in the next — is not here and cannot be. Each half reads
+ * as ordinary on its own, the two can sit turns apart, and a rule wide enough to
+ * catch them fires on `wget deps.tar && python3 setup.py`. What bounds that case
+ * is the sandbox's egress allowlist, not a pattern.
+ */
+const OPAQUE_BASH: RegExp[] = [
+  // decode → interpreter (the classic; `|` may be preceded by more pipeline)
+  /\b(?:base64|b64decode|uudecode|xxd|basenc)\b[^\n]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh|python[0-9.]*|perl|ruby|node|php)\b/i,
+  /\bopenssl\b[^\n]*\benc\b[^\n]*(?:-d|-decrypt)\b[^\n]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash)\b/i,
+  // eval of a substitution or of a variable — the body is unknown until it runs
+  /\beval\b[^\n]*(?:\$\(|`)/,
+  /\beval\b\s+["']?\$\{?[A-Za-z_]/,
+  // an interpreter invoked ON a substitution: sh -c "$(curl …)", bash <(…)
+  /\b(?:sh|bash|zsh|dash|ksh)\b\s+-c\s*["']?\s*\$\(/,
+  /\b(?:sh|bash|zsh|ksh)\b\s*<\s*\(/,
+  // python/node handed source they build themselves
+  /\bpython[0-9.]*\b[^\n]*-c\b[^\n]*\b(?:exec|eval|b64decode|marshal\.loads|codecs\.decode)\s*\(/i,
+  /\bnode\b[^\n]*-e\b[^\n]*\b(?:eval|Function|from\(\s*["']?[A-Za-z0-9+/=]{16,})/,
+  // PowerShell -EncodedCommand (and its abbreviations) with a base64 payload
+  /(?:^|\s)-e(?:nc|ncoded|ncodedcommand)?\s+["']?[A-Za-z0-9+/=]{24,}/i,
+  /\b(?:frombase64string|invoke-expression|iex)\b/i,
+  // word-splitting tricks whose only purpose is to break a literal apart
+  /\$\{IFS\}/,
+  /\$\{[A-Za-z_][A-Za-z0-9_]*:\d+:\d+\}/,
+];
+
 /** Paths whose edits warrant a human look (secrets, keys, git internals). */
 const SENSITIVE_PATH = /(^|\/)(\.env|\.git\/|id_rsa|\.ssh\/|secrets?\.|credentials)/i;
 
@@ -111,6 +162,14 @@ function assessByArgs(
     }
     for (const re of HIGH_BASH) {
       if (re.test(cmd)) return { level: "high", reason: `risky command: ${cmd.slice(0, 60)}` };
+    }
+    for (const re of OPAQUE_BASH) {
+      if (re.test(cmd)) {
+        return {
+          level: "high",
+          reason: `command builds itself at runtime, so it cannot be screened: ${cmd.slice(0, 60)}`,
+        };
+      }
     }
     return { level: "medium" };
   }

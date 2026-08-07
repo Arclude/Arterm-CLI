@@ -193,6 +193,10 @@ built to be safe by default:
   (`rm -rf /`, `mkfs`, fork bombs, …) are refused outright. This is
   defense-in-depth only and is bypassable; the permission prompt is the real
   guard.
+- **Unreadable commands are escalated** — a command that assembles itself at
+  runtime (`… | base64 -d | sh`, `eval "$(…)"`, `powershell -EncodedCommand …`)
+  can't be screened by any pattern, so it is treated as high-risk on that basis
+  alone: a prompt when someone is watching, a refusal when nobody is.
 - **Local by default** — no telemetry and no network calls beyond the model
   backend you configure.
 
