@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import type { Tool, ToolResult } from "@arterm/core";
-import { MAX_IMAGE_FILE_BYTES, imageMediaType, matchesImageMagic } from "@arterm/core";
+import { MAX_IMAGE_FILE_BYTES, imageMediaType, sniffImageType } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 
 /** Bytes read off disk before paging is required. */
@@ -13,10 +13,15 @@ const MAX_BYTES = 400_000;
  * `attachments.ts`, shared with the images the USER attaches. Two copies of
  * "is this really a PNG" is one copy that is right and one that is stale.
  */
-function readImage(abs: string, buf: Buffer, mediaType: string): ToolResult {
-  if (!matchesImageMagic(buf, mediaType)) {
+function readImage(abs: string, buf: Buffer, named: string): ToolResult {
+  // The BYTES decide the type, not the name. A `.png` that is really a JPEG is
+  // an ordinary file (there is one in the author's own ~/Resimler), and
+  // refusing it would fail on the first real photo. Bytes matching NOTHING is
+  // still a refusal — that is the HTML-error-page-named-.png case.
+  const mediaType = sniffImageType(buf);
+  if (!mediaType) {
     return {
-      output: `${abs} is named as ${mediaType} but its bytes are not — not sending it as an image.`,
+      output: `${abs} is named as ${named} but its bytes are not any image format — not sending it.`,
       isError: true,
     };
   }

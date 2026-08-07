@@ -16,6 +16,13 @@ const PNG = Buffer.from(
   "base64",
 );
 
+/** JPEG magic + JFIF header — enough for the sniffer, which reads 12 bytes. */
+const JPEG = Buffer.concat([
+  Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+  Buffer.from("JFIF\0"),
+  Buffer.alloc(32),
+]);
+
 let dir: string;
 beforeEach(async () => {
   dir = await fs.mkdtemp(join(tmpdir(), "arterm-attach-"));
@@ -90,6 +97,16 @@ describe("attachImageFiles", () => {
     } finally {
       await fs.rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("sends a JPEG named .png as a JPEG, rather than refusing it", async () => {
+    // A real file on the machine this was written on: ~/Resimler/logo.png is a
+    // JPEG. Nothing is wrong with it, and refusing it because its name is
+    // imprecise would be this feature failing on the first real photo.
+    await write("logo.png", JPEG);
+    const { attached, rejected } = await attachImageFiles(["logo.png"], dir);
+    expect(rejected).toEqual([]);
+    expect(attached[0]?.image.mediaType).toBe("image/jpeg");
   });
 
   it("refuses a .png whose bytes are not one, and names it", async () => {

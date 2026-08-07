@@ -59,19 +59,34 @@ export function imageMediaType(path: string): string | undefined {
 }
 
 /**
- * True when the bytes are the format the name claims.
+ * What the BYTES say the file is, regardless of what it is called.
  *
- * Shared with the `read` tool rather than written twice: the two answer the
- * same question about the same four formats, and a check that drifts between
- * two copies is a check that is right in one place.
+ * The extension decides whether a file is a candidate at all; this decides what
+ * it actually is, and the two disagree more often than they should. A real one
+ * on the machine this was written on: `~/Resimler/logo.png` is a JPEG. Nothing
+ * is wrong with that file, and refusing it because its name is imprecise would
+ * be this feature failing at the first real photo it was handed.
+ *
+ * Refusal is still the answer when the bytes match NOTHING here, which is the
+ * case that matters: a download that returned an HTML error page under a `.png`
+ * name is a provider 400 that ends the turn, and this is also what stops
+ * "attach my private key" from being possible — a key file is not any of these.
+ *
+ * Shared with the `read` tool rather than written twice; a check that drifts
+ * between two copies is a check that is right in one place.
  */
-export function matchesImageMagic(buf: Buffer, mediaType: string): boolean {
+export function sniffImageType(buf: Buffer): string | undefined {
   const head = buf.subarray(0, 12).toString("latin1");
-  if (mediaType === "image/png") return head.startsWith("\x89PNG\r\n\x1a\n");
-  if (mediaType === "image/jpeg") return head.startsWith("\xff\xd8\xff");
-  if (mediaType === "image/gif") return head.startsWith("GIF8");
-  if (mediaType === "image/webp") return head.startsWith("RIFF") && head.slice(8, 12) === "WEBP";
-  return false;
+  if (head.startsWith("\x89PNG\r\n\x1a\n")) return "image/png";
+  if (head.startsWith("\xff\xd8\xff")) return "image/jpeg";
+  if (head.startsWith("GIF8")) return "image/gif";
+  if (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP") return "image/webp";
+  return undefined;
+}
+
+/** True when the bytes are the format the name claims. */
+export function matchesImageMagic(buf: Buffer, mediaType: string): boolean {
+  return sniffImageType(buf) === mediaType;
 }
 
 /** One image the user attached, with what to show them about it. */
@@ -89,13 +104,23 @@ export interface AttachResult {
   rejected: string[];
 }
 
-/** Turn bytes the user chose into an attachment, or say why not. */
-function fromBytes(buf: Buffer, mediaType: string, label: string): Attachment | string {
-  if (!matchesImageMagic(buf, mediaType)) {
-    return `${label} is named as ${mediaType} but its bytes are not one.`;
+/**
+ * Turn bytes the user chose into an attachment, or say why not.
+ *
+ * The media type comes from the BYTES, never from the name — see
+ * `sniffImageType`. `expected` is only what to say when the bytes are nothing
+ * at all, since "clipboard is not an image" and "shot.png is not an image" want
+ * different words.
+ */
+function fromBytes(buf: Buffer, expected: string, label: string): Attachment | string {
+  const mediaType = sniffImageType(buf);
+  if (!mediaType) {
+    return `${label} is named as ${expected} but its bytes are not any image format.`;
   }
   if (buf.length > MAX_IMAGE_FILE_BYTES) {
-    return `${label} is ${buf.length} bytes, over the ${MAX_IMAGE_FILE_BYTES}-byte limit.`;
+    const mb = (buf.length / 1_000_000).toFixed(1);
+    const cap = (MAX_IMAGE_FILE_BYTES / 1_000_000).toFixed(1);
+    return `${label} is ${mb}MB, over the ${cap}MB limit — resize or crop it first.`;
   }
   return {
     image: { mediaType, data: buf.toString("base64") },
