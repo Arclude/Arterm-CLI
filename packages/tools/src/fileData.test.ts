@@ -196,6 +196,32 @@ describe("patchTool", () => {
     expect(await fs.readFile(join(dir, "f.txt"), "utf8")).toBe("a\nB\nc\n");
   });
 
+  it.runIf(hasGit)("renders what it changed, like every other mutating tool", async () => {
+    // `patch` was the only file-mutating tool that showed no diff — the one
+    // call you most want to see was the one you could not.
+    await write("f.txt", "old\n");
+    const res = await patchTool.execute({ patch: patchFor("f.txt", "old", "new") }, ctx());
+    expect(res.path).toBe("f.txt");
+    expect(res.diff?.some((r) => r.kind === "del" && r.text === "old")).toBe(true);
+    expect(res.diff?.some((r) => r.kind === "add" && r.text === "new")).toBe(true);
+  });
+
+  it.runIf(hasGit)("shows a created file as wholly added", async () => {
+    const create = "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,1 @@\n+hello\n";
+    const res = await patchTool.execute({ patch: create }, ctx());
+    expect(res.isError).toBeFalsy();
+    expect(res.diff?.some((r) => r.kind === "add" && r.text === "hello")).toBe(true);
+  });
+
+  it.runIf(hasGit)("renders nothing for a dry run — nothing changed", async () => {
+    await write("f.txt", "old\n");
+    const res = await patchTool.execute(
+      { patch: patchFor("f.txt", "old", "new"), dry_run: true },
+      ctx(),
+    );
+    expect(res.diff).toBeUndefined();
+  });
+
   it("refuses a patch that writes outside the working directory", async () => {
     // git apply bounds paths by the REPOSITORY, not by the directory it runs
     // in — so this check is the tool's boundary, not a duplicate of git's.

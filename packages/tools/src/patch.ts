@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { type Tool, patchTargets } from "@arterm/core";
+import { type Tool, lineDiff, patchTargets } from "@arterm/core";
 import { runGit } from "./gitRun.js";
 import { requireString, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
@@ -86,6 +86,18 @@ export const patchTool: Tool = {
       }
     }
 
+    // The first target's text, read BEFORE the patch lands, so the transcript
+    // can show what changed. Every other file-mutating tool renders a diff;
+    // `patch` — whose entire job is applying one — rendered a line of prose,
+    // which made the one call you most want to see the one you cannot.
+    // A file the patch CREATES has no before-text, and "" is the honest answer:
+    // lineDiff then shows the whole thing as added.
+    const shown = targets[0];
+    const before =
+      args.dry_run === true || shown === undefined
+        ? undefined
+        : await fs.readFile(resolveWithin(ctx.cwd, shown), "utf8").catch(() => "");
+
     const base = ["apply", `-p${strip}`];
     if (args.dry_run === true) base.push("--check");
     if (args.reject === true) base.push("--reject");
@@ -147,10 +159,18 @@ export const patchTool: Tool = {
     }
     if (result.stderr.trim()) notes.push(result.stderr.trim());
 
+    const after =
+      before !== undefined && shown !== undefined
+        ? await fs.readFile(resolveWithin(ctx.cwd, shown), "utf8").catch(() => undefined)
+        : undefined;
+
     return {
       output: `Applied to ${targets.length} file(s): ${targets.join(", ")}${
         notes.length > 0 ? `\n[${notes.join(" · ")}]` : ""
       }`,
+      ...(before !== undefined && after !== undefined && shown !== undefined
+        ? { diff: lineDiff(before, after), path: shown }
+        : {}),
       // A partial application is a failure the model has to see, even though
       // the files did change — otherwise it moves on with rejected hunks on disk.
       isError: rejects.length > 0,
