@@ -3,6 +3,7 @@ import type {
   ChatChunk,
   ChatProvider,
   ChatRequest,
+  ImageContent,
   Message,
   ModelInfo,
   RateLimitSnapshot,
@@ -132,7 +133,7 @@ export class OpenAICompatProvider implements ChatProvider {
   private async *streamOnce(req: ChatRequest): AsyncIterable<ChatChunk> {
     const body = {
       model: req.model,
-      messages: req.messages.map(toOpenAIMessage),
+      messages: req.messages.flatMap(toOpenAIMessages),
       stream: true,
       temperature: req.temperature,
       tools: req.tools ? req.tools.map(toOpenAITool) : undefined,
@@ -272,11 +273,38 @@ async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<unk
   }
 }
 
-function toOpenAIMessage(m: Message): Record<string, unknown> {
+/** Images as OpenAI content parts — a `data:` URI is this schema's base64 carrier. */
+function toOpenAIImageParts(images: ImageContent[] | undefined): Record<string, unknown>[] {
+  return (images ?? []).map((image) => ({
+    type: "image_url",
+    image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+  }));
+}
+
+/**
+ * One Arterm message becomes one OpenAI message — except a tool result carrying
+ * an image, which becomes two.
+ *
+ * The schema requires a `tool` message's `content` to be a plain string, so
+ * there is nowhere inside it to put an image part. A following `user` turn is
+ * the only slot the protocol has for one, and arriving one turn late beats not
+ * arriving: a model that is shown nothing describes the screenshot it imagines.
+ * The label goes first so the image has something naming what produced it.
+ */
+function toOpenAIMessages(m: Message): Record<string, unknown>[] {
+  const parts = toOpenAIImageParts(m.images);
   if (m.role === "tool") {
-    return { role: "tool", content: m.content, tool_call_id: m.toolCallId };
+    const result = { role: "tool", content: m.content, tool_call_id: m.toolCallId };
+    if (parts.length === 0) return [result];
+    const label = { type: "text", text: `Image output of ${m.name ?? "the tool call"} above:` };
+    return [result, { role: "user", content: [label, ...parts] }];
   }
   const base: Record<string, unknown> = { role: m.role, content: m.content };
+  // Only a user turn may carry image parts: the schema takes a string for an
+  // assistant's content, so an image there is rejected rather than ignored.
+  if (m.role === "user" && parts.length > 0) {
+    base.content = [...(m.content ? [{ type: "text", text: m.content }] : []), ...parts];
+  }
   if (m.toolCalls?.length) {
     base.tool_calls = m.toolCalls.map((c) => ({
       id: c.id,
@@ -284,7 +312,7 @@ function toOpenAIMessage(m: Message): Record<string, unknown> {
       function: { name: c.name, arguments: JSON.stringify(c.arguments) },
     }));
   }
-  return base;
+  return [base];
 }
 
 function toOpenAITool(t: ToolSchema): Record<string, unknown> {

@@ -46,6 +46,8 @@ import {
   McpManager,
   PluginLoader,
   SkillRegistry,
+  createMcpUseTool,
+  createSkillTool,
   startMemoryMcpServer,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
@@ -55,6 +57,7 @@ import { ArtermUserError } from "./errors.js";
 import { applyAutonomousProfile } from "./flags.js";
 import { runHeadless, runHeadlessGoal } from "./headless.js";
 import { runInit } from "./init.js";
+import { runMcpServe } from "./mcpServe.js";
 import { formatRecordsText, startCmemServer, startMemoryServer } from "./memoryServer.js";
 import { runPermissionsExplain } from "./permissionsExplain.js";
 import { formatList, listPermissions, parseOnly, runPermissionsList } from "./permissionsList.js";
@@ -367,8 +370,22 @@ async function startChat(globals: GlobalOpts): Promise<void> {
     session.agentDefs = agentDefs.summary;
 
     // Fold external tools into the agent (built-ins win on name collisions).
+    // The `skill` tool joins them here rather than in `buildSession`, because
+    // the registry it reads is loaded HERE — a session-level copy would be a
+    // second registry answering from a different directory.
     const existing = new Set(session.agent.tools.map((t) => t.name));
-    const extra = [...mcpTools, ...pluginTools].filter((t) => !existing.has(t.name));
+    const extra = [
+      createSkillTool(skills),
+      // Lazy access to servers that are configured but NOT eagerly connected.
+      // `isConnected` is what keeps it from opening a second child process for
+      // a server whose tools are already on the roster above.
+      createMcpUseTool({
+        servers: config.mcpServers ?? {},
+        isConnected: (name) => mcp.summary.some((s) => s.name === name && s.status === "connected"),
+      }),
+      ...mcpTools,
+      ...pluginTools,
+    ].filter((t) => !existing.has(t.name));
     if (extra.length > 0) {
       session.agent.setTools([...session.agent.tools, ...extra]);
       session.toolCount = session.agent.tools.length;
@@ -976,7 +993,7 @@ async function main(): Promise<void> {
       await runStatus(cmd.optsWithGlobals<{ json?: boolean }>());
     });
 
-  program
+  const mcpCommand = program
     .command("mcp")
     .description("expose this project's memory as a stdio MCP server (like claude-mem)")
     .action(async () => {
@@ -988,6 +1005,16 @@ async function main(): Promise<void> {
       } else {
         await startMemoryMcpServer({ cwd });
       }
+    });
+
+  mcpCommand
+    .command("serve")
+    .description("expose Arterm's own tools as a stdio MCP server (read-only unless --writable)")
+    .option("--writable", "also publish tools that would normally prompt (never destructive ones)")
+    .option("--tier <tier>", "roster to publish from: minimal | standard | full")
+    .option("--list", "print what would be published, and why, without starting the server")
+    .action(async (opts: { writable?: boolean; tier?: string; list?: boolean }) => {
+      await runMcpServe(opts);
     });
 
   await program.parseAsync(process.argv);

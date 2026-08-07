@@ -26,7 +26,13 @@ export {
   type FleetToolOptions,
   type RollUpFn,
 } from "./fleet.js";
-export { createMemorySearchTool, createRememberTool, formatLearning } from "./memoryTools.js";
+export {
+  createMemorySearchTool,
+  createRememberTool,
+  createForgetTool,
+  createRelatedMemoriesTool,
+  formatLearning,
+} from "./memoryTools.js";
 export { makeMemoTool, type MemoToolOptions } from "./memo.js";
 export { createTodoTool } from "./todo.js";
 export { createPlanTool } from "./plan.js";
@@ -50,6 +56,22 @@ export {
 } from "./callGraph.js";
 export { resetCallGraphs, codebaseTools } from "./codebase.js";
 export { createExecTool, allowedCommands, type ExecToolOptions } from "./exec.js";
+export { createLlmTool, type LlmCallFn, type LlmRequest } from "./llm.js";
+export { createSkillTool } from "./skillTool.js";
+export {
+  toolHelpTool,
+  createToolUseTool,
+  createSetWorkingDirTool,
+  refuseStatically,
+  type ToolUseGate,
+  type ToolUseOptions,
+} from "./metaTools.js";
+export {
+  WorkingDirStore,
+  type WorkingDirProvider,
+  type WorkingDirChange,
+} from "./workingDir.js";
+export { createMcpUseTool, type McpUseOptions } from "./mcpUse.js";
 export { startBackground, startedNote, killTree } from "./background.js";
 export { disposeLspClients, lspTools } from "./lsp/tools.js";
 export { langOf, parserFailure, CALL_GRAPH_EXTS, type CallLang } from "./treeSitter.js";

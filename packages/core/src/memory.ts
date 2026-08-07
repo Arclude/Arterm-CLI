@@ -53,6 +53,20 @@ export interface MemoryStore {
   recent(limit: number): Promise<MemoryRecord[]>;
   /** Every record, oldest first. */
   all(): Promise<MemoryRecord[]>;
+  /**
+   * Delete the record with exactly this id; true when one was removed.
+   *
+   * Optional because a store can legitimately be unable to forget — the
+   * cross-project view in `mcpMemoryServer.ts` reads another project's file and
+   * has no business deleting from it. A caller that finds this absent must say
+   * so rather than report a deletion that never happened.
+   *
+   * Unlike `append`, this may THROW. `append` swallows I/O errors because a
+   * session must not die over a memory write, but a swallowed failure here
+   * would tell the user a fact is gone while it is still on disk, which is the
+   * one lie this call must never tell.
+   */
+  remove?(id: string): Promise<boolean>;
 }
 
 /** Stores nothing. Used when memory is turned off. */
@@ -64,6 +78,9 @@ export class NullMemoryStore implements MemoryStore {
   }
   async all(): Promise<MemoryRecord[]> {
     return [];
+  }
+  async remove(_id: string): Promise<boolean> {
+    return false;
   }
 }
 
@@ -119,6 +136,22 @@ async function readRecordsFile(path: string): Promise<MemoryRecord[]> {
 }
 
 /**
+ * Rewrite a project's file with exactly `records`, via a sibling temp file and a
+ * rename.
+ *
+ * The rename is what makes it safe: truncating the real file and writing it back
+ * leaves a project's entire memory empty if the process dies in between, and
+ * this file is the only copy — there is no checkpoint and no git history behind
+ * it. The temp file is a sibling so the rename stays within one filesystem,
+ * where it is atomic.
+ */
+async function rewriteRecordsFile(path: string, records: MemoryRecord[]): Promise<void> {
+  const tmp = `${path}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  await fs.writeFile(tmp, records.map((r) => `${JSON.stringify(r)}\n`).join(""), "utf8");
+  await fs.rename(tmp, path);
+}
+
+/**
  * Append-only JSONL memory: one `{projectKey}.jsonl` per project under
  * `~/.arterm/memory/`. One record per line. Reads tolerate malformed lines.
  */
@@ -154,6 +187,27 @@ export class JsonlMemoryStore implements MemoryStore {
   async recent(limit: number): Promise<MemoryRecord[]> {
     const all = await this.all();
     return limit > 0 ? all.slice(-limit) : all;
+  }
+
+  /**
+   * Deletion in an append-only file is a rewrite of the whole file without the
+   * line — there is nowhere else to record the absence. A tombstone record would
+   * have been cheaper and race-free, but it leaves the forgotten text sitting in
+   * `~/.arterm/memory/*.jsonl`, and "forget this" is most often asked about
+   * something that should never have been written down.
+   *
+   * The read-then-rewrite is not atomic against a SECOND session appending to
+   * the same project in the window between them: that record is lost. Accepted
+   * over a lock file, because the window is one file read wide and two Arterm
+   * sessions writing the same project's memory in that instant is rarer than the
+   * bugs a lock protocol would add. Errors propagate — see `MemoryStore.remove`.
+   */
+  async remove(id: string): Promise<boolean> {
+    const all = await this.all();
+    const kept = all.filter((r) => r.id !== id);
+    if (kept.length === all.length) return false;
+    await rewriteRecordsFile(this.path, kept);
+    return true;
   }
 }
 

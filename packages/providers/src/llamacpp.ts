@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ChatChunk, ChatProvider, ChatRequest, Message, ModelInfo } from "@arterm/core";
+import { imagesWithheldNote } from "@arterm/core";
 import { streamIdleGuard } from "./timeout.js";
 
 /** Abort a generation if no tokens arrive for this long — bounds a wedged model. */
@@ -176,15 +177,26 @@ function systemText(messages: Message[]): string | undefined {
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
+/**
+ * The text of a message as this provider can send it.
+ *
+ * `session.prompt()` takes a string and nothing else, so an image attached here
+ * has no wire format to travel in. It becomes a line of text naming what was
+ * withheld — silence would leave the model describing a picture it never saw.
+ */
+function textOf(m: Message): string {
+  return m.content + imagesWithheldNote(m.images);
+}
+
 /** Everything except the trailing prompt becomes prior chat history. */
 function toLlamaHistory(messages: Message[]): any[] {
   const items: any[] = [];
   const body = messages.slice(0, -1).filter((m) => m.role !== "system");
   for (const m of body) {
-    if (m.role === "user") items.push({ type: "user", text: m.content });
-    else if (m.role === "assistant") items.push({ type: "model", response: [m.content] });
+    if (m.role === "user") items.push({ type: "user", text: textOf(m) });
+    else if (m.role === "assistant") items.push({ type: "model", response: [textOf(m)] });
     else if (m.role === "tool")
-      items.push({ type: "user", text: `Tool result (${m.name ?? "tool"}):\n${m.content}` });
+      items.push({ type: "user", text: `Tool result (${m.name ?? "tool"}):\n${textOf(m)}` });
   }
   return items;
 }
@@ -192,6 +204,6 @@ function toLlamaHistory(messages: Message[]): any[] {
 function lastPromptText(messages: Message[]): string {
   const last = messages[messages.length - 1];
   if (!last) return "";
-  if (last.role === "tool") return `Tool result (${last.name ?? "tool"}):\n${last.content}`;
-  return last.content;
+  if (last.role === "tool") return `Tool result (${last.name ?? "tool"}):\n${textOf(last)}`;
+  return textOf(last);
 }

@@ -31,6 +31,7 @@ import {
   type TeamMemberState,
   type TelemetrySubject,
   TodoStore,
+  type TokenUsage,
   Tokens,
   type Tool,
   applyPatch,
@@ -76,22 +77,30 @@ import {
 } from "@arterm/providers";
 import {
   type RollUpFn,
+  WorkingDirStore,
+  createBatchTool,
   createExecTool,
   createFleetTools,
+  createForgetTool,
+  createLlmTool,
   createMemorySearchTool,
   createPlanTool,
+  createRelatedMemoriesTool,
   createRememberTool,
   createSandboxRunner,
+  createSetWorkingDirTool,
   createSpawnParallelTool,
   createSpawnTool,
   createTaskTool,
   createTodoTool,
+  createToolUseTool,
   defaultTools,
   disposeLspClients,
   makeMemoTool,
   makeMessageTool,
   resetCallGraphs,
   taskDoneTool,
+  toolHelpTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
 import { armAutonomous } from "./flags.js";
@@ -212,6 +221,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // teardown hook in `persist()` is the half that makes backgrounding safe and
   // it has to close over the same instance.
   const processes = new ProcessRegistry();
+  // Where tool calls resolve. Confined to the session's own cwd by the store
+  // itself — `set_working_dir` moves WITHIN the root it was built with, never
+  // out of it, so the boundary every path-taking tool relies on is unchanged.
+  const workingDir = new WorkingDirStore(cwd);
   // Checkpoints are per session; the transcript id isn't known yet at build time.
   const sessionCheckpointId = randomUUID();
   // A dependency graph the model can write, on the shape `/sdd` executes.
@@ -266,6 +279,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       }
       return text;
     };
+
   const summarizeOneShot = summarizeWith();
 
   // Memory-digest summarizer: prefer `config.memory.summarizeModel`, but fall back to
@@ -373,6 +387,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     ...(sandbox ? { sandbox } : {}),
     ...(config.credentials ? { credentials: config.credentials } : {}),
     processes,
+    workingDir,
     recall: recallFn,
     container,
   });
@@ -749,6 +764,75 @@ export async function buildSession(opts: SessionOptions): Promise<{
     },
   });
 
+  /**
+   * One model call, metered.
+   *
+   * `summarizeWith` above bypasses the agent loop, and `budgetMeter` is a
+   * `response` PIPELINE stage inside it — so every one-shot made this way is
+   * invisible to `--budget` and to the spend a headless run reports. That was
+   * already true of `roll_up`, which this now also routes through: a leader
+   * that can summarise a fleet's output without it counting is a leader that
+   * can spend past the ceiling the run was granted, which is the exact hole
+   * `RunBudget` sharing exists to close on the sub-agent path.
+   *
+   * No history, ever. `Agent.plan()` looks like the same call and prepends the
+   * whole conversation, which is the cost these one-shots exist to avoid.
+   */
+  const oneShot = async (req: {
+    prompt: string;
+    system?: string;
+    model?: string;
+    schema?: Record<string, unknown>;
+    signal?: AbortSignal;
+  }): Promise<string> => {
+    const messages: Message[] = [];
+    if (req.system) messages.push({ role: "system", content: req.system });
+    const asked = req.schema
+      ? `${req.prompt}\n\nReply with JSON matching this schema, and nothing else:\n${JSON.stringify(req.schema)}`
+      : req.prompt;
+    messages.push({ role: "user", content: asked });
+
+    let text = "";
+    let usage: TokenUsage | undefined;
+    for await (const chunk of provider.chat({
+      // A model NAME on the provider already in use — never a provider
+      // selector, which is what keeps this from becoming an egress channel.
+      model: req.model ?? config.model,
+      messages,
+      temperature: 0,
+      ...(req.signal ? { signal: req.signal } : {}),
+    })) {
+      if (chunk.type === "text") text += chunk.delta;
+      else if (chunk.type === "done" && chunk.usage) usage = chunk.usage;
+    }
+    if (usage) budget.spend(usage, req.model ?? config.model, provider.id);
+    return text;
+  };
+
+  /**
+   * Re-enter the permission ladder for a tool dispatched by another tool.
+   *
+   * `batch` used to test `tool.permission !== "allow"` — the tool's DEFAULT,
+   * not its effective level. `PermissionManager.level()` is
+   * `overrides[name] ?? tool.permission`, so a user whose config said
+   * `{"permissions": {"web_fetch": "deny"}}` was obeyed for a direct call and
+   * IGNORED inside a batch, against the rule that a hard tool-level deny wins
+   * in every mode. It also never consulted the mode, so `test` — `allow` but
+   * `category: "execute"` — ran inside a batch in plan mode, where a direct
+   * call is denied.
+   */
+  const dispatchGate = async (
+    tool: Tool,
+    args: Record<string, unknown>,
+  ): Promise<{ allowed: boolean; reason?: string }> => {
+    const decision = await permissions.check(tool, args, asker);
+    if (decision.allowed) return { allowed: true };
+    return {
+      allowed: false,
+      reason: decision.reason ?? `"${tool.name}" was not permitted.`,
+    };
+  };
+
   // `roll_up`'s summariser: the same tool-free one-shot the context strategy
   // uses. Deliberately NOT `agent.plan()`, which prepends the leader's whole
   // history — the point of rolling up is that the results do not travel through
@@ -758,9 +842,9 @@ export async function buildSession(opts: SessionOptions): Promise<{
     const ask = focus
       ? `Summarise these sub-agent results with a focus on: ${focus}`
       : "Summarise these sub-agent results.";
-    return summarizeOneShot(
-      `${ask}\nKeep every concrete finding (files, symbols, numbers). Say plainly where they disagree.\n\n${body}`,
-    );
+    return oneShot({
+      prompt: `${ask}\nKeep every concrete finding (files, symbols, numbers). Say plainly where they disagree.\n\n${body}`,
+    });
   };
 
   agent.setTools([
@@ -771,6 +855,16 @@ export async function buildSession(opts: SessionOptions): Promise<{
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
     ...createFleetTools({ registry: fleetRegistry, rollUp }),
+    createLlmTool(oneShot),
+    toolHelpTool,
+    // The gate IS the ladder. Both of these dispatch to another tool's
+    // `execute`, which means the agent's `toolCall.permission` stage already ran
+    // — for the dispatcher, not for what it dispatches. Handing them
+    // `permissions.check` makes the inner call obey exactly the rules a direct
+    // call would, prompt included, and makes the prompt name the inner tool.
+    createToolUseTool({ gate: dispatchGate }),
+    createSetWorkingDirTool(workingDir),
+    createBatchTool({ gate: dispatchGate }),
     createExecTool({
       registry: processes,
       // From the user's config only — see `ExecToolOptions.extraAllowed`.
@@ -779,7 +873,12 @@ export async function buildSession(opts: SessionOptions): Promise<{
     ...(cmem
       ? cmem.tools()
       : memoryEnabled
-        ? [createMemorySearchTool(memoryStore), createRememberTool(memoryStore)]
+        ? [
+            createMemorySearchTool(memoryStore),
+            createRememberTool(memoryStore),
+            createForgetTool(memoryStore),
+            createRelatedMemoriesTool(memoryStore),
+          ]
         : []),
   ]);
 

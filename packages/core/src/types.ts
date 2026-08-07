@@ -17,6 +17,35 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+/**
+ * An image carried alongside a message or a tool result.
+ *
+ * Deliberately a SIDE CHANNEL rather than a `Message.content` union. The text is
+ * still the text, and `content` is read in dozens of places — the token
+ * estimator, both compaction strategies, every provider's message mapping, the
+ * session log, the transcript. A union would force all of them to handle a case
+ * most of them have no answer for; an optional field leaves every one of them
+ * correct as written, and a provider that cannot render images degrades to
+ * exactly the behavior it has today.
+ */
+export interface ImageContent {
+  /**
+   * IANA media type. Only the four formats every vision model accepts —
+   * image/png, image/jpeg, image/gif, image/webp — reach a provider; anything
+   * else is refused upstream, because a media type the vendor rejects is a 400
+   * that kills the turn and tells the model nothing it can act on.
+   */
+  mediaType: string;
+  /**
+   * Base64-encoded bytes: no `data:` URI prefix and no newlines. Both are what
+   * a tool written somewhere else tends to send, and both are rejected by the
+   * wire formats this feeds — so they are caught where a tool result enters the
+   * loop rather than at the provider, where the failure is a vendor error
+   * arriving mid-turn.
+   */
+  data: string;
+}
+
 export interface Message {
   role: Role;
   content: string;
@@ -26,6 +55,12 @@ export interface Message {
   toolCallId?: string;
   /** Optional tool/function name (for `tool` messages). */
   name?: string;
+  /**
+   * Images attached to this message — a tool result's screenshot, a picture the
+   * user pasted. `content` remains the whole text either way, so a reader that
+   * does not know about images still sees a complete message.
+   */
+  images?: ImageContent[];
 }
 
 export interface TokenUsage {
@@ -141,6 +176,13 @@ export interface ToolResult {
   diff?: DiffRow[];
   /** Path of the file a mutating tool changed (drives the "changed files" summary). */
   path?: string;
+  /**
+   * Images the tool produced: a screenshot, a rendered chart, a PNG the model
+   * asked to see. Unlike `diff`, this IS sent to the model — by the providers
+   * that accept image content, and as a line of text naming what was withheld
+   * by the ones that don't.
+   */
+  images?: ImageContent[];
 }
 
 export type PermissionLevel = "allow" | "ask" | "deny";

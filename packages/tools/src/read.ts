@@ -1,9 +1,65 @@
 import { promises as fs } from "node:fs";
-import type { Tool } from "@arterm/core";
+import { extname } from "node:path";
+import type { Tool, ToolResult } from "@arterm/core";
+import { MAX_IMAGE_BYTES } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 
 /** Bytes read off disk before paging is required. */
 const MAX_BYTES = 400_000;
+
+/** Extensions returned as image content, and the media type each maps to. */
+const IMAGE_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+
+/**
+ * Largest image this will inline, in RAW bytes.
+ *
+ * Derived from the loop's base64 ceiling rather than chosen separately: base64
+ * costs four bytes for every three, so a file above this encodes to something
+ * the agent would refuse anyway. Catching it here means the size the model is
+ * told is the file's own, not that of an encoding it never asked for.
+ */
+const MAX_IMAGE_FILE_BYTES = Math.floor((MAX_IMAGE_BYTES * 3) / 4);
+
+/**
+ * True when the bytes are the format the extension claims.
+ *
+ * A `.png` that is really an HTML error page is an ordinary way for a download
+ * to fail, and sending one as an image is a provider 400 that ends the turn
+ * with a vendor error the model cannot act on. The magic number turns that into
+ * a tool error naming the file.
+ */
+function matchesMagic(buf: Buffer, mediaType: string): boolean {
+  const head = buf.subarray(0, 12).toString("latin1");
+  if (mediaType === "image/png") return head.startsWith("\x89PNG\r\n\x1a\n");
+  if (mediaType === "image/jpeg") return head.startsWith("\xff\xd8\xff");
+  if (mediaType === "image/gif") return head.startsWith("GIF8");
+  if (mediaType === "image/webp") return head.startsWith("RIFF") && head.slice(8, 12) === "WEBP";
+  return false;
+}
+
+/** Return an image file as content the model can look at, or say why not. */
+function readImage(abs: string, buf: Buffer, mediaType: string): ToolResult {
+  if (!matchesMagic(buf, mediaType)) {
+    return {
+      output: `${abs} is named as ${mediaType} but its bytes are not — not sending it as an image.`,
+      isError: true,
+    };
+  }
+  if (buf.length > MAX_IMAGE_FILE_BYTES) {
+    const over = `${buf.length} bytes, over the ${MAX_IMAGE_FILE_BYTES}-byte limit for an image`;
+    return { output: `${abs} is ${over}. Resize or crop it first.`, isError: true };
+  }
+  return {
+    output: `${abs} — ${mediaType}, ${buf.length} bytes, attached as an image.`,
+    images: [{ mediaType, data: buf.toString("base64") }],
+  };
+}
 /** Lines returned when the caller does not ask for a window. */
 const DEFAULT_LIMIT = 2000;
 /** A single line longer than this is clipped — one minified bundle line is not a read. */
@@ -34,7 +90,9 @@ export const readTool: Tool = {
   name: "read",
   maxOutputBytes: 262_144,
   description:
-    "Read a UTF-8 text file with line numbers. Use `offset` and `limit` to read a window of a large file.",
+    "Read a UTF-8 text file with line numbers. Use `offset` and `limit` to read a window of a " +
+    "large file. A .png/.jpg/.gif/.webp file is returned as an image instead, so you can look " +
+    "at a screenshot or a chart rather than being told it is binary.",
   permission: "allow",
   category: "read",
   parameters: {
@@ -59,6 +117,11 @@ export const readTool: Tool = {
   async execute(args, ctx) {
     const abs = resolveWithin(ctx.cwd, requireString(args, "path"));
     const buf = await fs.readFile(abs);
+
+    // Before the binary check, not after: every image file trips it, and the
+    // refusal is the answer only for the binaries nothing can render.
+    const mediaType = IMAGE_TYPES[extname(abs).toLowerCase()];
+    if (mediaType) return readImage(abs, buf, mediaType);
 
     if (looksBinary(buf)) {
       return {

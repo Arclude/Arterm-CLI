@@ -98,6 +98,24 @@ describe("McpManager health checks", () => {
     expect(mgr.summary).toEqual([{ name: "srv", status: "connected", toolCount: 1 }]);
   });
 
+  it("connect starts EVERY configured server, used or not", async () => {
+    // The manager has no lazy path: there is no per-server connect, and
+    // `reconnect()` only retries servers that are unhealthy. Six configured
+    // servers are six child processes and six tool rosters from boot, whether
+    // or not anything calls them — which is what `mcp_use` exists to avoid.
+    const started: string[] = [];
+    const mgr = new McpManager(
+      { a: { command: "a" }, b: { command: "b" }, c: { command: "c" } },
+      async (name) => {
+        started.push(name);
+        return makeFakeClient();
+      },
+    );
+    const tools = await mgr.connect();
+    expect(started).toEqual(["a", "b", "c"]);
+    expect(tools.map((t) => t.name)).toEqual(["mcp__a__t1", "mcp__b__t1", "mcp__c__t1"]);
+  });
+
   it("check probes via ping and reports latency + tool count", async () => {
     const client = makeFakeClient();
     const mgr = new McpManager({ srv: { command: "x" } }, async () => client);

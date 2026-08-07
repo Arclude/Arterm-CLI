@@ -3,6 +3,7 @@ import type {
   ChatChunk,
   ChatProvider,
   ChatRequest,
+  ImageContent,
   Message,
   ModelInfo,
   RateLimitSnapshot,
@@ -94,11 +95,39 @@ export interface AnthropicConversation {
   messages: Anthropic.MessageParam[];
 }
 
+/** The formats the Messages API accepts as a base64 image source. */
+const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+
+/**
+ * Anthropic image blocks for a message's images.
+ *
+ * The narrowing from `ImageContent.mediaType` (a plain string) to the SDK's
+ * closed union happens here rather than in core, because which formats are
+ * acceptable is the vendor's business and not the tool protocol's. An
+ * unrecognized one is skipped: the agent already refuses those upstream, so
+ * reaching this is a bug, and sending it anyway would 400 the whole turn.
+ */
+function toAnthropicImages(images: ImageContent[] | undefined): Anthropic.ImageBlockParam[] {
+  const blocks: Anthropic.ImageBlockParam[] = [];
+  for (const image of images ?? []) {
+    const mediaType = IMAGE_MEDIA_TYPES.find((t) => t === image.mediaType);
+    if (!mediaType) continue;
+    blocks.push({
+      type: "image",
+      source: { type: "base64", media_type: mediaType, data: image.data },
+    });
+  }
+  return blocks;
+}
+
 /**
  * Convert Arterm messages to Anthropic's Messages-API shape: system messages are
  * hoisted to the top-level `system` string, assistant tool calls become
  * `tool_use` blocks, and `tool` messages become `user` messages with
  * `tool_result` blocks (Anthropic requires tool results in a user turn).
+ *
+ * Images lead the blocks they belong with — Anthropic's own guidance is that a
+ * prompt reads better when the picture precedes the words about it.
  */
 export function toAnthropicConversation(messages: Message[]): AnthropicConversation {
   const systemParts: string[] = [];
@@ -107,7 +136,15 @@ export function toAnthropicConversation(messages: Message[]): AnthropicConversat
     if (m.role === "system") {
       if (m.content) systemParts.push(m.content);
     } else if (m.role === "user") {
-      out.push({ role: "user", content: m.content });
+      const images = toAnthropicImages(m.images);
+      if (images.length === 0) {
+        out.push({ role: "user", content: m.content });
+      } else {
+        const content: Anthropic.ContentBlockParam[] = [...images];
+        // An empty text block is rejected, so it is added only when there is text.
+        if (m.content) content.push({ type: "text", text: m.content });
+        out.push({ role: "user", content });
+      }
     } else if (m.role === "assistant") {
       const content: Anthropic.ContentBlockParam[] = [];
       if (m.content) content.push({ type: "text", text: m.content });
@@ -118,9 +155,17 @@ export function toAnthropicConversation(messages: Message[]): AnthropicConversat
       if (content.length === 0) content.push({ type: "text", text: " " });
       out.push({ role: "assistant", content });
     } else if (m.role === "tool") {
+      // A `tool_result` block takes image blocks in its own content, so a
+      // screenshot stays attached to the call that produced it rather than
+      // arriving as a loose turn afterwards.
+      const images = toAnthropicImages(m.images);
+      const content: Anthropic.ToolResultBlockParam["content"] =
+        images.length > 0
+          ? [...images, ...(m.content ? [{ type: "text" as const, text: m.content }] : [])]
+          : m.content;
       out.push({
         role: "user",
-        content: [{ type: "tool_result", tool_use_id: m.toolCallId ?? "", content: m.content }],
+        content: [{ type: "tool_result", tool_use_id: m.toolCallId ?? "", content }],
       });
     }
   }

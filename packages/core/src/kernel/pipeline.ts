@@ -1,4 +1,4 @@
-import type { DiffRow, Message, TokenUsage, Tool, ToolCall } from "../types.js";
+import type { DiffRow, ImageContent, Message, TokenUsage, Tool, ToolCall } from "../types.js";
 
 /** Koa-style middleware: do work around `next()`, which runs the rest of the chain. */
 export type Middleware<Ctx> = (ctx: Ctx, next: () => Promise<void>) => Promise<void>;
@@ -102,6 +102,13 @@ export interface ToolCallCtx {
   diff?: DiffRow[];
   /** Path of the file a mutating tool changed. */
   path?: string;
+  /**
+   * Images the tool produced, after the `execute` stage has validated and
+   * capped them. On the ctx rather than smuggled past it for the same reason
+   * `diff` and `path` are: a stage that wants to inspect or drop what a tool is
+   * about to show the model has to be able to see it.
+   */
+  images?: ImageContent[];
 }
 export interface ContextWindowCtx {
   messages: Message[];

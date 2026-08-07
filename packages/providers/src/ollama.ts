@@ -6,6 +6,7 @@ import {
   type Message,
   type ModelInfo,
   type ToolSchema,
+  imagesWithheldNote,
   modelToolCall,
 } from "@arterm/core";
 import { providerErrorFromResponse } from "@arterm/core";
@@ -38,6 +39,31 @@ const TOOL_CAPABLE = [
   "nemotron",
   "athene",
   "qwq",
+];
+
+/**
+ * Model families whose every Ollama tag is multimodal. Substrings, like
+ * TOOL_CAPABLE above, and deliberately shorter than the true set.
+ *
+ * The asymmetry is what makes a short list safe: a family this MISSES sends the
+ * withheld note, and the model merely knows it wasn't shown a picture it could
+ * have read; a family it wrongly INCLUDES sends an `images` field the server
+ * rejects, which costs the whole turn. So only names with no text-only variant
+ * are listed — `gemma3` and `mistral-small`, whose tags are mixed, are left out
+ * on purpose. "vision" is here as a substring because a tag that says so
+ * (`llama3.2-vision`, `granite3.2-vision`) is self-declaring.
+ */
+const VISION_CAPABLE = [
+  "llava",
+  "bakllava",
+  "vision",
+  "moondream",
+  "minicpm-v",
+  "pixtral",
+  "internvl",
+  "qwen2-vl",
+  "qwen2.5vl",
+  "qwen3-vl",
 ];
 
 /** Max wait for metadata calls (tags/reachability) before giving up, in ms. */
@@ -95,6 +121,17 @@ export class OllamaProvider implements ChatProvider {
     return modelToolCall(model, "ollama") === true;
   }
 
+  /**
+   * Whether this model can be sent `images`. Ollama's `/api/chat` really does
+   * carry them, so a vision model here is shown the screenshot rather than told
+   * about it — but the capability is per-model and the server has no field that
+   * reports it, hence the family list.
+   */
+  supportsImages(model: string): boolean {
+    const lower = model.toLowerCase();
+    return VISION_CAPABLE.some((fam) => lower.includes(fam));
+  }
+
   /** True if the Ollama server responds, used for auto-detection. */
   async isReachable(): Promise<boolean> {
     try {
@@ -148,7 +185,7 @@ export class OllamaProvider implements ChatProvider {
   private async *streamOnce(req: ChatRequest): AsyncIterable<ChatChunk> {
     const body = {
       model: req.model,
-      messages: req.messages.map(toOllamaMessage),
+      messages: req.messages.map((m) => toOllamaMessage(m, this.supportsImages(req.model))),
       stream: true,
       options: req.temperature !== undefined ? { temperature: req.temperature } : undefined,
       tools: req.tools ? req.tools.map(toOllamaTool) : undefined,
@@ -217,8 +254,18 @@ export class OllamaProvider implements ChatProvider {
   }
 }
 
-function toOllamaMessage(m: Message): Record<string, unknown> {
-  const base: Record<string, unknown> = { role: m.role, content: m.content };
+/**
+ * `vision` decides whether the images ride the wire or become a line of text.
+ * Ollama takes bare base64 strings in `images` — no `data:` prefix, unlike the
+ * OpenAI-compatible shape.
+ */
+function toOllamaMessage(m: Message, vision: boolean): Record<string, unknown> {
+  const images = m.images ?? [];
+  const base: Record<string, unknown> = {
+    role: m.role,
+    content: vision ? m.content : m.content + imagesWithheldNote(m.images),
+  };
+  if (vision && images.length > 0) base.images = images.map((i) => i.data);
   if (m.toolCalls?.length) {
     base.tool_calls = m.toolCalls.map((c) => ({
       function: { name: c.name, arguments: c.arguments },

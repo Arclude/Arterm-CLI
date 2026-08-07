@@ -22,15 +22,96 @@ import { DEFAULT_MAX_OUTPUT_BYTES, clampMiddle, spoolOutput } from "./toolOutput
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
   ChatProvider,
-  DiffRow,
+  ImageContent,
   Message,
   PermissionAsker,
   SkillInfo,
   TokenUsage,
   Tool,
   ToolCall,
+  ToolResult,
   ToolSchema,
 } from "./types.js";
+
+/**
+ * Ceiling on the base64 payload of one image, and on the total a single tool
+ * result may attach.
+ *
+ * NOT a context budget — that would be the wrong ceiling to reason about. Every
+ * vision provider downscales an image to its own maximum before tokenizing, so
+ * a 400 KB screenshot and a 4 MB one cost the same few thousand tokens. What
+ * bytes actually bound is the HTTP request (Anthropic caps a single image at
+ * 5 MB of base64 and a whole request at 32 MB), the session JSONL this is
+ * written to, and the memory of a process that now holds every screenshot of
+ * the run.
+ *
+ * 4 MB sits under the vendor's per-image limit with room for the JSON framing
+ * around it, and still admits a lossless full-resolution screenshot at the
+ * 2576px long edge current models actually look at — so the cap refuses the
+ * pathological case without refusing the case it exists to carry.
+ */
+export const MAX_IMAGE_BYTES = 4_000_000;
+
+/** The media types every vision-capable provider accepts. */
+const IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** Base64 alphabet only: catches a `data:` URI prefix and embedded newlines alike. */
+const BASE64_ONLY = /^[A-Za-z0-9+/=]+$/;
+
+/**
+ * Accept the images a tool returned, or say why not.
+ *
+ * Enforced here rather than inside each tool for the same reason the output
+ * clamp is: MCP, plugin and browser tools are written by someone else and cap
+ * themselves at nothing, and this is the one place every tool result passes.
+ *
+ * A rejected image is REPORTED, never dropped in silence — the failure this
+ * exists to prevent is a model told nothing confidently describing a picture it
+ * was never shown. The note goes into the text because the text is the one
+ * channel every provider can carry.
+ */
+export function acceptImages(images: ImageContent[] | undefined): {
+  kept: ImageContent[];
+  note: string;
+} {
+  if (!images || images.length === 0) return { kept: [], note: "" };
+  const kept: ImageContent[] = [];
+  const rejected: string[] = [];
+  let bytes = 0;
+  for (const image of images) {
+    const size = Buffer.byteLength(image.data, "utf8");
+    if (!IMAGE_MEDIA_TYPES.has(image.mediaType)) {
+      rejected.push(`${image.mediaType} is not an image format any model here can read`);
+    } else if (size === 0 || !BASE64_ONLY.test(image.data)) {
+      rejected.push(`${image.mediaType} was not plain base64 (a data: URI or newlines?)`);
+    } else if (size > MAX_IMAGE_BYTES || bytes + size > MAX_IMAGE_BYTES) {
+      rejected.push(`${image.mediaType} at ${size} bytes exceeds the ${MAX_IMAGE_BYTES}-byte cap`);
+    } else {
+      kept.push(image);
+      bytes += size;
+    }
+  }
+  const note =
+    rejected.length > 0
+      ? `\n\n[${rejected.length} image(s) not shown to the model: ${rejected.join("; ")}.]`
+      : "";
+  return { kept, note };
+}
+
+/**
+ * The line a provider that cannot render images puts in their place.
+ *
+ * The other half of `acceptImages`'s rule, kept beside it because they answer
+ * one question between them: what reaches the model, and what the model is told
+ * about what didn't. It names the count and the formats rather than apologizing
+ * — the model's next move (ask for a description, run a different tool, say it
+ * cannot check) depends on knowing what it is missing.
+ */
+export function imagesWithheldNote(images: ImageContent[] | undefined): string {
+  if (!images || images.length === 0) return "";
+  const kinds = [...new Set(images.map((i) => i.mediaType))].join(", ");
+  return `\n\n[${images.length} image(s) (${kinds}) attached here — this model cannot see images.]`;
+}
 
 /**
  * The context's composition, in estimated tokens. See {@link Agent.contextBreakdown}
@@ -66,6 +147,18 @@ export interface AgentOptions {
   ask: PermissionAsker;
   bus: EventBus;
   cwd: string;
+  /**
+   * Where tool calls resolve, when the session lets the model move.
+   *
+   * Read FRESH on every tool call rather than captured once: `set_working_dir`
+   * changes it mid-turn, and a captured `cwd` would leave every tool after the
+   * move still resolving against the old directory — a `read` that silently
+   * answers from somewhere else is worse than one that fails.
+   *
+   * Structural on purpose: `core` must not depend on `@arterm/tools`, where the
+   * store lives.
+   */
+  workingDir?: { current(): string };
   /**
    * Execution boundary for shell commands (see `sandbox.ts`). Passed straight
    * through to every tool's `ToolContext`; only `bash` consumes it today. Shared
@@ -318,7 +411,7 @@ export class Agent {
         if (!ctx.tool) return; // gated out upstream
         try {
           const result = await ctx.tool.execute(ctx.call.arguments, {
-            cwd: this.opts.cwd,
+            cwd: this.opts.workingDir?.current() ?? this.opts.cwd,
             signal: ctx.signal,
             tools: this.opts.tools,
             ...(this.opts.sandbox ? { sandbox: this.opts.sandbox } : {}),
@@ -343,6 +436,11 @@ export class Agent {
           ctx.isError = result.isError ?? false;
           ctx.diff = result.diff;
           ctx.path = result.path;
+          // Images ride the same seam as the byte clamp above, and for the same
+          // reason: a tool written elsewhere caps and validates nothing.
+          const { kept, note } = acceptImages(result.images);
+          if (kept.length > 0) ctx.images = kept;
+          if (note) ctx.output = `${ctx.output}${note}`;
           // `usageHint` is delivered here rather than in the roster: the roster
           // is paid for on every request, so a paragraph per tool would cost
           // far more than it teaches. Attached to the first FAILED call, it
@@ -784,7 +882,10 @@ export class Agent {
           // tool_call — otherwise the next turn's history has an assistant tool_call
           // with no matching tool message, which native provider APIs reject.
           if (runSignal.aborted) {
-            await this.pushToolResult(call, "Tool call cancelled by the user.", true);
+            await this.pushToolResult(call, {
+              output: "Tool call cancelled by the user.",
+              isError: true,
+            });
             continue;
           }
           await this.runToolCall(call, runSignal);
@@ -877,30 +978,39 @@ export class Agent {
     // `permission` + `execute`); the agent owns only recording the outcome back into
     // history, so a feature can re-gate or wrap execution without touching this method.
     const ctx = await this.pipelines.toolCall.run({ call, signal });
-    await this.pushToolResult(call, ctx.output ?? "", ctx.isError ?? false, ctx.diff, ctx.path);
+    await this.pushToolResult(call, {
+      output: ctx.output ?? "",
+      isError: ctx.isError ?? false,
+      diff: ctx.diff,
+      path: ctx.path,
+      images: ctx.images,
+    });
   }
 
-  private async pushToolResult(
-    call: ToolCall,
-    output: string,
-    isError: boolean,
-    diff?: DiffRow[],
-    path?: string,
-  ): Promise<void> {
+  /**
+   * Takes the result as an object rather than five positionals. `images` would
+   * have been the fourth optional trailing parameter in a row, which is the
+   * point where a caller that wants only the last one starts writing
+   * `undefined, undefined` — and the fields are exactly `ToolResult`'s, so
+   * naming them matches the shape they came from.
+   */
+  private async pushToolResult(call: ToolCall, result: ToolResult): Promise<void> {
+    const isError = result.isError ?? false;
     await this.record({
       role: "tool",
-      content: output,
+      content: result.output,
       toolCallId: call.id,
       name: call.name,
+      ...(result.images && result.images.length > 0 ? { images: result.images } : {}),
     });
     this.bus.emit({
       type: "tool_result",
       callId: call.id,
       name: call.name,
-      output,
+      output: result.output,
       isError,
-      diff,
-      path,
+      diff: result.diff,
+      path: result.path,
     });
   }
 

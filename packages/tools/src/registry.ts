@@ -1,6 +1,6 @@
 import { type Tool, estimateTokens } from "@arterm/core";
 import { bashTool } from "./bash.js";
-import { batchTool } from "./batch.js";
+import { batchTool, createBatchTool } from "./batch.js";
 import { calleesTool, callersTool, codeStatsTool, deadCodeTool } from "./codebase.js";
 import { diffTool } from "./diff.js";
 import { editTool } from "./edit.js";
@@ -136,6 +136,7 @@ export function tierCost(tier: ToolTier): {
 // are injected as a run's terminal tool (a goal's, a review's) rather than being
 // ambient, which also keeps them off the `permissions list` / `explain` surface.
 export {
+  createBatchTool,
   readTool,
   lsTool,
   treeTool,
