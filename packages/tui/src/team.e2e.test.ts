@@ -152,10 +152,10 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
     stdin.write(ENTER);
 
     // Roster lands: header line + board seeded with both members pending.
-    await waitFor(ui, (f) => f.includes("⚑ team") && f.includes("test-writer"));
+    await waitFor(ui, (f) => f.includes("team roster") && f.includes("test-writer"));
 
     // A member is RUNNING with live tool activity on its board row.
-    await waitFor(ui, (f) => f.includes("▸ refactorer") && f.includes("⚙ edit"));
+    await waitFor(ui, (f) => f.includes("● LIVE") && f.includes("⚙ edit"));
     console.log(`\n──── FRAME: member running (live activity) ────\n${ui()}\n`);
 
     // Both members reach DONE with their changed-file counts.

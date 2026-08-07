@@ -126,6 +126,11 @@ const BRIDGED_EVENTS = new Set<AgentEvent["type"]>([
   "assistant_message",
   "autonomy_step",
   "usage",
+  // How full a worker's own context is. Without this the board could show what
+  // a member was DOING but not how close it was to the wall it would hit —
+  // and a worker at 90% is about to compact or truncate, which is the single
+  // most useful thing to know before its output disappoints you.
+  "context_usage",
   "error",
   // Why a sub-agent stopped is as much a fact as what it said. Without these a
   // worker that hit its iteration/token cap looked identical to one that

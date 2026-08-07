@@ -153,7 +153,7 @@ describe("remote permission answering (desktop ↔ TUI)", () => {
     for (const id of ["f1-1", "f1-2"]) {
       bus.emit({ type: "team_member_state", id, name: "explorer", state: "running" });
     }
-    await waitFor(seen, (f) => f.includes("\u25b8 explorer"));
+    await waitFor(seen, (f) => f.includes("\u25cf LIVE"));
 
     const first = broker.askFor({ id: "f1-1", name: "explorer" })(writeTool, { path: "a.ts" });
     broker.askFor({ id: "f1-2", name: "explorer" })(writeTool, { path: "b.ts" });

@@ -56,6 +56,14 @@ import type { DisplayItem, LoginProvider, Session } from "./types.js";
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
 const DEFAULT_CTX = 32768;
 
+/**
+ * Bridged member events that carry telemetry rather than activity. Kept as a set
+ * so the board's update runs for a `usage` or `context_usage` too — those have no
+ * activity string, and gating on activity alone is what left the cells' token and
+ * context columns permanently empty.
+ */
+const RICH = new Set(["tool_call", "usage", "context_usage"]);
+
 /** Streamed tokens repaint the live message at most this often (~22 fps). */
 const LIVE_FLUSH_MS = 45;
 
@@ -644,6 +652,18 @@ export function App({
   // plain ↑/↓ and Tab step rows too. Esc closes it. Feeds are per-row line rings.
   const [teamSel, setTeamSel] = useState(0);
   const [teamDetailOpen, setTeamDetailOpen] = useState(false);
+  // The swarm board's live clock. Deliberately NOT a standing timer: the status
+  // bar computes its clock inline for exactly this reason — a repaint every
+  // second on an idle session is a cost paid forever for a number nobody is
+  // reading. This one exists only while a member is actually running.
+  const [swarmClock, setSwarmClock] = useState(() => Date.now());
+  const swarmLive = teamMembers.some((m) => m.state === "running");
+  useEffect(() => {
+    if (!swarmLive) return;
+    setSwarmClock(Date.now());
+    const t = setInterval(() => setSwarmClock(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [swarmLive]);
   // Ref mirrors for the always-active Esc handlers below — a handler can fire
   // before the effect that would refresh its closure/subscription lands, so
   // gates are read through refs instead of isActive/closures.
@@ -1199,6 +1219,12 @@ export function App({
                     task: event.task ?? m.task,
                     filesChanged: event.filesChanged ?? m.filesChanged,
                     activity: event.state === "running" ? m.activity : undefined,
+                    // Stamped once, on the way IN to running, and then kept:
+                    // a finished cell should still say how long it took, and
+                    // re-stamping on a later state event would reset the clock
+                    // of a member that never stopped working.
+                    startedAt:
+                      event.state === "running" ? (m.startedAt ?? Date.now()) : m.startedAt,
                   }
                 : m,
             ),
@@ -1224,8 +1250,38 @@ export function App({
                 : inner.type === "tool_denied"
                   ? "⊘ denied"
                   : undefined;
-          if (activity) {
-            setTeamMembers((prev) => prev.map((m) => (m.id === event.id ? { ...m, activity } : m)));
+          // The member's own telemetry, bridged off its private bus: tokens
+          // billed, context filled, tool calls made. Activity alone said what a
+          // worker was DOING; none of it said how close it was to the wall it
+          // would hit, which is what decides whether its answer is worth
+          // reading. `window` is optional on the event (a local model the
+          // catalog doesn't know), so the session's own window is the fallback.
+          if (activity || RICH.has(inner.type)) {
+            setTeamMembers((prev) =>
+              prev.map((m) => {
+                if (m.id !== event.id) return m;
+                const next = { ...m };
+                if (activity) next.activity = activity;
+                if (inner.type === "tool_call") next.steps = (m.steps ?? 0) + 1;
+                if (inner.type === "usage") {
+                  // Prompt + completion: each iteration re-bills the prompt, so
+                  // the sum is the real spend (same definition as turnTokenBudget).
+                  next.tokens =
+                    (m.tokens ?? 0) +
+                    (inner.usage.promptTokens ?? 0) +
+                    (inner.usage.completionTokens ?? 0);
+                }
+                if (inner.type === "context_usage") {
+                  next.ctxUsed = inner.used;
+                  next.ctxWindow =
+                    inner.window ??
+                    m.ctxWindow ??
+                    session.agent.effectiveContextWindow() ??
+                    DEFAULT_CTX;
+                }
+                return next;
+              }),
+            );
           }
           const line = formatMemberEvent(inner);
           if (line) {
@@ -2690,6 +2746,7 @@ export function App({
             teamFeeds.get(teamMembers[Math.min(teamSel, teamMembers.length - 1)]?.id ?? "") ?? []
           }
           kind={boardKind}
+          now={swarmClock}
         />
       ) : null}
       {teamSuggest ? (

@@ -94,7 +94,7 @@ describe("fleet board (parallel autonomy)", () => {
     });
 
     // Board seeded, labelled as a fleet (not a team), with both rows pending.
-    await waitFor(ui, (f) => f.includes("⛓ fleet") && f.includes("refactorer"));
+    await waitFor(ui, (f) => f.includes("parallel workspace") && f.includes("refactorer"));
     expect(ui()).toContain("tester");
     expect(ui()).toContain("^↑↓ subtask");
 
@@ -112,7 +112,7 @@ describe("fleet board (parallel autonomy)", () => {
       name: "refactorer",
       event: { type: "tool_call", call: { id: "c1", name: "edit", arguments: {} } },
     });
-    await waitFor(ui, (f) => f.includes("▸ refactorer") && f.includes("⚙ edit"));
+    await waitFor(ui, (f) => f.includes("● LIVE") && f.includes("⚙ edit"));
 
     bus.emit({
       type: "team_member_state",
@@ -163,36 +163,36 @@ describe("fleet board (parallel autonomy)", () => {
     });
     await waitFor(ui, (f) => f.includes("refactorer") && f.includes("tester"));
 
-    /** The name on the ❯-marked row. */
+    /** The ❯-marked cell's header line (marker + index + name). */
     const selectedRow = (): string =>
       ui()
         .split("\n")
         .find((l) => l.includes("❯")) ?? "";
-    expect(selectedRow()).toContain("refactorer");
+    expect(selectedRow()).toContain("❯00 refactorer");
 
     // Plain ↓ / ↑ are prompt history now: the selection must not budge.
     stdin.write(DOWN);
     await tick();
-    expect(selectedRow()).toContain("refactorer");
+    expect(selectedRow()).toContain("❯00 refactorer");
     stdin.write(UP);
     await tick();
-    expect(selectedRow()).toContain("refactorer");
+    expect(selectedRow()).toContain("❯00 refactorer");
 
     // Ctrl+↓ moves it, and Ctrl+↑ wraps back around from the first row.
     stdin.write(CTRL_DOWN);
     await waitFor(
       () => selectedRow(),
-      (l) => l.includes("tester"),
+      (l) => l.includes("❯01 tester"),
     );
     stdin.write(CTRL_UP);
     await waitFor(
       () => selectedRow(),
-      (l) => l.includes("refactorer"),
+      (l) => l.includes("❯00 refactorer"),
     );
     stdin.write(CTRL_UP);
     await waitFor(
       () => selectedRow(),
-      (l) => l.includes("tester"),
+      (l) => l.includes("❯01 tester"),
     );
 
     unmount();
@@ -246,7 +246,10 @@ describe("fleet board (parallel autonomy)", () => {
       ],
     });
 
-    await waitFor(ui, (f) => f.includes("⛓ fleet") && f.includes("read the tools package"));
+    await waitFor(
+      ui,
+      (f) => f.includes("parallel workspace") && f.includes("read the tools package"),
+    );
     expect(ui()).toContain("^↑↓ subtask");
 
     // The rows are navigable, exactly as a planned round's are.
@@ -257,7 +260,7 @@ describe("fleet board (parallel autonomy)", () => {
     stdin.write(CTRL_DOWN);
     await waitFor(
       () => selectedRow(),
-      (l) => l.includes("read the providers package"),
+      (l) => l.includes("❯01 explorer"),
     );
 
     unmount();
@@ -299,7 +302,7 @@ describe("fleet board (parallel autonomy)", () => {
         .find((l) => l.includes("❯")) ?? "";
     stdin.write(DOWN);
     await tick();
-    expect(selectedRow()).toContain("refactorer");
+    expect(selectedRow()).toContain("❯00 refactorer");
 
     unmount();
   });
@@ -331,19 +334,19 @@ describe("fleet board (parallel autonomy)", () => {
     stdin.write(TAB);
     await waitFor(
       () => selectedRow(),
-      (l) => l.includes("read providers"),
+      (l) => l.includes("❯01 explorer"),
     );
 
     // Alt+arrows move it too, for terminals that drop the Ctrl modifier.
     stdin.write(ALT_DOWN);
     await waitFor(
       () => selectedRow(),
-      (l) => l.includes("read memory"),
+      (l) => l.includes("❯02 explorer"),
     );
     stdin.write(ALT_UP);
     await waitFor(
       () => selectedRow(),
-      (l) => l.includes("read providers"),
+      (l) => l.includes("❯01 explorer"),
     );
 
     unmount();
@@ -374,7 +377,7 @@ describe("fleet board (parallel autonomy)", () => {
     await waitFor(ui, (f) => f.includes("/comp"));
     stdin.write(TAB);
     await waitFor(ui, (f) => f.includes("/compact"));
-    expect(selectedRow()).toContain("read tools");
+    expect(selectedRow()).toContain("❯00 explorer");
 
     unmount();
   });
@@ -401,6 +404,46 @@ describe("fleet board (parallel autonomy)", () => {
     // Round 1's row is gone — its subtask is finished work, not a standing member.
     expect(ui()).not.toContain("first pass");
     expect(ui()).toContain("0/1 done");
+
+    unmount();
+  });
+
+  it("shows each worker's own spend and context fill, not just what it is doing", async () => {
+    const bus = new EventBus();
+    const { frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await tick();
+
+    bus.emit({
+      type: "autonomy_fleet_round",
+      round: 1,
+      tasks: [{ id: "r1-1", task: "port the parser", role: "refactorer" }],
+    });
+    bus.emit({ type: "team_member_state", id: "r1-1", name: "refactorer", state: "running" });
+    await waitFor(ui, (f) => f.includes("● LIVE"));
+
+    // A worker's bridged telemetry. `usage` and `context_usage` carry no
+    // activity string, so a board that only reacted to tool calls left both
+    // columns permanently blank — which is the bug this covers.
+    bus.emit({
+      type: "team_member_event",
+      id: "r1-1",
+      name: "refactorer",
+      event: { type: "usage", usage: { promptTokens: 1000, completionTokens: 240 } },
+    });
+    bus.emit({
+      type: "team_member_event",
+      id: "r1-1",
+      name: "refactorer",
+      // fakeSession's window is 8192, and the event carries its own anyway.
+      event: { type: "context_usage", used: 4096, window: 8192, estimated: false },
+    });
+
+    // Tokens billed (prompt + completion, the run's own definition of spend)…
+    await waitFor(ui, (f) => f.includes("1.2kt"));
+    // …and the context meter, half full, as a number AND a shape.
+    expect(ui()).toContain("50%");
+    expect(ui()).toMatch(/[█]{2,3}[░]{2,3} 50%/);
 
     unmount();
   });
