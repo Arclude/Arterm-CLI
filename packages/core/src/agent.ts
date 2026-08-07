@@ -269,6 +269,44 @@ const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md", "ARTERM.md"];
  * model's attention (context rot), so the tail is dropped, not summarized. */
 const INSTRUCTIONS_MAX_CHARS = 6000;
 
+/**
+ * Read an `assess()` reply — is the goal complete?
+ *
+ * The verdict lives in the VERB POSITION, not anywhere in the prose. It used to
+ * be `/\bDONE\b/i.test(text)`, and a real run ended on this reply:
+ *
+ *   "Let me verify the actual state of the main working tree before declaring done."
+ *
+ * That is a model saying it is NOT finished. The substring match read the word
+ * `done` inside `declaring done` and returned the opposite of the sentence's
+ * meaning — the same shape as the "does the output say PASS" bug the result
+ * verifier documents, one layer up. Prose that merely mentions the word must
+ * count for nothing, exactly as `extractVerifyCommand` demands a whole line.
+ *
+ * So only the first word of the first or last non-empty line decides, stripped
+ * of the markdown and punctuation a model wraps a one-word answer in (`**DONE**`,
+ * `DONE.`). Last line as well as first because a model that reasons before
+ * answering puts its verdict at the bottom, and the prompt asks for one word.
+ *
+ * The failure direction is deliberate: an unreadable reply is NOT done. The
+ * caller's next step is `gateClaim()`, so a false "done" spends a verification
+ * round-trip and, where no standing gate is configured, ends the run on a
+ * misreading. A false "not done" costs one more lap of a loop that is bounded
+ * anyway. Only one of those loses work.
+ */
+export function readAssessment(text: string): { done: boolean; note: string } {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const verdicts = [lines[0], lines[lines.length - 1]]
+    .filter((l): l is string => l !== undefined)
+    // First word, minus the decoration: `**DONE**` / `DONE.` / `"DONE"`.
+    .map((l) => (/^[^\w]*(\w+)/.exec(l)?.[1] ?? "").toUpperCase());
+  const done = verdicts.includes("DONE") && !verdicts.includes("CONTINUE");
+  return { done, note: text.trim().slice(0, 200) };
+}
+
 /** First existing instruction file in `dir` (name + capped body), if any. */
 async function loadProjectInstructions(
   dir: string,
@@ -646,6 +684,9 @@ export class Agent {
    * One-shot completion-check over the current history, WITHOUT tools and WITHOUT
    * mutating history. Used by the autonomy engine to reflect on whether a goal is
    * done when the model didn't explicitly call `task_done`.
+   *
+   * The reply is read by {@link readAssessment}, and strictly — see there for
+   * why a substring match was not good enough.
    */
   async assess(goal: string, signal?: AbortSignal): Promise<{ done: boolean; note: string }> {
     const { provider, model } = this.opts;
@@ -654,6 +695,7 @@ export class Agent {
       content: `GOAL: "${goal}"\nConsidering everything done so far, is the goal FULLY complete? Reply with exactly "DONE" if it is finished, otherwise "CONTINUE" and one line on the next step.`,
     };
     let text = "";
+    this.bus.emit({ type: "leader_call", kind: "assess", active: true });
     try {
       const system = await this.buildSystem(true);
       for await (const chunk of provider.chat({
@@ -663,16 +705,24 @@ export class Agent {
         signal,
       })) {
         if (chunk.type === "text") text += chunk.delta;
+        // Counted for the same reason as `plan()`'s: an eternal run assesses on
+        // every step, and those tokens were leaving the meter at zero.
+        else if (chunk.type === "done" && chunk.usage) {
+          this.bus.emit({ type: "usage", usage: chunk.usage });
+          this.opts.budget?.spend(chunk.usage, model, provider.id);
+        }
       }
     } catch (err) {
       // The autonomy loop calls assess() fire-and-forget; a provider/network failure
       // must not become an unhandled rejection. Treat it as "not done" so the loop's
-      // idle-streak logic keeps control and can eventually stop.
+      // idle-streak logic keeps control and can eventually stop. Unlike `plan()`
+      // this one is already visible: the note is surfaced by `autonomy_reflect`.
       const msg = err instanceof Error ? err.message : String(err);
       return { done: false, note: `assessment failed: ${msg}` };
+    } finally {
+      this.bus.emit({ type: "leader_call", kind: "assess", active: false });
     }
-    const done = /\bDONE\b/i.test(text) && !/\bCONTINUE\b/i.test(text);
-    return { done, note: text.trim().slice(0, 200) };
+    return readAssessment(text);
   }
 
   /**
@@ -684,6 +734,7 @@ export class Agent {
     const { provider, model } = this.opts;
     const probe: Message = { role: "user", content: prompt };
     let text = "";
+    this.bus.emit({ type: "leader_call", kind: "plan", active: true });
     try {
       const system = await this.planSystem();
       for await (const chunk of provider.chat({
@@ -693,11 +744,38 @@ export class Agent {
         signal,
       })) {
         if (chunk.type === "text") text += chunk.delta;
+        // The leader's planning calls are real spend. Reading only `text` here
+        // is why a whole /team run reported `usd: 0, reported: false` — every
+        // token it burned was the leader's, and none of it was counted. A meter
+        // that reads zero and a run that cost nothing must not look alike.
+        else if (chunk.type === "done" && chunk.usage) {
+          this.bus.emit({ type: "usage", usage: chunk.usage });
+          this.opts.budget?.spend(chunk.usage, model, provider.id);
+        }
       }
-    } catch {
-      // Leader decomposition is best-effort; on failure return an empty plan so the
-      // tolerant parsers (parseTasks/parsePhases) fall back to running the goal whole.
+    } catch (err) {
+      // Still best-effort — the tolerant parsers fall back to running the goal
+      // whole, and a leader that cannot be reached must not throw out of a loop
+      // that has work in flight. But it must not be SILENT: swallowing this
+      // turned "the provider refused every call" into "the leader proposed no
+      // work", and the run then exited 0 saying exactly that. Observed with a
+      // config whose provider had been reset to an Ollama that was not running:
+      // three ECONNREFUSED in a row, reported as a decision.
+      if (signal?.aborted) return "";
+      this.bus.emit({
+        type: "error",
+        error: `planning call failed (${provider.id}/${model}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        retryable: true,
+      });
       return "";
+    } finally {
+      // In `finally` so the "leader is thinking" indicator clears on every exit
+      // — including the abort path that returns early. A spinner that survives
+      // its own call is worse than none: it says the run is alive when it is
+      // the one thing that has stopped.
+      this.bus.emit({ type: "leader_call", kind: "plan", active: false });
     }
     return text.trim();
   }

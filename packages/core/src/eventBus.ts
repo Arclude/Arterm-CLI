@@ -122,6 +122,19 @@ export type AgentEvent =
   | { type: "goal_set"; goal: string; mode: AutonomyMode }
   | { type: "autonomy_step"; step: number }
   | { type: "autonomy_reflect"; done: boolean; note?: string }
+  /**
+   * The LEADER is on the wire — decomposing, assigning a round, or assessing.
+   *
+   * `turn_start`/`turn_end` cannot carry this: those bracket a turn, the
+   * telemetry layer turns them into the `invoke_agent` span, and `plan()` is
+   * neither. But without something, the leader is INVISIBLE — and it is the
+   * call that decides everything the round will do. Between rounds of a /team
+   * run the board reads `3/3 done · 0 LIVE`, the step counter is unchanged and
+   * the status bar says idle, while the leader has been thinking for two
+   * minutes. Every signal on screen says "finished" at the exact moment the
+   * most important call of the run is in flight.
+   */
+  | { type: "leader_call"; kind: "plan" | "assess"; active: boolean }
   // Fresh-context verifier's judgment on a completion claim (decision 3).
   // A result was gated. Every field past `pass` is additive and optional, so the
   // desktop contract's "additive fields do NOT bump v" applies.
