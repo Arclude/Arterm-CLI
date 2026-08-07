@@ -76,7 +76,9 @@ export function runToolsCost(opts: { tier?: string; json?: boolean }): void {
   // that quietly excludes part of what it measures is the kind of number
   // people plan against and then find wrong.
   process.stdout.write(
-    "\n  not counted: tools a session adds at runtime — todo, plan, spawn,\n" +
-      "  spawn_parallel, the memory tools, and any MCP or plugin tools.\n",
+    "\n  not counted: tools a session adds at runtime — todo, plan, task, spawn,\n" +
+      "  spawn_parallel, the model-driven fleet (spawn_subagent, assign_task,\n" +
+      "  await_tasks, ask_subagent, roll_up, fleet), the memory tools, and any\n" +
+      "  MCP or plugin tools.\n",
   );
 }

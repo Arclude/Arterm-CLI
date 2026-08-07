@@ -351,6 +351,13 @@ export interface ArtermConfig {
      * an `ask` session still route prompts to the user as before.
      */
     autoApprove?: boolean;
+    /**
+     * Live workers the MODEL may hold open at once via `spawn_subagent`
+     * (default 8). Not a tuning knob: `NEVER_SUBAGENT_TOOLS` stops a worker
+     * fanning out because nothing would be counting it, and an unbounded leader
+     * is the same hole one level up.
+     */
+    maxWorkers?: number;
   };
   /** Brain Arbiter: risk-gate tool calls (deny critical, escalate high). */
   arbiter: {
@@ -524,7 +531,13 @@ export function defaultConfig(): ArtermConfig {
       memory: true,
     },
     tui: { fullscreen: true, mouse: false },
-    fleet: { concurrency: 4, isolation: "none", mergeStrategy: "surface", autoApprove: false },
+    fleet: {
+      concurrency: 4,
+      isolation: "none",
+      mergeStrategy: "surface",
+      autoApprove: false,
+      maxWorkers: 8,
+    },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
     statusServer: { enabled: "auto", port: 0 },
@@ -675,6 +688,7 @@ const configFileSchema = z
         isolation: z.enum(["none", "worktree"]).optional(),
         mergeStrategy: z.enum(["surface", "apply"]).optional(),
         autoApprove: z.boolean().optional(),
+        maxWorkers: z.number().int().positive().optional(),
       })
       .partial(),
     arbiter: z

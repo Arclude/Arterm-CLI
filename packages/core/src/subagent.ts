@@ -126,7 +126,21 @@ export interface SubagentOptions {
  * by a filter at the call site; it is a named list so the rule is findable
  * from the sub-agent side too.
  */
-export const NEVER_SUBAGENT_TOOLS = new Set(["spawn", "spawn_parallel"]);
+export const NEVER_SUBAGENT_TOOLS = new Set([
+  "spawn",
+  "spawn_parallel",
+  // The model-driven fleet family. `spawn_subagent` is the one that matters —
+  // it creates a worker without a model call, so a worker holding it could
+  // build a fleet for free and nothing above would be counting. The rest go
+  // with it because a worker that can assign, await or terminate is operating
+  // on a fleet it is a member of.
+  "spawn_subagent",
+  "assign_task",
+  "await_tasks",
+  "ask_subagent",
+  "roll_up",
+  "fleet",
+]);
 
 /**
  * Tools a worker gets only when its spawn explicitly asks for them.
@@ -182,15 +196,41 @@ const BRIDGED_EVENTS = new Set<AgentEvent["type"]>([
 ]);
 
 /**
- * Runs a focused sub-agent toward a task with its own history and a private event
- * bus (so its tool calls don't flood the parent transcript), and returns its final
- * output. Uses the autonomy loop in "once" mode bounded by `maxSteps`.
+ * A sub-agent that OUTLIVES one task.
+ *
+ * `runSubagent` is this used once, which is all `/team` and `/sdd` ever needed:
+ * the engine decides the whole wave up front, so a worker is born, does its one
+ * job and is gone. That is also the limitation CLAUDE.md records about `/sdd` —
+ * a wave-2 worker is a fresh sub-agent with no memory of wave 1, and the
+ * dependency outputs are the only channel between them.
+ *
+ * A session keeps the `Agent`, so a second task sees the first one's history:
+ * the worker that read the parser can be asked what it found without being told
+ * again. That is what makes a fleet the MODEL can drive different from one the
+ * engine drives — the model does not know wave 2 until wave 1 answers.
+ *
+ * Tasks on one session must not overlap: two `run()` calls interleaving on one
+ * `Agent` would braid two conversations into one history. The caller serialises
+ * (see `FleetRegistry`, which gives every worker a queue).
  */
-export async function runSubagent(
-  task: string,
-  opts: SubagentOptions,
-  signal?: AbortSignal,
-): Promise<string> {
+export interface SubagentSession {
+  /** The worker's private bus — its tool calls never reach the parent transcript. */
+  readonly bus: EventBus;
+  readonly agent: Agent;
+  /** True between `run()` being called and its promise settling. */
+  readonly busy: boolean;
+  /** How many tasks this session has completed. */
+  readonly completed: number;
+  run(
+    task: string,
+    over?: { instruction?: string; role?: string },
+    signal?: AbortSignal,
+  ): Promise<string>;
+  /** Stop whatever is running now; the session stays usable. */
+  stop(): void;
+}
+
+export function createSubagentSession(opts: SubagentOptions): SubagentSession {
   const bus = new EventBus();
   const agentOpts: AgentOptions = {
     provider: opts.provider,
@@ -213,51 +253,110 @@ export async function runSubagent(
   };
   const agent = new Agent(agentOpts);
 
-  let lastAssistant = "";
-  let doneSummary: string | undefined;
-  let lastError = "";
-  let limit: { kind: "iterations" | "tokens"; limit: number } | undefined;
-  const off = bus.on((e) => {
-    if (e.type === "assistant_message") {
-      const text = e.message.content.trim();
-      if (text) lastAssistant = text;
-    } else if (e.type === "autonomy_done") {
-      doneSummary = e.summary;
-    } else if (e.type === "run_limit") {
-      limit = { kind: e.kind, limit: e.limit };
-    } else if (e.type === "error") {
-      // The agent loop swallows provider errors into bus events; on this PRIVATE
-      // bus nobody else sees them, so keep the last one to surface as the result
-      // when the run otherwise produced nothing (e.g. auth/quota failures).
-      lastError = e.error;
+  // The observability bridge lives for the SESSION, not for one task: a board
+  // watching a persistent worker must not go blind between its tasks.
+  if (opts.onEvent) {
+    bus.on((e) => {
+      if (BRIDGED_EVENTS.has(e.type)) opts.onEvent?.(e);
+    });
+  }
+
+  let current: AutonomyEngine | undefined;
+  let completed = 0;
+  let busy = false;
+
+  const run = async (
+    task: string,
+    over?: { instruction?: string; role?: string },
+    signal?: AbortSignal,
+  ): Promise<string> => {
+    let lastAssistant = "";
+    let doneSummary: string | undefined;
+    let lastError = "";
+    let limit: { kind: "iterations" | "tokens"; limit: number } | undefined;
+    const off = bus.on((e) => {
+      if (e.type === "assistant_message") {
+        const text = e.message.content.trim();
+        if (text) lastAssistant = text;
+      } else if (e.type === "autonomy_done") {
+        doneSummary = e.summary;
+      } else if (e.type === "run_limit") {
+        limit = { kind: e.kind, limit: e.limit };
+      } else if (e.type === "error") {
+        // The agent loop swallows provider errors into bus events; on this
+        // PRIVATE bus nobody else sees them, so keep the last one to surface as
+        // the result when the run otherwise produced nothing (e.g. auth/quota).
+        lastError = e.error;
+      }
+    });
+
+    const engine = new AutonomyEngine(agent, bus, opts.taskDone, {
+      mode: "once",
+      maxSteps: opts.maxSteps ?? 12,
+    });
+    current = engine;
+    busy = true;
+    const onAbort = () => engine.stop();
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    // The role preamble is sent ONCE. On a persistent worker it is already in
+    // the history, and repeating it per task both costs tokens and reads as a
+    // new instruction rather than the standing one.
+    const instruction =
+      completed === 0
+        ? (over?.instruction ?? opts.instruction ?? roleInstruction(over?.role ?? opts.role))
+        : undefined;
+    const fullTask = instruction ? `${instruction}\n\nTASK: ${task}` : task;
+    try {
+      await engine.start(fullTask);
+    } finally {
+      off();
+      signal?.removeEventListener("abort", onAbort);
+      current = undefined;
+      busy = false;
+      completed++;
     }
-    if (opts.onEvent && BRIDGED_EVENTS.has(e.type)) opts.onEvent(e);
-  });
+    // A worker that hit a cap in an earlier step and then declared itself done
+    // DID finish; only an undeclared result is suspect.
+    if (doneSummary) return doneSummary;
+    if (lastAssistant) {
+      return limit
+        ? `[truncated: ${limit.kind} cap ${limit.limit} reached — this result is UNFINISHED]\n${lastAssistant}`
+        : lastAssistant;
+    }
+    // Nothing produced: report WHY instead of a blank shrug — a provider failure
+    // (401 quota, unreachable host, …) was previously invisible to the caller.
+    return lastError ? `sub-agent failed: ${lastError}` : "(sub-agent produced no output)";
+  };
 
-  const engine = new AutonomyEngine(agent, bus, opts.taskDone, {
-    mode: "once",
-    maxSteps: opts.maxSteps ?? 12,
-  });
-  if (signal) signal.addEventListener("abort", () => engine.stop(), { once: true });
+  return {
+    bus,
+    agent,
+    get busy() {
+      return busy;
+    },
+    get completed() {
+      return completed;
+    },
+    run,
+    stop: () => current?.stop(),
+  };
+}
 
-  const instruction = opts.instruction ?? roleInstruction(opts.role);
-  const fullTask = instruction ? `${instruction}\n\nTASK: ${task}` : task;
-  try {
-    await engine.start(fullTask);
-  } finally {
-    off();
-  }
-  // A worker that hit a cap in an earlier step and then declared itself done DID
-  // finish; only an undeclared result is suspect.
-  if (doneSummary) return doneSummary;
-  if (lastAssistant) {
-    return limit
-      ? `[truncated: ${limit.kind} cap ${limit.limit} reached — this result is UNFINISHED]\n${lastAssistant}`
-      : lastAssistant;
-  }
-  // Nothing produced: report WHY instead of a blank shrug — a provider failure
-  // (401 quota, unreachable host, …) was previously invisible to the caller.
-  return lastError ? `sub-agent failed: ${lastError}` : "(sub-agent produced no output)";
+/**
+ * Runs a focused sub-agent toward a task with its own history and a private event
+ * bus (so its tool calls don't flood the parent transcript), and returns its final
+ * output. Uses the autonomy loop in "once" mode bounded by `maxSteps`.
+ *
+ * One task, one worker — the shape `/team` and `/sdd` dispatch. For a worker
+ * that takes more than one task, use `createSubagentSession`.
+ */
+export async function runSubagent(
+  task: string,
+  opts: SubagentOptions,
+  signal?: AbortSignal,
+): Promise<string> {
+  return createSubagentSession(opts).run(task, undefined, signal);
 }
 
 export interface FleetTask {

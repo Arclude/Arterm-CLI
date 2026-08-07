@@ -7,13 +7,15 @@ import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "./eventBus.js";
 import { PermissionManager } from "./permissions.js";
 import {
+  type SubagentOptions,
   availableRoles,
+  createSubagentSession,
   roleInstruction,
   runFleet,
   runSubagent,
   subagentRoster,
 } from "./subagent.js";
-import type { ChatProvider, Tool } from "./types.js";
+import type { ChatProvider, Message, Tool } from "./types.js";
 import { VERDICT_TOOL_NAME, captureVerdict, decideVerdict, formatVerdictEcho } from "./verify.js";
 
 const runCmd = promisify(execFile);
@@ -759,3 +761,97 @@ describe("subagentRoster", () => {
     expect(names).toEqual(["read", "edit", "bash", "git"]);
   });
 });
+
+describe("a session that outlives one task", () => {
+  /** Records what it was sent and answers by declaring itself done. */
+  function recordingProvider(prompts: Message[][]): ChatProvider {
+    let n = 0;
+    return {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat(req) {
+        prompts.push(req.messages as Message[]);
+        yield {
+          type: "tool_call",
+          call: { id: String(++n), name: "task_done", arguments: { summary: `answer ${n}` } },
+        };
+        yield { type: "done" };
+      },
+    };
+  }
+
+  const base = (provider: ChatProvider): SubagentOptions => ({
+    provider,
+    model: "m",
+    tools: [] as Tool[],
+    permissions: new PermissionManager({}, "yolo"),
+    ask: async () => "deny",
+    cwd: process.cwd(),
+    taskDone,
+  });
+
+  it("carries the first task's history into the second", async () => {
+    // The limitation this removes: a /sdd wave-2 worker is a fresh sub-agent
+    // with no memory of wave 1, so the only channel between them is the text
+    // of wave 1's output. A session's worker simply remembers.
+    const prompts: Message[][] = [];
+    const session = createSubagentSession(base(recordingProvider(prompts)));
+    await session.run("read the parser");
+    await session.run("now summarise what you read");
+
+    const second = prompts[prompts.length - 1] ?? [];
+    const text = second.map((m) => m.content).join("\n");
+    expect(text).toContain("read the parser");
+    expect(text).toContain("now summarise what you read");
+  });
+
+  it("sends the role preamble ONCE, not with every task", async () => {
+    // On a persistent worker it is already in the history; repeating it costs
+    // tokens and reads as a new instruction rather than the standing one.
+    const prompts: Message[][] = [];
+    const session = createSubagentSession({
+      ...base(recordingProvider(prompts)),
+      role: "reviewer",
+    });
+    await session.run("first");
+    const firstCount = countIn(prompts[0] ?? [], "code reviewer");
+    await session.run("second");
+    const last = prompts[prompts.length - 1] ?? [];
+
+    expect(firstCount).toBeGreaterThan(0);
+    // The preamble is still in the history exactly once — not added again.
+    expect(countIn(last, "code reviewer")).toBe(firstCount);
+  });
+
+  it("counts completed tasks and is not busy between them", async () => {
+    const session = createSubagentSession(base(recordingProvider([])));
+    expect(session.busy).toBe(false);
+    await session.run("one");
+    expect(session.completed).toBe(1);
+    expect(session.busy).toBe(false);
+  });
+
+  it("runSubagent is still one task on a FRESH worker, with no memory", async () => {
+    // The one-shot shape /team and /sdd dispatch has to keep working: two
+    // runSubagent calls are two strangers, however the session under them is
+    // now factored.
+    const prompts: Message[][] = [];
+    const provider = recordingProvider(prompts);
+    const opts = base(provider);
+    await runSubagent("the first task", opts);
+    prompts.length = 0;
+    await runSubagent("the second task", opts);
+
+    const seen = prompts
+      .flat()
+      .map((m) => m.content)
+      .join("\n");
+    expect(seen).toContain("the second task");
+    expect(seen).not.toContain("the first task");
+  });
+});
+
+function countIn(messages: Message[], needle: string): number {
+  return messages.filter((m) => m.content.includes(needle)).length;
+}

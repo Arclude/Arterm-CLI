@@ -12,6 +12,7 @@ import {
   CheckpointStore,
   Container,
   EventBus,
+  FleetRegistry,
   GenAiTelemetry,
   MemberMemory,
   MemoryRecorder,
@@ -26,6 +27,7 @@ import {
   type SandboxRunner,
   SddRunner,
   TaskStore,
+  type TeamMemberState,
   type TelemetrySubject,
   TodoStore,
   Tokens,
@@ -37,6 +39,7 @@ import {
   createPermissionManager,
   createPipelines,
   createSddStore,
+  createSubagentSession,
   declaredPaths,
   digest as digestObservations,
   estimateTokens,
@@ -71,6 +74,8 @@ import {
   withFallbacks,
 } from "@arterm/providers";
 import {
+  type RollUpFn,
+  createFleetTools,
   createMemorySearchTool,
   createPlanTool,
   createRememberTool,
@@ -661,6 +666,93 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const fleetFn = (tasks: { task: string; role?: string }[]) =>
     runFleetTasks(tasks).then((rs) => rs.map((r) => ({ task: r.task, output: r.output })));
 
+  // Model-driven fleet. `spawn`/`spawn_parallel` above are the ENGINE's shape:
+  // the caller decides the whole fan-out and waits for it. These workers persist
+  // across tasks and are assigned to without blocking, which is what lets the
+  // model decide wave 2 after wave 1 has answered.
+  //
+  // Declared before the registry, not after: `onChange` closes over it and the
+  // registry can fire during construction of anything that spawns.
+  const lastWorkerState = new Map<string, TeamMemberState>();
+  const fleetRegistry = new FleetRegistry({
+    maxWorkers: config.fleet?.maxWorkers,
+    createWorker: (spec) => {
+      // Dispatch-time policy, same as spawnFn: an autonomous session gives
+      // workers a fail-closed asker so a fleet never blocks on a prompt.
+      const sub = subagentPolicy(config, permissions);
+      const session = createSubagentSession({
+        provider,
+        model: agent.model,
+        tools: subagentTools(spec.tools),
+        permissions: sub?.permissions ?? permissions,
+        ask: sub?.ask ?? permissionBroker.askFor({ id: spec.id, name: spec.name }),
+        cwd,
+        taskDone: taskDoneTool,
+        context: createContextStrategy(config),
+        maxSteps: config.autonomy?.maxSteps,
+        maxIterations: config.budget?.maxIterations,
+        turnTokenBudget: config.budget?.turnTokens,
+        contextWindow: config.context?.window,
+        compactAtPercent: config.context?.compactAtPercent,
+        loopDetect: config.loopDetect,
+        // The parent's counter: a model that can spawn workers must not be able
+        // to spend past the ceiling the run was granted by spawning more.
+        budget,
+        ...(sandbox ? { sandbox } : {}),
+        ...(config.credentials ? { credentials: config.credentials } : {}),
+        ...(spec.role !== undefined ? { role: spec.role } : {}),
+        ...(spec.brief !== undefined ? { instruction: spec.brief } : {}),
+        onEvent: (event) =>
+          bus.emit({ type: "team_member_event", id: spec.id, name: spec.name, event }),
+      });
+      return {
+        run: (task, signal) => session.run(task, undefined, signal),
+        stop: () => session.stop(),
+      };
+    },
+    // The swarm board already knows how to draw workers; these are workers.
+    // Diffed rather than re-emitted, because the registry reports every task
+    // transition and a board that repaints on each one flickers for no reason.
+    onChange: () => {
+      for (const w of fleetRegistry.listWorkers()) {
+        const running = fleetRegistry
+          .listTasks()
+          .find((t) => t.workerId === w.id && t.state === "running");
+        const state =
+          w.state === "terminated"
+            ? "failed"
+            : running
+              ? "running"
+              : w.finished > 0
+                ? "done"
+                : "pending";
+        if (lastWorkerState.get(w.id) === state) continue;
+        lastWorkerState.set(w.id, state);
+        bus.emit({
+          type: "team_member_state",
+          id: w.id,
+          name: w.name,
+          state,
+          ...(running ? { task: running.task } : {}),
+        });
+      }
+    },
+  });
+
+  // `roll_up`'s summariser: the same tool-free one-shot the context strategy
+  // uses. Deliberately NOT `agent.plan()`, which prepends the leader's whole
+  // history — the point of rolling up is that the results do not travel through
+  // the leader's context, and plan() would send it along with them.
+  const rollUp: RollUpFn = async (parts, focus) => {
+    const body = parts.map((p) => `### ${p.label}\n${p.text}`).join("\n\n");
+    const ask = focus
+      ? `Summarise these sub-agent results with a focus on: ${focus}`
+      : "Summarise these sub-agent results.";
+    return summarizeOneShot(
+      `${ask}\nKeep every concrete finding (files, symbols, numbers). Say plainly where they disagree.\n\n${body}`,
+    );
+  };
+
   agent.setTools([
     ...agent.tools,
     createTodoTool(todos),
@@ -668,6 +760,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     createTaskTool(tasks),
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
+    ...createFleetTools({ registry: fleetRegistry, rollUp }),
     ...(cmem
       ? cmem.tools()
       : memoryEnabled
@@ -907,6 +1000,11 @@ export async function buildSession(opts: SessionOptions): Promise<{
   };
 
   const persist = async () => {
+    // Model-spawned workers are the one thing here that can still be RUNNING at
+    // teardown: nothing awaited them, which is the point of assigning without
+    // blocking. Stopping them first means a closing session does not leave a
+    // sub-agent making provider calls against a run nobody is watching.
+    fleetRegistry.dispose();
     // Flush the exporter here rather than behind a fourth returned function:
     // `persist` is the last call on EVERY teardown path (headless, session
     // close, close-all), and a batch processor that is never shut down drops

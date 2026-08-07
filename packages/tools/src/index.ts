@@ -20,6 +20,12 @@ export {
   type SpawnFn,
   type FleetFn,
 } from "./spawn.js";
+export {
+  createFleetTools,
+  FLEET_TOOL_NAMES,
+  type FleetToolOptions,
+  type RollUpFn,
+} from "./fleet.js";
 export { createMemorySearchTool, createRememberTool, formatLearning } from "./memoryTools.js";
 export { makeMemoTool, type MemoToolOptions } from "./memo.js";
 export { createTodoTool } from "./todo.js";
