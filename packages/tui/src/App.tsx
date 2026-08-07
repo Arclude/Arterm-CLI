@@ -1,5 +1,6 @@
 import {
   type AutonomyMode,
+  type ContextBreakdown,
   type McpServerSummary,
   type ModelInfo,
   PERMISSION_MODES,
@@ -17,6 +18,7 @@ import {
 } from "@arterm/core";
 import type React from "react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ContextPanel } from "./ContextPanel.js";
 import { LoginOverlay } from "./LoginOverlay.js";
 import { Item } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
@@ -230,6 +232,7 @@ const COMMANDS = [
   "resume",
   "stop",
   "compact",
+  "context",
   "cost",
   "config",
   "mcp",
@@ -620,6 +623,8 @@ export function App({
   const [inTok, setInTok] = useState(0);
   const [outTok, setOutTok] = useState(0);
   const [ctxUsed, setCtxUsed] = useState(0);
+  const [ctxEstimated, setCtxEstimated] = useState(true);
+  const [ctxWindowLive, setCtxWindowLive] = useState<number | undefined>(undefined);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerModels, setPickerModels] = useState<ModelInfo[]>([]);
   const [pickerIndex, setPickerIndex] = useState(0);
@@ -649,6 +654,20 @@ export function App({
   // events. Not a board cell: the leader is not a task that can finish, and its
   // live state is the status bar's job — but its cost belongs beside the fleet's.
   const [leaderCost, setLeaderCost] = useState(0);
+  // /context: the panel, its measured composition, and the two things that have
+  // already reshaped the window this session. Compactions and cleared results
+  // are counted here because the events announcing them scroll away, and "why
+  // is the history shorter than what I remember saying" is the question the
+  // panel exists to answer.
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | undefined>(undefined);
+  const [compactions, setCompactions] = useState<{
+    count: number;
+    last?: { before: number; after: number };
+  }>({ count: 0 });
+  const [clearedResults, setClearedResults] = useState(0);
+  const contextOpenRef = useRef(false);
+  contextOpenRef.current = contextOpen;
   // Which fan-out mode the board is showing: a /team roster or a parallel run's
   // per-round subtasks. Only the wording differs — the rows, the telemetry and
   // the navigation are the same. `team` wins if both could apply.
@@ -954,6 +973,13 @@ export function App({
         // until the agent compacted.
         case "context_usage":
           setCtxUsed(event.used);
+          // Whether the fill is the provider's own number or our heuristic is
+          // part of the fact, not a footnote: a local backend that reports no
+          // usage produces a gauge built entirely from an estimate, and a panel
+          // that showed both the same way would be claiming a precision it
+          // does not have.
+          setCtxEstimated(event.estimated);
+          if (event.window) setCtxWindowLive(event.window);
           break;
         case "usage":
           if (event.usage.promptTokens) {
@@ -979,6 +1005,10 @@ export function App({
             }`,
           });
           setCtxUsed(0);
+          setCompactions((c) => ({
+            count: c.count + 1,
+            last: { before: event.before, after: event.after },
+          }));
           break;
         case "autonomy_verify": {
           const what = event.scope && event.scope !== "goal" ? ` ${event.scope}` : "";
@@ -1017,6 +1047,7 @@ export function App({
             kind: "system",
             text: `✓ context: ${event.cleared} stale tool result${event.cleared > 1 ? "s" : ""} cleared`,
           });
+          setClearedResults((n) => n + event.cleared);
           break;
         case "autonomy_resume_available":
           push({
@@ -1527,6 +1558,12 @@ export function App({
     (_input, key) => {
       if (!visibleRef.current) return;
       if (!key.escape || pendingRef.current) return;
+      // Closing a view the user opened comes before stopping work they did not
+      // ask to stop — Esc on an open panel must never abort the turn behind it.
+      if (contextOpenRef.current) {
+        setContextOpen(false);
+        return;
+      }
       if (teamDetailOpenRef.current) {
         setTeamDetailOpen(false);
         return;
@@ -2029,6 +2066,19 @@ export function App({
           if (result.after >= result.before) {
             push({ kind: "system", text: "context already compact — nothing to trim" });
           }
+          break;
+        }
+        case "context": {
+          // Opened, not printed: the composition is a live view that has to
+          // survive the next turn changing it. The breakdown is measured on
+          // open (it reads the project instructions off disk to price the
+          // system prompt) and refreshed whenever the panel is reopened.
+          setContextBreakdown(undefined);
+          setContextOpen(true);
+          void session.agent
+            .contextBreakdown()
+            .then(setContextBreakdown)
+            .catch(() => setContextBreakdown(undefined));
           break;
         }
         case "cost": {
@@ -2850,6 +2900,19 @@ export function App({
           kind={boardKind}
           now={swarmClock}
           leader={{ cost: leaderCost }}
+        />
+      ) : null}
+      {contextOpen ? (
+        <ContextPanel
+          used={ctxUsed}
+          window={ctxWindowLive ?? session.agent.effectiveContextWindow() ?? DEFAULT_CTX}
+          estimated={ctxEstimated}
+          breakdown={contextBreakdown}
+          compactAt={session.config.context.compactAtPercent ?? 0.75}
+          compactions={compactions}
+          cleared={clearedResults}
+          members={teamMembers}
+          columns={columns}
         />
       ) : null}
       {teamSuggest ? (

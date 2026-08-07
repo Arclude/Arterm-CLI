@@ -16,7 +16,7 @@ import { modelContextWindow } from "./modelsDev.js";
 import type { PermissionManager } from "./permissions.js";
 import { ProviderError } from "./providerError.js";
 import type { SandboxRunner } from "./sandbox.js";
-import { estimateHistoryTokens } from "./tokenEstimate.js";
+import { estimateHistoryTokens, estimateMessageTokens, estimateTokens } from "./tokenEstimate.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
   ChatProvider,
@@ -29,6 +29,31 @@ import type {
   ToolCall,
   ToolSchema,
 } from "./types.js";
+
+/**
+ * The context's composition, in estimated tokens. See {@link Agent.contextBreakdown}
+ * for why these are estimates and why `total` is not `contextUsage().used`.
+ */
+export interface ContextBreakdown {
+  /** The system message as sent: base prompt, project instructions, skills. */
+  system: number;
+  /**
+   * Tool schemas sent through the API's own field. Zero for a model without
+   * native tool-calling — there the schemas are part of `system`, and counting
+   * them twice would inflate the only number a reader can act on.
+   */
+  tools: number;
+  /** User and assistant turns. */
+  conversation: number;
+  /** Tool results still in the working history. */
+  toolResults: number;
+  /** The parts, summed. An estimate; see the method's note. */
+  total: number;
+  /** Messages in the working history. */
+  messages: number;
+  /** Whether the model takes tool schemas through the API rather than the prompt. */
+  nativeTools: boolean;
+}
 
 export interface AgentOptions {
   provider: ChatProvider;
@@ -856,6 +881,48 @@ export class Agent {
       used: reported ?? estimateHistoryTokens(this.messages),
       ...(window !== undefined ? { window } : {}),
       estimated: reported === undefined,
+    };
+  }
+
+  /**
+   * What the context is made of, by part.
+   *
+   * `contextUsage()` answers "how full", which is enough to decide whether to
+   * compact and nothing else. It is not enough to act on: a window at 80% is a
+   * different problem when it is 60k of tool output than when it is 60k of
+   * conversation, and only one of those is fixed by compacting.
+   *
+   * The numbers are ESTIMATES, from the same ~4-chars-per-token heuristic the
+   * compaction decision uses, and `total` will not generally equal
+   * `contextUsage().used` — that one prefers the provider's reported prompt
+   * tokens when there are any. Two different measurements of the same thing,
+   * and a caller that presents them as one will show a discrepancy it cannot
+   * explain. `total` is here to give the parts a denominator of their own.
+   */
+  async contextBreakdown(): Promise<ContextBreakdown> {
+    const native =
+      this.opts.tools.length > 0 && (await this.opts.provider.supportsNativeTools(this.opts.model));
+    // The system message as it will actually be sent — including the project
+    // instructions and, for a model without native tool-calling, the whole JSON
+    // tool protocol. That last part is why `tools` is zero in the non-native
+    // case rather than double-counted: the schemas ARE the system message there.
+    const system = estimateTokens((await this.buildSystem(native)).content);
+    const tools = native ? estimateTokens(JSON.stringify(this.toolSchemas())) : 0;
+    let conversation = 0;
+    let toolResults = 0;
+    for (const message of this.messages) {
+      const tokens = estimateMessageTokens(message);
+      if (message.role === "tool") toolResults += tokens;
+      else conversation += tokens;
+    }
+    return {
+      system,
+      tools,
+      conversation,
+      toolResults,
+      total: system + tools + conversation + toolResults,
+      messages: this.messages.length,
+      nativeTools: native,
     };
   }
 

@@ -150,6 +150,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: "Context",
     items: [
+      ["/context", "what is filling the window: composition, agents, compactions"],
       ["/compact", "shrink context (auto when near full)"],
       ["/cost", "token usage + estimated cost"],
       ["/config", "show the resolved configuration"],
