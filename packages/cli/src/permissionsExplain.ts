@@ -138,9 +138,13 @@ export async function collectTools(
   config: ArtermConfig,
   builtinsOnly: boolean,
 ): Promise<Array<{ tool: Tool; source: ExplainResult["source"] }>> {
-  const entries: Array<{ tool: Tool; source: ExplainResult["source"] }> = defaultTools().map(
-    (tool) => ({ tool, source: "built-in" as const }),
-  );
+  // The session's tier, not the default one. `buildSession` builds the roster
+  // from `config.tools.tier`; an inspector that always listed `standard` would
+  // describe a surface nobody runs — hiding `install` from a `full` session's
+  // table, and inventing rows a `minimal` session does not have.
+  const entries: Array<{ tool: Tool; source: ExplainResult["source"] }> = defaultTools(
+    config.tools?.tier,
+  ).map((tool) => ({ tool, source: "built-in" as const }));
   if (builtinsOnly) return entries;
 
   const seen = new Set(entries.map((e) => e.tool.name));

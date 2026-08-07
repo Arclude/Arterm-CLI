@@ -7,10 +7,19 @@ import { gitCommitTool, gitTool } from "./git.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { jsonTool } from "./json.js";
+import { logsTool } from "./logs.js";
 import { lsTool } from "./ls.js";
 import { multiEditTool } from "./multiEdit.js";
 import { patchTool } from "./patch.js";
-import { formatTool, lintTool, testTool } from "./project.js";
+import {
+  auditTool,
+  formatTool,
+  installTool,
+  lintTool,
+  outdatedTool,
+  testTool,
+  typecheckTool,
+} from "./project.js";
 import { readTool } from "./read.js";
 import { replaceTool } from "./replace.js";
 import { searchTool } from "./search.js";
@@ -57,18 +66,30 @@ const STANDARD_EXTRA: Tool[] = [
   testTool,
   lintTool,
   formatTool,
+  typecheckTool,
   webFetchTool,
   webSearchTool,
 ];
 
 /**
- * Added at `full`: the meta-tools.
+ * Added at `full`: package management, operations, and the meta-tools.
  *
- * They go last on purpose — both describe or dispatch OTHER tools, so they are
- * worth their schema only once the roster is large enough to be worth
+ * The meta-tools go last on purpose — both describe or dispatch OTHER tools, so
+ * they are worth their schema only once the roster is large enough to be worth
  * searching. On a six-tool roster, `tool_search` costs more than it saves.
+ *
+ * `install`, `audit` and `outdated` sit here rather than at `standard` because
+ * an ordinary coding turn does not manage dependencies: it reads, changes and
+ * runs code. A session that needs them is doing a different job, and can say so.
  */
-const FULL_EXTRA: Tool[] = [toolSearchTool, batchTool];
+const FULL_EXTRA: Tool[] = [
+  installTool,
+  auditTool,
+  outdatedTool,
+  logsTool,
+  toolSearchTool,
+  batchTool,
+];
 
 /** The default tool set wired into the agent. */
 export function defaultTools(tier: ToolTier = "standard"): Tool[] {
@@ -129,6 +150,11 @@ export {
   testTool,
   lintTool,
   formatTool,
+  typecheckTool,
+  installTool,
+  auditTool,
+  outdatedTool,
+  logsTool,
   toolSearchTool,
   batchTool,
   taskDoneTool,

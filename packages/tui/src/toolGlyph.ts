@@ -37,6 +37,9 @@ const CATEGORY: Record<string, ToolVisual> = {
   git: { glyph: "⎇", color: "#a6e3a1" },
   web: { glyph: "◈", color: "#89dceb" },
   test: { glyph: "⚗", color: "#a6e3a1" },
+  // Dependency work reaches the network and runs someone else's code; it reads
+  // differently from the rest of a turn and should look it.
+  package: { glyph: "◱", color: "#fab387" },
   memory: { glyph: "✦", color: "#f5c2e7" },
   plan: { glyph: "☰", color: "#94e2d5" },
   agent: { glyph: "◈", color: "#cba6f7" },
@@ -68,6 +71,11 @@ const TOOL_CATEGORY: Record<string, keyof typeof CATEGORY> = {
   bash: "shell",
   lint: "test",
   test: "test",
+  typecheck: "test",
+  install: "package",
+  audit: "package",
+  outdated: "package",
+  logs: "read",
   git: "git",
   git_commit: "git",
   web_fetch: "web",

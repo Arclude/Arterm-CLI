@@ -2,6 +2,7 @@ import { type ArtermConfig, type Tool, defaultConfig } from "@arterm/core";
 import { describe, expect, it } from "vitest";
 import {
   type ExplainResult,
+  collectTools,
   explainCall,
   formatExplanation,
   parseArgs,
@@ -162,5 +163,30 @@ describe("formatExplanation", () => {
     );
     expect(text).toMatch(/mode: auto/);
     expect(text).toMatch(/category: execute/);
+  });
+});
+
+describe("collectTools honours the session's tier", () => {
+  // Both inspectors exist to describe the policy a session actually runs, and
+  // the roster is half of that. Pinned to `standard`, the table hid `install`
+  // from a `full` session and invented rows a `minimal` one does not have.
+  const withTier = (tier: "minimal" | "standard" | "full") =>
+    ({ ...defaultConfig(), tools: { tier } }) as ArtermConfig;
+
+  it("lists only the minimal roster under tier minimal", async () => {
+    const names = (await collectTools(withTier("minimal"), true)).map((e) => e.tool.name);
+    expect(names).toContain("bash");
+    expect(names).not.toContain("git_commit");
+    expect(names).not.toContain("install");
+  });
+
+  it("reaches the package tools only under tier full", async () => {
+    const standard = (await collectTools(withTier("standard"), true)).map((e) => e.tool.name);
+    const full = (await collectTools(withTier("full"), true)).map((e) => e.tool.name);
+    expect(standard).toContain("typecheck");
+    expect(standard).not.toContain("install");
+    for (const name of ["install", "audit", "outdated", "logs"]) {
+      expect(full, `${name} missing from the full roster`).toContain(name);
+    }
   });
 });
