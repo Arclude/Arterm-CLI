@@ -33,6 +33,7 @@ const CATEGORY: Record<string, ToolVisual> = {
   web: { glyph: "◈", color: "#89dceb" },
   test: { glyph: "⚗", color: "#a6e3a1" },
   memory: { glyph: "✦", color: "#f5c2e7" },
+  plan: { glyph: "☰", color: "#94e2d5" },
   agent: { glyph: "◈", color: "#cba6f7" },
   meta: { glyph: "❏", color: "#a6adc8" },
   done: { glyph: "✓", color: "#a6e3a1" },
@@ -68,6 +69,7 @@ const TOOL_CATEGORY: Record<string, keyof typeof CATEGORY> = {
   message: "agent",
   batch: "meta",
   task_done: "done",
+  todo: "plan",
 };
 
 /**

@@ -22,6 +22,7 @@ export {
 } from "./spawn.js";
 export { createMemorySearchTool, createRememberTool, formatLearning } from "./memoryTools.js";
 export { makeMemoTool, type MemoToolOptions } from "./memo.js";
+export { createTodoTool } from "./todo.js";
 export { makeMessageTool, type MessageToolOptions } from "./message.js";
 export { startMemoryMcpServer } from "./mcpMemoryServer.js";
 export {

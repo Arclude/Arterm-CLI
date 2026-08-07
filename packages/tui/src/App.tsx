@@ -9,6 +9,7 @@ import {
   type PermissionOrigin,
   type PluginSummary,
   type SddTaskState,
+  type TodoItem,
   cachedCatalogSync,
   fetchCatalog,
   findModelById,
@@ -28,6 +29,7 @@ import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardKind, type TeamBoardMember } from "./TeamBoard.js";
+import { TodoStrip } from "./TodoStrip.js";
 import { agentColor } from "./agentColor.js";
 import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
 import { OSC52_MAX_CHARS, copyToClipboard } from "./clipboard.js";
@@ -666,6 +668,8 @@ export function App({
   // events. Not a board cell: the leader is not a task that can finish, and its
   // live state is the status bar's job — but its cost belongs beside the fleet's.
   const [leaderCost, setLeaderCost] = useState(0);
+  // The model's work list, mirrored from the bus (see core/src/todo.ts).
+  const [todos, setTodos] = useState<TodoItem[]>([]);
   // /context: the panel, its measured composition, and the two things that have
   // already reshaped the window this session. Compactions and cleared results
   // are counted here because the events announcing them scroll away, and "why
@@ -1146,6 +1150,11 @@ export function App({
               color: agentColor(event.from),
             });
           }
+          break;
+        case "todo_changed":
+          // The list replaces itself wholesale — there is no incremental form,
+          // so the surface stores what it was handed rather than accumulating.
+          setTodos(event.items);
           break;
         case "goal_set":
           setAutoState("running");
@@ -3024,15 +3033,16 @@ export function App({
       )}
       {autoState !== "idle" ? (
         <Box>
-          <Text color="magenta" bold>
-            {autoState === "paused" ? "⏸ GOAL" : "◆ GOAL"}
+          <Text color={theme.monitor.swarm} bold>
+            {autoState === "paused" ? `${glyphs.paused} GOAL` : `${glyphs.round} GOAL`}
           </Text>
-          <Text color="gray">
+          <Text color={theme.textMuted}>
             {"  "}
-            step {autoStep} · {goalText.slice(0, 64)}
+            step {autoStep} · {oneLine(goalText, 64)}
           </Text>
         </Box>
       ) : null}
+      {todos.length > 0 ? <TodoStrip items={todos} columns={columns} /> : null}
       <StatusBar
         provider={providerLabel}
         model={model}

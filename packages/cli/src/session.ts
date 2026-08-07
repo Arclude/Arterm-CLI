@@ -25,6 +25,7 @@ import {
   type SandboxRunner,
   SddRunner,
   type TelemetrySubject,
+  TodoStore,
   Tokens,
   type Tool,
   applyPatch,
@@ -70,6 +71,7 @@ import {
   createSandboxRunner,
   createSpawnParallelTool,
   createSpawnTool,
+  createTodoTool,
   defaultTools,
   makeMemoTool,
   makeMessageTool,
@@ -187,6 +189,9 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const model = opts.model ?? config.model;
 
   const bus = new EventBus();
+  // The model's own work list. Held outside the conversation so it survives
+  // compaction — which is the whole reason it exists (see `todo.ts`).
+  const todos = new TodoStore((items) => bus.emit({ type: "todo_changed", items }));
   // Checkpoints are per session; the transcript id isn't known yet at build time.
   const sessionCheckpointId = randomUUID();
 
@@ -649,6 +654,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
 
   agent.setTools([
     ...agent.tools,
+    createTodoTool(todos),
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
     ...(cmem

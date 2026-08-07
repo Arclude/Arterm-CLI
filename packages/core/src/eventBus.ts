@@ -1,4 +1,5 @@
 import type { ProviderErrorKind } from "./providerError.js";
+import type { TodoItem } from "./todo.js";
 import type {
   AutonomyMode,
   DiffRow,
@@ -69,6 +70,10 @@ export type AgentEvent =
   | { type: "context_usage"; used: number; window?: number; estimated: boolean }
   // Stale tool outputs were replaced with placeholders (cheaper than compaction).
   | { type: "tool_results_cleared"; cleared: number }
+  // The model rewrote its own work list (see `todo.ts`). Carries the whole
+  // list because the list IS the state — there is no incremental form, and a
+  // surface that had to accumulate deltas would drift from the store.
+  | { type: "todo_changed"; items: TodoItem[] }
   // The turn hit a hard cap (iteration count or token budget) and stopped early —
   // surfaced so limit stops are never silent (the reply may be mid-thought).
   | { type: "run_limit"; kind: "iterations" | "tokens"; limit: number; used: number }
