@@ -10,6 +10,7 @@ import { grepTool } from "./grep.js";
 import { jsonTool } from "./json.js";
 import { logsTool } from "./logs.js";
 import { lsTool } from "./ls.js";
+import { lspTools } from "./lsp/tools.js";
 import { multiEditTool } from "./multiEdit.js";
 import { patchTool } from "./patch.js";
 import {
@@ -92,6 +93,7 @@ const FULL_EXTRA: Tool[] = [
   auditTool,
   outdatedTool,
   logsTool,
+  ...lspTools,
   toolSearchTool,
   batchTool,
 ];

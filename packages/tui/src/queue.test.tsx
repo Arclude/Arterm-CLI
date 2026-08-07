@@ -8,7 +8,13 @@ import type { Session } from "./types.js";
 const ENTER = "\r";
 const tick = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-async function waitFor(view: () => string, pred: (f: string) => boolean, timeout = 4000) {
+// 20s, not 4: this polls, so the bound is only a FAILURE deadline and costs
+// nothing when the condition holds early. Six vitest workers running in
+// parallel — some of them spawning language servers and parsing with
+// tree-sitter — can push a render past four seconds on a loaded machine, and a
+// bound tight enough to trip on load is a test that reports the machine rather
+// than the code.
+async function waitFor(view: () => string, pred: (f: string) => boolean, timeout = 20_000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if (pred(view())) return;
@@ -105,5 +111,5 @@ describe("prompt queue (typing stays live while a turn runs)", () => {
     expect(out.indexOf("echo:two")).toBeLessThan(out.indexOf("echo:three"));
 
     unmount();
-  });
+  }, 30_000);
 });

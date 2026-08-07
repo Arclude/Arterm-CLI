@@ -85,8 +85,10 @@ import {
   createTaskTool,
   createTodoTool,
   defaultTools,
+  disposeLspClients,
   makeMemoTool,
   makeMessageTool,
+  resetCallGraphs,
   taskDoneTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
@@ -1005,6 +1007,11 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // blocking. Stopping them first means a closing session does not leave a
     // sub-agent making provider calls against a run nobody is watching.
     fleetRegistry.dispose();
+    // Language servers are the other long-lived child. They are cached for the
+    // process precisely so a second question is cheap, which means nothing else
+    // ever closes them.
+    await disposeLspClients().catch(() => {});
+    resetCallGraphs();
     // Flush the exporter here rather than behind a fourth returned function:
     // `persist` is the last call on EVERY teardown path (headless, session
     // close, close-all), and a batch processor that is never shut down drops

@@ -30,5 +30,8 @@
     "web-tree-sitter": "^0.26.11",
     "yaml": "^2.9.0",
     "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript-language-server": "^5.3.0"
   }
 }
