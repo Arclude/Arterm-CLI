@@ -82,6 +82,19 @@ export interface SandboxRunner {
   wrap(command: string, cwd: string, signal?: AbortSignal): Promise<SandboxedCommand>;
   /** Release per-command state (masked credential files, proxy leases). */
   release(): void;
+  /**
+   * Tear the boundary itself down at session end.
+   *
+   * Optional so a test double stays a three-line object literal, and mandatory
+   * in spirit for anything backed by a real runtime: the boundary is not just
+   * rules, it is HOST-SIDE PROCESSES AND LISTENERS (the egress proxy, the socket
+   * bridge). Those handles hold Node's event loop open, so a run that has
+   * finished still cannot exit. Observed exactly that way — a headless
+   * `--autonomous` run wrote its result, printed its verdict, and then sat there
+   * until an external timeout killed it, which reports as a failure with the
+   * work already done. `release()` is per COMMAND; this is per SESSION.
+   */
+  dispose?(): Promise<void>;
 }
 
 /**
