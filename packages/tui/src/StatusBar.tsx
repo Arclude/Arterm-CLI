@@ -192,7 +192,7 @@ export function StatusBar({
           {meter}
           <Text color="gray">
             {" "}
-            {pct}%/{fmtTok(ctxWindow || 0)}
+            {pct}% {fmtTok(ctxUsed)}/{fmtTok(ctxWindow || 0)}
           </Text>
           {sepN}
           <Text color="gray">
@@ -246,9 +246,11 @@ export function StatusBar({
         {sepW}
         <Text color="gray">ctx </Text>
         {meter}
+        {/* Percent AND absolutes: a percentage alone cannot tell 25% of an 8k
+            window from 25% of a 1M one, and those are different situations. */}
         <Text color="gray">
           {" "}
-          {pct}%/{fmtTok(ctxWindow || 0)}
+          {pct}% {fmtTok(ctxUsed)}/{fmtTok(ctxWindow || 0)}
         </Text>
         {sepW}
         <Text color="gray">
