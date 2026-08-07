@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import type { Tool } from "@arterm/core";
+import { ignorePatterns } from "./ignore.js";
 import { assertSafeGlob, isWithin, optionalString, requireString } from "./paths.js";
 
 const MAX_MATCHES = 100;
@@ -36,7 +37,9 @@ export const grepTool: Tool = {
     const { default: fg } = await import("fast-glob");
     const files = await fg(glob, {
       cwd: ctx.cwd,
-      ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
+      // The project's own `.gitignore` decides, not a three-entry list that
+      // only ever matched a TypeScript repo — see `ignore.ts`.
+      ignore: await ignorePatterns(ctx.cwd),
       onlyFiles: true,
       absolute: true,
       followSymbolicLinks: false,

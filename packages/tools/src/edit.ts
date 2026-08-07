@@ -1,13 +1,15 @@
 import { promises as fs } from "node:fs";
 import { type Tool, editPreview, lineDiff } from "@arterm/core";
+import { applyRanges, matchEdit, matched } from "./editMatch.js";
 import { requireString, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
 
 export const editTool: Tool = {
   name: "edit",
   description:
-    "Replace an exact substring in a file. old_string must appear exactly once unless " +
-    "replace_all is true. Read the file first to craft a unique old_string.",
+    "Replace a substring in a file. old_string must identify exactly one place unless " +
+    "replace_all is true. Read the file first and copy the text; whitespace differences " +
+    "are forgiven, but the match must still be unique.",
   permission: "ask",
   category: "edit",
   mutating: true,
@@ -37,26 +39,31 @@ export const editTool: Tool = {
     const replaceAll = args.replace_all === true;
 
     const content = await fs.readFile(abs, "utf8");
-    const count = content.split(oldStr).length - 1;
-    if (count === 0) {
-      return { output: "old_string not found in file.", isError: true };
-    }
-    if (count > 1 && !replaceAll) {
+    // The ladder (see `editMatch.ts`): exact first, then progressively more
+    // forgiving about whitespace. Exact matching is right and it fails
+    // constantly, because the model reconstructs `old_string` from a file it
+    // read several turns ago and gets the indentation wrong.
+    const result = matchEdit(content, oldStr, newStr, replaceAll);
+    if (!matched(result)) {
+      const near = (result as { nearest?: { tier: string; count: number } }).nearest;
       return {
-        output: `old_string is not unique (${count} matches). Add context or set replace_all.`,
+        output: near
+          ? `old_string is not unique (${near.count} matches at the "${near.tier}" level). Add surrounding context, or set replace_all.`
+          : "old_string not found in file — not even ignoring whitespace. Read the file and copy the text exactly.",
         isError: true,
       };
     }
-    // NB: use index+slice, not String.replace — replace() interprets `$&`, `$1`,
+
+    // NB: ranges + slice, not String.replace — replace() interprets `$&`, `$1`,
     // `$$` etc. in new_string as patterns and would silently corrupt the write.
-    const idx = content.indexOf(oldStr);
-    const updated = replaceAll
-      ? content.split(oldStr).join(newStr)
-      : content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
+    const updated = applyRanges(content, result.ranges, result.replacement);
     await fs.writeFile(abs, updated, "utf8");
     invalidateSearchIndex(ctx.cwd);
+    // The tier is reported, always. A silent fuzzy match is how an edit lands
+    // in the wrong place and nobody finds out until the tests do.
+    const how = result.tier === "exact" ? "" : ` (matched on ${result.tier})`;
     return {
-      output: `Replaced ${replaceAll ? count : 1} occurrence(s) in ${relPath}`,
+      output: `Replaced ${result.ranges.length} occurrence(s) in ${relPath}${how}`,
       diff: lineDiff(content, updated),
       path: relPath,
     };

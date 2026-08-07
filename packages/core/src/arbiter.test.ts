@@ -199,3 +199,39 @@ describe("RiskArbiter", () => {
     );
   });
 });
+
+/**
+ * The one critical that is not about damage: the process that would ask the
+ * follow-up question is the one being killed. An agent cannot recover from,
+ * report on, or be steered away from its own death.
+ */
+describe("commands that would kill the agent itself", () => {
+  it("blocks match-by-name kills that necessarily include this process", () => {
+    for (const command of [
+      "pkill -f node",
+      "killall node",
+      "pkill -9 arterm",
+      "taskkill /F /IM node.exe",
+      "Stop-Process -Name node -Force",
+    ]) {
+      const risk = assessRisk(tool("bash", "execute"), { command });
+      expect(risk.level, command).toBe("critical");
+      expect(risk.reason, command).toContain("kill the agent's own process");
+    }
+  });
+
+  it("blocks kill-everything forms", () => {
+    for (const command of ["kill -9 -1", "killall -1", "pkill -u $USER"]) {
+      expect(assessRisk(tool("bash", "execute"), { command }).level, command).toBe("critical");
+    }
+  });
+
+  it("leaves an ordinary targeted kill alone", () => {
+    // Killing a dev server by pid, or a process that is not this runtime, is
+    // normal work — the guard is about self-destruction, not about `kill`.
+    for (const command of ["kill 4321", "pkill -f my-dev-server", "killall postgres"]) {
+      const level = assessRisk(tool("bash", "execute"), { command }).level;
+      expect(level, command).not.toBe("critical");
+    }
+  });
+});

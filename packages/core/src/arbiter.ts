@@ -38,6 +38,32 @@ const CRITICAL_BASH: RegExp[] = [
   /\b(?:rd|rmdir|del|remove-item)\b[^\n]*?(?:\/s\b|-recurse\b)[^\n]*?(?:%SystemDrive%|%SystemRoot%|%WinDir%|\$env:SystemRoot|\$env:windir)/i,
 ];
 
+/**
+ * Commands that would kill the agent running them.
+ *
+ * A pattern-matched `pkill -f node` reads as ordinary process cleanup, and on
+ * a machine where the agent IS a node process it ends the session mid-turn:
+ * the run stops with no summary, no verdict, and no checkpoint — the user
+ * simply loses the work. `kill -9 -1` and its Windows equivalents are the same
+ * shape.
+ *
+ * Graded `critical` rather than `high`, i.e. denied even under yolo, because
+ * unlike the other criticals this one is not about the damage — it is that the
+ * process which would ask the follow-up question is the one being killed. An
+ * agent cannot recover from, report on, or be steered away from its own death.
+ * A user who genuinely wants these can run them in their own shell.
+ */
+const SELF_KILL_BASH: RegExp[] = [
+  // Kill every process the user owns, or every process at all.
+  /\bkill(?:all)?\s+(?:-\w+\s+)*-1\b/,
+  /\bpkill\s+(?:-\w+\s+)*-(?:1|u\s+\$?\w+)\b/,
+  // Match-by-name kills that necessarily include this process.
+  /\b(?:pkill|killall)\b[^\n]*\b(?:node|bun|deno|arterm|electron)\b/i,
+  // PowerShell / Windows equivalents.
+  /\bstop-process\b[^\n]*-name\s+["']?(?:node|arterm|electron)/i,
+  /\btaskkill\b[^\n]*\/im\s+["']?(?:node|arterm|electron)\.exe/i,
+];
+
 /** Risky-but-sometimes-legitimate commands — escalated to the human. */
 const HIGH_BASH: RegExp[] = [
   /\brm\s+-[rf]{1,2}\b/,
@@ -159,6 +185,14 @@ function assessByArgs(
     for (const re of CRITICAL_BASH) {
       if (re.test(cmd))
         return { level: "critical", reason: `destructive command: ${cmd.slice(0, 60)}` };
+    }
+    for (const re of SELF_KILL_BASH) {
+      if (re.test(cmd)) {
+        return {
+          level: "critical",
+          reason: `this would kill the agent's own process: ${cmd.slice(0, 60)}`,
+        };
+      }
     }
     for (const re of HIGH_BASH) {
       if (re.test(cmd)) return { level: "high", reason: `risky command: ${cmd.slice(0, 60)}` };

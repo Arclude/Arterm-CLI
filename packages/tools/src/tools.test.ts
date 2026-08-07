@@ -31,6 +31,55 @@ describe("readTool", () => {
     expect(res.output).toContain("world");
     expect(res.output).toMatch(/1\thello/);
   });
+
+  it("reads a window of a large file, numbered from the offset", async () => {
+    // Without paging, line 4000 of a 5000-line file was reachable only by
+    // shelling out to `sed -n` — a file read that skips the tool that reads
+    // files, and with it the path confinement and the size cap.
+    const lines = Array.from({ length: 5000 }, (_, i) => `line ${i + 1}`);
+    await fs.writeFile(join(dir, "big.txt"), lines.join("\n"));
+
+    const res = await readTool.execute({ path: "big.txt", offset: 4000, limit: 3 }, ctx());
+    expect(res.output).toContain("line 4000");
+    expect(res.output).toContain("line 4002");
+    expect(res.output).not.toContain("line 4003");
+    expect(res.output).toMatch(/\s4000\tline 4000/);
+  });
+
+  it("says what it did not return", async () => {
+    // A window with no edges reads as the whole file, and a model that
+    // believes it has read the file stops looking.
+    const lines = Array.from({ length: 100 }, (_, i) => `l${i + 1}`);
+    await fs.writeFile(join(dir, "mid.txt"), lines.join("\n"));
+
+    const res = await readTool.execute({ path: "mid.txt", offset: 50, limit: 10 }, ctx());
+    expect(res.output).toContain("100 lines total");
+    expect(res.output).toContain("49 line(s) above");
+    expect(res.output).toContain("41 line(s) below");
+  });
+
+  it("refuses an offset past the end instead of returning nothing", async () => {
+    await fs.writeFile(join(dir, "short.txt"), "a\nb\n");
+    const res = await readTool.execute({ path: "short.txt", offset: 900 }, ctx());
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("past the end");
+  });
+
+  it("refuses a binary file rather than decoding it as text", async () => {
+    // Decoded as UTF-8, a binary file is a screenful of replacement characters
+    // that costs tokens and says nothing.
+    await fs.writeFile(join(dir, "bin"), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01, 0x02]));
+    const res = await readTool.execute({ path: "bin" }, ctx());
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("binary");
+  });
+
+  it("clips a single enormous line instead of pasting a bundle", async () => {
+    await fs.writeFile(join(dir, "min.js"), `${"x".repeat(9000)}\nsecond`);
+    const res = await readTool.execute({ path: "min.js" }, ctx());
+    expect(res.output).toContain("[line clipped]");
+    expect(res.output).toContain("second");
+  });
 });
 
 describe("editTool", () => {

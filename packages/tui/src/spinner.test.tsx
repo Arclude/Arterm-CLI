@@ -13,12 +13,23 @@ describe("the spinner", () => {
     // glyph and the word "working".
     const { lastFrame, unmount } = render(createElement(Spinner));
     const first = lastFrame();
-    await tick(SPINNER_INTERVAL_MS * 2);
-    expect(lastFrame()).not.toBe(first);
+    // Polled rather than slept-then-asserted: the interval is real time, and a
+    // loaded machine can miss a single tick without the spinner being broken.
+    // Waiting for the change (up to a generous bound) tests the property
+    // without turning machine load into a failing build.
+    let moved = false;
+    for (let i = 0; i < 40 && !moved; i++) {
+      await tick(SPINNER_INTERVAL_MS);
+      moved = lastFrame() !== first;
+    }
+    expect(moved).toBe(true);
     unmount();
   });
 
   it("keeps every frame one column wide, so the text beside it never shifts", async () => {
+    // Width is a property of the frame set, not of timing: sampling whatever
+    // frame is current a dozen times is enough, and no assertion here depends
+    // on a tick actually having fired.
     const { lastFrame, unmount } = render(createElement(Spinner));
     for (let i = 0; i < 12; i++) {
       expect(displayWidth((lastFrame() ?? "").trim())).toBe(1);

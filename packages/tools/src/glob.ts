@@ -1,4 +1,5 @@
 import type { Tool } from "@arterm/core";
+import { ignorePatterns } from "./ignore.js";
 import { assertSafeGlob, requireString } from "./paths.js";
 
 export const globTool: Tool = {
@@ -22,7 +23,8 @@ export const globTool: Tool = {
     const matches = await fg(pattern, {
       cwd: ctx.cwd,
       dot: false,
-      ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
+      // The project's own `.gitignore`, not a three-entry list — see `ignore.ts`.
+      ignore: await ignorePatterns(ctx.cwd),
       onlyFiles: true,
       followSymbolicLinks: false,
     });
