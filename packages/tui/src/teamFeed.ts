@@ -33,6 +33,21 @@ export function formatMemberEvent(event: AgentEvent): string | undefined {
       return `✗ ${event.kind ? `[${event.kind}] ` : ""}${squash(event.error, 88)}`;
     case "provider_fallback":
       return `↪ ${event.reason} — ${event.to.provider}/${event.to.model}`;
+    // Why a worker stopped, and whether it was stuck. `subagent.ts` bridges all
+    // four of these deliberately — a worker that hit its cap looked identical
+    // to one that finished, and a looping worker looked like a busy one — but
+    // the formatter dropped them on the floor, so the feed showed the silence
+    // rather than the reason for it.
+    case "loop_detected":
+      return `↻ looping — the same step ran ${event.streak}×, steered`;
+    case "loop_cut":
+      return `■ cut: the same step repeated ${event.streak}× without progress`;
+    case "run_limit":
+      return `⚠ stopped: ${event.kind === "tokens" ? "token budget" : "iteration cap"} reached (${event.limit})`;
+    case "autonomy_stopped":
+      return `■ ${squash(event.reason, 88)}`;
+    case "autonomy_done":
+      return `✓ ${squash(event.summary, 88)}`;
     default:
       return undefined;
   }

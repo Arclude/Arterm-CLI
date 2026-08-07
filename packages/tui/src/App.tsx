@@ -1022,6 +1022,77 @@ export function App({
                 : `⚠ turn stopped: token budget spent (${event.used}/${event.limit}) — send a message to continue`,
           });
           break;
+        // The guards, made visible. Each of the next six events was emitted by
+        // core and handled nowhere here, so the terminal showed a run that
+        // paused, repeated itself, was granted more steps, or refused to send a
+        // request — with no line to say why. The desktop bridge read them; the
+        // TUI, which is where an attended run is actually watched, did not.
+        case "loop_detected":
+          // A steer was injected, not a stop: say what the loop was and that
+          // the run continues, or this reads as a failure.
+          push({
+            kind: "system",
+            text: `↻ looping: the same step ran ${event.streak}× — steered (${event.note})`,
+          });
+          break;
+        case "loop_cut":
+          push({
+            kind: "system",
+            text: `■ turn cut: the same step repeated ${event.streak}× without progress`,
+          });
+          break;
+        case "autonomy_extended":
+          // The step cap is a progress gate, not a wall. Without this line a
+          // run that should have stopped at the cap silently keeps going.
+          push({
+            kind: "system",
+            text: `▸ step cap extended to ${event.newLimit} — ${event.reason}`,
+          });
+          break;
+        case "budget_warning":
+          push({
+            kind: "system",
+            text: `⚠ budget: ${event.spent} spent — wrapping up`,
+          });
+          break;
+        case "budget_exceeded":
+          // The request was refused before it was sent, so nothing else on
+          // screen will change. This line is the only evidence of the refusal.
+          push({
+            kind: "system",
+            text: `✗ budget exhausted (${event.spent}) — the request was refused before it was sent`,
+          });
+          break;
+        case "autonomy_backoff":
+          push({
+            kind: "system",
+            text: `◷ provider error — retrying in ${(event.ms / 1000).toFixed(event.ms < 10_000 ? 1 : 0)}s (attempt ${event.attempt})`,
+          });
+          break;
+        case "autonomy_journal":
+          // One line per eternal step, most of them `ok`. Printing all of them
+          // would bury the transcript in a status the screen already shows;
+          // the ones worth a line are the steps that did not go well.
+          if (event.status !== "ok" && event.status !== "idle") {
+            push({ kind: "system", text: `⚠ step ${event.status}: ${event.note}` });
+          }
+          break;
+        case "team_message":
+          // A member's `result` is its round recap, which the board and the
+          // round summary already carry. A directed `message` is the one thing
+          // with no other home: one worker deliberately telling another
+          // something, invisible until now.
+          if (event.kind === "message") {
+            push({
+              kind: "system",
+              text: `✉ ${event.fromName} → ${event.toName ?? "team"}: ${oneLine(event.text, 120)}`,
+              // The sender's own accent, the same one its board cell and its
+              // permission prompt wear — a fan-out is only readable if one
+              // worker is one colour everywhere.
+              color: agentColor(event.from),
+            });
+          }
+          break;
         case "goal_set":
           setAutoState("running");
           setGoalText(event.goal);
@@ -1294,6 +1365,17 @@ export function App({
           }
           break;
         }
+        case "team_memory":
+          // A note a member left its future self. It belongs to that member,
+          // not to the run, so it goes in the member's feed rather than the
+          // transcript — the drill-down is where "what was this worker
+          // thinking" is actually asked.
+          setTeamFeeds((prev) => {
+            const next = new Map(prev);
+            next.set(event.member, appendFeed(prev.get(event.member), `✎ note: ${event.text}`));
+            return next;
+          });
+          break;
         case "team_patch":
           push({
             kind: "system",
