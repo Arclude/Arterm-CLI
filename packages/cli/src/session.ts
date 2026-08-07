@@ -20,6 +20,7 @@ import {
   PermissionBroker,
   PermissionManager,
   type PermissionMode,
+  PlanStore,
   RunBudget,
   RunController,
   type SandboxRunner,
@@ -41,6 +42,7 @@ import {
   formatMemorySection,
   loadConfig,
   memberIsolation,
+  planPath,
   resolveSandbox,
   runFleet,
   runSubagent,
@@ -67,6 +69,7 @@ import {
 } from "@arterm/providers";
 import {
   createMemorySearchTool,
+  createPlanTool,
   createRememberTool,
   createSandboxRunner,
   createSpawnParallelTool,
@@ -655,6 +658,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
   agent.setTools([
     ...agent.tools,
     createTodoTool(todos),
+    createPlanTool(new PlanStore(planPath(sessionCheckpointId))),
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
     ...(cmem

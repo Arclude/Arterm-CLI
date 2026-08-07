@@ -69,4 +69,14 @@ export function runToolsCost(opts: { tier?: string; json?: boolean }): void {
     }
     process.stdout.write("\n  set it with `tools.tier` in ~/.arterm/config.json\n");
   }
+
+  // Said plainly rather than left to be discovered: a session adds tools this
+  // command cannot see (they need stores and callbacks that only exist inside
+  // a run), so the real roster is larger than the number above. A measurement
+  // that quietly excludes part of what it measures is the kind of number
+  // people plan against and then find wrong.
+  process.stdout.write(
+    "\n  not counted: tools a session adds at runtime — todo, plan, spawn,\n" +
+      "  spawn_parallel, the memory tools, and any MCP or plugin tools.\n",
+  );
 }

@@ -68,6 +68,7 @@ const TOOL_CATEGORY: Record<string, keyof typeof CATEGORY> = {
   spawn_parallel: "agent",
   message: "agent",
   batch: "meta",
+  plan: "plan",
   task_done: "done",
   todo: "plan",
 };
