@@ -32,6 +32,26 @@ describe("config comes from the user's home, and nowhere else", () => {
     expect(source).not.toMatch(/join\(\s*process\.cwd\(\)/);
   });
 
+  /**
+   * `$ARTERM_HOME` may move it, and that is deliberate — it is the only channel
+   * that can act BEFORE this module loads, which is what a test runner (and a
+   * CI job, and a second profile) needs. It does not weaken the invariant above:
+   * the threat that test guards is a CLONED REPO shipping a config that grants
+   * itself `exec.allow` or an egress domain, and an env var is not something a
+   * checkout carries. The model cannot reach it either — a tool call sets the
+   * environment of the child it spawns, never of the running CLI.
+   *
+   * What it must never become is a path DERIVED from the tree being worked on.
+   * `cwd`, a repo file, or an argv value would each hand that grant straight
+   * back to the clone.
+   */
+  it("the ARTERM_HOME override reads the environment and nothing else", () => {
+    const line = source.split("\n").find((l) => l.includes("export const ARTERM_HOME"));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/process\.env\.ARTERM_HOME/);
+    expect(line).not.toMatch(/cwd\(\)|argv|readFile/);
+  });
+
   it("nothing merges a second config source into the loaded one", () => {
     // `mergeConfig` exists to layer defaults under the file — one file.
     const merges = [...source.matchAll(/mergeConfig\(/g)];
