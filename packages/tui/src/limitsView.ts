@@ -51,7 +51,10 @@ export function formatRateLimits(snap: RateLimitSnapshot, now: number = Date.now
 
   const lines: string[] = [];
   for (const key of keys) {
-    // biome-ignore lint/style/noNonNullAssertion: keys come from the map
+    // `key` came out of `families.keys()`, so the lookup cannot miss — but
+    // `Map.get` is typed `V | undefined` regardless, which is what the
+    // assertion answers. (Not a biome-ignore: `noNonNullAssertion` is off
+    // project-wide, so the suppression this replaced silenced nothing.)
     const f = families.get(key)!;
     const parts: string[] = [];
     if (f.remaining !== undefined && f.limit !== undefined) {
