@@ -1,6 +1,6 @@
 import { defaultConfig } from "@arterm/core";
 import { describe, expect, it } from "vitest";
-import { applyAutonomousProfile, armAutonomous } from "./flags.js";
+import { applyAutonomousProfile, armAutonomous, printedPrompt } from "./flags.js";
 
 describe("applyAutonomousProfile (--autonomous / --autonomy-mode / --max-steps)", () => {
   it("--autonomous flips all five unattended switches and announces itself", () => {
@@ -219,5 +219,24 @@ describe("armAutonomous (the Shift+Tab runtime profile)", () => {
     // Unlike --autonomous, the runtime path cannot force the detector on (it is
     // wired at Agent construction) — so it must say the guard is absent.
     expect(messages.join("")).toContain("NO loop guard");
+  });
+});
+
+describe("printedPrompt (--print takes an optional value)", () => {
+  it("returns the prompt when --print carried one", () => {
+    expect(printedPrompt("summarize this repo")).toBe("summarize this repo");
+  });
+
+  it("treats a bare --print as no prompt, so the caller falls through to stdin", () => {
+    // Commander reports the valueless flag as `true`. Reading it as a prompt is
+    // what crashed `arterm --print --json` on `prompt.trim is not a function`.
+    expect(printedPrompt(true)).toBeUndefined();
+    expect(printedPrompt(undefined)).toBeUndefined();
+  });
+
+  it("keeps an empty --print '' as an empty prompt rather than a stdin read", () => {
+    // The user said something, even if it was nothing: the "no prompt provided"
+    // error is the right answer, not a read that blocks on a terminal's stdin.
+    expect(printedPrompt("")).toBe("");
   });
 });
