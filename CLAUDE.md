@@ -47,6 +47,10 @@ node scripts/sdd-context-e2e.mjs               # what an /sdd worker is actually
 SDD_E2E_CONTEXT=off node scripts/sdd-context-e2e.mjs   # same run, context disabled
 ```
 
+```bash
+node scripts/sandbox-lifecycle-e2e.mjs     # does a sandboxed run EXIT when it is done?
+```
+
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
 fake model, then asserts on the request bodies: the spec and the dependencies'
 output reached the sub-agents. The `SDD_E2E_CONTEXT=off` run reproduces the
@@ -62,6 +66,18 @@ sees and how many requests actually reached the server. It is separate from
 `pnpm test` because it spawns a real process — the only way to catch bugs that
 depend on process lifetime (an unref'd backoff timer once let the CLI exit 0
 mid-retry with no answer and no error, which no in-process test could see).
+
+`sandbox-lifecycle-e2e.mjs` is the mirror image of that bug, and the reason
+`SandboxRunner.dispose()` exists. The boundary is not just rules — it is
+host-side PROCESSES (the egress proxy, the socket bridge), whose listeners hold
+Node's event loop open. Nothing tore them down, so a headless `--autonomous` run
+did the work, passed its gate and printed its JSON verdict, and then never
+exited; it had to be killed, which reports as a failed run whatever it actually
+accomplished. Every in-process assertion passed. `--autonomous` forces the
+sandbox on, so this was every unattended run — and invisible to the Harbor
+adapter, which passes `--no-sandbox`. `dispose()` refcounts its holders: one
+process can hand the same boundary to several sessions (the TUI's manager does),
+so the LAST session out resets, or closing one would unconfine the rest.
 
 To drive the same faults **by hand** — against the TUI, or while curling the
 status server — start the standalone fake instead:
@@ -91,6 +107,18 @@ the fallback is the thing the short-circuit exists for, and only the log shows i
   `noImplicitOverride`. Index access can be `undefined` — handle it.
 - Tests are **vitest** (`*.test.ts`); the CLI package passes with no tests via
   `--passWithNoTests`.
+- **A test may never write the developer's `~/.arterm`.** `ARTERM_HOME` is
+  resolved ONCE at module load in `core/src/config.ts`, so `$ARTERM_HOME` is the
+  only thing that can redirect it — `packages/cli/vitest.config.ts` points it at
+  a temp dir, and `configIsolation.test.ts` fails if that redirect disappears.
+  This is not hypothetical tidiness: `processE2e.test.ts` builds a session from
+  `defaultConfig()` and calls `persist()`, which reset a real config's
+  `provider`/`model`/`permissions` to the defaults while leaving every other
+  field intact. The file still looked correct — `openaiCompatHost` naming the
+  live endpoint beside `provider: "ollama"` — and the next run went to an Ollama
+  that was not running, surfacing three layers away as a team leader that
+  "proposed no work". Keep the guard test; a lost `vitest.config.ts` is a
+  one-line change whose only symptom is somebody's config changing under them.
 
 ## How-to: add a tool
 
@@ -335,6 +363,63 @@ reading instance state, so the fleet prompt is a pure function of what it is giv
 `createWorktree` bases on `HEAD`, i.e. a tree with the change absent, where a
 verifier passes trivially. `/sdd` verification is therefore skipped entirely when
 `fleet.isolation` is `worktree` and `mergeStrategy` isn't `apply`.
+
+**A failed merge leaves NOTHING behind** (`applyPatch`, `worktree.ts`). The
+mechanism is `git apply --3way`, which on conflict does not simply refuse: it
+writes the conflict markers into the working tree, stages the conflicting blobs,
+*and* exits non-zero. So the caller was correctly told "this did not apply" while
+the user's source files had already been replaced with text that does not parse.
+Seen on a three-member `/team` run where each member implemented all three
+modules in its own worktree: every one of the three merged files came out
+starting with `<<<<<<< ours`, and the run carried on. The member's BRANCH is the
+recovery channel that mode deliberately keeps — a half-merged working tree is
+the one outcome nobody asked for — so the paths the patch names are snapshotted
+before the apply and restored (including deleting a file that had to be created)
+when it fails.
+
+**The leader is visible while it thinks** (`leader_call`, emitted around
+`Agent.plan()`/`assess()`). It is the one agent with no cell on the swarm board,
+by design — but `plan()` emits no `turn_start`, so between rounds the screen
+showed a finished board (`3/3 done · 0 LIVE`), a frozen step counter and an idle
+status bar while the call deciding the entire next round ran for minutes. Every
+signal on screen said "done" at the exact moment the most important call of the
+run was in flight. `turn_start` cannot carry this: it brackets a turn and the
+telemetry layer turns it into the `invoke_agent` span, and a planning probe is
+neither.
+
+`plan()` is still best-effort — an unreachable leader returns an empty plan so
+the tolerant parsers fall back and the loop keeps control — but it is no longer
+SILENT. Swallowing the exception turned "the provider refused every call" into
+`"no further team work proposed"`, printed as a summary, with exit 0. Both it and
+`assess()` also meter their usage now; reading only the `text` chunks is why a
+whole `/team` run reported `usd: 0, reported: false` when every token it burned
+was the leader's.
+
+**`readAssessment` reads the verb position, not the prose** — the completion
+check's half of the rule the result verifier states one layer up. `assess()`
+asks for one word, and the parse was `/\bDONE\b/i.test(text)`, so this reply
+ended a run:
+
+> "Let me verify the actual state of the main working tree before declaring done."
+
+That is a model saying it is NOT finished. Only the first word of the first or
+last non-empty line counts now (last as well as first because a model that
+reasons before answering puts the verdict at the bottom), stripped of the
+markdown a one-word answer gets wrapped in. Unreadable means NOT done, and the
+asymmetry is the same one as everywhere else here: the next step is
+`gateClaim()`, so a false "done" spends a verification round-trip and — with no
+standing gate configured — ends the run on a misreading, while a false "not
+done" costs one more lap of an already-bounded loop.
+
+**A finished fan-out run reports the CLAIM it was gated on**, not `verdict.note`.
+The note is one word by design, so the summary field was at best `"DONE"`; the
+claim adds a ✓/✗ line per worker. `roundClaim` takes the ASSIGNMENT map rather
+than reading `result.task`, because a team member's `task` is the assignment
+buried under its private-memory recall and the blackboard brief — quoting its
+first 120 characters produced `✗ upper-writer: [Your private memory — earlier
+rounds, visible only to you]`, in the summary AND in what the judge was asked to
+check. Note what the summary still is: the LAST round's claim, so a multi-round
+run names the members of the round that finished it and not of the ones before.
 
 ## The sandbox: the one control `--autonomous` adds
 
