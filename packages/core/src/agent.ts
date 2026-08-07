@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { RunBudget } from "./budget.js";
 import type { CompactionResult, ContextStrategy } from "./contextStrategy.js";
+import type { CredentialSettings } from "./credentials.js";
 import type { EventBus } from "./eventBus.js";
 import {
   Container,
@@ -45,6 +46,12 @@ export interface AgentOptions {
    * with more concurrency.
    */
   sandbox?: SandboxRunner;
+  /**
+   * Env hygiene for shell commands (see `credentials.ts`). Shared with
+   * sub-agents for the same reason the sandbox is: a fleet worker's `bash` is
+   * the same shell on the same host, and it feeds the same transcript.
+   */
+  credentials?: CredentialSettings;
   /** Seed the conversation with prior messages (e.g. resuming a recorded session). */
   initialMessages?: Message[];
   temperature?: number;
@@ -280,6 +287,7 @@ export class Agent {
             signal: ctx.signal,
             tools: this.opts.tools,
             ...(this.opts.sandbox ? { sandbox: this.opts.sandbox } : {}),
+            ...(this.opts.credentials ? { credentials: this.opts.credentials } : {}),
           });
           ctx.output = result.output;
           ctx.isError = result.isError ?? false;

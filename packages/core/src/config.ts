@@ -134,6 +134,22 @@ export interface ArtermConfig {
     denyRead?: string[];
   };
   /**
+   * What a shell command inherits from the session's environment (see
+   * `credentials.ts`). Unlike the sandbox this is ON by default and in every
+   * mode: the leak it closes is `env` printing Arterm's own API keys into the
+   * transcript, which an attended session does just as readily as an
+   * unattended one, and which no egress allowlist sees because the data
+   * leaves through our own request to the model.
+   */
+  credentials: {
+    /** Withhold credential-named variables from spawned commands (default true). */
+    scrub?: boolean;
+    /** Names handed through anyway — e.g. `GITHUB_TOKEN` for a run that uses `gh`. */
+    allow?: string[];
+    /** Extra names always withheld, whatever they are called (e.g. `DATABASE_URL`). */
+    deny?: string[];
+  };
+  /**
    * OpenTelemetry GenAI export (`gen_ai.*` spans and metrics). Off by default:
    * an OTLP connection is not something a local-first tool should open without
    * being asked. `endpoint` also reads the standard `OTEL_EXPORTER_OTLP_ENDPOINT`.
@@ -459,6 +475,9 @@ export function defaultConfig(): ArtermConfig {
       allowedDomains: [...DEFAULT_ALLOWED_DOMAINS],
       deniedDomains: [...DEFAULT_DENIED_DOMAINS],
     },
+    // On by default and everywhere — the opposite of the sandbox, because the
+    // channel it closes does not depend on nobody being at the keyboard.
+    credentials: { scrub: true },
     telemetry: { enabled: false },
     autonomy: {
       mode: "once",
@@ -558,6 +577,13 @@ const configFileSchema = z
         deniedDomains: z.array(z.string()).optional(),
         allowWrite: z.array(z.string()).optional(),
         denyRead: z.array(z.string()).optional(),
+      })
+      .partial(),
+    credentials: z
+      .object({
+        scrub: z.boolean().optional(),
+        allow: z.array(z.string()).optional(),
+        deny: z.array(z.string()).optional(),
       })
       .partial(),
     telemetry: z

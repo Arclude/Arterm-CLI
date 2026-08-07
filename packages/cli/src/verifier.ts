@@ -106,6 +106,7 @@ export function createVerifier(deps: VerifierDeps): Verifier | undefined {
       // its own. Without it an undeclared unit is judged by a reviewer that only
       // reads, so nothing ever executes the suite.
       ...(deps.config.verify?.command ? { defaultCommand: deps.config.verify.command } : {}),
+      ...(deps.config.credentials ? { credentials: deps.config.credentials } : {}),
     }),
   ];
   // The judge is separately switchable: on a small local model it can be noise,

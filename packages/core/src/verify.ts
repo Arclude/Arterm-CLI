@@ -23,6 +23,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { type CredentialSettings, scrubEnv } from "./credentials.js";
 import type { AgentEvent } from "./eventBus.js";
 
 /** The tool the judge calls to deliver its verdict. */
@@ -342,6 +343,16 @@ export interface CommandVerifierOptions {
    * remove it; without a marker the fallback is what runs.
    */
   defaultCommand?: string;
+  /**
+   * Env hygiene for the spawned command (see `credentials.ts`). This is the
+   * sharper instance of the same leak `bash` had, for two reasons: the command
+   * can come from MODEL OUTPUT via `extractVerifyCommand`, and it is spawned
+   * directly rather than through the sandbox — so under `--autonomous` it is
+   * the one command that runs outside the boundary. Its stdout is ignored, so
+   * nothing reaches the transcript; what a full environment would still buy is
+   * an outbound `curl` carrying the session's keys. Omitted still scrubs.
+   */
+  credentials?: CredentialSettings;
 }
 
 /**
@@ -373,6 +384,10 @@ export function makeCommandVerifier(opts: CommandVerifierOptions): Verifier {
         shell: false,
         windowsHide: true,
         stdio: "ignore",
+        // `spawn` inherits `process.env` when `env` is omitted, so this has to
+        // be passed explicitly — the same withholding `bash` does, on the one
+        // command a model can name that never crosses the sandbox.
+        env: scrubEnv(process.env, opts.credentials).env,
         ...(sh.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         // Kill the process TREE, not just the shell: `sh -c "pnpm test"` leaves an
         // orphaned node behind otherwise. Same reasoning (and the same platform

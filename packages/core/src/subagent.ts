@@ -3,6 +3,7 @@ import { getAgentDefinition, listAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine } from "./autonomy.js";
 import type { RunBudget } from "./budget.js";
 import type { ContextStrategy } from "./contextStrategy.js";
+import type { CredentialSettings } from "./credentials.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import type { LoopDetectOptions } from "./loopDetector.js";
 import type { PermissionManager } from "./permissions.js";
@@ -98,6 +99,12 @@ export interface SubagentOptions {
    * actually does the writing under `--autonomous`.
    */
   sandbox?: SandboxRunner;
+  /**
+   * The parent's env hygiene, passed down unchanged — same argument as the
+   * sandbox above, and one more: a worker's output is quoted verbatim into the
+   * next wave's prompt, so a key it printed travels further than the parent's.
+   */
+  credentials?: CredentialSettings;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -160,6 +167,7 @@ export async function runSubagent(
     ...(opts.loopDetect !== undefined ? { loopDetect: opts.loopDetect } : {}),
     ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
     ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
+    ...(opts.credentials !== undefined ? { credentials: opts.credentials } : {}),
   };
   const agent = new Agent(agentOpts);
 

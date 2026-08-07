@@ -383,6 +383,53 @@ die at runtime with `Dynamic require of "crypto" is not supported`. That failure
 is invisible to `pnpm test` and typecheck alike — it only appears when the built
 binary runs, which is what the e2e scripts exist for.
 
+## Credentials: what a command is HANDED
+
+`core/src/credentials.ts` is the question standing next to the sandbox's. The
+sandbox decides where an allowed command may reach; this decides what it is
+given before it runs. `bash` spawned with the agent process's environment, and
+that environment holds the keys the user gave to **Arterm** — `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, and `ARTERM_SECRET`, which unlocks the keystore holding the
+rest. One `env` put all of them in the transcript: sent to the provider next
+turn, written to the session JSONL, quoted into fleet workers' prompts, folded
+into every later compaction. No egress rule sees that path — it leaves through
+our own request to the model — and the model need not intend it, since `npm
+install` runs package scripts with the same inherited environment.
+
+Three properties make it the opposite shape to the sandbox:
+
+- **On by default, in every mode.** The sandbox is off for attended sessions
+  because the prompt is the control there. A prompt does not help here: the
+  answer "yes, run `pnpm test`" is not consent to hand `pnpm test` an API key.
+- **Default-closed even unwired.** `scrubEnv(env)` with no settings scrubs. A
+  `ToolContext` assembled without this plumbing (a sub-agent, a test, a
+  standalone call) must not be the one path that still hands the keys over.
+- **Names, never values.** A variable is judged by what it is called.
+  Value-sniffing ("this looks like a token") eventually eats a `PATH` entry, and
+  a control that breaks the toolchain is one people switch off — the same
+  argument that makes the sandbox confine writes rather than forbid reads.
+  `SSH_AUTH_SOCK` and `XDG_SESSION_*` are deliberately NOT matched for exactly
+  this reason; they are the false positives that would have sunk the feature.
+
+`extendEnv: false` is load-bearing in `bash.ts`. execa MERGES `env` into
+`process.env` by default, so passing a scrubbed map alone would have handed the
+originals through anyway — and that same default is why the **sandboxed** path
+leaked too, the wrapper's `env` being additive rather than the whole environment.
+
+The **verify command** gets the same treatment, and is the sharper case:
+`makeCommandVerifier` spawns it directly rather than through the sandbox, and
+`extractVerifyCommand` means it can come from MODEL OUTPUT. Its stdout is
+ignored, so nothing reaches the transcript — what a full environment would still
+buy is an outbound `curl` carrying the session's keys, from the one command that
+never crosses the boundary. `spawn` inherits `process.env` when `env` is omitted,
+so this has to be passed explicitly; omitting the settings still scrubs.
+
+`withheldNote` takes the command and its output as evidence and reports only
+names they actually mention. Unconditional, it would append a credentials line
+to every failing command in any session that has a key set — pointing the model
+at the wrong cause of a failure that had nothing to do with it. Conditional, it
+fires on the case it was written for: tools that need a variable name it.
+
 ## Telemetry: `gen_ai.*`, pinned
 
 `core/src/telemetry.ts` is the MAPPING (which seam becomes which span, under

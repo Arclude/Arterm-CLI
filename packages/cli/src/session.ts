@@ -343,6 +343,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     loopDetect: config.loopDetect,
     budget,
     ...(sandbox ? { sandbox } : {}),
+    ...(config.credentials ? { credentials: config.credentials } : {}),
     recall: recallFn,
     container,
   });
@@ -447,6 +448,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       loopDetect: config.loopDetect,
       budget,
       ...(sandbox ? { sandbox } : {}),
+      ...(config.credentials ? { credentials: config.credentials } : {}),
       role,
     });
     bus.emit({ type: "subagent_done", output, role });
@@ -559,6 +561,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
         // already a write root — so isolation and confinement compose rather
         // than the boundary refusing every command a `/sdd` wave runs.
         ...(sandbox ? { sandbox } : {}),
+        ...(config.credentials ? { credentials: config.credentials } : {}),
         concurrency: config.fleet?.concurrency,
         isolation: config.fleet?.isolation ?? "none",
         onStart: (i, task, role) => {

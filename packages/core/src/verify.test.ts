@@ -104,6 +104,30 @@ describe("makeCommandVerifier", () => {
     expect(evaded).toMatchObject({ pass: true, by: "command" });
   });
 
+  it("withholds credentials from the command, even one the model declared", async () => {
+    // The sharpest instance of the leak: this command can come from model
+    // output, and it is spawned directly rather than through the sandbox — so
+    // under `--autonomous` it is the one command running outside the boundary.
+    // Exit 0 here means the variable was absent.
+    process.env.ARTERM_TEST_API_KEY = "sk-leaked";
+    try {
+      const probe = 'node -e "process.exit(process.env.ARTERM_TEST_API_KEY ? 1 : 0)"';
+      expect(await verify({ goal: `g\nverify: ${probe}`, claim: "c" })).toMatchObject({
+        pass: true,
+      });
+      // …and hands it over when the session said to.
+      const opted = makeCommandVerifier({
+        cwd: process.cwd(),
+        credentials: { allow: ["ARTERM_TEST_API_KEY"] },
+      });
+      expect(await opted({ goal: `g\nverify: ${probe}`, claim: "c" })).toMatchObject({
+        pass: false,
+      });
+    } finally {
+      Reflect.deleteProperty(process.env, "ARTERM_TEST_API_KEY");
+    }
+  }, 20_000);
+
   it("treats a blank configured command as no command at all", async () => {
     const blank = makeCommandVerifier({ cwd: "/nonexistent-xyz", defaultCommand: "   " });
     expect(await blank({ goal: "g", claim: "c" })).toEqual({ pass: true });

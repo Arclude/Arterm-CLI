@@ -197,6 +197,14 @@ built to be safe by default:
   runtime (`… | base64 -d | sh`, `eval "$(…)"`, `powershell -EncodedCommand …`)
   can't be screened by any pattern, so it is treated as high-risk on that basis
   alone: a prompt when someone is watching, a refusal when nobody is.
+- **Credential env hygiene** — shell commands do **not** inherit variables whose
+  names say they hold a credential (`*_API_KEY`, `*_TOKEN`, `*_SECRET`,
+  `*_PASSWORD`, `ARTERM_SECRET`, …). Without this, one `env` puts your provider
+  keys into the transcript — which is then sent to the model, written to the
+  session log, and quoted into sub-agent prompts. On by default in every mode;
+  pass specific names through with `credentials.allow`, or switch it off with
+  `credentials.scrub: false`. Names your toolchain needs that merely sound
+  secret (`SSH_AUTH_SOCK`, `XDG_SESSION_*`) are never withheld.
 - **Local by default** — no telemetry and no network calls beyond the model
   backend you configure.
 
@@ -224,6 +232,9 @@ Configuration lives in `~/.arterm/` and is created on demand.
 | `sandbox.enabled`  | Confine `bash` to the working directory + an egress allowlist. | `false` (on under `--autonomous`) |
 | `sandbox.allowedDomains` | Hosts `bash` may reach; `[]` means no network.  | registries + source hosts |
 | `sandbox.allowWrite` | Extra writable paths beyond the working dir and temp dir. | `[]`             |
+| `credentials.scrub` | Withhold credential-named env vars from `bash`.       | `true`                   |
+| `credentials.allow` | Names handed to `bash` anyway (e.g. `GITHUB_TOKEN` for `gh`). | `[]`            |
+| `credentials.deny`  | Extra names always withheld (e.g. `DATABASE_URL`).    | `[]`                     |
 | `telemetry.enabled`| Export OpenTelemetry GenAI spans/metrics over OTLP.   | `false`                  |
 | `telemetry.endpoint` | OTLP/HTTP base URL (or `OTEL_EXPORTER_OTLP_ENDPOINT`). | —                    |
 

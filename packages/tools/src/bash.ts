@@ -1,4 +1,5 @@
 import type { Tool } from "@arterm/core";
+import { scrubEnv, withheldNote } from "@arterm/core";
 import { requireString } from "./paths.js";
 
 /**
@@ -64,6 +65,16 @@ export const bashTool: Tool = {
       }
     }
 
+    // The environment the command actually receives. `extendEnv: false` is the
+    // load-bearing half: execa MERGES `env` into `process.env` by default, so
+    // handing it a scrubbed map would have passed the originals through
+    // regardless — and that default is also why the sandboxed path leaked, the
+    // wrapper's `env` being additive rather than the whole environment.
+    const { env, withheld } = scrubEnv(
+      { ...process.env, ...(sandboxed?.env ?? {}) },
+      ctx.credentials,
+    );
+
     // Timeout/cancel must kill the whole process TREE, not just the shell:
     // with `shell: true` the direct child is cmd/sh, and an orphaned grandchild
     // keeps the output pipe open — so `await child` would hang forever (seen on
@@ -74,12 +85,11 @@ export const bashTool: Tool = {
       reject: false as const,
       all: true as const,
       detached: process.platform !== "win32",
+      env,
+      extendEnv: false as const,
     };
     const child = sandboxed
-      ? execa(sandboxed.argv[0] as string, sandboxed.argv.slice(1), {
-          ...shared,
-          env: sandboxed.env,
-        })
+      ? execa(sandboxed.argv[0] as string, sandboxed.argv.slice(1), shared)
       : execa(command, { ...shared, shell: true });
 
     let terminated: "timed out" | "cancelled" | undefined;
@@ -111,8 +121,14 @@ export const bashTool: Tool = {
             : "Command cancelled.";
         return { output: out ? `${out}\n${note}` : note, isError: true };
       }
-      const status = result.exitCode === 0 ? "" : `\n[exit code ${result.exitCode}]`;
-      return { output: `${out}${status}`.trim() || "(no output)", isError: result.exitCode !== 0 };
+      if (result.exitCode === 0) return { output: out || "(no output)" };
+      // A failure is where the withholding has to become visible — but only
+      // where it is plausibly the cause. The command and its output are the
+      // evidence: a note fires when one of them names the variable, and stays
+      // quiet under a failing test run that never mentioned it.
+      const note = withheldNote(withheld, `${command}\n${out}`);
+      const tail = `\n[exit code ${result.exitCode}]${note ? `\n${note}` : ""}`;
+      return { output: `${out}${tail}`.trim(), isError: true };
     } catch (err) {
       return { output: `Command failed: ${asMessage(err)}`, isError: true };
     } finally {

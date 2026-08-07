@@ -3,6 +3,7 @@
  * implement them. This keeps the dependency direction one-way (everything → core).
  */
 
+import type { CredentialSettings } from "./credentials.js";
 import type { SandboxRunner } from "./sandbox.js";
 
 export type Role = "system" | "user" | "assistant" | "tool";
@@ -255,6 +256,13 @@ export interface ToolContext {
    * what an attended run still does unless `sandbox.enabled` says otherwise.
    */
   sandbox?: SandboxRunner;
+  /**
+   * Which environment variables a spawned command inherits (see
+   * `credentials.ts`). Absent does NOT mean "hand everything over" — the
+   * scrub's defaults apply, so a context assembled without this wiring is not
+   * the one path that still leaks the session's API keys into the transcript.
+   */
+  credentials?: CredentialSettings;
   /**
    * The agent's current tool roster, injected at execute time. Meta-tools use it:
    * `tool_search` lists/searches it and `batch` dispatches to it. Optional so
