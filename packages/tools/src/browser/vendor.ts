@@ -41,7 +41,12 @@ export interface PwLocator {
   selectOption(values: string[], options?: { timeout?: number }): Promise<string[]>;
   setInputFiles(files: string[], options?: { timeout?: number }): Promise<void>;
   dragTo(target: PwLocator, options?: { timeout?: number }): Promise<void>;
-  screenshot(options?: { path?: string; timeout?: number }): Promise<unknown>;
+  /**
+   * Playwright resolves to the PNG BYTES, and writes a file too when `path` is
+   * given. Typed as Buffer because the bytes are what we return to the model —
+   * `unknown` here would push a cast to every call site.
+   */
+  screenshot(options?: { path?: string; timeout?: number }): Promise<Buffer>;
   waitFor(options?: { state?: string; timeout?: number }): Promise<void>;
 }
 
@@ -58,7 +63,7 @@ export interface PwPage {
    * the fact that the function is serialised, not called here.
    */
   evaluate<T>(fn: string | ((arg: never) => T), arg?: unknown): Promise<T>;
-  screenshot(options?: { path?: string; fullPage?: boolean; timeout?: number }): Promise<unknown>;
+  screenshot(options?: { path?: string; fullPage?: boolean; timeout?: number }): Promise<Buffer>;
   waitForLoadState(state?: string, options?: { timeout?: number }): Promise<void>;
   waitForTimeout(ms: number): Promise<void>;
   keyboard: { press(key: string, options?: { timeout?: number }): Promise<void> };

@@ -72,6 +72,8 @@ export {
   type WorkingDirChange,
 } from "./workingDir.js";
 export { createMcpUseTool, type McpUseOptions } from "./mcpUse.js";
+export { createBrowserTools, disposeBrowsers } from "./browser/tools.js";
+export { BrowserPool, type BrowserPoolOptions } from "./browser/pool.js";
 export { startBackground, startedNote, killTree } from "./background.js";
 export { disposeLspClients, lspTools } from "./lsp/tools.js";
 export { langOf, parserFailure, CALL_GRAPH_EXTS, type CallLang } from "./treeSitter.js";

@@ -79,6 +79,7 @@ import {
   type RollUpFn,
   WorkingDirStore,
   createBatchTool,
+  createBrowserTools,
   createExecTool,
   createFleetTools,
   createForgetTool,
@@ -95,6 +96,7 @@ import {
   createTodoTool,
   createToolUseTool,
   defaultTools,
+  disposeBrowsers,
   disposeLspClients,
   makeMemoTool,
   makeMessageTool,
@@ -864,6 +866,9 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // call would, prompt included, and makes the prompt name the inner tool.
     createToolUseTool({ gate: dispatchGate }),
     createSetWorkingDirTool(workingDir),
+    // A browser is a long-lived child like a language server: started on
+    // demand, cached, and closed by `persist()` below.
+    ...createBrowserTools(),
     createBatchTool({ gate: dispatchGate }),
     createExecTool({
       registry: processes,
@@ -1124,6 +1129,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     // process precisely so a second question is cheap, which means nothing else
     // ever closes them.
     await disposeLspClients().catch(() => {});
+    await disposeBrowsers().catch(() => 0);
     resetCallGraphs();
     // The reason background execution is safe to offer at all: what the session
     // started, the session stops. Without this a dev server launched in minute

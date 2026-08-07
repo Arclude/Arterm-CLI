@@ -3,7 +3,7 @@
   "version": "0.3.2",
   "private": true,
   "type": "module",
-  "description": "Local AI coding agent for your terminal — hybrid Ollama + direct GGUF",
+  "description": "Local AI coding agent for your terminal \u2014 hybrid Ollama + direct GGUF",
   "engines": {
     "node": ">=22"
   },

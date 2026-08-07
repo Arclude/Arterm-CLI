@@ -13,7 +13,7 @@
 
 import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
-import { ARTERM_HOME, type Tool, type ToolResult } from "@arterm/core";
+import { ARTERM_HOME, MAX_IMAGE_BYTES, type Tool, type ToolResult } from "@arterm/core";
 import { optionalString, requireString, resolveWithin } from "../paths.js";
 import { BrowserPool, type PageEntry, actionTimeout } from "./pool.js";
 import { renderSnapshot } from "./snapshot.js";
@@ -656,14 +656,14 @@ export function createBrowserTools(pool: BrowserPool = defaultPool): Tool[] {
   const screenshot: Tool = {
     name: "browser_screenshot",
     description:
-      "Save a PNG of the page (or of one element) to disk and return its path. Use " +
-      "browser_snapshot to READ a page — this is for showing a human what it looks like.",
-    // NOTE: this writes a file and hands back a path because `ToolResult` has no
-    // image channel yet. When `ToolResult.images` lands, the image should be
-    // returned INLINE from here — the path is a stand-in, and a model that
-    // cannot see the picture is being told where a picture it cannot open is.
-    // Until then the honest framing is in the description: reading is
-    // `browser_snapshot`'s job, and this is for a person.
+      "Capture a PNG of the page (or of one element) and return the image. Use browser_snapshot " +
+      "to READ a page — a screenshot cannot be clicked and costs far more.",
+    usageHint:
+      "Reach for `browser_snapshot` first, always: it returns a ref-annotated tree you can act " +
+      "on, where this returns pixels you can only look at. A screenshot earns its cost when the " +
+      "question is visual — a layout that is wrong, a chart, something the accessibility tree " +
+      "does not carry. Pass `path` when a human needs the file afterwards; without it the image " +
+      "comes back inline and nothing is written to the project.",
     permission: "ask",
     category: "edit",
     mutating: true,
@@ -688,21 +688,44 @@ export function createBrowserTools(pool: BrowserPool = defaultPool): Tool[] {
         // An explicit path is confined to the project; the default goes to
         // ARTERM_HOME, which keeps a debugging screenshot out of the repository
         // (and out of whatever the model commits next).
-        const target = rel
-          ? resolveWithin(ctx.cwd, rel)
-          : join(ARTERM_HOME, "screenshots", `${Date.now()}-${entry.id}.png`);
-        await fs.mkdir(dirname(target), { recursive: true });
         const ref = optionalString(args, "ref");
-        if (ref) {
-          await pool.locate(entry, ref).screenshot({ path: target, timeout: actionTimeout() });
-        } else {
-          await entry.page.screenshot({
-            path: target,
-            timeout: actionTimeout(),
-            ...(args.fullPage === true ? { fullPage: true } : {}),
-          });
+        const shot = { timeout: actionTimeout() };
+        const buffer = ref
+          ? await pool.locate(entry, ref).screenshot(shot)
+          : await entry.page.screenshot({
+              ...shot,
+              ...(args.fullPage === true ? { fullPage: true } : {}),
+            });
+
+        // A file only when one was ASKED for. The default used to write to
+        // ARTERM_HOME unconditionally, which left a debugging screenshot on
+        // disk for every look at a page.
+        let wrote: string | undefined;
+        if (rel) {
+          wrote = resolveWithin(ctx.cwd, rel);
+          await fs.mkdir(dirname(wrote), { recursive: true });
+          await fs.writeFile(wrote, buffer);
         }
-        return { output: `wrote ${target}` };
+
+        // Past the loop's cap the image is refused there, and the model would
+        // be told a picture exists that it cannot see. Falling back to a file
+        // keeps the capture useful — and says which happened.
+        const oversized = buffer.byteLength > MAX_IMAGE_BYTES;
+        if (oversized && !wrote) {
+          wrote = join(ARTERM_HOME, "screenshots", `${Date.now()}-${entry.id}.png`);
+          await fs.mkdir(dirname(wrote), { recursive: true });
+          await fs.writeFile(wrote, buffer);
+        }
+        const where = wrote ? `\nwrote ${wrote}` : "";
+        if (oversized) {
+          return {
+            output: `screenshot is ${buffer.byteLength} bytes, over the ${MAX_IMAGE_BYTES}-byte inline cap — it is on disk instead.${where}`,
+          };
+        }
+        return {
+          output: `screenshot of ${await describePage(entry)}${where}`,
+          images: [{ mediaType: "image/png", data: buffer.toString("base64") }],
+        };
       }),
   };
 

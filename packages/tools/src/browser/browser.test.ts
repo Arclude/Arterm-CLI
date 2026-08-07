@@ -67,10 +67,10 @@ class StubLocator implements PwLocator {
   async hover(): Promise<void> {
     this.rec("hover");
   }
-  async screenshot(options?: { path?: string }): Promise<unknown> {
+  async screenshot(options?: { path?: string }): Promise<Buffer> {
     this.rec("screenshot", options);
-    if (options?.path) await fs.writeFile(options.path, "element-png");
-    return undefined;
+    // Playwright resolves to the BYTES; the caller decides whether to store them.
+    return Buffer.from("element-png");
   }
   async waitFor(options?: Record<string, unknown>): Promise<void> {
     this.page.calls.push({ op: `waitFor ${this.selector}`, args: [options] });
@@ -127,10 +127,9 @@ class StubPage implements PwPage {
     this.calls.push({ op: "collect", args: [] });
     return this.snapshot as unknown as T;
   }
-  async screenshot(options?: { path?: string }): Promise<unknown> {
+  async screenshot(options?: { path?: string }): Promise<Buffer> {
     this.calls.push({ op: "screenshot", args: [options] });
-    if (options?.path) await fs.writeFile(options.path, "page-png");
-    return undefined;
+    return Buffer.from("page-png");
   }
   async waitForLoadState(state?: string): Promise<void> {
     this.calls.push({ op: "waitForLoadState", args: [state] });
@@ -768,6 +767,25 @@ describe("waiting", () => {
 });
 
 describe("screenshots", () => {
+  it("returns the image INLINE, so the model can actually see it", async () => {
+    // The whole point of the image channel: a path is a picture the model
+    // cannot open.
+    const { tools, h } = setup();
+    await openWithSnapshot(tools, h);
+    const res = await run(tools, "browser_screenshot", {});
+    expect(res.isError).toBeFalsy();
+    expect(res.images?.[0]?.mediaType).toBe("image/png");
+    expect(Buffer.from(res.images?.[0]?.data ?? "", "base64").toString()).toBe("page-png");
+  });
+
+  it("writes nothing to disk unless a path was asked for", async () => {
+    // It used to drop a PNG in ARTERM_HOME on every look at a page.
+    const { tools, h } = setup();
+    await openWithSnapshot(tools, h);
+    const res = await run(tools, "browser_screenshot", {});
+    expect(res.output).not.toContain("wrote ");
+  });
+
   it("writes a PNG where it was asked to, inside the project", async () => {
     const { tools, h } = setup();
     await openWithSnapshot(tools, h);
@@ -775,6 +793,8 @@ describe("screenshots", () => {
     expect(res.isError).toBeFalsy();
     expect(res.output).toContain(join(dir, "shots", "page.png"));
     await expect(fs.readFile(join(dir, "shots", "page.png"), "utf8")).resolves.toBe("page-png");
+    // A file AND the inline image — asking for one does not lose the other.
+    expect(res.images).toHaveLength(1);
   });
 
   it("refuses a path outside the working directory", async () => {
