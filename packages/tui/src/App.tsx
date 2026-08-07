@@ -11,6 +11,7 @@ import {
   cachedCatalogSync,
   fetchCatalog,
   findModelById,
+  priceUsage,
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
@@ -644,6 +645,10 @@ export function App({
   // Live /sdd kanban board — seeded from `sdd_graph`, updated per `sdd_task_state`.
   const [sddTasks, setSddTasks] = useState<SddBoardTask[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamBoardMember[]>([]);
+  // The main agent's own USD spend for the session, accumulated from its usage
+  // events. Not a board cell: the leader is not a task that can finish, and its
+  // live state is the status bar's job — but its cost belongs beside the fleet's.
+  const [leaderCost, setLeaderCost] = useState(0);
   // Which fan-out mode the board is showing: a /team roster or a parallel run's
   // per-round subtasks. Only the wording differs — the rows, the telemetry and
   // the navigation are the same. `team` wins if both could apply.
@@ -959,6 +964,12 @@ export function App({
             setOutTok((t) => t + (event.usage.completionTokens ?? 0));
             turnRef.current.outTok += event.usage.completionTokens;
           }
+          // The leader's own spend, so the board can name it beside the fleet's.
+          // Totalling only the workers makes a fan-out look cheaper than it was;
+          // the planning tokens are the leader's and they are not free.
+          setLeaderCost(
+            (c) => c + priceUsage(event.usage, session.agent.model, session.providerLabel).usd,
+          );
           break;
         case "context_compacted":
           push({
@@ -1342,6 +1353,14 @@ export function App({
                     (m.tokens ?? 0) +
                     (inner.usage.promptTokens ?? 0) +
                     (inner.usage.completionTokens ?? 0);
+                  // Priced through core's own function, so a worker's cell and
+                  // the run's budget can never disagree about what a token
+                  // costs. A worker runs the session's model — the fleet does
+                  // not assign its own — so that is what it is priced at, and
+                  // an unpriced (local, unlisted) model simply adds nothing.
+                  next.cost =
+                    (m.cost ?? 0) +
+                    priceUsage(inner.usage, session.agent.model, session.providerLabel).usd;
                 }
                 if (inner.type === "context_usage") {
                   next.ctxUsed = inner.used;
@@ -2830,6 +2849,7 @@ export function App({
           }
           kind={boardKind}
           now={swarmClock}
+          leader={{ cost: leaderCost }}
         />
       ) : null}
       {teamSuggest ? (

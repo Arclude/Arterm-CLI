@@ -1,6 +1,10 @@
 import type { SddTaskState } from "@arterm/core";
 import type React from "react";
 import { Box, Text } from "./ink.js";
+import { MonitorShell } from "./monitorShell.js";
+import { STATE_COLOR, stateMark } from "./taskState.js";
+import { theme } from "./theme.js";
+import { glyphs } from "./uiGlyphs.js";
 
 /** A single task rendered on the /sdd board. */
 export interface SddBoardTask {
@@ -10,15 +14,15 @@ export interface SddBoardTask {
   state: SddTaskState;
 }
 
-/** Kanban columns, in flow order left→right. */
-const COLUMNS: { state: SddTaskState; label: string; color: string }[] = [
-  { state: "pending", label: "PENDING", color: "gray" },
-  { state: "running", label: "RUNNING", color: "yellow" },
-  { state: "done", label: "DONE", color: "green" },
-  { state: "failed", label: "FAILED", color: "red" },
+/** Kanban columns, in flow order left→right. Colours come from the one table. */
+const COLUMNS: { state: SddTaskState; label: string }[] = [
+  { state: "pending", label: "PENDING" },
+  { state: "running", label: "RUNNING" },
+  { state: "done", label: "DONE" },
+  { state: "failed", label: "FAILED" },
   // A blocked task never ran because a dependency failed — its own column, so it
   // is not mistaken for work still queued.
-  { state: "blocked", label: "BLOCKED", color: "gray" },
+  { state: "blocked", label: "BLOCKED" },
 ];
 
 const MAX_PER_COLUMN = 8;
@@ -62,36 +66,36 @@ export function SddBoard({
   const colWidth = Math.max(10, Math.floor((columns - 6) / COLUMNS.length) - 1);
 
   return (
-    <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text>
-        <Text color="cyan" bold>
-          ▤ /sdd board
-        </Text>
-        <Text color="gray">
-          {"  — "}
+    <MonitorShell
+      glyph={glyphs.plan}
+      title="/sdd board"
+      accent={theme.monitor.sdd}
+      footer={`${detailOpen ? "↑↓/⇥" : "⇥/^↑↓"} task${detailOpen ? "" : " · ⏎ inspect"} · esc close`}
+      right={
+        <Text color={theme.textMuted}>
+          {"   "}
           {done}/{total} done
           {running ? ` · ${running} running` : ""}
           {failed ? ` · ${failed} failed` : ""}
         </Text>
-        <Text color="gray" dimColor>
-          {`   ${detailOpen ? "↑↓/⇥" : "⇥/^↑↓"} task${detailOpen ? "" : " · ⏎ inspect"} · esc close`}
-        </Text>
-      </Text>
+      }
+    >
       <Box>
         {COLUMNS.map((col) => {
           const items = tasks.filter((t) => t.state === col.state);
+          const color = STATE_COLOR[col.state];
           return (
             <Box key={col.state} flexDirection="column" width={colWidth} paddingRight={1}>
-              <Text color={col.color} bold>
+              <Text color={color} bold>
                 {col.label} ({items.length})
               </Text>
               {items.slice(0, MAX_PER_COLUMN).map((t) => (
-                <Text key={t.id} color={col.color} wrap="truncate-end" bold={t.id === sel?.id}>
-                  {t.id === sel?.id ? "❯" : mark(col.state)} {t.id} {t.title}
+                <Text key={t.id} color={color} wrap="truncate-end" bold={t.id === sel?.id}>
+                  {t.id === sel?.id ? glyphs.select : stateMark(col.state)} {t.id} {t.title}
                 </Text>
               ))}
               {items.length > MAX_PER_COLUMN ? (
-                <Text color="gray" dimColor>
+                <Text color={theme.textMuted} dimColor>
                   {`  +${items.length - MAX_PER_COLUMN} more`}
                 </Text>
               ) : null}
@@ -102,45 +106,30 @@ export function SddBoard({
       {detailOpen && sel ? (
         <Box flexDirection="column" marginTop={1} paddingLeft={1}>
           <Text wrap="truncate-end">
-            <Text color={sel.state === "failed" ? "red" : "cyan"} bold>
-              ⚙ {sel.id} {sel.title}
+            <Text color={sel.state === "failed" ? theme.error : theme.accent} bold>
+              {glyphs.tool} {sel.id} {sel.title}
             </Text>
-            <Text color="gray" dimColor>
+            <Text color={theme.textMuted} dimColor>
               {` (${Math.min(selected, tasks.length - 1) + 1}/${tasks.length})`}
             </Text>
             {sel.dependsOn.length > 0 ? (
-              <Text color="gray"> — after {sel.dependsOn.join(", ")}</Text>
+              <Text color={theme.textMuted}> — after {sel.dependsOn.join(", ")}</Text>
             ) : null}
           </Text>
           {feed.length === 0 ? (
-            <Text color="gray" dimColor>
+            <Text color={theme.textMuted} dimColor>
               (no activity yet)
             </Text>
           ) : (
             feed.slice(-DETAIL_LINES).map((line, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: feed lines are append-only
-              <Text key={i} color="gray" wrap="truncate-end">
+              <Text key={i} color={theme.textMuted} wrap="truncate-end">
                 {line}
               </Text>
             ))
           )}
         </Box>
       ) : null}
-    </Box>
+    </MonitorShell>
   );
-}
-
-function mark(state: SddTaskState): string {
-  switch (state) {
-    case "running":
-      return "▸";
-    case "done":
-      return "✓";
-    case "failed":
-      return "✗";
-    case "blocked":
-      return "⊘";
-    default:
-      return "·";
-  }
 }

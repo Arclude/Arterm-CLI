@@ -2,6 +2,11 @@ import type { SddTaskState } from "@arterm/core";
 import type React from "react";
 import { agentColor } from "./agentColor.js";
 import { Box, Text } from "./ink.js";
+import { MonitorShell, panelWindow } from "./monitorShell.js";
+import { STATE_COLOR, STATE_LABEL, stateMark } from "./taskState.js";
+import { truncateDisplay } from "./terminalWidth.js";
+import { theme } from "./theme.js";
+import { glyphs } from "./uiGlyphs.js";
 
 /** One team member's live cell on the swarm board. */
 export interface TeamBoardMember {
@@ -25,39 +30,23 @@ export interface TeamBoardMember {
   steps?: number;
   /** Epoch ms the member last entered `running`; drives the live clock. */
   startedAt?: number;
+  /** USD this member has billed, priced from the same catalog the budget uses. */
+  cost?: number;
 }
 
-const STATE_COLOR: Record<SddTaskState, string> = {
-  pending: "gray",
-  running: "yellow",
-  done: "green",
-  failed: "red",
-  blocked: "gray",
-};
-
-function mark(state: SddTaskState): string {
-  switch (state) {
-    case "running":
-      return "●";
-    case "done":
-      return "✓";
-    case "failed":
-      return "✗";
-    case "blocked":
-      return "⊘";
-    default:
-      return "·";
-  }
+/**
+ * The main agent's own spend, shown beside the fleet's.
+ *
+ * It is not a cell: the leader is not one of the tasks that can finish, its
+ * live state is already the status bar's job, and giving it a cell would shift
+ * every worker's index by one for no reading gain. What it does need is to be
+ * *counted* — a board that totals only the workers makes a run look cheaper
+ * than it was, and the leader is where the planning tokens go.
+ */
+export interface TeamBoardLeader {
+  tokens?: number;
+  cost?: number;
 }
-
-/** The word next to the glyph — colour alone does not survive a screenshot. */
-const STATE_LABEL: Record<SddTaskState, string> = {
-  pending: "queued",
-  running: "LIVE",
-  done: "done",
-  failed: "failed",
-  blocked: "blocked",
-};
 
 /** How many trailing feed lines the drill-down view shows. */
 const DETAIL_LINES = 12;
@@ -66,6 +55,13 @@ const DETAIL_LINES = 12;
 const MIN_CELL = 30;
 /** More than three columns turns the cells into unreadable stubs. */
 const MAX_COLS = 3;
+/**
+ * Grid rows drawn at once. The board lives in the bottom region, which every
+ * repaint redraws, so an unbounded board pushes the transcript off the screen
+ * one row at a time. Nine agents across three columns still fit; a twelfth
+ * gets counted, not dropped silently.
+ */
+const MAX_GRID_ROWS = 3;
 
 /** Which kind of run the board is showing — only the wording differs. */
 export type TeamBoardKind = "team" | "fleet";
@@ -80,6 +76,16 @@ function fmtTok(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`;
   return String(n);
+}
+
+/**
+ * Spend, at the precision the number deserves. Sub-cent amounts keep four
+ * decimals because that is the range a single worker lives in and `$0.00`
+ * would read as free; past a cent, two decimals are what anyone acts on.
+ */
+export function fmtCost(usd: number): string {
+  if (usd <= 0) return "";
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
 /**
@@ -100,14 +106,20 @@ export function fmtElapsed(ms: number): string {
 function ctxMeter(pct: number): string {
   const w = 5;
   const filled = Math.max(0, Math.min(w, Math.round((pct / 100) * w)));
-  return "█".repeat(filled) + "░".repeat(w - filled);
+  return glyphs.meterFull.repeat(filled) + glyphs.meterEmpty.repeat(w - filled);
 }
 
-/** Red once a member is close enough to the wall that its next reply will suffer. */
+/**
+ * A ramp, not a threshold. One red line at 80% says nothing until the moment
+ * it says everything; a run climbing through 40 → 60 → 75 is information you
+ * can act on while there is still room to act.
+ */
 function ctxColor(pct: number): string {
-  if (pct >= 85) return "red";
-  if (pct >= 60) return "yellow";
-  return "blueBright";
+  if (pct >= 80) return theme.error;
+  if (pct >= 65) return theme.warn;
+  if (pct >= 50) return "peach";
+  if (pct >= 25) return theme.success;
+  return theme.accent;
 }
 
 /**
@@ -147,14 +159,14 @@ function Cell({
   now: number;
 }): React.ReactElement {
   const m = member;
-  const accent = m.state === "failed" ? "red" : agentColor(m.id);
+  const accent = m.state === "failed" ? theme.error : agentColor(m.id);
   const running = m.state === "running";
 
   // Line 1 — identity on the left, liveness and wall time on the right.
   const idx = String(index).padStart(2, "0");
   const elapsed = m.startedAt ? fmtElapsed(now - m.startedAt) : "";
-  const status = `${mark(m.state)} ${STATE_LABEL[m.state]}${elapsed ? ` ${elapsed}` : ""}`;
-  const headText = `${selected ? "❯" : " "}${idx} ${m.name}${m.adhoc ? "*" : ""}`;
+  const status = `${stateMark(m.state)} ${STATE_LABEL[m.state]}${elapsed ? ` ${elapsed}` : ""}`;
+  const headText = `${selected ? glyphs.select : " "}${idx} ${m.name}${m.adhoc ? "*" : ""}`;
 
   // Line 2 — what it is doing on the left, what it has spent on the right.
   const pct =
@@ -162,12 +174,16 @@ function Cell({
   // The meter is coloured by fill and the counters are not, so they are built
   // as two strings rather than one joined list — a single list would have to be
   // re-split at render time, which is where the token count went missing.
-  // In a three-across grid the right column is what squeezes the activity text,
-  // so the step count — the least load-bearing of the three numbers — is the one
-  // that goes. Tokens and context stay at every width.
+  //
+  // What the right column gives up as it narrows, in order. Cost goes first —
+  // not because it matters least, but because the header already totals it,
+  // while the activity text on the left has no second home. A three-across
+  // grid squeezes hardest, and there the cell should still say what the worker
+  // is DOING; measured, `⚙ r… 1.2kt $0.0031` is not a cell anyone can read.
   const counters = [
-    m.steps && width >= 34 ? `${m.steps}⚙` : "",
+    m.steps && width >= 52 ? `${m.steps}${glyphs.tool}` : "",
     m.tokens ? `${fmtTok(m.tokens)}t` : "",
+    m.cost && width >= 44 ? fmtCost(m.cost) : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -179,7 +195,7 @@ function Cell({
     <Box flexDirection="column" width={width}>
       <Box justifyContent="space-between" gap={1}>
         <Box flexShrink={1} minWidth={0}>
-          <Text wrap="truncate-end" color={selected ? "magenta" : accent} bold={selected}>
+          <Text wrap="truncate-end" color={selected ? theme.monitor.swarm : accent} bold={selected}>
             {headText}
           </Text>
         </Box>
@@ -191,13 +207,17 @@ function Cell({
       </Box>
       <Box justifyContent="space-between" gap={1}>
         <Box flexShrink={1} minWidth={0}>
-          <Text wrap="truncate-end" color={running ? "cyan" : "gray"} dimColor={!running}>
+          <Text
+            wrap="truncate-end"
+            color={running ? theme.accent : theme.textMuted}
+            dimColor={!running}
+          >
             {bodyText}
           </Text>
         </Box>
         <Box flexShrink={0}>
           <Text>
-            <Text color="gray" dimColor>
+            <Text color={theme.textMuted} dimColor>
               {counters}
               {counters && meter ? " " : ""}
             </Text>
@@ -234,8 +254,11 @@ export function TeamBoard({
   feed,
   kind = "team",
   now = Date.now(),
+  leader,
 }: {
   members: TeamBoardMember[];
+  /** The main agent's own spend, named beside the fleet's. */
+  leader?: TeamBoardLeader;
   /** Terminal width, used to size the grid. */
   columns: number;
   /** Index of the cell the Ctrl+↑/↓ selection is on. */
@@ -260,90 +283,112 @@ export function TeamBoard({
   const inner = Math.max(MIN_CELL, columns - 4);
   const cols = Math.max(1, Math.min(MAX_COLS, members.length, Math.floor(inner / MIN_CELL)));
   const cellW = Math.floor((inner - (cols - 1) * 2) / cols);
-  const rows: TeamBoardMember[][] = [];
-  for (let i = 0; i < members.length; i += cols) rows.push(members.slice(i, i + cols));
+  const allRows: TeamBoardMember[][] = [];
+  for (let i = 0; i < members.length; i += cols) allRows.push(members.slice(i, i + cols));
+  // Window on the selection so stepping past the last visible cell scrolls the
+  // grid instead of appearing to do nothing, and count what is off-screen: a
+  // board showing nine of twelve reads as the whole swarm.
+  const grid = panelWindow(allRows, Math.floor(selIndex / cols), MAX_GRID_ROWS);
+  const hidden = grid.before * cols + grid.after * cols;
 
   // Aggregates: the swarm as one number each, so "is anything happening" is
-  // answerable without reading nine cells.
-  const totalTokens = members.reduce((sum, m) => sum + (m.tokens ?? 0), 0);
+  // answerable without reading nine cells. The leader's share is named
+  // separately rather than folded in — "the fleet cost $0.21" and "this run
+  // cost $0.29, most of it planning" are different facts.
+  const fleetTokens = members.reduce((sum, m) => sum + (m.tokens ?? 0), 0);
+  const fleetCost = members.reduce((sum, m) => sum + (m.cost ?? 0), 0);
 
   return (
-    <Box
-      flexDirection="column"
-      marginTop={1}
-      borderStyle="round"
-      borderColor="magenta"
-      paddingX={1}
+    <MonitorShell
+      glyph={glyphs.fleet}
+      title="AGENT SWARM"
+      kicker={KIND_LABEL[kind].title}
+      accent={theme.monitor.swarm}
+      footer={`${detailOpen ? "↑↓/⇥" : "⇥/^↑↓"} ${KIND_LABEL[kind].unit}${
+        detailOpen ? "" : " · ⏎ inspect"
+      } · esc close`}
+      right={
+        <>
+          <Text color={theme.textMuted}>
+            {"   "}
+            {done}/{members.length} done
+            {failed ? ` · ${failed} failed` : ""}
+          </Text>
+          <Text color={live > 0 ? theme.success : theme.textMuted}>
+            {"   "}
+            {glyphs.running} {live} LIVE
+          </Text>
+          {fleetTokens > 0 ? <Text color={theme.textMuted}> · {fmtTok(fleetTokens)}t</Text> : null}
+          {fleetCost > 0 ? <Text color={theme.textMuted}> · {fmtCost(fleetCost)}</Text> : null}
+          {leader && (leader.cost ?? 0) > 0 ? (
+            <Text color={theme.textMuted} dimColor>
+              {" +"}
+              {fmtCost(leader.cost ?? 0)} lead
+            </Text>
+          ) : null}
+        </>
+      }
     >
-      <Text wrap="truncate-end">
-        <Text color="magenta" bold>
-          ⛓ AGENT SWARM
-        </Text>
-        <Text color="gray" dimColor>
-          {"  / "}
-          {KIND_LABEL[kind].title}
-        </Text>
-        <Text color="gray">
-          {"   "}
-          {done}/{members.length} done
-          {failed ? ` · ${failed} failed` : ""}
-        </Text>
-        <Text color={live > 0 ? "green" : "gray"}>
-          {"   ● "}
-          {live} LIVE
-        </Text>
-        {totalTokens > 0 ? <Text color="gray"> · {fmtTok(totalTokens)}t</Text> : null}
-      </Text>
-      {rows.map((row, r) => (
+      {grid.window.map((row, r) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: grid rows are positional
         <Box key={r} flexDirection="row" marginTop={r === 0 ? 1 : 0}>
-          {row.map((m, c) => (
-            <Box key={m.id} marginRight={c === row.length - 1 ? 0 : 2}>
-              <Cell
-                member={m}
-                index={r * cols + c}
-                width={cellW}
-                selected={r * cols + c === selIndex}
-                now={now}
-              />
-            </Box>
-          ))}
+          {row.map((m, c) => {
+            const index = (grid.offset + r) * cols + c;
+            return (
+              <Box key={m.id} marginRight={c === row.length - 1 ? 0 : 2}>
+                <Cell
+                  member={m}
+                  index={index}
+                  width={cellW}
+                  selected={index === selIndex}
+                  now={now}
+                />
+              </Box>
+            );
+          })}
         </Box>
       ))}
-      {/* The key legend gets its own line rather than a share of the header's:
-          competing for one row, the counts truncated the legend on a 100-column
-          terminal, and a legend nobody can finish reading is not one. */}
-      <Text color="gray" dimColor wrap="truncate-end">
-        {`${detailOpen ? "↑↓/⇥" : "⇥/^↑↓"} ${KIND_LABEL[kind].unit}${
-          detailOpen ? "" : " · ⏎ inspect"
-        } · esc close`}
-      </Text>
+      {hidden > 0 ? (
+        <Text color={theme.textMuted} dimColor>
+          {" "}
+          {grid.before > 0 ? "↑" : "↓"} {hidden} more agent{hidden > 1 ? "s" : ""}
+        </Text>
+      ) : null}
       {detailOpen && sel ? (
         <Box flexDirection="column" marginTop={1} paddingLeft={1}>
           <Text wrap="truncate-end">
-            <Text color={sel.state === "failed" ? "red" : agentColor(sel.id)} bold>
-              ⚙ {sel.name}
+            <Text color={sel.state === "failed" ? theme.error : agentColor(sel.id)} bold>
+              {glyphs.tool} {sel.name}
             </Text>
-            <Text color="gray" dimColor>
+            <Text color={theme.textMuted} dimColor>
               {` (${selIndex + 1}/${members.length})`}
             </Text>
-            <Text color="gray"> — {(sel.task ?? sel.description).slice(0, columns - 20)}</Text>
-            {sel.filesChanged ? <Text color="green"> ✎{sel.filesChanged}</Text> : null}
+            <Text color={theme.textMuted}>
+              {" "}
+              — {truncateDisplay(sel.task ?? sel.description, Math.max(10, columns - 20))}
+            </Text>
+            {sel.filesChanged ? (
+              <Text color={theme.success}>
+                {" "}
+                {glyphs.filesChanged}
+                {sel.filesChanged}
+              </Text>
+            ) : null}
           </Text>
           {feed.length === 0 ? (
-            <Text color="gray" dimColor>
+            <Text color={theme.textMuted} dimColor>
               (no activity yet)
             </Text>
           ) : (
             feed.slice(-DETAIL_LINES).map((line, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: feed lines are append-only
-              <Text key={i} color="gray" wrap="truncate-end">
+              <Text key={i} color={theme.textMuted} wrap="truncate-end">
                 {line}
               </Text>
             ))
           )}
         </Box>
       ) : null}
-    </Box>
+    </MonitorShell>
   );
 }
