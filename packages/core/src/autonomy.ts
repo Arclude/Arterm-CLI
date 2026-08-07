@@ -396,10 +396,26 @@ export class AutonomyEngine {
    * What a fan-out round claims: the leader's integration text, plus a per-worker
    * ✓/✗ line. The reviewer needs to see that a slot failed — the leader's prose
    * routinely reads as if everything landed.
+   *
+   * `assigned` is the ASSIGNMENT, and it has to be passed in rather than read off
+   * the result. A team member's `task` field is the whole assembled prompt — its
+   * private-memory recall, then the blackboard brief, then the assignment — so
+   * the first 120 characters of it are boilerplate. Every row read
+   * `✗ upper-writer: [Your private memory — earlier rounds, visible only to you]`,
+   * which is not what anyone meant by "what this worker was asked to do". That
+   * text goes to the JUDGE as well as to the summary, so the gate was being
+   * asked to check a claim that described the prompt scaffolding.
    */
-  private roundClaim(note: string, results: AutonomyTaskResult[]): string {
+  private roundClaim(
+    note: string,
+    results: AutonomyTaskResult[],
+    assigned?: Map<string, string>,
+  ): string {
     const rows = results
-      .map((r) => `${r.error ? "✗" : "✓"} ${r.role ?? r.id ?? "worker"}: ${r.task.slice(0, 120)}`)
+      .map((r) => {
+        const what = (r.id ? assigned?.get(r.id) : undefined) ?? r.task;
+        return `${r.error ? "✗" : "✓"} ${r.role ?? r.id ?? "worker"}: ${what.slice(0, 120)}`;
+      })
       .join("\n");
     return [note, rows].filter(Boolean).join("\n\n");
   }
@@ -917,7 +933,8 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       if (verdict.done) {
         const claim = this.roundClaim(verdict.note || "goal complete", results);
         if (await this.gateClaim(claim, { scope: "round", id: `r${round}` })) {
-          this.finish(verdict.note || "goal complete");
+          // The CLAIM, not the note — see the team loop's twin for why.
+          this.finish(claim);
           return;
         }
         if (this.stopped) break;
@@ -938,6 +955,24 @@ Name ONE different concrete task that would advance the GOAL — a specific next
    * integrates the results and reflects. Ends on assess-done, /stop, idle rounds,
    * or the round cap.
    */
+  /**
+   * The scope sentence every member's assignment ends with — `/sdd`'s
+   * `specBlock()` rule, which CLAUDE.md calls load-bearing rather than padding,
+   * applied to the other fan-out mode that had been missing it.
+   *
+   * A member sees the whole GOAL (it needs to, to make sensible choices) and is
+   * a full agent, so without this it builds the whole goal. Observed on a
+   * three-member run told "one file per member": each member implemented all
+   * three modules in its own worktree, and merging three branches that each
+   * created the same three files put `<<<<<<< ours` at the top of every one.
+   * Two members writing one file is worse than either doing it alone, and the
+   * cost lands at merge time, where it is hardest to read.
+   */
+  private static readonly MEMBER_SCOPE =
+    "SCOPE: do ONLY the task above. Other members are working on the rest of the goal " +
+    "CONCURRENTLY, in their own copies of the tree — touch only the files your own task " +
+    "names. Work you do outside your task collides with theirs at merge time.";
+
   private async runTeamLoop(): Promise<void> {
     const runFleet = this.runFleet;
     if (!runFleet) {
@@ -1012,6 +1047,11 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       }
       this.idleStreak = 0;
 
+      // What each member was actually ASKED for, kept beside the prompt that
+      // gets built from it — the prompt is the assignment buried under two
+      // digests, and the round's claim must quote the assignment.
+      const assigned = new Map(assignments.map((a) => [a.member.id, a.task]));
+
       // File-backed members carry their definition body as a full system prompt;
       // ad-hoc members get their brief as a task-instruction prefix. Two digests can
       // precede the task: the member's own memory (what it did/decided in earlier
@@ -1020,7 +1060,9 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       const tasks: AutonomyTask[] = assignments.map((a) => {
         const recall = this.memberMemory?.recall(a.member.id);
         const brief = this.blackboard?.briefFor(a.member.id);
-        const task = [recall, brief, a.task].filter(Boolean).join("\n\n");
+        const task = [recall, brief, a.task, AutonomyEngine.MEMBER_SCOPE]
+          .filter(Boolean)
+          .join("\n\n");
         return {
           task,
           role: a.member.name,
@@ -1084,11 +1126,18 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       const verdict = await this.agent.assess(this.goal, this.current.signal);
       this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
       if (verdict.done) {
-        const claim = this.roundClaim(verdict.note || "goal complete", results);
+        const claim = this.roundClaim(verdict.note || "goal complete", results, assigned);
         // summary() only after acceptance: a rejected round is not a finished team run.
         if (await this.gateClaim(claim, { scope: "round", id: `r${round}` })) {
           summary();
-          this.finish(verdict.note || "goal complete");
+          // Report the CLAIM that was gated, not the leader's one-line reply.
+          // `assess()` is asked for a single word, so `verdict.note` is at best
+          // "DONE" and at worst a fragment of the model thinking out loud — a
+          // real run's whole summary field came back as "Let me verify the
+          // actual state of the main working tree before declaring done." The
+          // claim names what each member actually did, and it is the text the
+          // judge accepted, so the run reports exactly what was approved.
+          this.finish(claim);
           return;
         }
         if (this.stopped) break;
