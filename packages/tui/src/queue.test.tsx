@@ -81,7 +81,9 @@ describe("prompt queue (typing stays live while a turn runs)", () => {
     stdin.write("one");
     await tick();
     stdin.write(ENTER);
-    await waitFor(seen, (f) => f.includes("working…"));
+    // The working line carries a spinner and a running clock now, so match the
+    // word and the elapsed time rather than the old static "working…".
+    await waitFor(seen, (f) => /working \d/.test(f));
 
     // The prompt is still live: type and submit two more while the turn runs.
     stdin.write("two");

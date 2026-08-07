@@ -74,7 +74,11 @@ export interface UiGlyphs {
 
 const UNICODE: UiGlyphs = Object.freeze({
   brand: "◆",
-  prompt: "❯",
+  // The composer caret and the list selector are deliberately different marks.
+  // Both mean "here", but one is where you type and the other is which row is
+  // selected, and a screen with the same glyph for both reads as one cursor in
+  // two places.
+  prompt: "›",
   cursor: "▏",
   select: "❯",
   success: "✓",

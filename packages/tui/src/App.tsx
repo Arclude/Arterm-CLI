@@ -25,6 +25,7 @@ import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
 import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
+import { Elapsed, Spinner } from "./Spinner.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardKind, type TeamBoardMember } from "./TeamBoard.js";
 import { agentColor } from "./agentColor.js";
@@ -55,7 +56,9 @@ import { Markdown } from "./markdown.js";
 import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
 import { truncateDisplay } from "./terminalWidth.js";
+import { theme } from "./theme.js";
 import type { DisplayItem, LoginProvider, Session } from "./types.js";
+import { glyphs } from "./uiGlyphs.js";
 
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
 const DEFAULT_CTX = 32768;
@@ -168,18 +171,18 @@ function InputLine({
   return (
     <Box width={columns} borderStyle="round" borderColor={borderColor} paddingX={1}>
       <Text wrap="wrap">
-        <Text color="cyan" bold>
-          {"› "}
+        <Text color={theme.brandAccent} bold>
+          {`${glyphs.prompt} `}
         </Text>
         {value}
-        <Text color="cyan">▏</Text>
+        <Text color={theme.accent}>{glyphs.cursor}</Text>
         {suggestion ? (
-          <Text color="gray" dimColor>
+          <Text color={theme.textMuted} dimColor>
             {suggestion}
-            {"  ⇥ tab"}
+            {`  ${glyphs.tab} tab`}
           </Text>
         ) : null}
-        {value === "" ? <Text color="gray"> message… (type ? for help)</Text> : null}
+        {value === "" ? <Text color={theme.textMuted}> message… (type ? for help)</Text> : null}
       </Text>
     </Box>
   );
@@ -2959,9 +2962,13 @@ export function App({
           {busy && autoState === "idle" ? (
             // The turn runs behind a LIVE prompt: keep typing, Enter queues the
             // next message(s), Esc cancels the turn (and drops the queue).
-            <Text color="yellow">
-              ● working…{" "}
-              <Text color="gray" dimColor>
+            // A moving glyph and a running clock, because the failure this
+            // replaces is a turn that has stalled looking exactly like a turn
+            // that is thinking. Both are their own components on their own
+            // timers, mounted only while this line is.
+            <Text color={theme.warn}>
+              <Spinner /> working <Elapsed since={turnStartRef.current} />{" "}
+              <Text color={theme.textMuted} dimColor>
                 Esc cancels · Enter queues the next message
               </Text>
             </Text>
@@ -2984,7 +2991,13 @@ export function App({
             columns={columns}
             // The frame makes "where do I type" visible; its color mirrors the
             // mode badge (magenta while AUTONOMOUS is armed, red under yolo).
-            borderColor={autoArmed ? "magenta" : permMode === "yolo" ? "red" : "gray"}
+            borderColor={
+              autoArmed
+                ? theme.monitor.swarm
+                : permMode === "yolo"
+                  ? theme.error
+                  : theme.borderDefault
+            }
             onChange={setInput}
             onSubmit={submit}
             onHelp={() => push({ kind: "help" })}
