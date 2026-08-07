@@ -32,6 +32,9 @@ const CATEGORY: Record<string, ToolVisual> = {
   diff: { glyph: "±", color: "#f9e2af" },
   data: { glyph: "❴", color: "#f5c2e7" },
   search: { glyph: "⌕", color: "#cba6f7" },
+  // Relationships between symbols, not occurrences of text — a different
+  // question from `search`, and worth a different mark beside it.
+  graph: { glyph: "⇴", color: "#b4befe" },
   list: { glyph: "▣", color: "#89b4fa" },
   shell: { glyph: "⌘", color: "#94e2d5" },
   git: { glyph: "⎇", color: "#a6e3a1" },
@@ -65,6 +68,10 @@ const TOOL_CATEGORY: Record<string, keyof typeof CATEGORY> = {
   grep: "search",
   glob: "search",
   search: "search",
+  callers: "graph",
+  callees: "graph",
+  dead_code: "graph",
+  code_stats: "graph",
   tool_search: "search",
   memory_search: "search",
   ls: "list",

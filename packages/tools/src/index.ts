@@ -40,3 +40,13 @@ export {
   type SymbolKind,
 } from "./symbolIndex.js";
 export { invalidateSymbolIndex } from "./symbols.js";
+export {
+  CallGraph,
+  extractFacts,
+  type CallSite,
+  type DeclSite,
+  type FileFacts,
+  type GraphStats,
+} from "./callGraph.js";
+export { resetCallGraphs, codebaseTools } from "./codebase.js";
+export { langOf, parserFailure, CALL_GRAPH_EXTS, type CallLang } from "./treeSitter.js";

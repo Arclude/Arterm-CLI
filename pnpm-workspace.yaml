@@ -3,3 +3,6 @@ packages:
 allowBuilds:
   '@biomejs/biome': true
   esbuild: true
+  tree-sitter-javascript: set this to true or false
+  tree-sitter-python: set this to true or false
+  tree-sitter-typescript: set this to true or false

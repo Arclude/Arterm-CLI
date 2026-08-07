@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { ARTERM_HOME } from "@arterm/core";
+import { type SqliteDb, openCacheDb } from "./sqlite.js";
 
 /**
  * Symbol-level code index: extracts declarations (functions, classes, methods,
@@ -217,49 +218,27 @@ export function extractSymbols(path: string, content: string): CodeSymbol[] {
   return out;
 }
 
-/** Minimal subset of the `node:sqlite` DatabaseSync surface we rely on. */
-interface SqliteStatement {
-  run(...params: unknown[]): unknown;
-  all(...params: unknown[]): unknown[];
-  get(...params: unknown[]): unknown;
-}
-interface SqliteDb {
-  exec(sql: string): void;
-  prepare(sql: string): SqliteStatement;
-  close(): void;
-}
-
 const SCHEMA_VERSION = 1;
 
-/** Open the per-project SQLite cache, or null when `node:sqlite` is unavailable. */
-async function openDb(cwd: string, dir: string): Promise<SqliteDb | null> {
-  let DatabaseSync: (new (path: string) => SqliteDb) | undefined;
-  try {
-    ({ DatabaseSync } = (await import("node:sqlite")) as unknown as {
-      DatabaseSync: new (path: string) => SqliteDb;
-    });
-  } catch {
-    return null; // runtime without node:sqlite — fall back to in-memory only
-  }
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    const key = createHash("sha1").update(cwd).digest("hex").slice(0, 16);
-    const db = new DatabaseSync(join(dir, `${key}.db`));
-    const version = (db.prepare("PRAGMA user_version").get() as { user_version?: number })
-      .user_version;
-    if (version !== SCHEMA_VERSION) {
-      db.exec("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS symbols;");
-      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    }
-    db.exec(
-      `CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime REAL);
+/**
+ * Open the per-project SQLite cache, or null when `node:sqlite` is unavailable.
+ *
+ * The import lives in `sqlite.ts` for a reason worth reading before changing it
+ * back: a statically-visible `node:sqlite` specifier does not survive the
+ * bundler, and this index spent its whole life reporting "no persistence" in
+ * the shipped binary because of it.
+ */
+function openDb(cwd: string, dir: string): Promise<SqliteDb | null> {
+  const key = createHash("sha1").update(cwd).digest("hex").slice(0, 16);
+  return openCacheDb({
+    dir,
+    file: `${key}.db`,
+    schemaVersion: SCHEMA_VERSION,
+    onMigrate: (db) => db.exec("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS symbols;"),
+    schema: `CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime REAL);
        CREATE TABLE IF NOT EXISTS symbols (path TEXT, name TEXT, kind TEXT, line INTEGER, signature TEXT);
        CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols (name);`,
-    );
-    return db;
-  } catch {
-    return null;
-  }
+  });
 }
 
 /**

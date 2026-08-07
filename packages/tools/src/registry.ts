@@ -1,6 +1,7 @@
 import { type Tool, estimateTokens } from "@arterm/core";
 import { bashTool } from "./bash.js";
 import { batchTool } from "./batch.js";
+import { calleesTool, callersTool, codeStatsTool, deadCodeTool } from "./codebase.js";
 import { diffTool } from "./diff.js";
 import { editTool } from "./edit.js";
 import { gitCommitTool, gitTool } from "./git.js";
@@ -83,6 +84,10 @@ const STANDARD_EXTRA: Tool[] = [
  * runs code. A session that needs them is doing a different job, and can say so.
  */
 const FULL_EXTRA: Tool[] = [
+  callersTool,
+  calleesTool,
+  deadCodeTool,
+  codeStatsTool,
   installTool,
   auditTool,
   outdatedTool,
@@ -155,6 +160,10 @@ export {
   auditTool,
   outdatedTool,
   logsTool,
+  callersTool,
+  calleesTool,
+  deadCodeTool,
+  codeStatsTool,
   toolSearchTool,
   batchTool,
   taskDoneTool,
