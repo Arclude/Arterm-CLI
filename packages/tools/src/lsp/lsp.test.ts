@@ -303,6 +303,12 @@ describe("the tools", () => {
     );
     expect(res.isError).toBeFalsy();
     expect(await fs.readFile(join(dir, "a.ts"), "utf8")).toBe("const renamed = 1;\nrenamed + 2;\n");
+    // The rule mutatingDiff.test.ts states for every writing tool. It is
+    // asserted here because that file has no business spawning a server, and
+    // `lsp_rename` is the writing tool with the least reviewable change: the
+    // server chose the edits, not the model.
+    expect(res.path).toBe("a.ts");
+    expect(res.diff?.some((r) => r.kind === "add" && r.text.includes("renamed"))).toBe(true);
   });
 
   it("dry_run writes nothing", async () => {
