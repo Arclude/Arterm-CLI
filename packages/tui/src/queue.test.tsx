@@ -81,24 +81,35 @@ describe("prompt queue (typing stays live while a turn runs)", () => {
     const bus = new EventBus();
     const { stdin, frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
     const seen = () => frames.join("\n");
-    await tick();
+    const latest = () => frames[frames.length - 1] ?? "";
 
-    // First prompt starts a turn.
-    stdin.write("one");
-    await tick();
-    stdin.write(ENTER);
-    // The working line carries a spinner and a running clock now, so match the
-    // word and the elapsed time rather than the old static "working…".
+    /**
+     * Type a prompt and submit it, waiting for the CHARACTERS to land first.
+     *
+     * A fixed `tick()` here is what made this test fail under parallel load,
+     * roughly two runs in three: Ink had not finished mounting and subscribing
+     * to stdin, so the keystrokes went nowhere. The symptom was a 20-second
+     * timeout pointing at an empty composer and an idle status bar — which
+     * reads like the queue is broken, when nothing was ever typed.
+     */
+    const submit = async (text: string): Promise<void> => {
+      stdin.write(text);
+      await waitFor(latest, (f) => f.includes(text));
+      stdin.write(ENTER);
+    };
+
+    // Wait for the composer to exist before typing at it at all.
+    await waitFor(latest, (f) => f.includes("message…"));
+
+    // First prompt starts a turn. The working line carries a spinner and a
+    // running clock, so match the word and the elapsed time.
+    await submit("one");
     await waitFor(seen, (f) => /working \d/.test(f));
 
     // The prompt is still live: type and submit two more while the turn runs.
-    stdin.write("two");
-    await tick();
-    stdin.write(ENTER);
+    await submit("two");
     await waitFor(seen, (f) => f.includes("⏳ two"));
-    stdin.write("three");
-    await tick();
-    stdin.write(ENTER);
+    await submit("three");
     await waitFor(seen, (f) => f.includes("⏳ three"));
 
     // All three answers arrive, in submission order.

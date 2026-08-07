@@ -55,6 +55,7 @@ import {
 } from "./ink.js";
 import { formatRateLimits } from "./limitsView.js";
 import { Markdown } from "./markdown.js";
+import { formatMcpView, publishedServers } from "./mcpView.js";
 import { formatProcesses, parsePsArgs } from "./psView.js";
 import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
@@ -2483,12 +2484,15 @@ export function App({
             push({ kind: "system", text: "usage: /mcp [check|reload]" });
             break;
           }
-          // The server set is fixed at startup (config-only), so an empty summary
-          // means there is nothing to list, probe, or reconnect.
-          if (session.mcpServers.length === 0) {
+          // NOT an early return on an empty list any more. `mcpServers` is only
+          // the servers this session CONNECTS to; it is empty on a fresh
+          // install, and answering "none configured" there told users we had no
+          // MCP at all while the same binary published two servers of its own.
+          // `check` and `reload` still need something to act on.
+          if (session.mcpServers.length === 0 && (sub === "check" || sub === "reload")) {
             push({
               kind: "system",
-              text: "no MCP servers configured — add them to ~/.arterm/config.json → mcpServers",
+              text: `no MCP servers to ${sub} — this session connects to none. \`/mcp\` lists what Arterm publishes.`,
             });
             break;
           }
@@ -2529,7 +2533,20 @@ export function App({
             }
             break;
           }
-          push({ kind: "system", text: `MCP servers:\n${mcpSummaryLines(session.mcpServers)}` });
+          push({
+            kind: "system",
+            text: formatMcpView({
+              connected: session.mcpServers,
+              published: publishedServers({
+                memoryEngine:
+                  session.config.memory?.mode === "off"
+                    ? "off"
+                    : session.config.memory?.engine === "cmem"
+                      ? "cmem"
+                      : "jsonl",
+              }),
+            }),
+          });
           break;
         }
         case "plugins": {
