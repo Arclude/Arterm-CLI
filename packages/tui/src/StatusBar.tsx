@@ -28,6 +28,15 @@ interface Props {
   /** Multi-session summary for the badge: 1-based index, total, busy background count. */
   sessions?: { index: number; count: number; busyBackground: number };
   /**
+   * Background processes this session started and has not stopped.
+   *
+   * On the LIVE row rather than the place row, and ahead of the model: a dev
+   * server holding a port is a fact about the machine right now, and until this
+   * the only way to learn it was to type `/ps` — which nobody does when they do
+   * not already suspect it.
+   */
+  bgProcesses?: number;
+  /**
    * Where the fallback chain landed, when it has moved off the configured model.
    *
    * Without it the bar keeps naming the model you *chose* while a different one
@@ -136,6 +145,7 @@ function ModeBadge({ mode }: { mode: string }): React.ReactElement {
 }
 
 export function StatusBar({
+  bgProcesses,
   provider,
   model,
   status,
@@ -266,6 +276,19 @@ export function StatusBar({
         ]
       : []),
   ];
+
+  if (bgProcesses && bgProcesses > 0) {
+    const label = `${bgProcesses} bg`;
+    liveChips.splice(3, 0, {
+      key: "bg",
+      text: `${glyphs.tool} ${label}`,
+      node: (
+        <Text color={theme.warn}>
+          {glyphs.tool} {label}
+        </Text>
+      ),
+    });
+  }
 
   const placeChips: RenderChip[] = [
     {

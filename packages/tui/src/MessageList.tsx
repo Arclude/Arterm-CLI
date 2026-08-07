@@ -217,9 +217,16 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: "Extensions",
     items: [
-      ["/mcp [check|reload]", "MCP servers — status · probe · reconnect"],
+      ["/mcp [check|reload]", "MCP — what this session connects to, and what it publishes"],
       ["/plugins [check|reload]", "plugins — status · validate · rescan"],
       ["/skills · /skill <n>", "list skills · run one by name"],
+    ],
+  },
+  {
+    title: "Processes",
+    items: [
+      ["/ps", "background processes this session started — what is still running"],
+      ["/ps kill <id>", "stop one  ·  /ps kill all stops every one"],
     ],
   },
   {
@@ -357,6 +364,13 @@ function ItemBody({ item }: { item: DisplayItem }): React.ReactElement {
           item.ms !== undefined ? fmtMs(item.ms) : "",
           item.bytes ? fmtBytes(item.bytes) : "",
           item.tok ? `${fmtTok(item.tok)}t` : "",
+          // A screenshot is a line of text here and a fortune in the context —
+          // sent again on every later turn. The terminal cannot draw it, but
+          // leaving its cost invisible is how a session gets expensive with no
+          // visible cause.
+          item.images
+            ? `${glyphs.image}${item.images.count > 1 ? `×${item.images.count}` : ""} ${fmtBytes(item.images.bytes)}`
+            : "",
         ]
           .filter(Boolean)
           .join(" · ");

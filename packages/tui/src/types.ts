@@ -204,6 +204,12 @@ export type DisplayItem =
       ms?: number;
       bytes?: number;
       tok?: number;
+      /**
+       * Images this result sent to the model. The terminal cannot draw them,
+       * but their cost has to be visible: an image is the most expensive thing
+       * a tool can put in the context and it is re-sent every later turn.
+       */
+      images?: { count: number; bytes: number };
     }
   /** A status line. `color` overrides the default gray — sub-agent lines use their
    *  worker's accent colour (see agentColor.ts) so a fan-out is readable. */

@@ -222,7 +222,13 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // Background children. Built here rather than beside the tools, because the
   // teardown hook in `persist()` is the half that makes backgrounding safe and
   // it has to close over the same instance.
-  const processes = new ProcessRegistry();
+  const processes: ProcessRegistry = new ProcessRegistry({
+    // Self-reference in its own initializer: legal, and only ever invoked after
+    // the assignment lands — `register`/`kill` are the callers, and both happen
+    // later. Without this the status bar would only learn about a running dev
+    // server on whatever repaint happened to come next.
+    onChange: () => bus.emit({ type: "processes_changed", live: processes.live().length }),
+  });
   // Where tool calls resolve. Confined to the session's own cwd by the store
   // itself — `set_working_dir` moves WITHIN the root it was built with, never
   // out of it, so the boundary every path-taking tool relies on is unchanged.

@@ -701,6 +701,8 @@ export function App({
   // second on an idle session is a cost paid forever for a number nobody is
   // reading. This one exists only while a member is actually running.
   const [swarmClock, setSwarmClock] = useState(() => Date.now());
+  /** Background processes still running — the status bar's `N bg` chip. */
+  const [bgProcesses, setBgProcesses] = useState(0);
   const swarmLive = teamMembers.some((m) => m.state === "running");
   useEffect(() => {
     if (!swarmLive) return;
@@ -976,9 +978,13 @@ export function App({
             path: event.path,
             bytes: event.output.length,
             tok: Math.ceil(event.output.length / 4),
+            images: event.images,
           });
           if (event.path && !event.isError) turnRef.current.changedFiles.add(event.path);
           setStatus("thinking");
+          break;
+        case "processes_changed":
+          setBgProcesses(event.live);
           break;
         case "tool_denied":
           push({
@@ -3105,6 +3111,7 @@ export function App({
         columns={columns}
         shiftSelect={mouseCapture}
         sessions={sessionsBadge}
+        bgProcesses={bgProcesses}
         fallbackTo={fallbackTo}
         version={version}
       />

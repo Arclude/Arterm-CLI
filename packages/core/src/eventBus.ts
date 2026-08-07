@@ -25,8 +25,26 @@ export type AgentEvent =
       diff?: DiffRow[];
       /** Path the mutating tool changed (feeds the "changed files" turn summary). */
       path?: string;
+      /**
+       * Images this result attached, as count and total bytes.
+       *
+       * Not the data — the transcript has no way to draw a PNG and the payload
+       * would be megabytes of base64 on the bus. But the FACT has to travel: an
+       * image is the most expensive thing a tool can put in the context, it is
+       * re-sent on every later turn, and without this a screenshot is a line of
+       * text that silently costs more than the whole conversation around it.
+       */
+      images?: { count: number; bytes: number };
     }
   | { type: "tool_denied"; callId: string; name: string; reason?: string }
+  /**
+   * A background process started or ended (see `processRegistry.ts`).
+   *
+   * An event rather than a repaint timer, deliberately: this file's swarm clock
+   * documents why a standing one-second interval is a cost paid forever for a
+   * number nobody is reading. The set changes rarely, so the signal is rare.
+   */
+  | { type: "processes_changed"; live: number }
   // A permission prompt went up. Emitted so an out-of-band answerer (the desktop
   // status server) can surface it live; the request itself also rides the status
   // snapshot as `pendingPermission`, so a late subscriber still sees it.

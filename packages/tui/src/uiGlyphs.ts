@@ -50,6 +50,8 @@ export interface UiGlyphs {
   plan: string;
   // Session facts
   tool: string;
+  /** Marks an image a tool sent to the model — the terminal cannot draw it. */
+  image: string;
   filesChanged: string;
   context: string;
   cost: string;
@@ -109,6 +111,7 @@ const UNICODE: UiGlyphs = Object.freeze({
   patch: "⤓",
   plan: "▤",
   tool: "⚙",
+  image: "▨",
   filesChanged: "✎",
   context: "◔",
   cost: "$",
@@ -144,6 +147,7 @@ const NERD: UiGlyphs = Object.freeze({
   key: "󰌆",
   net: "󰖟",
   tool: "󰒓",
+  image: "▨",
   plan: "󰈙",
   fleet: "󰓾",
   context: "󰓡",
@@ -180,6 +184,7 @@ const ASCII: UiGlyphs = Object.freeze({
   patch: "v",
   plan: "=",
   tool: "*",
+  image: "i",
   filesChanged: "~",
   context: "c",
   cost: "$",

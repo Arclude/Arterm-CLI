@@ -1011,6 +1011,14 @@ export class Agent {
       isError,
       diff: result.diff,
       path: result.path,
+      ...(result.images && result.images.length > 0
+        ? {
+            images: {
+              count: result.images.length,
+              bytes: result.images.reduce((n, i) => n + Math.ceil((i.data.length * 3) / 4), 0),
+            },
+          }
+        : {}),
     });
   }
 
