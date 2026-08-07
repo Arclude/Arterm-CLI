@@ -30,6 +30,7 @@ export * from "./contextStrategies.js";
 export * from "./contextRegistry.js";
 export * from "./toolProtocol.js";
 export * from "./agent.js";
+export * from "./attachments.js";
 export * from "./loopDetector.js";
 export * from "./budget.js";
 export * from "./checkpoint.js";

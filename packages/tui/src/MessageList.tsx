@@ -55,7 +55,7 @@ function fmtMs(ms: number): string {
 }
 
 /** Output size — the other half of "why did that take four seconds". */
-function fmtBytes(n: number): string {
+export function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`;
   if (n >= 1024) return `${Math.round(n / 1024)}KB`;
   return `${n}B`;
@@ -331,6 +331,16 @@ function ItemBody({ item }: { item: DisplayItem }): React.ReactElement {
       return (
         <MessageBlock label="USER" color="cyan">
           <Text>{item.text}</Text>
+          {item.images ? (
+            // The same marker a tool result gets, for the same reason: what the
+            // model was shown has to be visible, and a picture the terminal
+            // cannot draw is otherwise indistinguishable from one never sent.
+            <Text dimColor>
+              {glyphs.image}
+              {item.images.count > 1 ? `×${item.images.count}` : ""} {fmtBytes(item.images.bytes)}{" "}
+              attached
+            </Text>
+          ) : null}
         </MessageBlock>
       );
     case "assistant":

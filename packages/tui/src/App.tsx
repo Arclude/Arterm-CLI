@@ -1,4 +1,5 @@
 import {
+  type Attachment,
   type AutonomyMode,
   type ContextBreakdown,
   type McpServerSummary,
@@ -10,10 +11,13 @@ import {
   type PluginSummary,
   type SddTaskState,
   type TodoItem,
+  attachImageFiles,
   cachedCatalogSync,
+  extractImagePaths,
   fetchCatalog,
   findModelById,
   priceUsage,
+  readClipboardImage,
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
@@ -22,7 +26,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ComposerFrame } from "./Composer.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { LoginOverlay } from "./LoginOverlay.js";
-import { Item } from "./MessageList.js";
+import { Item, fmtBytes } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
 import { SddBoard, type SddBoardTask } from "./SddBoard.js";
@@ -612,6 +616,12 @@ export function App({
   // transcript and cleared once the full message is recorded (assistant_message).
   const [live, setLive] = useState("");
   const [input, setInput] = useState("");
+  // Images waiting to ride out with the next prompt (Ctrl+V). Mirrored into a
+  // ref for the same reason `queue` is: the submit path reads it from inside a
+  // memoized callback, where the state value would be the one from render N.
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attachRef = useRef<Attachment[]>([]);
+  attachRef.current = attachments;
   const [history, setHistory] = useState<HistoryNav>(emptyHistory);
   const [model, setModel] = useState(session.agent.model);
   /**
@@ -2703,10 +2713,41 @@ export function App({
   // The plain single-agent turn (also the decline path of the team suggestion).
   const runPlain = useCallback(
     async (text: string) => {
-      push({ kind: "user", text });
+      // Two ways a picture gets here, because a terminal has two. Ctrl+V put
+      // one in `attachRef` already; a DRAGGED photo arrives as nothing but its
+      // path typed into the prompt, so the line itself has to be read.
+      const named = extractImagePaths(text);
+      const found =
+        named.length > 0
+          ? await attachImageFiles(named, process.cwd())
+          : { attached: [], rejected: [] };
+      const attached = [...attachRef.current, ...found.attached];
+      setAttachments([]);
+      // Named and NOT attached is the case worth a line: silence there reads as
+      // "the model is looking at it", which is the one wrong belief to leave.
+      for (const why of found.rejected) {
+        push({ kind: "system", text: `not attached — ${why}` });
+      }
+
+      push({
+        kind: "user",
+        text,
+        ...(attached.length > 0
+          ? {
+              images: {
+                count: attached.length,
+                bytes: attached.reduce((n, a) => n + a.bytes, 0),
+              },
+            }
+          : {}),
+      });
       const controller = new AbortController();
       abortRef.current = controller;
-      await session.agent.run(text, controller.signal);
+      await session.agent.run(
+        text,
+        controller.signal,
+        attached.length > 0 ? { images: attached.map((a) => a.image) } : undefined,
+      );
       abortRef.current = null;
     },
     [session, push],
@@ -2775,6 +2816,24 @@ export function App({
     (input, key) => {
       if (key.ctrl && (input === "x" || input === "X")) {
         onCloseSession?.();
+        return;
+      }
+      // Ctrl+V, not Ctrl+Shift+V: the terminal keeps the latter for its own
+      // paste, so this one reaches us. A clipboard holding text is the ordinary
+      // case and says so quietly rather than erroring.
+      if (key.ctrl && (input === "v" || input === "V")) {
+        void (async () => {
+          const { attachment, error } = await readClipboardImage();
+          if (attachment) {
+            setAttachments((a) => [...a, attachment]);
+            push({
+              kind: "system",
+              text: `${glyphs.image} clipboard image attached — ${fmtBytes(attachment.bytes)}`,
+            });
+          } else if (error) {
+            push({ kind: "system", text: error });
+          }
+        })();
         return;
       }
       if (!key.leftArrow && !key.rightArrow) return;
@@ -3069,9 +3128,16 @@ export function App({
             // sits where the eye already is instead of on a line of its own.
             workingSince={busy && autoState === "idle" ? turnStartRef.current : undefined}
             hint={
-              busy && autoState === "idle"
-                ? "Esc cancels · Enter queues the next message"
-                : "Enter send · ? help · ↑↓ history · Esc cancels"
+              // An attachment outranks the key legend: it is a fact about what
+              // this Enter will send, and it is the only place the user can see
+              // that Ctrl+V actually took.
+              attachments.length > 0
+                ? `${glyphs.image}${attachments.length > 1 ? `×${attachments.length}` : ""} ${fmtBytes(
+                    attachments.reduce((n, a) => n + a.bytes, 0),
+                  )} attached · Enter sends`
+                : busy && autoState === "idle"
+                  ? "Esc cancels · Enter queues the next message"
+                  : "Enter send · ? help · ↑↓ history · Esc cancels"
             }
             onChange={setInput}
             onSubmit={submit}

@@ -430,6 +430,46 @@ to every failing command in any session that has a key set — pointing the mode
 at the wrong cause of a failure that had nothing to do with it. Conditional, it
 fires on the case it was written for: tools that need a variable name it.
 
+## Attachments: the one path where a path is NOT confined
+
+`core/src/attachments.ts` turns a file the **user** named into `Message.images`.
+It exists because that field promised "a picture the user pasted" from the day
+it was written and nothing ever populated it: every image a model saw came from
+a tool result, so it could look at a screenshot it took and not at one you have.
+
+Its boundary is the deliberate **inverse** of `resolveWithin`'s, which is why it
+is its own file rather than a helper inside `read`. A tool's `path` argument is
+model output, so it is confined to the working directory — that is the
+CVE-2025-59532 lesson and it does not bend. A path typed into the composer is
+not model output: a human named a file on their own machine and pressed Enter,
+and confining that would refuse the ordinary case (a screenshot in `~/Pictures`)
+while protecting nobody. What keeps the exception honest is structural, not a
+comment: **nothing in the tool layer may call these functions.** They are
+reached from the composer's submit path, and from nowhere else.
+
+Everything that is *not* about location still applies, and one of those carries
+the weight the path check gave up: the **magic number**. It is what stops
+"attach my private key" from being something this can do at all, quite apart
+from its first job of keeping an HTML error page named `.png` out of a provider
+400. The size ceiling is derived from the loop's base64 cap rather than chosen,
+so the size reported is the file's own.
+
+A refusal always NAMES the file. Silence there reads as "the model is looking at
+it", which is the single wrong belief this must not leave a user holding — the
+same rule as `acceptImages`, whose cap the user's images are then held to as
+well, because the provider that would reject them does not care who chose them.
+
+**A terminal does not deliver a dropped picture — it types the PATH.** So the
+drag arrives as text and `extractImagePaths` has to read the submitted line;
+quoted, backslash-escaped and `file://` forms come first because splitting on
+whitespace tears `my shot.png` in half. The path is *not* stripped from the
+text: the user typed it, it names what they are asking about, and silently
+editing someone's own sentence is worse than a duplicated path. Ctrl+V is the
+other half (`readClipboardImage`, over wl-paste/xclip/pngpaste — OSC 52 has a
+copy but no read). Every reader is tried rather than one chosen from
+`$WAYLAND_DISPLAY`, because the environment answers which display server runs,
+not which helper is installed.
+
 ## Telemetry: `gen_ai.*`, pinned
 
 `core/src/telemetry.ts` is the MAPPING (which seam becomes which span, under

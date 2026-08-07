@@ -484,7 +484,17 @@ export class Agent {
     const ui = this.pipelines.userInput;
     if (!ui.has("record")) {
       ui.use("record", async (ctx, next) => {
-        await this.record({ role: "user", content: ctx.input });
+        // The user's own images go through `acceptImages` too. They are held to
+        // the same cap and the same format rule as a tool's, because the
+        // provider that would reject them does not care who chose them — and a
+        // refusal noted in the text is how the model learns it was not shown
+        // the thing the sentence refers to.
+        const { kept, note } = acceptImages(ctx.images);
+        await this.record({
+          role: "user",
+          content: ctx.input + note,
+          ...(kept.length > 0 ? { images: kept } : {}),
+        });
         await next();
       });
     }
@@ -795,8 +805,19 @@ export class Agent {
     return lines.join("\n");
   }
 
-  /** Runs one user turn to completion (possibly many tool round-trips). */
-  async run(userInput: string, signal?: AbortSignal): Promise<void> {
+  /**
+   * Runs one user turn to completion (possibly many tool round-trips).
+   *
+   * `opts.images` is what the user attached to THIS turn — see
+   * `attachments.ts`. It is a third parameter rather than a widened first one
+   * so every existing caller (autonomy, sub-agents, /sdd, the tests) is
+   * unchanged: a turn with no attachment is exactly the turn it was before.
+   */
+  async run(
+    userInput: string,
+    signal?: AbortSignal,
+    opts?: { images?: ImageContent[] },
+  ): Promise<void> {
     const { provider, model, tools } = this.opts;
     const native = tools.length > 0 ? await provider.supportsNativeTools(model) : false;
     const maxIterations = this.opts.maxIterations ?? 12;
@@ -823,7 +844,10 @@ export class Agent {
       // append). Keep it INSIDE the try so a failed write (disk full, EACCES, path
       // limit) surfaces as an `error` event and still runs teardown (turn_end),
       // instead of rejecting run() and leaking the turn.
-      await this.pipelines.userInput.run({ input: userInput });
+      await this.pipelines.userInput.run({
+        input: userInput,
+        ...(opts?.images && opts.images.length > 0 ? { images: opts.images } : {}),
+      });
       this.bus.emit({ type: "turn_start" });
 
       const limit = handle.getIterationLimit() ?? maxIterations;

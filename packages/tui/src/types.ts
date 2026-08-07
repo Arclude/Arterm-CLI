@@ -187,7 +187,16 @@ export interface Session {
 
 /** A rendered transcript entry. */
 export type DisplayItem =
-  | { kind: "user"; text: string }
+  | {
+      kind: "user";
+      text: string;
+      /**
+       * Images the USER attached to this turn — a dragged path, a pasted
+       * clipboard. Same shape and same reason as the tool row's: the terminal
+       * cannot draw them, and their cost is re-paid on every later turn.
+       */
+      images?: { count: number; bytes: number };
+    }
   | { kind: "assistant"; text: string }
   | {
       kind: "tool";

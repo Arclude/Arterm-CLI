@@ -184,3 +184,61 @@ describe("Agent carries tool images into history", () => {
     expect(tool?.images).toBeUndefined();
   });
 });
+
+describe("Agent carries the USER's images into history", () => {
+  /**
+   * The other direction, and the one that was missing.
+   *
+   * `Message.images` promised "a picture the user pasted" from the day it was
+   * written, and nothing populated it: every image a model ever saw came from a
+   * tool result. So the model could look at a screenshot it took itself and not
+   * at one you have.
+   */
+  function bare(): { agent: Agent; provider: ScriptedProvider } {
+    const provider = new ScriptedProvider();
+    const agent = new Agent({
+      provider,
+      model: "m",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus: new EventBus(),
+      cwd: process.cwd(),
+    });
+    return { agent, provider };
+  }
+
+  it("attaches them to the user message, and hands them to the provider", async () => {
+    const image = png();
+    const { agent, provider } = bare();
+    await agent.run("what is wrong here?", undefined, { images: [image] });
+
+    const user = agent.history.find((m) => m.role === "user");
+    expect(user?.content).toBe("what is wrong here?");
+    expect(user?.images).toEqual([image]);
+    // History is what the next request is built from, so reaching history and
+    // not the request would buy nothing.
+    expect(provider.lastMessages?.find((m) => m.role === "user")?.images).toEqual([image]);
+  });
+
+  it("holds the user's images to the same cap as a tool's", async () => {
+    // The provider that would reject them does not care who chose them, and a
+    // 400 mid-turn tells the model nothing it can act on.
+    const { agent } = bare();
+    await agent.run("look", undefined, { images: [png(MAX_IMAGE_BYTES + 1)] });
+
+    const user = agent.history.find((m) => m.role === "user");
+    expect(user?.images).toBeUndefined();
+    expect(user?.content).toContain("look");
+    expect(user?.content).toContain("not shown to the model");
+  });
+
+  it("leaves a turn with no attachment exactly as it was", async () => {
+    const { agent } = bare();
+    await agent.run("plain question");
+
+    const user = agent.history.find((m) => m.role === "user");
+    expect(user?.content).toBe("plain question");
+    expect(user?.images).toBeUndefined();
+  });
+});

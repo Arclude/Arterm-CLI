@@ -64,6 +64,12 @@ export class Pipeline<Ctx> {
 // phases the pipelines are empty pass-throughs; the agent consumes them stage-by-stage later.
 export interface UserInputCtx {
   input: string;
+  /**
+   * Images the user attached to this turn — a dragged path, a pasted
+   * clipboard. Tool results carry their own images through `toolCall`; this is
+   * the other direction, and it exists only on the turn the user attached them.
+   */
+  images?: ImageContent[];
 }
 export interface RequestCtx {
   system: Message;

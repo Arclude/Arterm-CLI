@@ -3,6 +3,11 @@
  * clipboard, so it works over SSH and needs no per-OS helper binaries.
  * Supported by Windows Terminal, iTerm2, kitty, wezterm, and most modern
  * emulators. Payload is capped — terminals silently drop huge sequences.
+ *
+ * This is the COPY direction only. Reading a picture back off the clipboard is
+ * `readClipboardImage` in core's `attachments.ts`: OSC 52 has no read that a
+ * terminal will answer without asking, so that one shells out to wl-paste /
+ * xclip / pngpaste, and it belongs beside the rule for what may be attached.
  */
 
 import { spawn as spawnProcess } from "node:child_process";
