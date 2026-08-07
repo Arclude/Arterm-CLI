@@ -7,6 +7,7 @@ export * from "./toolOutput.js";
 export * from "./telemetry.js";
 export * from "./types.js";
 export * from "./diff.js";
+export * from "./unifiedDiff.js";
 export * from "./eventBus.js";
 export * from "./providerError.js";
 export * from "./config.js";

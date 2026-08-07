@@ -26,6 +26,11 @@ const CATEGORY: Record<string, ToolVisual> = {
   read: { glyph: "▤", color: "#89b4fa" },
   edit: { glyph: "✎", color: "#f9e2af" },
   write: { glyph: "✎", color: "#f9e2af" },
+  // Applying a patch or sweeping a regex across the tree is an edit, but not
+  // one whose scope a reader can see from the row — its own mark says so.
+  patch: { glyph: "⇄", color: "#fab387" },
+  diff: { glyph: "±", color: "#f9e2af" },
+  data: { glyph: "❴", color: "#f5c2e7" },
   search: { glyph: "⌕", color: "#cba6f7" },
   list: { glyph: "▣", color: "#89b4fa" },
   shell: { glyph: "⌘", color: "#94e2d5" },
@@ -49,6 +54,11 @@ const TOOL_CATEGORY: Record<string, keyof typeof CATEGORY> = {
   multi_edit: "edit",
   write: "write",
   format: "edit",
+  patch: "patch",
+  replace: "patch",
+  diff: "diff",
+  json: "data",
+  tree: "list",
   grep: "search",
   glob: "search",
   search: "search",

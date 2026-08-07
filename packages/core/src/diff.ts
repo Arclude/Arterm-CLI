@@ -22,7 +22,10 @@ function splitLines(s: string): string[] {
   return s.length === 0 ? [] : s.split("\n");
 }
 
-type Op = { t: "eq" | "del" | "add"; text: string };
+/** One line's fate in a diff: unchanged, removed from the old, added to the new. */
+export type DiffOp = { t: "eq" | "del" | "add"; text: string };
+
+type Op = DiffOp;
 
 /** Ordered LCS diff of two line arrays (equal / deleted / added, in place). */
 function lcsDiff(x: string[], y: string[]): Op[] {
@@ -60,17 +63,18 @@ function lcsDiff(x: string[], y: string[]): Op[] {
 }
 
 /**
- * Compute a git-style, line-numbered diff of two file contents: unchanged lines are
- * `context` (with both line numbers), removals are `del`, additions are `add`. Common
- * head/tail are trimmed first (so only the changed region is diffed), unchanged runs
- * larger than the context window collapse behind a `hunk` header, and the whole thing
- * is capped at MAX_ROWS. Returns [] when the contents are identical.
+ * Line-by-line ops turning `a` into `b`, in order.
+ *
+ * The common head and tail are trimmed before the LCS runs, so an edit to one
+ * line of a 5000-line file costs a walk, not a 25-million-cell table. Past
+ * LCS_BUDGET the middle degrades to "remove everything, add everything" —
+ * a worse-looking diff, but a bounded one.
+ *
+ * Shared by the rendered `lineDiff` and by `unifiedDiff`: the two disagree
+ * about presentation (rows with line numbers vs. patch text) and must not
+ * disagree about what actually changed.
  */
-export function lineDiff(before: string, after: string): DiffRow[] {
-  const a = splitLines(before);
-  const b = splitLines(after);
-
-  // Trim common prefix / suffix so LCS only runs on the region that actually changed.
+export function diffOps(a: readonly string[], b: readonly string[]): DiffOp[] {
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;
   let endA = a.length;
@@ -81,21 +85,34 @@ export function lineDiff(before: string, after: string): DiffRow[] {
   }
   const midA = a.slice(start, endA);
   const midB = b.slice(start, endB);
-  if (midA.length === 0 && midB.length === 0) return [];
 
   const midOps: Op[] =
-    midA.length * midB.length > LCS_BUDGET
-      ? [
-          ...midA.map((text): Op => ({ t: "del", text })),
-          ...midB.map((text): Op => ({ t: "add", text })),
-        ]
-      : lcsDiff(midA, midB);
+    midA.length === 0 && midB.length === 0
+      ? []
+      : midA.length * midB.length > LCS_BUDGET
+        ? [
+            ...midA.map((text): Op => ({ t: "del", text })),
+            ...midB.map((text): Op => ({ t: "add", text })),
+          ]
+        : lcsDiff(midA, midB);
 
-  const ops: Op[] = [
+  return [
     ...a.slice(0, start).map((text): Op => ({ t: "eq", text })),
     ...midOps,
     ...a.slice(endA).map((text): Op => ({ t: "eq", text })),
   ];
+}
+
+/**
+ * Compute a git-style, line-numbered diff of two file contents: unchanged lines are
+ * `context` (with both line numbers), removals are `del`, additions are `add`. Common
+ * head/tail are trimmed first (so only the changed region is diffed), unchanged runs
+ * larger than the context window collapse behind a `hunk` header, and the whole thing
+ * is capped at MAX_ROWS. Returns [] when the contents are identical.
+ */
+export function lineDiff(before: string, after: string): DiffRow[] {
+  const ops = diffOps(splitLines(before), splitLines(after));
+  if (!ops.some((op) => op.t !== "eq")) return [];
 
   // Attach line numbers.
   let oldNo = 0;

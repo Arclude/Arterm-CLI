@@ -23,6 +23,8 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "execa": "^9.5.2",
     "fast-glob": "^3.3.2",
+    "json5": "^2.2.3",
+    "yaml": "^2.9.0",
     "zod": "^3.25.76"
   }
 }

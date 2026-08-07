@@ -1,19 +1,24 @@
 import { type Tool, estimateTokens } from "@arterm/core";
 import { bashTool } from "./bash.js";
 import { batchTool } from "./batch.js";
+import { diffTool } from "./diff.js";
 import { editTool } from "./edit.js";
 import { gitCommitTool, gitTool } from "./git.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
+import { jsonTool } from "./json.js";
 import { lsTool } from "./ls.js";
 import { multiEditTool } from "./multiEdit.js";
+import { patchTool } from "./patch.js";
 import { formatTool, lintTool, testTool } from "./project.js";
 import { readTool } from "./read.js";
+import { replaceTool } from "./replace.js";
 import { searchTool } from "./search.js";
 import { submitVerdictTool } from "./submitVerdict.js";
 import { symbolsTool } from "./symbols.js";
 import { taskDoneTool } from "./taskDone.js";
 import { toolSearchTool } from "./toolSearch.js";
+import { treeTool } from "./tree.js";
 import { webFetchTool } from "./webFetch.js";
 import { webSearchTool } from "./webSearch.js";
 import { writeTool } from "./write.js";
@@ -39,9 +44,14 @@ const MINIMAL: Tool[] = [readTool, grepTool, globTool, writeTool, editTool, bash
 /** Added at `standard`: the rest of an ordinary coding turn. */
 const STANDARD_EXTRA: Tool[] = [
   lsTool,
+  treeTool,
   searchTool,
   symbolsTool,
   multiEditTool,
+  patchTool,
+  replaceTool,
+  jsonTool,
+  diffTool,
   gitTool,
   gitCommitTool,
   testTool,
@@ -99,6 +109,7 @@ export function tierCost(tier: ToolTier): {
 export {
   readTool,
   lsTool,
+  treeTool,
   globTool,
   grepTool,
   searchTool,
@@ -106,6 +117,10 @@ export {
   writeTool,
   editTool,
   multiEditTool,
+  patchTool,
+  replaceTool,
+  jsonTool,
+  diffTool,
   bashTool,
   webFetchTool,
   webSearchTool,
