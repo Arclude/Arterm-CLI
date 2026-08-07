@@ -25,6 +25,7 @@ import {
   RunController,
   type SandboxRunner,
   SddRunner,
+  TaskStore,
   type TelemetrySubject,
   TodoStore,
   Tokens,
@@ -49,6 +50,7 @@ import {
   saveConfig,
   subagentPolicy,
   subagentRoster,
+  taskPath,
 } from "@arterm/core";
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
 import {
@@ -74,6 +76,7 @@ import {
   createSandboxRunner,
   createSpawnParallelTool,
   createSpawnTool,
+  createTaskTool,
   createTodoTool,
   defaultTools,
   makeMemoTool,
@@ -197,6 +200,8 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const todos = new TodoStore((items) => bus.emit({ type: "todo_changed", items }));
   // Checkpoints are per session; the transcript id isn't known yet at build time.
   const sessionCheckpointId = randomUUID();
+  // A dependency graph the model can write, on the shape `/sdd` executes.
+  const tasks = new TaskStore(taskPath(sessionCheckpointId));
 
   /**
    * Wrap a provider in the configured fallback chain. Rebuilt on every provider
@@ -659,6 +664,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     ...agent.tools,
     createTodoTool(todos),
     createPlanTool(new PlanStore(planPath(sessionCheckpointId))),
+    createTaskTool(tasks),
     createSpawnTool(spawnFn),
     createSpawnParallelTool(fleetFn),
     ...(cmem

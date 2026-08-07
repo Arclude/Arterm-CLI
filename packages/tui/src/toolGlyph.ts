@@ -69,6 +69,7 @@ const TOOL_CATEGORY: Record<string, keyof typeof CATEGORY> = {
   message: "agent",
   batch: "meta",
   plan: "plan",
+  task: "plan",
   task_done: "done",
   todo: "plan",
 };

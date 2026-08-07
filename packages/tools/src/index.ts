@@ -24,6 +24,7 @@ export { createMemorySearchTool, createRememberTool, formatLearning } from "./me
 export { makeMemoTool, type MemoToolOptions } from "./memo.js";
 export { createTodoTool } from "./todo.js";
 export { createPlanTool } from "./plan.js";
+export { createTaskTool } from "./task.js";
 export { makeMessageTool, type MessageToolOptions } from "./message.js";
 export { startMemoryMcpServer } from "./mcpMemoryServer.js";
 export {
