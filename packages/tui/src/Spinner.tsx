@@ -64,12 +64,28 @@ export function fmtElapsed(ms: number): string {
  * both from the 120 ms tick would redraw the digits eight times a second for
  * one visible change.
  */
-export function Elapsed({ since, color }: { since: number; color?: string }): React.ReactElement {
+export function Elapsed({
+  since,
+  color,
+  minWidth = 0,
+}: {
+  since: number;
+  color?: string;
+  /**
+   * Pad the text to this many columns. A clock counting from `9.9s` to `10s`
+   * to `1m05s` changes width three times, and anything laid out to its right —
+   * a frame's closing corner, most of all — would move with it.
+   */
+  minWidth?: number;
+}): React.ReactElement {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  return <Text color={color ?? theme.textMuted}>{fmtElapsed(now - since)}</Text>;
+  return <Text color={color ?? theme.textMuted}>{fmtElapsed(now - since).padEnd(minWidth)}</Text>;
 }
+
+/** Columns {@link Elapsed} occupies when padded — `2m05s` is the widest form. */
+export const ELAPSED_W = 6;

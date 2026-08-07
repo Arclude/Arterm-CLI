@@ -18,6 +18,7 @@ import {
 } from "@arterm/core";
 import type React from "react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ComposerFrame } from "./Composer.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { LoginOverlay } from "./LoginOverlay.js";
 import { Item } from "./MessageList.js";
@@ -25,7 +26,6 @@ import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
 import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
-import { Elapsed, Spinner } from "./Spinner.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardKind, type TeamBoardMember } from "./TeamBoard.js";
 import { agentColor } from "./agentColor.js";
@@ -81,6 +81,8 @@ function InputLine({
   commands,
   columns,
   borderColor = "gray",
+  workingSince,
+  hint,
   onChange,
   onSubmit,
   onHelp,
@@ -95,6 +97,10 @@ function InputLine({
   columns: number;
   /** Frame color for the typing area — mirrors the mode badge. */
   borderColor?: string;
+  /** Epoch ms the running turn began; drives the top rail's spinner and clock. */
+  workingSince?: number | undefined;
+  /** The bottom rail's text — the keys that apply right now. */
+  hint: string;
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onHelp: () => void;
@@ -162,29 +168,21 @@ function InputLine({
     },
     { isActive: active },
   );
-  // One width-bounded, wrapping <Text>: a long paste flows onto as many lines as
-  // it needs and the box grows vertically, instead of overflowing or ghosting.
-  // The border is drawn on THIS box rather than a wrapper: adding a nesting
-  // level around InputLine sent MultiApp's layout into a measure/re-layout
-  // oscillation (unbounded re-renders, observed as an OOM in its tests) —
-  // decorating the existing node does not.
+  // The frame is drawn as text (see `Composer.tsx`) rather than by Ink's border,
+  // so it can carry a title, a live spinner and a hint. It stays a single
+  // fixed-width column Box with `<Text>` children: what sent MultiApp's layout
+  // into a measure/re-layout oscillation (unbounded re-renders, an OOM in its
+  // tests) was WRAPPING this component from outside, and nothing here measures
+  // an element — the widths are arithmetic on strings.
   return (
-    <Box width={columns} borderStyle="round" borderColor={borderColor} paddingX={1}>
-      <Text wrap="wrap">
-        <Text color={theme.brandAccent} bold>
-          {`${glyphs.prompt} `}
-        </Text>
-        {value}
-        <Text color={theme.accent}>{glyphs.cursor}</Text>
-        {suggestion ? (
-          <Text color={theme.textMuted} dimColor>
-            {suggestion}
-            {`  ${glyphs.tab} tab`}
-          </Text>
-        ) : null}
-        {value === "" ? <Text color={theme.textMuted}> message… (type ? for help)</Text> : null}
-      </Text>
-    </Box>
+    <ComposerFrame
+      value={value}
+      suggestion={suggestion}
+      columns={columns}
+      color={borderColor}
+      workingSince={workingSince}
+      hint={hint}
+    />
   );
 }
 
@@ -2959,20 +2957,10 @@ export function App({
         />
       ) : (
         <Box marginTop={1} flexDirection="column">
-          {busy && autoState === "idle" ? (
-            // The turn runs behind a LIVE prompt: keep typing, Enter queues the
-            // next message(s), Esc cancels the turn (and drops the queue).
-            // A moving glyph and a running clock, because the failure this
-            // replaces is a turn that has stalled looking exactly like a turn
-            // that is thinking. Both are their own components on their own
-            // timers, mounted only while this line is.
-            <Text color={theme.warn}>
-              <Spinner /> working <Elapsed since={turnStartRef.current} />{" "}
-              <Text color={theme.textMuted} dimColor>
-                Esc cancels · Enter queues the next message
-              </Text>
-            </Text>
-          ) : null}
+          {/* The "working" line used to live here. It is on the composer's top
+              rail now: the turn runs behind a LIVE prompt, so the spinner
+              belongs where the eye already is, and the row it used to take is
+              a row the transcript keeps. */}
           {queue.slice(0, 3).map((q, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: queue is order-only
             <Text key={i} color="gray" dimColor wrap="truncate">
@@ -2997,6 +2985,14 @@ export function App({
                 : permMode === "yolo"
                   ? theme.error
                   : theme.borderDefault
+            }
+            // The turn's clock lives on the frame's top rail now, so liveness
+            // sits where the eye already is instead of on a line of its own.
+            workingSince={busy && autoState === "idle" ? turnStartRef.current : undefined}
+            hint={
+              busy && autoState === "idle"
+                ? "Esc cancels · Enter queues the next message"
+                : "Enter send · ? help · ↑↓ history · Esc cancels"
             }
             onChange={setInput}
             onSubmit={submit}

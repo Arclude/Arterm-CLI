@@ -96,6 +96,37 @@ export function truncateDisplay(value: string, width: number): string {
 }
 
 /**
+ * Break `value` into lines of at most `width` columns, splitting on grapheme
+ * boundaries rather than characters.
+ *
+ * For a frame drawn as text — where each row is padded to a fixed inner width
+ * and closed with its own border character — the wrapping has to be ours: Ink
+ * wraps inside a `<Text>`, which is invisible to the code that has to draw the
+ * `│` at the end of every resulting row. A newline in the input starts a new
+ * line, so a pasted block keeps its shape.
+ */
+export function wrapToWidth(value: string, width: number): string[] {
+  const w = Math.max(1, width);
+  const out: string[] = [];
+  for (const paragraph of value.split("\n")) {
+    let line = "";
+    let used = 0;
+    for (const { segment } of SEGMENTER.segment(paragraph)) {
+      const sw = displayWidth(segment);
+      if (used + sw > w) {
+        out.push(line);
+        line = "";
+        used = 0;
+      }
+      line += segment;
+      used += sw;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/**
  * Truncate from the middle, keeping both ends. For a path or a command the
  * informative parts are the head (what it is) and the tail (which file) — a
  * tail-cut throws away the second one.
