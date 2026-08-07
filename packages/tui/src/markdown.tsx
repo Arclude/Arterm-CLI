@@ -1,6 +1,6 @@
-import { Box, Text } from "ink";
 import { memo } from "react";
 import type React from "react";
+import { Box, Text } from "./ink.js";
 
 /**
  * Lightweight markdown rendering for the transcript. The parser is pure (no ink)

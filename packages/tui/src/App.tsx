@@ -14,17 +14,6 @@ import {
   searchCatalog,
   toolCallPreview,
 } from "@arterm/core";
-import {
-  Box,
-  type DOMElement,
-  Static,
-  Text,
-  measureElement,
-  useApp,
-  useInput,
-  useStdin,
-  useStdout,
-} from "ink";
 import type React from "react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoginOverlay } from "./LoginOverlay.js";
@@ -47,10 +36,22 @@ import {
   historyUp,
   reduceInput,
 } from "./editing.js";
+import {
+  Box,
+  type DOMElement,
+  Static,
+  Text,
+  measureElement,
+  useApp,
+  useInput,
+  useStdin,
+  useStdout,
+} from "./ink.js";
 import { formatRateLimits } from "./limitsView.js";
 import { Markdown } from "./markdown.js";
 import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
+import { truncateDisplay } from "./terminalWidth.js";
 import type { DisplayItem, LoginProvider, Session } from "./types.js";
 
 /** Soft context-window estimate for the status-bar gauge (local models rarely report one). */
@@ -252,7 +253,7 @@ const COMMANDS = [
  */
 function oneLine(text: string, max: number): string {
   const first = text.split("\n")[0]?.trim() ?? "";
-  return first.length > max ? `${first.slice(0, max)}…` : first;
+  return truncateDisplay(first, max);
 }
 
 /** How a remotely-answered permission reads in the transcript. */

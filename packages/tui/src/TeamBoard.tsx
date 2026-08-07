@@ -1,7 +1,7 @@
 import type { SddTaskState } from "@arterm/core";
-import { Box, Text } from "ink";
 import type React from "react";
 import { agentColor } from "./agentColor.js";
+import { Box, Text } from "./ink.js";
 
 /** One team member's live cell on the swarm board. */
 export interface TeamBoardMember {

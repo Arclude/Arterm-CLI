@@ -1,5 +1,5 @@
-import { Box, Text } from "ink";
 import type React from "react";
+import { Box, Text } from "./ink.js";
 
 /**
  * Interactive /sdd interview overlay: presents the model's clarifying questions one

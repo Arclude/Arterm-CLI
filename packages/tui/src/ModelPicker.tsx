@@ -1,6 +1,6 @@
 import type { ModelInfo } from "@arterm/core";
-import { Box, Text } from "ink";
 import type React from "react";
+import { Box, Text } from "./ink.js";
 
 function fmtBytes(n?: number): string {
   if (!n) return "";

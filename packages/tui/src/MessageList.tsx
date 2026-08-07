@@ -1,8 +1,9 @@
 import type { DiffRow } from "@arterm/core";
-import { Box, Text } from "ink";
 import { memo } from "react";
 import type React from "react";
+import { Box, Text } from "./ink.js";
 import { Markdown } from "./markdown.js";
+import { truncateDisplay } from "./terminalWidth.js";
 import type { DisplayItem } from "./types.js";
 
 interface Props {
@@ -44,7 +45,9 @@ function fmtTok(n: number): string {
 
 function truncate(text: string, max: number): string {
   const t = text.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max)}…` : t;
+  // Measured in terminal columns: tool arguments carry paths, and a path can
+  // hold anything a filesystem allows — emoji included, at two columns each.
+  return truncateDisplay(t, max);
 }
 
 /** Colour a diff-preview line by its leading marker. */

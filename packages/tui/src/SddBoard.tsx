@@ -1,6 +1,6 @@
 import type { SddTaskState } from "@arterm/core";
-import { Box, Text } from "ink";
 import type React from "react";
+import { Box, Text } from "./ink.js";
 
 /** A single task rendered on the /sdd board. */
 export interface SddBoardTask {

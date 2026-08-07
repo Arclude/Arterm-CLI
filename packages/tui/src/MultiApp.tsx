@@ -1,8 +1,8 @@
-import { Box, useApp, useInput, useStdout } from "ink";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App } from "./App.js";
 import { SessionPanel, type SessionPanelEntry } from "./SessionPanel.js";
+import { Box, useApp, useInput, useStdout } from "./ink.js";
 import { SessionMeta } from "./sessionMeta.js";
 import type { Session } from "./types.js";
 

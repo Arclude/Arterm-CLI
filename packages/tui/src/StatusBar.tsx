@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { Box, Text } from "ink";
 import type React from "react";
+import { Box, Text } from "./ink.js";
+import { truncateDisplay } from "./terminalWidth.js";
 
 export type Status = "idle" | "thinking" | "tool";
 
@@ -63,10 +64,14 @@ function bar(pct: number, width: number): string {
   return "█".repeat(filled) + "░".repeat(w - filled);
 }
 
-/** Truncate to a max display length, marking the cut with an ellipsis. */
+/**
+ * Truncate to a column budget, marking the cut with an ellipsis. Measured in
+ * terminal columns rather than code units: a branch name with an emoji, a cwd
+ * with CJK, or the bar's own `⚙` are all wider than `.length` claims, and the
+ * status bar is where an overflow costs a wrapped line.
+ */
 function clip(s: string, max: number): string {
-  if (max <= 0) return "";
-  return s.length <= max ? s : `${s.slice(0, Math.max(1, max - 1))}…`;
+  return truncateDisplay(s, max);
 }
 
 /** Status-bar color for each permission mode. */

@@ -1,7 +1,7 @@
 import type { PermissionOrigin, Tool } from "@arterm/core";
-import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { agentColor } from "./agentColor.js";
+import { Box, Text, useInput } from "./ink.js";
 
 export interface PendingPermission {
   tool: Tool;
