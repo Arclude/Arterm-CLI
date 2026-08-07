@@ -247,6 +247,12 @@ const HELP_FOOTER: [string, string][] = [
   ],
   ["Modes", "ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all"],
   ["Edit", "Backspace del char · Ctrl+W del word · Ctrl+U clear line"],
+  // Discoverability is the whole feature here: a key nobody knows about is a
+  // key nobody presses, and dragging a file is the half people try first.
+  [
+    "Images",
+    "Ctrl+V pastes one from the clipboard (⌫ over [Image #1] removes it) · or drag a file in",
+  ],
   [
     "Board",
     "Tab (or Ctrl/Alt+↑↓) step sub-agent · Enter inspect (empty prompt) · ↑↓ step while open · Esc close",

@@ -459,6 +459,22 @@ it", which is the single wrong belief this must not leave a user holding — the
 same rule as `acceptImages`, whose cap the user's images are then held to as
 well, because the provider that would reject them does not care who chose them.
 
+**A pasted image needs a REPRESENTATION in the line**, because a terminal has
+no pixels to give it. `imagePlaceholder` puts `[Image #1]` where the prompt can
+show it, place it in the sentence, and — the part that matters — delete it:
+`stillMentioned` keeps only the held images whose token survived to the
+submitted line, so the TEXT is the truth and the held list follows it. One
+Backspace removes the whole token (`editing.ts`), since it is the one atom the
+user did not type character by character, and a half-eaten `[Image #` matches
+nothing while the image stays attached. The token stays in what goes to the
+model: it is not the user's own words, but it says where the image belongs, and
+with several attached it is the only way to write "compare [Image #1] with
+[Image #2]".
+
+`ARTERM_CLIPBOARD_CMD` points at an executable that writes image bytes to
+stdout — a PATH, not a command string, because a quoting bug here would read as
+"no image on the clipboard" rather than as the mistake it is.
+
 **A terminal does not deliver a dropped picture — it types the PATH.** So the
 drag arrives as text and `extractImagePaths` has to read the submitted line;
 quoted, backslash-escaped and `file://` forms come first because splitting on

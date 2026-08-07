@@ -35,6 +35,22 @@ export function deleteWordBackward(value: string): string {
   return wordStart === -1 ? "" : trimmed.slice(0, wordStart);
 }
 
+/**
+ * A trailing `[Image #1]` is one thing, so one backspace removes it.
+ *
+ * It is the ONE atom in the prompt the user did not type character by
+ * character: Ctrl+V put it there whole. Taking ten presses to undo one press
+ * would make detaching feel like a mistake being punished — and a half-deleted
+ * `[Image #` no longer matches anything, so the image would silently stay
+ * attached while the line said nothing about it.
+ */
+const TRAILING_IMAGE_TOKEN = /\s?\[Image #\d+\]$/;
+
+function deleteBackward(value: string): string {
+  const whole = TRAILING_IMAGE_TOKEN.exec(value);
+  return whole ? value.slice(0, whole.index) : value.slice(0, -1);
+}
+
 /** Normalises pasted line endings (CRLF or a lone CR) to "\n". */
 function normalizeNewlines(s: string): string {
   return s.replace(/\r\n?/g, "\n");
@@ -103,7 +119,9 @@ export function reduceInput(value: string, input: string, key: KeyLike): InputAc
   }
   if (key.ctrl && input === "u") return { type: "change", value: "" };
 
-  if (key.backspace || key.delete) return { type: "change", value: value.slice(0, -1) };
+  if (key.backspace || key.delete) {
+    return { type: "change", value: deleteBackward(value) };
+  }
   if (key.upArrow) return { type: "history_prev" };
   if (key.downArrow) return { type: "history_next" };
   if (key.escape || key.tab) return { type: "noop" };

@@ -1,10 +1,10 @@
 import {
-  type Attachment,
   type AutonomyMode,
   type ContextBreakdown,
   type McpServerSummary,
   type ModelInfo,
   PERMISSION_MODES,
+  type PendingAttachment,
   type PermissionAsker,
   type PermissionMode,
   type PermissionOrigin,
@@ -16,9 +16,11 @@ import {
   extractImagePaths,
   fetchCatalog,
   findModelById,
+  imagePlaceholder,
   priceUsage,
   readClipboardImage,
   searchCatalog,
+  stillMentioned,
   toolCallPreview,
 } from "@arterm/core";
 import type React from "react";
@@ -619,8 +621,8 @@ export function App({
   // Images waiting to ride out with the next prompt (Ctrl+V). Mirrored into a
   // ref for the same reason `queue` is: the submit path reads it from inside a
   // memoized callback, where the state value would be the one from render N.
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const attachRef = useRef<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const attachRef = useRef<PendingAttachment[]>([]);
   attachRef.current = attachments;
   const [history, setHistory] = useState<HistoryNav>(emptyHistory);
   const [model, setModel] = useState(session.agent.model);
@@ -2721,7 +2723,11 @@ export function App({
         named.length > 0
           ? await attachImageFiles(named, process.cwd())
           : { attached: [], rejected: [] };
-      const attached = [...attachRef.current, ...found.attached];
+      // Only the pasted images whose token SURVIVED to the submitted line.
+      // Backspacing over `[Image #1]` is how you take one back, and the text is
+      // the truth — the held list follows it, never the other way round.
+      const kept = stillMentioned(text, attachRef.current).map((h) => h.attachment);
+      const attached = [...kept, ...found.attached];
       setAttachments([]);
       // Named and NOT attached is the case worth a line: silence there reads as
       // "the model is looking at it", which is the one wrong belief to leave.
@@ -2824,15 +2830,23 @@ export function App({
       if (key.ctrl && (input === "v" || input === "V")) {
         void (async () => {
           const { attachment, error } = await readClipboardImage();
-          if (attachment) {
-            setAttachments((a) => [...a, attachment]);
-            push({
-              kind: "system",
-              text: `${glyphs.image} clipboard image attached — ${fmtBytes(attachment.bytes)}`,
-            });
-          } else if (error) {
-            push({ kind: "system", text: error });
+          if (!attachment) {
+            if (error) push({ kind: "system", text: error });
+            return;
           }
+          // The token goes into the LINE, not just onto a rail. A picture has
+          // no pixels to show in a terminal, so this is the whole of what the
+          // user can see, place in the sentence, and delete to change their
+          // mind. Numbered from the count so far, so a second paste is #2.
+          //
+          // Two independent updates, and the number comes off the REF. A
+          // `setInput` nested inside the `setAttachments` updater was the first
+          // shape of this, and an updater that is not pure is one React may run
+          // twice or mid-render: the image still reached the model, and the
+          // composer's chip did not render at all.
+          const placeholder = imagePlaceholder(attachRef.current.length + 1);
+          setAttachments((held) => [...held, { attachment, placeholder }]);
+          setInput((v) => (v.length === 0 || v.endsWith(" ") ? v : `${v} `) + placeholder);
         })();
         return;
       }
@@ -3133,8 +3147,8 @@ export function App({
               // that Ctrl+V actually took.
               attachments.length > 0
                 ? `${glyphs.image}${attachments.length > 1 ? `×${attachments.length}` : ""} ${fmtBytes(
-                    attachments.reduce((n, a) => n + a.bytes, 0),
-                  )} attached · Enter sends`
+                    attachments.reduce((n, a) => n + a.attachment.bytes, 0),
+                  )} attached · ⌫ over the token removes it`
                 : busy && autoState === "idle"
                   ? "Esc cancels · Enter queues the next message"
                   : "Enter send · ? help · ↑↓ history · Esc cancels"

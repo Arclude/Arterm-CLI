@@ -103,6 +103,29 @@ describe("reduceInput", () => {
     expect(reduceInput("abc", "", { backspace: true })).toEqual({ type: "change", value: "ab" });
   });
 
+  it("deletes a whole trailing [Image #N] on one Backspace", () => {
+    // It is the one atom in the prompt the user did not type character by
+    // character — Ctrl+V put it there whole. Ten presses to undo one press
+    // would make detaching feel like a punishment, and a half-eaten
+    // `[Image #` matches nothing, so the image would stay attached while the
+    // line no longer said so.
+    expect(reduceInput("look at this [Image #1]", "", { backspace: true })).toEqual({
+      type: "change",
+      value: "look at this",
+    });
+    expect(reduceInput("[Image #12]", "", { backspace: true })).toEqual({
+      type: "change",
+      value: "",
+    });
+  });
+
+  it("still deletes one char when the line merely mentions an image elsewhere", () => {
+    expect(reduceInput("[Image #1] and more", "", { backspace: true })).toEqual({
+      type: "change",
+      value: "[Image #1] and mor",
+    });
+  });
+
   it("deletes a word on Ctrl+W", () => {
     expect(reduceInput("foo bar", "w", { ctrl: true })).toEqual({
       type: "change",

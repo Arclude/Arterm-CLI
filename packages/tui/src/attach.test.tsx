@@ -203,6 +203,105 @@ describe("a photo dragged onto the prompt reaches the model", () => {
   }, 30_000);
 });
 
+describe("Ctrl+V puts a token in the LINE, and deleting it takes the image back", () => {
+  /**
+   * The clipboard is stubbed through ARTERM_CLIPBOARD_CMD — a real escape
+   * hatch, not a test-only hook: it is how someone on a setup none of the
+   * built-in readers fit points us at their own tool.
+   */
+  let script: string;
+  beforeEach(async () => {
+    script = join(dir, "fake-paste.sh");
+    await fs.writeFile(script, `#!/bin/sh\ncat ${JSON.stringify(join(dir, "clip.png"))}\n`);
+    await fs.chmod(script, 0o755);
+    await fs.writeFile(join(dir, "clip.png"), PNG);
+    process.env.ARTERM_CLIPBOARD_CMD = script;
+  });
+  afterEach(() => {
+    process.env.ARTERM_CLIPBOARD_CMD = undefined;
+  });
+
+  const CTRL_V = "\x16";
+
+  it("shows [Image #1] in the prompt and sends the image with it", async () => {
+    const seen: Seen[] = [];
+    const { stdin, frames, unmount } = render(
+      createElement(App, { session: fakeSession(new EventBus(), seen) }),
+    );
+    const latest = () => frames[frames.length - 1] ?? "";
+    await waitFor(latest, (f) => f.includes("message…"));
+
+    stdin.write("bunda ne var? ");
+    await waitFor(latest, (f) => f.includes("bunda ne var?"));
+    stdin.write(CTRL_V);
+    // The token in the line is the WHOLE of what a terminal can show for a
+    // picture — without it the only evidence Ctrl+V did anything is a chip.
+    await waitFor(latest, (f) => f.includes("[Image #1]"));
+    // And the rail prices it. Asserted because the first version of this
+    // handler called setInput from INSIDE the setAttachments updater: the
+    // token appeared, the image reached the model, and the chip never
+    // rendered — an impure updater React is free to run twice or mid-render.
+    expect(latest()).toContain("attached");
+    stdin.write(ENTER);
+
+    await waitFor(
+      () => JSON.stringify(seen),
+      () => seen.length > 0,
+    );
+    expect(seen[0]?.text).toContain("[Image #1]");
+    expect(seen[0]?.images).toHaveLength(1);
+    expect(Buffer.from(seen[0]?.images?.[0]?.data ?? "", "base64")).toEqual(PNG);
+    unmount();
+  }, 30_000);
+
+  it("backspacing the token off sends no image", async () => {
+    const seen: Seen[] = [];
+    const { stdin, frames, unmount } = render(
+      createElement(App, { session: fakeSession(new EventBus(), seen) }),
+    );
+    const latest = () => frames[frames.length - 1] ?? "";
+    await waitFor(latest, (f) => f.includes("message…"));
+
+    stdin.write("hmm");
+    await waitFor(latest, (f) => f.includes("hmm"));
+    stdin.write(CTRL_V);
+    await waitFor(latest, (f) => f.includes("[Image #1]"));
+    // One backspace, not ten: the token is one thing.
+    stdin.write("\x7f");
+    await waitFor(latest, (f) => !f.includes("[Image #1]"));
+    stdin.write(ENTER);
+
+    await waitFor(
+      () => JSON.stringify(seen),
+      () => seen.length > 0,
+    );
+    expect(seen[0]?.images).toBeUndefined();
+    unmount();
+  }, 30_000);
+
+  it("numbers a second paste, and keeps both", async () => {
+    const seen: Seen[] = [];
+    const { stdin, frames, unmount } = render(
+      createElement(App, { session: fakeSession(new EventBus(), seen) }),
+    );
+    const latest = () => frames[frames.length - 1] ?? "";
+    await waitFor(latest, (f) => f.includes("message…"));
+
+    stdin.write(CTRL_V);
+    await waitFor(latest, (f) => f.includes("[Image #1]"));
+    stdin.write(CTRL_V);
+    await waitFor(latest, (f) => f.includes("[Image #2]"));
+    stdin.write(ENTER);
+
+    await waitFor(
+      () => JSON.stringify(seen),
+      () => seen.length > 0,
+    );
+    expect(seen[0]?.images).toHaveLength(2);
+    unmount();
+  }, 30_000);
+});
+
 describe("what was attached is visible on the user's own row", () => {
   const frame = (node: Parameters<typeof render>[0]): string => {
     const { lastFrame, unmount } = render(node);

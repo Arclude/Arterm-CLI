@@ -215,12 +215,65 @@ function safeDecode(text: string): string {
   }
 }
 
+/**
+ * The token that stands for a pasted image inside the prompt.
+ *
+ * A picture pasted into a terminal has no pixels to show, so it needs a
+ * REPRESENTATION in the line — otherwise the only evidence Ctrl+V did anything
+ * is a chip on a rail, and there is no way to change your mind. With a token in
+ * the text you can see it, place it in the sentence, and delete it.
+ *
+ * It stays in the text that goes to the model on purpose. It is not the user's
+ * own words — we inserted it — but it says WHERE in the sentence the image
+ * belongs, and with several attached it is the only way to write "compare
+ * [Image #1] with [Image #2]" and be understood.
+ */
+export function imagePlaceholder(index: number): string {
+  return `[Image #${index}]`;
+}
+
+/** An image held in the composer, with the token that represents it. */
+export interface PendingAttachment {
+  attachment: Attachment;
+  placeholder: string;
+}
+
+/**
+ * The held images whose token is still in the line.
+ *
+ * Deleting `[Image #1]` is how you take an attachment back, and it has to be
+ * the same gesture as deleting anything else you typed. The text is the truth;
+ * the held list follows it.
+ */
+export function stillMentioned(
+  text: string,
+  held: readonly PendingAttachment[],
+): PendingAttachment[] {
+  return held.filter((h) => text.includes(h.placeholder));
+}
+
 /** A command that writes the clipboard's image to stdout. */
 export interface ClipboardReader {
   command: string;
   args: string[];
   /** What to tell the user to install when nothing here is present. */
   install: string;
+}
+
+/**
+ * An executable the user pointed us at, tried before the built-in readers.
+ *
+ * The escape hatch for a setup none of them fit — a remote session, a tiling
+ * compositor with its own tool, tmux over ssh. It is a PATH to a program that
+ * writes image bytes to stdout, taking no arguments: a command string would
+ * need quoting rules, and a quoting bug here would read as "no image on the
+ * clipboard" rather than as the mistake it is.
+ */
+export function configuredReader(
+  env: NodeJS.ProcessEnv = process.env,
+): ClipboardReader | undefined {
+  const command = env.ARTERM_CLIPBOARD_CMD?.trim();
+  return command ? { command, args: [], install: "ARTERM_CLIPBOARD_CMD" } : undefined;
 }
 
 /** How each platform hands over a picture that is on the clipboard. */
@@ -279,10 +332,12 @@ function runReader(command: string, args: string[]): Promise<ReaderOutcome> {
  * ordinary thing.
  */
 export async function readClipboardImage(
-  readers: readonly ClipboardReader[] = CLIPBOARD_READERS,
+  readers?: readonly ClipboardReader[],
 ): Promise<{ attachment?: Attachment; error?: string }> {
+  const configured = configuredReader();
+  const chain = readers ?? (configured ? [configured, ...CLIPBOARD_READERS] : CLIPBOARD_READERS);
   let anyReaderRan = false;
-  for (const reader of readers) {
+  for (const reader of chain) {
     const outcome = await runReader(reader.command, reader.args);
     if (outcome.kind === "missing") continue;
     // It exists. Whatever happens after this, the answer is about the
@@ -293,7 +348,7 @@ export async function readClipboardImage(
     if (typeof result !== "string") return { attachment: result };
     return { error: result };
   }
-  const installs = readers.map((r) => r.install).join(", ");
+  const installs = chain.map((r) => r.install).join(", ");
   return {
     error: anyReaderRan
       ? "No image on the clipboard."

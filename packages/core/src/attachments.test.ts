@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   MAX_IMAGE_FILE_BYTES,
   attachImageFiles,
+  configuredReader,
   extractImagePaths,
   imageMediaType,
+  imagePlaceholder,
   readClipboardImage,
+  stillMentioned,
 } from "./attachments.js";
 
 /** A real 1×1 PNG — the magic check is the point, so a fake blob proves nothing. */
@@ -147,6 +150,43 @@ describe("attachImageFiles", () => {
     const { attached, rejected } = await attachImageFiles(["ok.png", "bad.png"], dir);
     expect(attached).toHaveLength(1);
     expect(rejected).toHaveLength(1);
+  });
+});
+
+describe("the prompt token that stands for a pasted image", () => {
+  it("numbers from one", () => {
+    expect(imagePlaceholder(1)).toBe("[Image #1]");
+    expect(imagePlaceholder(2)).toBe("[Image #2]");
+  });
+
+  it("keeps only the images the line still mentions", () => {
+    // Deleting `[Image #1]` is how a paste is taken back, so the TEXT is the
+    // truth and the held list follows it — never the other way round.
+    const held = [
+      {
+        attachment: { image: { mediaType: "image/png", data: "a" }, label: "clipboard", bytes: 1 },
+      },
+      {
+        attachment: { image: { mediaType: "image/png", data: "b" }, label: "clipboard", bytes: 2 },
+      },
+    ].map((h, i) => ({ ...h, placeholder: imagePlaceholder(i + 1) }));
+
+    expect(stillMentioned("look at [Image #1] and [Image #2]", held)).toHaveLength(2);
+    expect(stillMentioned("only [Image #2] now", held)).toEqual([held[1]]);
+    expect(stillMentioned("changed my mind", held)).toEqual([]);
+  });
+});
+
+describe("ARTERM_CLIPBOARD_CMD", () => {
+  it("is ignored when unset", () => {
+    expect(configuredReader({})).toBeUndefined();
+    expect(configuredReader({ ARTERM_CLIPBOARD_CMD: "   " })).toBeUndefined();
+  });
+
+  it("becomes a reader when set", () => {
+    const reader = configuredReader({ ARTERM_CLIPBOARD_CMD: "/usr/local/bin/my-paste" });
+    expect(reader?.command).toBe("/usr/local/bin/my-paste");
+    expect(reader?.args).toEqual([]);
   });
 });
 
