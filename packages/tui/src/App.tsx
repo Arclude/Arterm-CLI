@@ -328,9 +328,16 @@ const LiveMessage = memo(function LiveMessage({
   maxRows: number;
   columns: number;
 }): React.ReactElement {
+  // A CONSTANT number of rows: the tail is bottom-pinned and the space above
+  // it is padded with blanks rather than collapsed. This region is redrawn on
+  // every streamed chunk, and one that grows a row as the text arrives leaks
+  // the row it grew past into the terminal's scrollback — the same contract the
+  // composer's frame keeps, for the same reason.
   const lines = text.split("\n");
   const clipped = lines.length > maxRows;
-  const tail = clipped ? lines.slice(-maxRows).join("\n") : text;
+  const shown = clipped ? lines.slice(-maxRows) : lines;
+  const blanks = Math.max(0, maxRows - shown.length);
+  const tail = shown.join("\n");
   return (
     <Box
       width={columns}
@@ -346,10 +353,14 @@ const LiveMessage = memo(function LiveMessage({
         ASSISTANT
       </Text>
       {clipped ? (
-        <Text color="gray" dimColor>
-          … akış devam ediyor (tam metin bitince yukarıda)
+        <Text color={theme.textMuted} dimColor>
+          … streaming (the full text lands above when it finishes)
         </Text>
       ) : null}
+      {Array.from({ length: blanks }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: blank padding rows are positional
+        <Text key={i}> </Text>
+      ))}
       <Markdown text={tail} />
     </Box>
   );
@@ -2852,7 +2863,11 @@ export function App({
   // everything below it is Ink's small in-place dynamic region. Keeping that
   // region far below the terminal height matters: at >= stdout.rows Ink clears
   // and rewrites the whole terminal every render (stutter + broken scrollback).
-  const liveMaxRows = Math.max(4, rows - 16);
+  // Eight rows, not a share of the screen. The old `rows - 16` made the live
+  // region's height depend on the terminal's, so the same stream drew a
+  // different number of rows on a tall window and a short one — and a region
+  // whose height moves is exactly what leaks scrollback.
+  const liveMaxRows = 8;
 
   // Fullscreen: feed the arrow router the freshest state each render (it is
   // memoized once and reads through these refs), and clamp the scroll offset

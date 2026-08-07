@@ -1,10 +1,14 @@
 import type { DiffRow } from "@arterm/core";
 import { memo } from "react";
 import type React from "react";
+import { EntryBoundary } from "./EntryBoundary.js";
 import { Box, Text } from "./ink.js";
 import { Markdown } from "./markdown.js";
-import { truncateDisplay } from "./terminalWidth.js";
+import { padEndDisplay, truncateDisplay } from "./terminalWidth.js";
+import { theme } from "./theme.js";
+import { toolColor, toolGlyph } from "./toolGlyph.js";
 import type { DisplayItem } from "./types.js";
+import { glyphs } from "./uiGlyphs.js";
 
 interface Props {
   items: DisplayItem[];
@@ -43,11 +47,43 @@ function fmtTok(n: number): string {
   return String(n);
 }
 
+/** A tool's duration, at the precision anyone acts on. */
+function fmtMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m${String(Math.round((ms % 60_000) / 1000)).padStart(2, "0")}s`;
+}
+
+/** Output size — the other half of "why did that take four seconds". */
+function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)}KB`;
+  return `${n}B`;
+}
+
 function truncate(text: string, max: number): string {
   const t = text.replace(/\s+/g, " ").trim();
   // Measured in terminal columns: tool arguments carry paths, and a path can
   // hold anything a filesystem allows — emoji included, at two columns each.
   return truncateDisplay(t, max);
+}
+
+/**
+ * Expand hard tabs to 8-column stops.
+ *
+ * A tab advances the terminal's cursor without painting anything, so a row
+ * containing one gets a colourless gap in the middle of its wash and its
+ * padding lands in the wrong column. Expanding up front makes the row's width
+ * something this code can compute.
+ */
+function expandTabs(text: string, stop = 8): string {
+  if (!text.includes("\t")) return text;
+  let out = "";
+  for (const ch of text) {
+    if (ch === "\t") out += " ".repeat(stop - (out.length % stop));
+    else out += ch;
+  }
+  return out;
 }
 
 /** Colour a diff-preview line by its leading marker. */
@@ -69,41 +105,63 @@ function DiffView({
   rows,
   isError,
   outcome,
+  columns = 80,
 }: {
   path?: string;
   rows: DiffRow[];
   isError?: boolean;
   outcome?: string;
+  /** Pane width — the wash has to be painted out to a known column. */
+  columns?: number;
 }): React.ReactElement {
   const width = rows.reduce((m, r) => Math.max(m, r.old ?? 0, r.new ?? 0), 0).toString().length;
   const pad = (n?: number): string =>
     n === undefined ? " ".repeat(width) : String(n).padStart(width);
+  // The gutter is `old new │ ` plus the marker and its space.
+  const gutter = width * 2 + 5;
+  // One column short of the pane on purpose: writing a printable space into
+  // the final column leaves some terminals in pending-wrap, and the reset then
+  // shows up as a visual spill onto the next line.
+  const body = Math.max(8, columns - gutter - 2);
   return (
     <Box flexDirection="column">
-      <Text color={isError ? "red" : "yellow"} bold>
-        {"✎ "}
-        {path ?? "edit"}
+      <Text color={isError ? theme.error : theme.warn} bold>
+        {glyphs.filesChanged} {path ?? "edit"}
       </Text>
       <Box flexDirection="column" paddingLeft={1}>
         {rows.map((r, i) => {
           if (r.kind === "hunk") {
             return (
               // biome-ignore lint/suspicious/noArrayIndexKey: static diff rows, never reordered
-              <Text key={i} color="cyan" dimColor>
+              <Text key={i} color={theme.accent} dimColor>
                 {r.text}
               </Text>
             );
           }
           const marker = r.kind === "add" ? "+" : r.kind === "del" ? "-" : " ";
-          const color = r.kind === "add" ? "green" : r.kind === "del" ? "red" : undefined;
+          const color =
+            r.kind === "add" ? theme.success : r.kind === "del" ? theme.error : undefined;
+          // The wash goes on the TEXT, not the Box: Ink paints a background
+          // only behind actual characters, so the row is padded out with real
+          // spaces to give the colour something to sit on. A hard tab would
+          // advance the cursor without painting, leaving a colourless gap and
+          // desyncing the padding, so tabs are expanded to 8-column stops first.
+          const text = expandTabs(r.text);
+          const wash =
+            theme.supportsBackground && r.kind === "add"
+              ? theme.diffAddBg
+              : theme.supportsBackground && r.kind === "del"
+                ? theme.diffDelBg
+                : undefined;
+          const painted = wash ? padEndDisplay(truncateDisplay(text, body), body) : text;
           return (
             // biome-ignore lint/suspicious/noArrayIndexKey: static diff rows, never reordered
             <Text key={i} wrap="truncate-end">
-              <Text color="gray" dimColor>
+              <Text color={theme.textMuted} dimColor>
                 {pad(r.old)} {pad(r.new)} │{" "}
               </Text>
-              <Text color={color}>
-                {marker} {r.text.length > 0 ? r.text : " "}
+              <Text color={color} {...(wash ? { backgroundColor: wash } : {})}>
+                {marker} {painted.length > 0 ? painted : " "}
               </Text>
             </Text>
           );
@@ -250,6 +308,17 @@ function HelpPanel(): React.ReactElement {
 // — only the cutter layout shifts. This is what keeps scroll fluid on a long
 // transcript (without it, every wheel tick re-parses every message's markdown).
 export const Item = memo(function Item({ item }: { item: DisplayItem }): React.ReactElement {
+  // Wrapped per entry: Ink renders one tree, so a render error in any single
+  // entry unmounts the whole UI — the session still alive underneath, the agent
+  // possibly mid-turn, and a stack trace where the terminal used to be.
+  return (
+    <EntryBoundary label={`a ${item.kind} entry`}>
+      <ItemBody item={item} />
+    </EntryBoundary>
+  );
+});
+
+function ItemBody({ item }: { item: DisplayItem }): React.ReactElement {
   switch (item.kind) {
     case "user":
       return (
@@ -277,10 +346,33 @@ export const Item = memo(function Item({ item }: { item: DisplayItem }): React.R
       }
       // A result row (output, no args) renders only the indented tree line so it
       // reads as the continuation of its call row rather than a second "• name".
+      //
+      // The measurements ride here rather than on the call row: none of them
+      // exist until the tool returns. They were being recorded on the item and
+      // rendered nowhere, so a call that took four seconds and one that took
+      // four milliseconds looked the same, which is the difference between a
+      // slow tool and a slow model.
       if (item.output !== undefined && item.args === undefined) {
+        const meta = [
+          item.ms !== undefined ? fmtMs(item.ms) : "",
+          item.bytes ? fmtBytes(item.bytes) : "",
+          item.tok ? `${fmtTok(item.tok)}t` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         return (
           <Box paddingLeft={2}>
-            <Text color={item.isError ? "red" : "gray"}>└─ {truncate(item.output, 400)}</Text>
+            <Text wrap="truncate-end">
+              <Text color={item.isError ? theme.error : theme.textMuted}>
+                └─ {truncate(item.output, 400)}
+              </Text>
+              {meta ? (
+                <Text color={theme.textMuted} dimColor>
+                  {"  · "}
+                  {meta}
+                </Text>
+              ) : null}
+            </Text>
           </Box>
         );
       }
@@ -305,13 +397,15 @@ export const Item = memo(function Item({ item }: { item: DisplayItem }): React.R
           </Box>
         );
       }
+      // The call row. Its glyph and colour are the tool's own: every call drew
+      // the same `•` in the same yellow, so the shape of a turn — five reads,
+      // an edit, a bash — was unreadable until you read the names.
       return (
         <Box>
-          <Text color={item.isError ? "red" : "yellow"} bold>
-            {"• "}
-            {item.name}
+          <Text color={item.isError ? theme.error : toolColor(item.name)} bold>
+            {toolGlyph(item.name)} {item.name}
           </Text>
-          {item.args ? <Text color="gray"> {truncate(item.args, 60)}</Text> : null}
+          {item.args ? <Text color={theme.textSecondary}> {truncate(item.args, 60)}</Text> : null}
         </Box>
       );
     }
@@ -335,7 +429,7 @@ export const Item = memo(function Item({ item }: { item: DisplayItem }): React.R
         </Box>
       );
   }
-});
+}
 
 export function MessageList({ items, live }: Props): React.ReactElement {
   return (
