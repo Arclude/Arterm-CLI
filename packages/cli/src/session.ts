@@ -10,6 +10,7 @@ import {
   Blackboard,
   type ChatProvider,
   CheckpointStore,
+  Chronicle,
   Container,
   EventBus,
   FleetRegistry,
@@ -35,6 +36,7 @@ import {
   Tokens,
   type Tool,
   applyPatch,
+  chronicleToolCall,
   createBrainArbiterStage,
   createContextStrategy,
   createMemoryStore,
@@ -59,6 +61,7 @@ import {
   taskPath,
 } from "@arterm/core";
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
+import { createChronicleSink } from "./chronicleStore.js";
 import {
   allProviders,
   buildAuthorizeUrl,
@@ -418,6 +421,24 @@ export async function buildSession(opts: SessionOptions): Promise<{
     pipelines.toolCall.before("execute", telemetry.genai.toolStage());
     telemetry.genai.attach(bus);
   }
+
+  // The chronicle: what this run DID, kept apart from what it says it did. Sits
+  // outside the permission stage so a denial is recorded too — see
+  // `chronicleToolCall` for why that costs the duration its precision, and why
+  // the precise one is telemetry's job rather than this one's.
+  // Keyed by the same id as checkpoints and tasks, so the three views of one
+  // session line up without a fourth identifier to reconcile.
+  const chronicle = new Chronicle(
+    createChronicleSink(sessionCheckpointId, (err) => {
+      // Reported, never fatal: this observes the run, it does not run it.
+      process.stderr.write(`⚠ chronicle: ${err instanceof Error ? err.message : String(err)}\n`);
+    }),
+    () => ({ sessionId: sessionCheckpointId }),
+  );
+  container.resolve(Tokens.Pipelines).toolCall.before(
+    "permission",
+    chronicleToolCall(chronicle, () => workingDir.current()),
+  );
 
   // Checkpoints: snapshot a file's contents BEFORE the tool that writes it, so
   // a turn can be undone. Registered `before` the permission stage rather than

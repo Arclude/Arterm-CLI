@@ -652,6 +652,48 @@ Same reason `budgetMeter` is now installed whether or not a ceiling exists —
 spend accounting used to be a side effect of setting a limit, which made every
 unlimited run report zero tokens and zero cost.
 
+## The chronicle: what a run DID, apart from what it said
+
+`core/src/chronicle.ts` is the MAPPING (the envelope, the hash chain, which seam
+becomes which record); `cli/src/chronicleStore.ts` is the MECHANISM (one JSONL
+file per session under `$ARTERM_HOME/chronicle/`). Same split as telemetry and
+the sandbox, for the same reason.
+
+It exists because of the hole the verify section admits: the judge "only reads
+the result. It never sees the diff." Two runs proved the cost — a fleet worker
+rewrote `slug()`, committed it as `docs(…)`, and the judge passed it saying the
+behavior was untouched; and an autonomous run that fixed two real bugs reported
+a mechanism for one of them that had never happened. In both, the run's own
+narration was the only account of the run.
+
+**So the ledger records the seam, not the story.** `ToolResult.path` and `.diff`
+come from the TOOL — and `diff` is explicitly never sent to the model — while
+`contentHashAfter` is read back off the disk. None of the three can be written
+by a model composing a summary. `mutatingDiff.test.ts` already forces every
+writing tool to declare both, so coverage is inherited rather than re-argued.
+
+The chain is WrongStack's: `previousHash` anchored at `GENESIS_HASH`, each
+record's `hash` excluded from its own preimage, one `stableStringify` shared by
+every reader. That encoder is part of the durable format — two subtly different
+ones produce a "tampered" verdict on a file nobody touched. Deletion is the case
+that motivates the chain at all: a removed record leaves every survivor hashing
+correctly, so only the link between them can tell.
+
+Registered `before("permission")`, NOT `before("execute")` where the telemetry
+span goes, because a denied call never reaches `execute` and a denial is exactly
+what a summary drops. The price is that `durationMs` spans the decision too, so
+it is not the latency number — `gen_ai.*` still owns that.
+
+**It never fails a run.** `Chronicle.append` swallows a throwing sink and still
+advances the chain: a record that failed to PERSIST is not a record that was
+tampered with, and letting the sequence skip would make a full disk look like an
+edited ledger. Telemetry's policy, the sandbox's opposite — this observes, it
+does not control.
+
+`arterm chronicle verify` exits 1 on a broken chain, so a script can gate on it.
+Not yet wired: feeding the ledger to the judge, and a watcher that would tell a
+change the agent made from one that appeared underneath it.
+
 ## Measuring: `bench/harbor/`
 
 `bench/harbor/arterm_agent.py` is a Harbor `BaseInstalledAgent` — the adapter

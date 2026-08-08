@@ -53,6 +53,7 @@ import {
 import type { Session } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
+import { runChronicleList, runChronicleShow, runChronicleVerify } from "./chronicleCmd.js";
 import { ArtermUserError } from "./errors.js";
 import { applyAutonomousProfile, printedPrompt } from "./flags.js";
 import { runHeadless, runHeadlessGoal } from "./headless.js";
@@ -960,6 +961,30 @@ async function main(): Promise<void> {
         ...opts,
         json: cmd.optsWithGlobals<{ json?: boolean }>().json,
       });
+    });
+
+  const chronicle = program
+    .command("chronicle")
+    .description("what this session actually did — a tamper-evident tool ledger");
+  chronicle
+    .command("verify", { isDefault: true })
+    .description("recompute the hash chain (exit 1 if it was edited)")
+    .argument("[session]", "session id (default: the most recent)")
+    .action((session: string | undefined, _opts, cmd: Command) => {
+      runChronicleVerify(session, cmd.optsWithGlobals<{ json?: boolean }>().json ?? false);
+    });
+  chronicle
+    .command("show")
+    .description("list the run's tool calls and the files they changed")
+    .argument("[session]", "session id (default: the most recent)")
+    .action((session: string | undefined, _opts, cmd: Command) => {
+      runChronicleShow(session, cmd.optsWithGlobals<{ json?: boolean }>().json ?? false);
+    });
+  chronicle
+    .command("list")
+    .description("sessions that have a ledger, newest first")
+    .action((_opts, cmd: Command) => {
+      runChronicleList(cmd.optsWithGlobals<{ json?: boolean }>().json ?? false);
     });
 
   program
