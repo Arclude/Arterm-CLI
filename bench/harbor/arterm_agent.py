@@ -127,23 +127,36 @@ class ArtermAgent(BaseInstalledAgent):
         )
         remote = "/installed-agent/arterm.tgz"
         await environment.upload_file(self._tarball, remote)
-        # nvm leaves node on PATH only for the shell that loaded it, so the
-        # global bin is symlinked into /usr/local/bin: `run()` is a separate
-        # exec and would otherwise not find `arterm` at all.
+        # nvm leaves node on PATH only for the shell that loaded it, so both
+        # binaries are symlinked into /usr/local/bin: `run()` is a separate exec
+        # and would otherwise not find `arterm` at all.
+        #
+        # `node` is asked for SEPARATELY rather than derived from arterm's path.
+        # They are not siblings: npm's global install puts a launcher in nvm's
+        # `bin/` beside `node`, but `readlink -f` follows it through to the
+        # package's own file — `…/lib/node_modules/arterm-cli/dist/main.js` —
+        # whose directory contains no interpreter. The link pointed at nothing,
+        # and `arterm`'s `#!/usr/bin/env node` shebang failed the install step
+        # with `exit 127: 'node': No such file or directory`.
         await self.exec_as_agent(
             environment,
             command=(
                 "set -euo pipefail; "
                 f"{nvm_node_install_snippet()} && "
                 f"npm install -g {shlex.quote(remote)} && "
-                "readlink -f \"$(command -v arterm)\" > /tmp/arterm-real-path"
+                'readlink -f "$(command -v arterm)" > /tmp/arterm-real-path && '
+                'readlink -f "$(command -v node)" > /tmp/node-real-path'
             ),
         )
+        # `arterm --version` at the end is the assertion, not a courtesy: it is
+        # the only thing here that proves the interpreter, the launcher and the
+        # package resolve together, and it runs in a fresh exec — exactly like
+        # `run()` will.
         await self.exec_as_root(
             environment,
             command=(
                 'ln -sf "$(cat /tmp/arterm-real-path)" /usr/local/bin/arterm && '
-                'ln -sf "$(dirname "$(cat /tmp/arterm-real-path)")/node" /usr/local/bin/node && '
+                'ln -sf "$(cat /tmp/node-real-path)" /usr/local/bin/node && '
                 "arterm --version"
             ),
         )
