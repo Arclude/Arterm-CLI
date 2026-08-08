@@ -10,7 +10,7 @@ process.env.ARTERM_LSP_REQUEST_MS = "800";
 process.env.ARTERM_LSP_DIAGNOSTICS_MS = "500";
 process.env.ARTERM_LSP_INIT_MS = "8000";
 import { rmWithRetry } from "../testTmp.js";
-import { LspClient, uriOf } from "./client.js";
+import { LspClient, uriKey, uriOf } from "./client.js";
 import { FrameReader, frame } from "./protocol.js";
 import { installHint, resolveServerBinary, serverFor } from "./servers.js";
 import {
@@ -380,6 +380,24 @@ describe("uriOf", () => {
     expect(uri.startsWith("file:///")).toBe(true);
     expect(uri).toContain("a%20b.ts");
     expect(uri).not.toContain("a b.ts");
+  });
+});
+
+describe("uriKey", () => {
+  // The platform is a parameter so this is testable off Windows; the bug it
+  // covers is only reachable there, and a fix nothing can exercise is a guess.
+  it("folds case on Windows, where the server renames our drive letter", () => {
+    // What actually happened: we opened `file:///C:/…`, tsserver published
+    // `file:///c:/…`, the exact-string lookup missed, and `lsp_diagnostics`
+    // answered "no diagnostics published" for a file with a type error in it.
+    expect(uriKey("file:///C:/Users/x/a.ts", "win32")).toBe(
+      uriKey("file:///c:/Users/x/a.ts", "win32"),
+    );
+  });
+
+  it("leaves a POSIX uri alone, where two cases are two files", () => {
+    expect(uriKey("file:///tmp/A.ts", "linux")).toBe("file:///tmp/A.ts");
+    expect(uriKey("file:///tmp/A.ts", "linux")).not.toBe(uriKey("file:///tmp/a.ts", "linux"));
   });
 });
 
