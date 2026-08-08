@@ -86,7 +86,25 @@ describe("unifiedDiff output is a patch git will apply", () => {
     await fs.writeFile(join(dir, "f.txt"), before);
     const patch = unifiedDiff(before, after, { fromFile: "f.txt", toFile: "f.txt" }).text;
     await fs.writeFile(join(dir, "p.diff"), patch);
-    execFileSync("git", ["apply", "--unsafe-paths", "-p1", "p.diff"], { cwd: dir });
+    // The subject here is the PATCH, not the platform's newline policy. A Windows
+    // runner has core.autocrlf=true, so `git apply` writes the result back with
+    // CRLF and all six assertions fail on a difference this module never emitted
+    // ("expected 'a\r\nb\r\n' to be 'a\nb\n'"). Pinning it keeps the round trip
+    // measuring the one thing it is for.
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.eol=lf",
+        "apply",
+        "--unsafe-paths",
+        "-p1",
+        "p.diff",
+      ],
+      { cwd: dir },
+    );
     return fs.readFile(join(dir, "f.txt"), "utf8");
   };
 
