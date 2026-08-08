@@ -98,7 +98,9 @@ export function uriKey(uri: string, platform: NodeJS.Platform = process.platform
 
 export class LspClient {
   private diagnostics = new Map<string, LspDiagnostic[]>();
-  private diagnosticWaiters = new Map<string, Array<() => void>>();
+  private diagnosticWaiters = new Map<string, Array<(count: number, publish: number) => void>>();
+  /** How many times the server has published for a document — see `waitForDiagnostics`. */
+  private publishCount = new Map<string, number>();
   private opened = new Set<string>();
   private disposed = false;
 
@@ -152,11 +154,13 @@ export class LspClient {
       if (method !== "textDocument/publishDiagnostics") return;
       const p = params as { uri: string; diagnostics: LspDiagnostic[] };
       const key = uriKey(p.uri);
-      client.diagnostics.set(key, p.diagnostics ?? []);
+      const items = p.diagnostics ?? [];
+      client.diagnostics.set(key, items);
+      client.publishCount.set(key, (client.publishCount.get(key) ?? 0) + 1);
       const waiting = client.diagnosticWaiters.get(key);
       if (waiting) {
         client.diagnosticWaiters.delete(key);
-        for (const wake of waiting) wake();
+        for (const wake of waiting) wake(items.length, client.publishCount.get(key) ?? 1);
       }
     });
 
@@ -204,6 +208,7 @@ export class LspClient {
       this.opened.delete(key);
     }
     this.diagnostics.delete(key);
+    this.publishCount.delete(key);
     this.rpc.notify("textDocument/didOpen", {
       textDocument: { uri, languageId: languageIdFor(lang), version: 1, text },
     });
@@ -218,15 +223,40 @@ export class LspClient {
    * for the notification with a bound. A server that publishes nothing within
    * the bound means "no diagnostics yet", not "no problems" — the caller says
    * which it got.
+   *
+   * The first push is not the answer. `typescript-language-server` publishes an
+   * EMPTY set for a document as soon as it is opened, before it has finished
+   * loading the project, and the real errors follow once it has. Resolving on
+   * that first notification made `lsp_diagnostics` answer "no diagnostics at or
+   * above warning" for a file whose only line was a type error — a clean bill of
+   * health for broken code, which is the one wrong answer this tool must never
+   * give. It surfaced as a CI flake because a loaded runner widens the gap; the
+   * bug was there on every fast machine too, just usually lost the race.
+   *
+   * So an empty FIRST push is provisional and keeps the wait open. What ends it
+   * is anything with content, a SECOND push (the post-load one, empty or not —
+   * the server has settled), or the bound. A genuinely clean file therefore
+   * costs one extra round trip rather than the whole bound.
    */
   async waitForDiagnostics(uri: string): Promise<{ items: LspDiagnostic[]; arrived: boolean }> {
     const key = uriKey(uri);
     const existing = this.diagnostics.get(key);
-    if (existing) return { items: existing, arrived: true };
+    const seen = this.publishCount.get(key) ?? 0;
+    if (existing && (existing.length > 0 || seen > 1)) return { items: existing, arrived: true };
     let timer: NodeJS.Timeout | undefined;
     await new Promise<void>((resolve) => {
+      const settle = (count: number, publish: number): void => {
+        if (count > 0 || publish > 1) {
+          resolve();
+          return;
+        }
+        // A lone empty set: re-arm for the next push and keep the bound running.
+        const again = this.diagnosticWaiters.get(key) ?? [];
+        again.push(settle);
+        this.diagnosticWaiters.set(key, again);
+      };
       const waiters = this.diagnosticWaiters.get(key) ?? [];
-      waiters.push(resolve);
+      waiters.push(settle);
       this.diagnosticWaiters.set(key, waiters);
       timer = setTimeout(resolve, diagnosticWait());
       timer.unref?.();

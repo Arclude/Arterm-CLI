@@ -13,6 +13,10 @@
  *   --mode ok        answers everything (default)
  *   --mode silent    initializes, then never answers a request
  *   --mode nodiag    answers requests but publishes no diagnostics
+ *   --mode slowdiag  publishes an EMPTY set on open, the real one shortly after
+ *                    (what typescript-language-server does before its project
+ *                    is loaded — a client that takes the first push calls
+ *                    broken code clean)
  *   --mode escape    returns a rename edit pointing outside the root
  *   --mode crash     exits as soon as it is initialized
  */
@@ -98,27 +102,42 @@ function handle(message) {
     documents.set(params.textDocument.uri, params.textDocument.text);
     if (mode === "nodiag" || mode === "silent") return;
     const uri = params.textDocument.uri;
+    // `slowdiag` is what typescript-language-server really does: an EMPTY set the
+    // moment the document opens, before the project is loaded, then the errors
+    // once it is. A client that answers on the first push calls broken code
+    // clean — reproduced here so the fix is testable without a real server or a
+    // loaded CI runner to lose the race on.
+    if (mode === "slowdiag") {
+      send({
+        jsonrpc: "2.0",
+        method: "textDocument/publishDiagnostics",
+        params: { uri, diagnostics: [] },
+      });
+    }
     // One error, one warning — enough to exercise severity filtering.
-    send({
-      jsonrpc: "2.0",
-      method: "textDocument/publishDiagnostics",
-      params: {
-        uri,
-        diagnostics: [
-          {
-            range: { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } },
-            severity: 1,
-            code: 2304,
-            message: "Cannot find name 'alpha'.",
-          },
-          {
-            range: { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } },
-            severity: 2,
-            message: "'beta' is declared but never read.",
-          },
-        ],
-      },
-    });
+    const publish = () =>
+      send({
+        jsonrpc: "2.0",
+        method: "textDocument/publishDiagnostics",
+        params: {
+          uri,
+          diagnostics: [
+            {
+              range: { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } },
+              severity: 1,
+              code: 2304,
+              message: "Cannot find name 'alpha'.",
+            },
+            {
+              range: { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } },
+              severity: 2,
+              message: "'beta' is declared but never read.",
+            },
+          ],
+        },
+      });
+    if (mode === "slowdiag") setTimeout(publish, 40);
+    else publish();
     return;
   }
   if (mode === "silent") return; // the whole point: never answers

@@ -284,6 +284,23 @@ describe("the tools", () => {
     expect(res.isError).toBe(true);
   });
 
+  it("does not call broken code clean when the server publishes an EMPTY set first", async () => {
+    // What typescript-language-server actually does: an empty set the moment the
+    // document opens, before the project is loaded, then the errors once it is.
+    // Answering on the first push reported "no diagnostics at or above warning"
+    // for a file whose only line is a type error — a clean bill of health for
+    // broken code, which is the one wrong answer this tool must never give.
+    //
+    // It reached us as a CI flake (a loaded runner widens the gap), but the race
+    // was there on every machine; the fast ones just usually won it.
+    await plantFake("slowdiag");
+    await write("a.ts", "const alpha = 1;\nbeta\n");
+    const res = await lspDiagnosticsTool.execute({ path: "a.ts" }, ctx());
+    expect(res.output).toContain("a.ts:1:7  error [2304]");
+    expect(res.output).not.toContain("no diagnostics");
+    expect(res.isError).toBe(true);
+  });
+
   it("filters to errors when asked", async () => {
     await plantFake("ok");
     await write("a.ts", "const alpha = 1;\nbeta\n");
