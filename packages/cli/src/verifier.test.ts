@@ -1,6 +1,6 @@
-import { type ArtermConfig, type ChatProvider, defaultConfig } from "@arterm/core";
+import { type ArtermConfig, type ChatProvider, Chronicle, defaultConfig } from "@arterm/core";
 import { describe, expect, it } from "vitest";
-import { createJudgeRun, createVerifier, verifyEnabled } from "./verifier.js";
+import { createJudgeRun, createVerifier, evidenceBlock, verifyEnabled } from "./verifier.js";
 
 function config(over: Partial<ArtermConfig> = {}): ArtermConfig {
   return { ...defaultConfig(), ...over };
@@ -141,5 +141,75 @@ describe("createVerifier", () => {
     // The judge would have rejected; with judge:false only the command decides.
     const res = await verify?.({ goal: 'verify: node -e "process.exit(0)"', claim: "done" });
     expect(res).toMatchObject({ pass: true, by: "command" });
+  });
+});
+
+describe("the ledger reaches the judge", () => {
+  /** A chronicle with one recorded write, sealed the way a run seals it. */
+  const withWrite = (): Chronicle => {
+    const chronicle = new Chronicle({ write: () => {} }, () => ({ sessionId: "s" }));
+    chronicle.append({
+      eventType: "tool.executed",
+      outcome: "success",
+      scope: { agentId: "r1-1" },
+      toolName: "write",
+      change: { path: "slug.ts", added: 4, removed: 2, contentHashAfter: "a".repeat(64) },
+    });
+    return chronicle;
+  };
+
+  it("names the file, the counts, the digest and the worker", () => {
+    const block = evidenceBlock(withWrite());
+    expect(block).toContain("slug.ts");
+    expect(block).toContain("+4/-2");
+    expect(block).toContain("aaaaaaaaaaaa");
+    expect(block).toContain("by r1-1");
+  });
+
+  it("says nothing at all when the run wrote nothing", () => {
+    // An empty "what was recorded" section reads as "nothing happened", which is
+    // false for a review or a question — runs that legitimately write no files.
+    expect(evidenceBlock(new Chronicle({ write: () => {} }))).toBeUndefined();
+    expect(evidenceBlock(undefined)).toBeUndefined();
+  });
+
+  it("counts denied calls, which the claim will not mention", () => {
+    const chronicle = withWrite();
+    chronicle.append({
+      eventType: "tool.denied",
+      outcome: "denied",
+      scope: {},
+      toolName: "bash",
+    });
+    expect(evidenceBlock(chronicle)).toContain("1 tool call(s) were DENIED");
+  });
+
+  it("puts it in the prompt the judge is actually given", async () => {
+    // The end of the wire, not the middle: a block built and never rendered
+    // would pass every assertion above.
+    let prompt = "";
+    const provider: ChatProvider = {
+      id: "stub",
+      supportsNativeTools: () => true,
+      listModels: async () => [],
+      async *chat(req) {
+        prompt = req.messages.map((m) => String(m.content)).join("\n");
+        yield {
+          type: "tool_call",
+          call: { id: "1", name: "submit_verdict", arguments: { pass: true, summary: "ok" } },
+        };
+        yield { type: "done" };
+      },
+    };
+    const verify = createVerifier({ ...deps(provider), chronicle: withWrite() });
+    // `createVerifier` returns undefined when verification is switched off; the
+    // default config has it on, so this narrows rather than asserts behaviour.
+    if (!verify) throw new Error("verification is on by default");
+    await verify({ goal: "g", claim: "I changed nothing." });
+
+    expect(prompt).toContain("WHAT WAS RECORDED");
+    expect(prompt).toContain("slug.ts");
+    // …and the judge is told what a disagreement means, or the evidence is decoration.
+    expect(prompt).toContain("that IS the concrete evidence a rejection needs");
   });
 });

@@ -1,6 +1,7 @@
 import {
   type ArtermConfig,
   type ChatProvider,
+  type Chronicle,
   type ContextStrategy,
   type JudgeRun,
   PermissionManager,
@@ -38,6 +39,48 @@ export interface VerifierDeps {
   context: () => ContextStrategy | undefined;
   cwd: string;
   config: ArtermConfig;
+  /**
+   * The run's ledger. Supplied, not required: a verifier built without one is
+   * exactly what it was before — the judge reading the result and nothing else.
+   */
+  chronicle?: Chronicle;
+}
+
+/** How many files the evidence block names before it starts counting instead. */
+const MAX_EVIDENCE_FILES = 40;
+
+/**
+ * The ledger as a block the judge can read against the claim.
+ *
+ * Returns undefined when the run recorded no writes at all — an empty section
+ * headed "what was recorded" invites the reading that nothing happened, when
+ * the truthful statement is that this ledger covers file writes and a run can
+ * legitimately have none (a review, a question, a build).
+ *
+ * Truncation is stated rather than silent, the same rule `roundClaim` follows:
+ * a list that quietly stops at 40 reads as a complete account of 40 files.
+ */
+export function evidenceBlock(chronicle: Chronicle | undefined): string | undefined {
+  if (!chronicle) return undefined;
+  const files = chronicle.changed();
+  if (files.length === 0) return undefined;
+  const shown = files.slice(0, MAX_EVIDENCE_FILES);
+  const lines = shown.map((f) => {
+    const who = f.by.length > 0 ? ` by ${f.by.join(", ")}` : "";
+    // "gone" rather than an omitted column: a file written and then deleted is
+    // a different fact from one the ledger has no digest for.
+    const digest = f.contentHashAfter ? f.contentHashAfter.slice(0, 12) : "gone";
+    const writes = f.writes > 1 ? ` (${f.writes} writes)` : "";
+    return `- ${f.path}  +${f.added}/-${f.removed}  ${digest}${writes}${who}`;
+  });
+  if (files.length > shown.length) {
+    lines.push(`- …and ${files.length - shown.length} more file(s) not listed`);
+  }
+  const denied = chronicle.deniedCount();
+  if (denied > 0) {
+    lines.push(`- ${denied} tool call(s) were DENIED by the permission policy and never ran`);
+  }
+  return lines.join("\n");
 }
 
 /** Whether verification is on, honoring the superseded `autonomy.verify` flag. */
@@ -115,5 +158,12 @@ export function createVerifier(deps: VerifierDeps): Verifier | undefined {
   if (deps.config.verify?.judge !== false) {
     parts.push(makeJudgeVerifier({ run: createJudgeRun(deps) }));
   }
-  return makeCompositeVerifier(parts);
+  const composite = makeCompositeVerifier(parts);
+  // Decorated here rather than inside the composite: the ledger is a fact about
+  // THIS session, and `core` has no way to reach it. The command gate ignores
+  // the field; only `buildJudgeInstruction` renders it.
+  return async (req) => {
+    const evidence = evidenceBlock(deps.chronicle);
+    return composite(evidence ? { ...req, evidence } : req);
+  };
 }

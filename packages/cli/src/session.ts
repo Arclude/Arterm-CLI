@@ -975,6 +975,9 @@ export async function buildSession(opts: SessionOptions): Promise<{
     context: () => createContextStrategy(config),
     cwd,
     config,
+    // The judge stops being the only account of the run: it now reads the
+    // claim against what the tool layer recorded.
+    chronicle,
   });
 
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
