@@ -51,10 +51,9 @@ export function runChronicleVerify(sessionId: string | undefined, json: boolean)
   if (json) {
     process.stdout.write(`${JSON.stringify({ session, file, unreadable, ...result })}\n`);
   } else if (result.ok) {
+    const skipped = unreadable > 0 ? `  ⚠ ${unreadable} unreadable line(s) skipped\n` : "";
     process.stdout.write(
-      `✓ chain intact — ${result.entries} record(s), head ${result.lastHash.slice(0, 12)}…\n` +
-        `  ${file}\n` +
-        (unreadable > 0 ? `  ⚠ ${unreadable} unreadable line(s) skipped\n` : ""),
+      `✓ chain intact — ${result.entries} record(s), head ${result.lastHash.slice(0, 12)}…\n  ${file}\n${skipped}`,
     );
   } else {
     process.stdout.write(`✗ chain broken at record ${result.brokenAt}\n  ${result.reason}\n`);
@@ -80,13 +79,14 @@ export function runChronicleShow(sessionId: string | undefined, json: boolean): 
     return;
   }
   const changed = records.filter((r) => r.change);
+  const chain = result.ok
+    ? `✓ chain intact (head ${result.lastHash.slice(0, 12)}…)\n`
+    : `✗ chain broken at ${result.brokenAt}: ${result.reason}\n`;
+  const skipped = unreadable > 0 ? `⚠ ${unreadable} unreadable line(s) skipped\n` : "";
   process.stdout.write(
-    `${session}  ${records.length} record(s), ${changed.length} file change(s)\n\n` +
-      `${records.map(line).join("\n")}\n\n` +
-      (result.ok
-        ? `✓ chain intact (head ${result.lastHash.slice(0, 12)}…)\n`
-        : `✗ chain broken at ${result.brokenAt}: ${result.reason}\n`) +
-      (unreadable > 0 ? `⚠ ${unreadable} unreadable line(s) skipped\n` : ""),
+    `${session}  ${records.length} record(s), ${changed.length} file change(s)\n\n${records
+      .map(line)
+      .join("\n")}\n\n${chain}${skipped}`,
   );
   if (!result.ok) process.exitCode = 1;
 }

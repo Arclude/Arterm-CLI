@@ -64,8 +64,9 @@ describe("the chain", () => {
     chronicle.append({ eventType: "tool.executed", outcome: "success", scope: {} });
 
     const tampered = records.map((r) => ({ ...r }));
-    // biome-ignore lint/style/noNonNullAssertion: the record was just appended
-    tampered[0]!.toolName = "read";
+    const first = tampered[0];
+    if (!first) throw new Error("no record to tamper with");
+    first.toolName = "read";
     const result = verifyChain(tampered);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");

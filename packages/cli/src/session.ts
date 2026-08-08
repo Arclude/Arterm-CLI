@@ -61,7 +61,6 @@ import {
   taskPath,
 } from "@arterm/core";
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
-import { createChronicleSink } from "./chronicleStore.js";
 import {
   allProviders,
   buildAuthorizeUrl,
@@ -108,6 +107,7 @@ import {
   toolHelpTool,
 } from "@arterm/tools";
 import type { Session } from "@arterm/tui";
+import { createChronicleSink } from "./chronicleStore.js";
 import { armAutonomous } from "./flags.js";
 import { startOtel } from "./otel.js";
 import { createVerifier } from "./verifier.js";
