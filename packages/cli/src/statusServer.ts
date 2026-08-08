@@ -8,8 +8,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { ARTERM_HOME } from "@arterm/core";
 import type { Session } from "@arterm/tui";
 import { StatusState, control } from "./statusState.js";
 
@@ -17,11 +17,24 @@ import { StatusState, control } from "./statusState.js";
  * Loopback-only HTTP + SSE status server for the Arterm desktop app.
  * Protocol contract: docs/desktop-integration.md (v1). Serves a live snapshot,
  * a stamped event stream, and a control endpoint; announces itself via a
- * discovery file at `~/.arterm/status/<pid>-<sessionId>.json`. One process may
- * host several sessions, each with its own server and discovery file.
+ * discovery file at `$ARTERM_HOME/status/<pid>-<sessionId>.json` (which is
+ * `~/.arterm/status` unless redirected). One process may host several sessions,
+ * each with its own server and discovery file.
+ *
+ * The directory comes from `ARTERM_HOME`, not from `homedir()`, and that is the
+ * difference between a test and a mess: `statusServer.test.ts` CREATES discovery
+ * files and asserts they exist, so with the path computed here the suite wrote
+ * into the developer's own `~/.arterm/status` on every run. It cleaned up after
+ * itself, which is exactly why nobody noticed — the same shape as the
+ * `config.json` overwrite that `configIsolation.test.ts` was written for, and
+ * which that guard did not cover because it only knew about one file.
+ *
+ * It also decides whether a confined run can test itself at all: `~/.arterm` is
+ * not one of the sandbox's write roots, so under `--autonomous` this path failed
+ * every status test until it followed the redirect.
  */
 
-export const STATUS_DIR = join(homedir(), ".arterm", "status");
+export const STATUS_DIR = join(ARTERM_HOME, "status");
 const MAX_CONTROL_BODY = 64 * 1024;
 
 /** A running status server. */

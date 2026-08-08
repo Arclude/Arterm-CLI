@@ -120,6 +120,20 @@ the fallback is the thing the short-circuit exists for, and only the log shows i
   "proposed no work". Keep the guard test; a lost `vitest.config.ts` is a
   one-line change whose only symptom is somebody's config changing under them.
 
+- **So `homedir()` belongs to exactly one file**, and `configIsolation.test.ts`
+  scans every package's `src/` to prove it. The redirect above is worthless to
+  code that never consults it: `statusServer.ts` built
+  `join(homedir(), ".arterm", "status")` itself, and `statusServer.test.ts`
+  CREATES discovery files there and asserts they exist — so the suite wrote into
+  the developer's real `~/.arterm/status` on every run, and deleted them
+  afterwards, which is why the only trace was an mtime. The first guard could not
+  see it, because it knew about one FILE while the mistake is a CLASS. The scan
+  matches the import rather than the word, so the sentence explaining the rule
+  does not trip it, and it names the offending path instead of counting it. It
+  also decides whether a confined run can test itself at all: `~/.arterm` is not
+  one of the sandbox's write roots, so under `--autonomous` a path built from
+  `homedir()` is not merely unredirected, it is unwritable.
+
 ## How-to: add a tool
 
 1. Create `packages/tools/src/<name>.ts` implementing the `Tool` interface from
