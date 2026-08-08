@@ -123,6 +123,14 @@ export interface ChatRequest {
 
 export type ChatChunk =
   | { type: "text"; delta: string }
+  /**
+   * The model's reasoning, when the backend streams it separately from the
+   * answer. Its own chunk kind rather than more `text`, because the two have
+   * opposite fates: this is displayed and metered, and then DROPPED. Folding it
+   * into the answer would put the model's working notes into the transcript, the
+   * next request's history, and every compaction after that.
+   */
+  | { type: "thinking"; delta: string }
   | { type: "tool_call"; call: ToolCall }
   | { type: "done"; usage?: TokenUsage };
 

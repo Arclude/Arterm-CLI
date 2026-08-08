@@ -236,6 +236,36 @@ The accounting was already right before the markers existed: `cache_read` and
 because a read costs ~10% of the input rate and merging them overstates an agent
 loop — which is mostly cache hits — by close to an order of magnitude.
 
+### Reasoning is a THIRD chunk kind, and it is never recorded
+
+`ChatChunk` has `thinking` beside `text` because the two have opposite fates.
+`text` accumulates into the assistant message, which becomes the transcript, the
+next request's history, and every later compaction. Reasoning is displayed,
+metered, and DROPPED — folding it into the answer would re-send the model's
+working notes for the rest of the session, and re-bill them each turn.
+
+`openai-compat.ts` reads `reasoning_content`, falling back to `reasoning`. That
+field is not in the OpenAI spec: it is the convention DeepSeek introduced and
+Zhipu/GLM, Moonshot and most compatible reasoning backends copied, so it arrives
+on the same endpoint under one of two names and is simply absent otherwise.
+Reading a field a server never sends costs nothing — NOT reading it cost the
+user twice: billed as output tokens, and invisible.
+
+That invisibility was the actual bug. A backend streaming only
+`reasoning_content` sends no answer text for as long as it thinks, so the screen
+showed a spinner and nothing else — indistinguishable from a hung request.
+`ThinkingPreview` says WHAT is happening, and it obeys the same constant-height
+contract as `LiveMessage`: the region is redrawn on every chunk, so one that
+grows a row leaks the row it grew past into the terminal's scrollback.
+`wrap="truncate-end"` is part of that contract, since a wrapped long line is two
+rows and not one. One region or the other renders, never both.
+
+Anthropic's extended thinking is deliberately NOT wired yet. It is not the same
+feature: with tools, the API requires the assistant's thinking blocks be passed
+back with their signatures, which means reasoning that *is* recorded — the exact
+inverse of the rule above — and getting it wrong fails the request rather than
+degrading quietly.
+
 ## Kernel: the agent loop is pipeline-driven
 
 `packages/core/src/kernel/` holds a tiny DI layer that the agent loop runs on:

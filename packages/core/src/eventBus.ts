@@ -13,6 +13,12 @@ import type {
 export type AgentEvent =
   | { type: "turn_start" }
   | { type: "text_delta"; delta: string }
+  /**
+   * The model reasoning before it answers. Separate from `text_delta` because
+   * it never becomes part of the reply: the UI shows it while it streams, and
+   * nothing records it.
+   */
+  | { type: "thinking_delta"; delta: string }
   | { type: "assistant_message"; message: Message }
   | { type: "tool_call"; call: ToolCall }
   | {

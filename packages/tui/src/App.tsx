@@ -377,6 +377,65 @@ const LiveMessage = memo(function LiveMessage({
   );
 });
 
+/** Rows of reasoning kept on screen. Small: it is context, not the answer. */
+const THINKING_ROWS = 3;
+
+/**
+ * The model's reasoning while it streams, and only while it streams — the
+ * answer replaces it, and nothing records it.
+ *
+ * It exists because a reasoning model that sends `reasoning_content` and no
+ * `content` for thirty seconds is indistinguishable from a hung request. The
+ * spinner says something is happening; this says WHAT.
+ *
+ * Constant height, like `LiveMessage` and for the same reason: this region is
+ * redrawn on every chunk, and one that grows a row as text arrives leaks that
+ * row into the terminal's scrollback. `truncate-end` is part of that contract —
+ * a wrapped long line would be two rows, not one.
+ */
+const ThinkingPreview = memo(function ThinkingPreview({
+  text,
+  columns,
+}: {
+  text: string;
+  columns: number;
+}): React.ReactElement {
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  const shown = lines.slice(-THINKING_ROWS);
+  const blanks = Math.max(0, THINKING_ROWS - shown.length);
+  return (
+    <Box
+      width={columns}
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={theme.textMuted}
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      paddingLeft={1}
+    >
+      <Text color={theme.textMuted} dimColor bold>
+        THINKING
+      </Text>
+      {Array.from({ length: blanks }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: blank padding rows are positional
+        <Text key={i}> </Text>
+      ))}
+      {shown.map((line, i) => (
+        <Text
+          // biome-ignore lint/suspicious/noArrayIndexKey: a scrolling tail is positional
+          key={i}
+          color={theme.textMuted}
+          dimColor
+          wrap="truncate-end"
+        >
+          {line}
+        </Text>
+      ))}
+    </Box>
+  );
+});
+
 /**
  * Fullscreen mode's managed, in-app scrollable transcript. The alternate screen
  * has no scrollback for the chat to ride, so we window it ourselves with two
@@ -617,6 +676,9 @@ export function App({
   // Streamed assistant text for the current round, shown live below the committed
   // transcript and cleared once the full message is recorded (assistant_message).
   const [live, setLive] = useState("");
+  // The model's reasoning, while it streams. Held apart from `live` because it
+  // is never committed: it is shown, then dropped when the answer lands.
+  const [thinking, setThinking] = useState("");
   const [input, setInput] = useState("");
   // Images waiting to ride out with the next prompt (Ctrl+V). Mirrored into a
   // ref for the same reason `queue` is: the submit path reads it from inside a
@@ -897,6 +959,20 @@ export function App({
       }, LIVE_FLUSH_MS);
     }
   }, []);
+  // Reasoning rides the same throttle for the same reason, on its own buffer:
+  // a reasoning model emits far more of it than answer, and a repaint per token
+  // is what made streaming stutter in the first place.
+  const thinkBufRef = useRef("");
+  const thinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appendThinking = useCallback((delta: string) => {
+    thinkBufRef.current += delta;
+    if (thinkTimerRef.current === null) {
+      thinkTimerRef.current = setTimeout(() => {
+        thinkTimerRef.current = null;
+        setThinking(thinkBufRef.current);
+      }, LIVE_FLUSH_MS);
+    }
+  }, []);
   const resetLive = useCallback(() => {
     liveBufRef.current = "";
     if (liveTimerRef.current !== null) {
@@ -904,6 +980,12 @@ export function App({
       liveTimerRef.current = null;
     }
     setLive("");
+    thinkBufRef.current = "";
+    if (thinkTimerRef.current !== null) {
+      clearTimeout(thinkTimerRef.current);
+      thinkTimerRef.current = null;
+    }
+    setThinking("");
   }, []);
   useEffect(() => resetLive, [resetLive]);
 
@@ -961,6 +1043,10 @@ export function App({
           // Accumulate streamed tokens for a throttled live preview; replaced by
           // the committed assistant_message once the round finishes.
           appendLive(event.delta);
+          break;
+        case "thinking_delta":
+          setStatus("thinking");
+          appendThinking(event.delta);
           break;
         case "assistant_message": {
           const text = event.message.content.trim();
@@ -1593,7 +1679,7 @@ export function App({
         }
       }
     });
-  }, [session, push, appendLive, resetLive]);
+  }, [session, push, appendLive, appendThinking, resetLive]);
 
   // Kick off an autonomous run if launched with --goal (start() guards re-entry).
   useEffect(() => {
@@ -3273,7 +3359,14 @@ export function App({
         columns={columns}
         snapKey={`${staticGen}:${items.length}:${rows}:${columns}`}
       >
-        {live ? <LiveMessage text={live} maxRows={liveMaxRows} columns={columns} /> : null}
+        {/* One or the other, never both: two live regions would double the
+            height this area is allowed to occupy. Once the answer starts the
+            reasoning is over, and the answer is what the reader wants. */}
+        {live ? (
+          <LiveMessage text={live} maxRows={liveMaxRows} columns={columns} />
+        ) : thinking ? (
+          <ThinkingPreview text={thinking} columns={columns} />
+        ) : null}
         {footer}
       </AnchoredRegion>
     </>

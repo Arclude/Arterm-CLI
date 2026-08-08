@@ -1389,3 +1389,49 @@ describe("concurrent tool calls", () => {
     expect(log).toEqual(["start:r1", "end:r1", "start:gate", "end:gate", "start:r2", "end:r2"]);
   });
 });
+
+describe("streamed reasoning", () => {
+  it("announces thinking without ever recording it", async () => {
+    // The rule the chunk kind exists for. `text` becomes the assistant message,
+    // which becomes the transcript, the next request's history, and every later
+    // compaction — so reasoning that leaked into it would be re-sent, re-billed
+    // and re-summarized for the rest of the session.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider([
+      [
+        { type: "thinking", delta: "the user wants the parser" },
+        { type: "text", delta: "here it is" },
+      ],
+    ]);
+    const agent = makeAgent(provider, bus);
+    await agent.run("go");
+
+    expect(events.filter((e) => e.type === "thinking_delta")).toHaveLength(1);
+    const assistant = agent.history.filter((m) => m.role === "assistant");
+    expect(assistant.map((m) => m.content)).toEqual(["here it is"]);
+    expect(JSON.stringify(agent.history)).not.toContain("the user wants the parser");
+  });
+
+  it("ends the turn on the answer, not on the reasoning that preceded it", async () => {
+    // A `thinking` chunk must not read as "the model produced no text", which
+    // is the condition the loop breaks on. `run()` records rather than returns,
+    // so the committed assistant message is the observable.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider([
+      [
+        { type: "thinking", delta: "thinking hard" },
+        { type: "text", delta: "done" },
+      ],
+    ]);
+    const agent = makeAgent(provider, bus);
+    await agent.run("go");
+
+    const committed = events.filter((e) => e.type === "assistant_message");
+    expect(committed).toHaveLength(1);
+    expect(agent.history.at(-1)?.content).toBe("done");
+    // One provider call: the reasoning did not send the loop round again.
+    expect(provider.calls).toBe(1);
+  });
+});

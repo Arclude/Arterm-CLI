@@ -36,6 +36,19 @@ interface OpenAIStreamChunk {
   choices?: Array<{
     delta?: {
       content?: string;
+      /**
+       * Reasoning streamed beside the answer. Not in the OpenAI spec — it is
+       * the convention DeepSeek introduced and Zhipu/GLM, Moonshot and most
+       * OpenAI-compatible reasoning backends copied, so it arrives on the same
+       * endpoint under one of two names and is simply absent otherwise.
+       *
+       * Reading a field a server never sends costs nothing. NOT reading it cost
+       * the user the tokens twice over: billed as output, and invisible — a
+       * reasoning model streaming only `reasoning_content` for thirty seconds
+       * looked exactly like a hung request.
+       */
+      reasoning_content?: string;
+      reasoning?: string;
       tool_calls?: OpenAIDeltaToolCall[];
     };
   }>;
@@ -169,6 +182,12 @@ export class OpenAICompatProvider implements ChatProvider {
         guard.reset();
         const obj = chunk as OpenAIStreamChunk;
         const delta = obj.choices?.[0]?.delta;
+        // Reasoning first: a backend that sends both in one delta produced the
+        // thinking before the answer, and the display should say so.
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+        if (typeof reasoning === "string" && reasoning.length > 0) {
+          yield { type: "thinking", delta: reasoning };
+        }
         if (typeof delta?.content === "string") {
           yield { type: "text", delta: delta.content };
         }

@@ -1084,6 +1084,11 @@ export class Agent {
       if (chunk.type === "text") {
         text += chunk.delta;
         this.bus.emit({ type: "text_delta", delta: chunk.delta });
+      } else if (chunk.type === "thinking") {
+        // Announced, never accumulated. `text` becomes the assistant message —
+        // the transcript, the next request's history, every later compaction —
+        // and the model's working notes belong in none of those.
+        this.bus.emit({ type: "thinking_delta", delta: chunk.delta });
       } else if (chunk.type === "tool_call") {
         calls.push(chunk.call);
         this.bus.emit({ type: "tool_call", call: chunk.call });

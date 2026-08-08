@@ -98,3 +98,61 @@ describe("OpenAICompatProvider.chat resilience", () => {
     });
   });
 });
+
+describe("reasoning streamed beside the answer", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const drain = async (events: object[]): Promise<ChatChunk[]> => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => sseResponse(events));
+    const chunks: ChatChunk[] = [];
+    for await (const c of provider().chat({ model: "local", messages: [] })) chunks.push(c);
+    return chunks;
+  };
+
+  it("surfaces reasoning_content as its own kind, never as answer text", async () => {
+    // DeepSeek's field name, which Zhipu/GLM and most OpenAI-compatible
+    // reasoning backends copied. It was being dropped on the floor: billed as
+    // output tokens, shown nowhere.
+    const chunks = await drain([
+      { choices: [{ delta: { reasoning_content: "let me check the file" } }] },
+      { choices: [{ delta: { content: "the answer" } }] },
+    ]);
+    expect(chunks).toEqual([
+      { type: "thinking", delta: "let me check the file" },
+      { type: "text", delta: "the answer" },
+      { type: "done", usage: undefined },
+    ]);
+  });
+
+  it("accepts the other spelling gateways use", async () => {
+    const chunks = await drain([{ choices: [{ delta: { reasoning: "hmm" } }] }]);
+    expect(chunks[0]).toEqual({ type: "thinking", delta: "hmm" });
+  });
+
+  it("puts the reasoning before the answer when one delta carries both", async () => {
+    // The model thought first; the display should say so.
+    const chunks = await drain([
+      { choices: [{ delta: { reasoning_content: "because", content: "so" } }] },
+    ]);
+    expect(chunks.slice(0, 2)).toEqual([
+      { type: "thinking", delta: "because" },
+      { type: "text", delta: "so" },
+    ]);
+  });
+
+  it("changes nothing for a server that never sends it", async () => {
+    // The whole feature has to be free for LM Studio, vLLM and every
+    // non-reasoning model — reading a field nobody sends must be a no-op, not
+    // an empty chunk per delta.
+    const chunks = await drain([{ choices: [{ delta: { content: "plain" } }] }]);
+    expect(chunks).toEqual([
+      { type: "text", delta: "plain" },
+      { type: "done", usage: undefined },
+    ]);
+  });
+
+  it("skips an empty reasoning delta rather than emitting a blank chunk", async () => {
+    const chunks = await drain([{ choices: [{ delta: { reasoning_content: "" } }] }]);
+    expect(chunks.some((c) => c.type === "thinking")).toBe(false);
+  });
+});
