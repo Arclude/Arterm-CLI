@@ -25,10 +25,14 @@ const OUTCOME_GLYPH: Record<string, string> = {
   denied: "⊘",
 };
 
-/** One record as a line: what ran, what it touched, what came of it. */
+/** One record as a line: WHO ran what, what it touched, what came of it. */
 function line(record: ChronicleRecord): string {
   const glyph = OUTCOME_GLYPH[record.outcome] ?? "·";
-  const head = `${glyph} ${String(record.sequence).padStart(3)}  ${record.toolName ?? "—"}`;
+  // The worker is named on the row, not left in the JSON: in a fan-out "who
+  // changed this file" is the whole question, and three writes attributed to
+  // one session id answer it no better than the summary this replaces.
+  const who = record.scope.agentId ? `${record.scope.agentId} ` : "";
+  const head = `${glyph} ${String(record.sequence).padStart(3)}  ${who}${record.toolName ?? "—"}`;
   if (!record.change) return head;
   const { path, added, removed, contentHashAfter } = record.change;
   // The hash is the part that is not the tool's word for it, so it is shown
