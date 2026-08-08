@@ -413,13 +413,24 @@ done" costs one more lap of an already-bounded loop.
 
 **A finished fan-out run reports the CLAIM it was gated on**, not `verdict.note`.
 The note is one word by design, so the summary field was at best `"DONE"`; the
-claim adds a ✓/✗ line per worker. `roundClaim` takes the ASSIGNMENT map rather
+claim adds a ✓/✗ line per worker. `recordRound` takes the ASSIGNMENT map rather
 than reading `result.task`, because a team member's `task` is the assignment
 buried under its private-memory recall and the blackboard brief — quoting its
 first 120 characters produced `✗ upper-writer: [Your private memory — earlier
 rounds, visible only to you]`, in the summary AND in what the judge was asked to
-check. Note what the summary still is: the LAST round's claim, so a multi-round
-run names the members of the round that finished it and not of the ones before.
+check. Parallel mode passes no map, because there `decompose()` hands its
+subtasks to the fleet unwrapped and the task IS the assignment.
+
+**The claim is the whole run, not the round that ended it.** Rows accumulate in
+`roundRows` as each round lands, and `roundClaim()` renders all of them — the
+last round's claim alone reported a six-round team run as the work of whoever
+ran last, hiding both the earlier members and any ✗ among them from the summary
+and from the gate. One round prints bare rows; several get `Round N:` labels,
+because "who did what" is only answerable together with "and when". The budget
+is `MAX_CLAIM_ROWS` and it drops whole rounds from the FRONT, keeping the tail a
+reader wants first, and it SAYS how many it dropped — parallel mode's rounds are
+bounded by `maxSteps` (200), so this truncates in practice, and a silent one
+would read as a run that did less than it did.
 
 ## The sandbox: the one control `--autonomous` adds
 

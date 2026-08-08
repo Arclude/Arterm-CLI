@@ -193,6 +193,18 @@ export class AutonomyEngine {
   private goal = "";
   private step = 0;
   private idleStreak = 0;
+  /**
+   * One entry per completed fan-out round: that round's ✓/✗ worker rows.
+   *
+   * What a finished run claims is the WHOLE run, not the round that happened to
+   * end it. Quoting only the last round made a six-round team run report the one
+   * member that ran last — rounds 1..N-1 vanished from the summary AND from the
+   * text the judge was gated on, so a run whose real work happened in round 2
+   * asked the gate to check a single line about round 6. Rows are formatted as
+   * each round lands rather than holding the results, so the history costs a few
+   * hundred bytes instead of every sub-agent's full output.
+   */
+  private roundRows: Array<{ round: number; rows: string[] }> = [];
   private pendingSteer?: string;
   private stopped = false;
   private current?: AbortController;
@@ -393,9 +405,9 @@ export class AutonomyEngine {
   }
 
   /**
-   * What a fan-out round claims: the leader's integration text, plus a per-worker
-   * ✓/✗ line. The reviewer needs to see that a slot failed — the leader's prose
-   * routinely reads as if everything landed.
+   * Remember one finished round as ✓/✗ worker rows. The reviewer needs to see
+   * that a slot failed — the leader's prose routinely reads as if everything
+   * landed.
    *
    * `assigned` is the ASSIGNMENT, and it has to be passed in rather than read off
    * the result. A team member's `task` field is the whole assembled prompt — its
@@ -404,20 +416,57 @@ export class AutonomyEngine {
    * `✗ upper-writer: [Your private memory — earlier rounds, visible only to you]`,
    * which is not what anyone meant by "what this worker was asked to do". That
    * text goes to the JUDGE as well as to the summary, so the gate was being
-   * asked to check a claim that described the prompt scaffolding.
+   * asked to check a claim that described the prompt scaffolding. Parallel mode
+   * passes nothing, because there the task IS the assignment — `decompose()`
+   * hands its subtasks straight to the fleet with no digest wrapped around them.
    */
-  private roundClaim(
-    note: string,
+  private recordRound(
+    round: number,
     results: AutonomyTaskResult[],
     assigned?: Map<string, string>,
-  ): string {
-    const rows = results
-      .map((r) => {
-        const what = (r.id ? assigned?.get(r.id) : undefined) ?? r.task;
-        return `${r.error ? "✗" : "✓"} ${r.role ?? r.id ?? "worker"}: ${what.slice(0, 120)}`;
-      })
-      .join("\n");
-    return [note, rows].filter(Boolean).join("\n\n");
+  ): void {
+    const rows = results.map((r) => {
+      const what = (r.id ? assigned?.get(r.id) : undefined) ?? r.task;
+      return `${r.error ? "✗" : "✓"} ${r.role ?? r.id ?? "worker"}: ${what.slice(0, 120)}`;
+    });
+    if (rows.length > 0) this.roundRows.push({ round, rows });
+  }
+
+  /**
+   * What a finished fan-out run claims: the leader's integration text, plus every
+   * round's worker rows.
+   *
+   * A single-round run prints bare rows; a multi-round one labels each round,
+   * because "who did what" is only answerable together with "and when". An
+   * over-long history drops its OLDEST rounds and says how many — parallel mode's
+   * round count is bounded by `maxSteps` (200 by default), so an uncapped claim
+   * is a real risk, and a SILENT truncation would read as a run that did less
+   * than it did, which is the failure this whole function exists to prevent.
+   * Rounds are dropped whole: half a round in the claim is worse than a labelled
+   * gap, and the newest round always survives however big it is.
+   */
+  private roundClaim(note: string): string {
+    const history = this.roundRows;
+    if (history.length === 0) return note;
+
+    const kept: Array<{ round: number; rows: string[] }> = [];
+    let rows = 0;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const entry = history[i];
+      if (!entry) continue;
+      if (kept.length > 0 && rows + entry.rows.length > AutonomyEngine.MAX_CLAIM_ROWS) break;
+      kept.unshift(entry);
+      rows += entry.rows.length;
+    }
+
+    const dropped = history.length - kept.length;
+    const labelled = history.length > 1;
+    const body = kept
+      .map((e) => (labelled ? [`Round ${e.round}:`, ...e.rows].join("\n") : e.rows.join("\n")))
+      .join("\n\n");
+    const omitted =
+      dropped > 0 ? `(… ${dropped} earlier round${dropped === 1 ? "" : "s"} omitted)` : "";
+    return [note, omitted, body].filter(Boolean).join("\n\n");
   }
 
   /**
@@ -523,6 +572,7 @@ export class AutonomyEngine {
     this.pendingSteer = undefined;
     this._phases = [];
     this._team = [];
+    this.roundRows = [];
     this.progressSinceExtend = 0;
     this.journal = [];
     this.consecutiveFailures = 0;
@@ -925,13 +975,14 @@ Name ONE different concrete task that would advance the GOAL — a specific next
 
       // A round of fleet results is this mode's unit of progress.
       this.progressSinceExtend += results.length;
+      this.recordRound(round, results);
       await this.aggregate(round, results);
       this.bus.emit({ type: "autonomy_aggregate", round, count: results.length });
 
       const verdict = await this.agent.assess(this.goal, this.current.signal);
       this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
       if (verdict.done) {
-        const claim = this.roundClaim(verdict.note || "goal complete", results);
+        const claim = this.roundClaim(verdict.note || "goal complete");
         if (await this.gateClaim(claim, { scope: "round", id: `r${round}` })) {
           // The CLAIM, not the note — see the team loop's twin for why.
           this.finish(claim);
@@ -955,6 +1006,9 @@ Name ONE different concrete task that would advance the GOAL — a specific next
    * integrates the results and reflects. Ends on assess-done, /stop, idle rounds,
    * or the round cap.
    */
+  /** How many worker rows a claim carries before it starts dropping whole rounds. */
+  private static readonly MAX_CLAIM_ROWS = 40;
+
   /**
    * The scope sentence every member's assignment ends with — `/sdd`'s
    * `specBlock()` rule, which CLAUDE.md calls load-bearing rather than padding,
@@ -1098,6 +1152,7 @@ Name ONE different concrete task that would advance the GOAL — a specific next
 
       done += results.filter((r) => !r.error).length;
       failed += results.filter((r) => r.error).length;
+      this.recordRound(round, results, assigned);
 
       // Each member's result goes two places: the shared board, so teammates read it
       // next round (surfaced as a team_message event for the topology graph), and the
@@ -1126,7 +1181,7 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       const verdict = await this.agent.assess(this.goal, this.current.signal);
       this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
       if (verdict.done) {
-        const claim = this.roundClaim(verdict.note || "goal complete", results, assigned);
+        const claim = this.roundClaim(verdict.note || "goal complete");
         // summary() only after acceptance: a rejected round is not a finished team run.
         if (await this.gateClaim(claim, { scope: "round", id: `r${round}` })) {
           summary();

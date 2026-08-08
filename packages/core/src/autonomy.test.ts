@@ -956,6 +956,17 @@ describe("team mode", () => {
     expect(summary).toContain("fix the review notes");
     expect(summary).not.toContain("Team board");
     expect(summary).not.toContain("reviewer output");
+
+    // …and the claim is the WHOLE run, not the round that ended it. Round 2 ran
+    // one member; reporting only that round said a two-member team run was the
+    // work of `coder`, with the reviewer — and everything round 1 did — absent
+    // from the summary AND from the text the judge was gated on.
+    expect(summary).toContain("Round 1:");
+    expect(summary).toContain("Round 2:");
+    expect(summary).toContain("✓ coder: implement");
+    expect(summary).toContain("✓ reviewer: review");
+    // Rounds read oldest-first: the claim is a history, not a stack.
+    expect(summary.indexOf("Round 1:")).toBeLessThan(summary.indexOf("Round 2:"));
   });
 
   it("recaps a member's own result into its private memory and hands it back next round", async () => {
@@ -1150,6 +1161,46 @@ describe("AutonomyEngine verification in fan-out modes", () => {
     expect(claim).toContain("all good");
     expect(claim).toContain("✓");
     expect(claim).toContain("✗");
+    // One round needs no "when" — labelling it would be noise in the common case.
+    expect(claim).not.toContain("Round 1:");
+  });
+
+  it("parallel: the claim carries every round, dropping the OLDEST and saying so", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    // 12 rounds × 5 workers = 60 rows, over the 40-row claim budget.
+    agent.plans = Array.from({ length: 12 }, (_, r) =>
+      JSON.stringify(
+        Array.from({ length: 5 }, (_, t) => ({ task: `r${String(r + 1).padStart(2, "0")}-t${t}` })),
+      ),
+    );
+    // Not done until the 12th round; the fallback verdict ends it.
+    agent.assessVerdicts = Array.from({ length: 11 }, () => ({ done: false, note: "keep going" }));
+    agent.assessVerdict = { done: true, note: "all landed" };
+    let claim = "";
+    const engine = makeEngine(agent, bus, {
+      mode: "parallel",
+      maxSteps: 12,
+      runFleet: async (tasks) => tasks.map((t) => ({ ...t, output: "x" })),
+      verify: async (req) => {
+        claim = req.claim;
+        return { pass: true };
+      },
+    });
+
+    await engine.start("do the twelve rounds");
+
+    expect(engine.state).toBe("done");
+    // The newest rounds survive whole — a reader wants the tail first.
+    expect(claim).toContain("Round 12:");
+    expect(claim).toContain("r12-t0");
+    // 8 rounds of 5 rows fit; a 9th would not, so 4 rounds fall off the front.
+    expect(claim).toContain("Round 5:"); // the oldest round that still fits
+    expect(claim).not.toContain("Round 4:");
+    expect(claim).not.toContain("r01-t0");
+    // …and the run SAYS it dropped them. A silent truncation reads as a run that
+    // did less than it did, which is the failure the whole claim exists to prevent.
+    expect(claim).toContain("4 earlier rounds omitted");
   });
 
   it("team: a rejected round does not report the team run as finished", async () => {
