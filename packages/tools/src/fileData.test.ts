@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -118,29 +118,29 @@ describe("diffTool", () => {
     // `-U<n>` implies --patch, so passing it beside --stat returns the whole
     // diff after the summary — looking exactly like it worked, while costing
     // the context that asking for a stat was meant to save.
-    execSync("git init -q . && git add -A && git commit -qm x --allow-empty", {
-      cwd: dir,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: "t",
-        GIT_AUTHOR_EMAIL: "t@t",
-        GIT_COMMITTER_NAME: "t",
-        GIT_COMMITTER_EMAIL: "t@t",
-      },
-      shell: "/bin/sh",
-    });
+    // One process per command, no shell. Chaining with `&&` needs one, and the
+    // shell this named — /bin/sh — does not exist on Windows, so the test died
+    // with `spawnSync /bin/sh ENOENT` before reaching an assertion.
+    const git = (...argv: string[]) =>
+      execFileSync("git", argv, {
+        cwd: dir,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@t",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@t",
+        },
+      });
+    git("init", "-q", ".");
+    // git's Windows default rewrites LF to CRLF on checkout, which would make
+    // the diff this asserts on a diff of every line.
+    git("config", "core.autocrlf", "false");
+    git("add", "-A");
+    git("commit", "-qm", "x", "--allow-empty");
     await write("tracked.txt", "a\n");
-    execSync("git add -A && git commit -qm y", {
-      cwd: dir,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: "t",
-        GIT_AUTHOR_EMAIL: "t@t",
-        GIT_COMMITTER_NAME: "t",
-        GIT_COMMITTER_EMAIL: "t@t",
-      },
-      shell: "/bin/sh",
-    });
+    git("add", "-A");
+    git("commit", "-qm", "y");
     await write("tracked.txt", `${Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n")}\n`);
 
     const summary = await diffTool.execute({ mode: "working", stat: true }, ctx());

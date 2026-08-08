@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 process.env.ARTERM_LSP_REQUEST_MS = "800";
 process.env.ARTERM_LSP_DIAGNOSTICS_MS = "500";
 process.env.ARTERM_LSP_INIT_MS = "8000";
+import { rmWithRetry } from "../testTmp.js";
 import { LspClient, uriOf } from "./client.js";
 import { FrameReader, frame } from "./protocol.js";
 import { installHint, resolveServerBinary, serverFor } from "./servers.js";
@@ -38,11 +39,18 @@ let dir: string;
 const ctx = () => ({ cwd: dir });
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(join(tmpdir(), "arterm-lsp-"));
+  // Canonical, not just unique. A real session's cwd comes from `process.cwd()`,
+  // which Windows reports in its long form, while `mkdtemp` hands back the 8.3
+  // short one (`C:\Users\RUNNER~1\…`). The language server answers with paths it
+  // canonicalised itself, so the tool could not shorten them against a root
+  // spelled differently and reported an absolute path where the test wanted
+  // `a.ts`. Resolving here makes both sides talk about the same directory.
+  dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "arterm-lsp-")));
 });
 afterEach(async () => {
   await disposeLspClients();
-  await fs.rm(dir, { recursive: true, force: true });
+  // The server is a child process; its handles on `dir` outlive its exit.
+  await rmWithRetry(dir);
 });
 
 describe("frame reading", () => {
@@ -362,7 +370,16 @@ describe("the tools", () => {
 
 describe("uriOf", () => {
   it("produces a file URL the server will accept", () => {
-    expect(uriOf("/tmp/a b.ts")).toBe("file:///tmp/a%20b.ts");
+    // The subject is the ESCAPING — a raw space is what a server rejects. The
+    // input has to be an absolute path the platform recognises: `pathToFileURL`
+    // resolves a bare "/tmp/…" against the current drive on Windows, so the old
+    // literal asserted the drive letter (`file:///D:/tmp/a%20b.ts`) rather than
+    // the encoding it was written for.
+    const p = resolve(tmpdir(), "a b.ts");
+    const uri = uriOf(p);
+    expect(uri.startsWith("file:///")).toBe(true);
+    expect(uri).toContain("a%20b.ts");
+    expect(uri).not.toContain("a b.ts");
   });
 });
 
