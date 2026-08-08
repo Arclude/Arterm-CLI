@@ -690,9 +690,25 @@ tampered with, and letting the sequence skip would make a full disk look like an
 edited ledger. Telemetry's policy, the sandbox's opposite — this observes, it
 does not control.
 
+**Sub-agents write to the PARENT's chronicle**, because the workers are where
+the writing happens — a ledger that recorded the leader and not the fleet would
+describe the one agent that mostly reads. They get a container carrying only the
+ledger stage, never the parent's: sharing that would hand a worker the parent's
+`execute` stage, which closes over the parent's tools and cwd, and the Agent's
+`has(name)` guard means it would silently keep it instead of building its own.
+
+One instance, so a fan-out is one chain — three workers interleaving into three
+chains could each verify while the run as a whole had no order at all. Each
+record is stamped with `agentId`, filled from `FleetTask.id` or, for an
+anonymous parallel slot, `role#index`. Without it a three-worker round records
+three writes by "implementer" and cannot say which made which, which is the
+question a fan-out exists to make hard.
+
 `arterm chronicle verify` exits 1 on a broken chain, so a script can gate on it.
 Not yet wired: feeding the ledger to the judge, and a watcher that would tell a
-change the agent made from one that appeared underneath it.
+change the agent made from one that appeared underneath it. `bash` declares no
+path, so a file written by a shell command is invisible here — the same
+documented hole checkpoints have. Nothing prunes `$ARTERM_HOME/chronicle` yet.
 
 ## Measuring: `bench/harbor/`
 

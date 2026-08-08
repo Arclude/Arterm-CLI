@@ -504,6 +504,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       model: agent.model,
       tools: subagentTools(),
       permissions: sub?.permissions ?? permissions,
+      chronicle,
       // Tagged so the prompt says WHICH worker is blocked, not just the tool name.
       ask: sub?.ask ?? permissionBroker.askFor({ name: role ?? "sub-agent" }),
       cwd,
@@ -616,6 +617,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
         model: agent.model,
         tools: subagentTools(),
         permissions: sub?.permissions ?? permissions,
+        chronicle,
         ask: sub?.ask ?? ((tool, args) => asker(tool, args)),
         cwd,
         taskDone: taskDoneTool,
@@ -739,6 +741,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
         model: agent.model,
         tools: subagentTools(spec.tools),
         permissions: sub?.permissions ?? permissions,
+        chronicle,
         ask: sub?.ask ?? permissionBroker.askFor({ id: spec.id, name: spec.name }),
         cwd,
         taskDone: taskDoneTool,

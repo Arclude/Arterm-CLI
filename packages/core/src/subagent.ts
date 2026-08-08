@@ -2,9 +2,14 @@ import { Agent, type AgentOptions } from "./agent.js";
 import { getAgentDefinition, listAgentDefinitions } from "./agentRegistry.js";
 import { AutonomyEngine } from "./autonomy.js";
 import type { RunBudget } from "./budget.js";
+import { type Chronicle, chronicleToolCall } from "./chronicle.js";
 import type { ContextStrategy } from "./contextStrategy.js";
 import type { CredentialSettings } from "./credentials.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
+import { Container } from "./kernel/container.js";
+import { createPipelines } from "./kernel/pipeline.js";
+import { RunController } from "./kernel/runController.js";
+import { Tokens } from "./kernel/tokens.js";
 import type { LoopDetectOptions } from "./loopDetector.js";
 import type { PermissionManager } from "./permissions.js";
 import type { ProcessRegistry } from "./processRegistry.js";
@@ -112,6 +117,13 @@ export interface SubagentOptions {
    * session cannot see leaves it running after the session ends.
    */
   processes?: ProcessRegistry;
+  /**
+   * Stable identity for this worker, used to stamp the ledger — `runFleet`
+   * fills it from `FleetTask.id` (team members) or the slot index. Without it a
+   * fan-out records three writes by "implementer" and cannot say which worker
+   * made which, which is the question a fan-out exists to make hard.
+   */
+  id?: string;
   role?: string;
   /** Explicit instruction prefix — wins over `roleInstruction(role)` (ad-hoc team members). */
   instruction?: string;
@@ -123,6 +135,17 @@ export interface SubagentOptions {
    * (the team board) can watch the member work without flooding its own transcript.
    */
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * The parent's ledger, passed down unchanged — the same argument as the
+   * sandbox, credentials and process registry above, and the sharpest case of
+   * it: the WORKERS are where the writing happens. A chronicle that records the
+   * leader and not the fleet describes the one agent that mostly reads.
+   *
+   * The parent's `Chronicle` instance, not a new one, so a fan-out is a single
+   * chain: three workers interleaving into three chains could each verify while
+   * the run as a whole had no order at all.
+   */
+  chronicle?: Chronicle;
 }
 
 /**
@@ -237,6 +260,39 @@ export interface SubagentSession {
   stop(): void;
 }
 
+/**
+ * A container carrying ONLY the ledger stage.
+ *
+ * Deliberately not the parent's container. Sharing that would hand the worker
+ * the parent's `execute` stage too — which closes over the parent's tools and
+ * working directory — and the Agent's `has(name)` guard means the worker would
+ * silently keep it instead of installing its own. So the worker gets fresh
+ * pipelines with one stage pre-registered, and everything else is built for it
+ * as usual.
+ *
+ * Registered before the Agent constructs, which is what puts it ahead of
+ * `permission` in the chain: a denied worker call is recorded rather than lost,
+ * exactly as it is for the leader.
+ */
+function subagentContainer(chronicle: Chronicle, opts: SubagentOptions): Container {
+  const pipelines = createPipelines();
+  pipelines.toolCall.use(
+    "chronicle",
+    chronicleToolCall(
+      chronicle,
+      () => opts.cwd,
+      // The worker's identity travels with the record: "who changed this file"
+      // is the question a fan-out makes hard, and a ledger that answered it
+      // with one session id would be no better than the summary it replaces.
+      () => ({ agentId: opts.id ?? opts.role ?? "worker" }),
+    ),
+  );
+  const container = new Container();
+  container.bind(Tokens.Pipelines, () => pipelines);
+  container.bind(Tokens.RunController, () => new RunController(container));
+  return container;
+}
+
 export function createSubagentSession(opts: SubagentOptions): SubagentSession {
   const bus = new EventBus();
   const agentOpts: AgentOptions = {
@@ -258,6 +314,7 @@ export function createSubagentSession(opts: SubagentOptions): SubagentSession {
     ...(opts.sandbox !== undefined ? { sandbox: opts.sandbox } : {}),
     ...(opts.credentials !== undefined ? { credentials: opts.credentials } : {}),
     ...(opts.processes !== undefined ? { processes: opts.processes } : {}),
+    ...(opts.chronicle ? { container: subagentContainer(opts.chronicle, opts) } : {}),
   };
   const agent = new Agent(agentOpts);
 
@@ -443,6 +500,9 @@ export async function runFleet(
       // Per-task overrides (team members) win over the fleet-wide options.
       const sub: SubagentOptions = {
         ...opts,
+        // Team members bring their own id; a parallel slot is anonymous, so the
+        // role and the slot together are what distinguish it in the ledger.
+        id: t.id ?? `${t.role ?? "worker"}#${index}`,
         role: t.role,
         instruction: t.instruction ?? opts.instruction,
         systemPrompt: t.systemPrompt ?? opts.systemPrompt,

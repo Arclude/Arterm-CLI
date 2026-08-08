@@ -205,6 +205,31 @@ describe("the toolCall stage", () => {
     expect(records[0]?.outcome).toBe("failure");
   });
 
+  it("stamps the worker's identity, so a fan-out says WHO changed the file", async () => {
+    // The question a fan-out makes hard. A ledger that answered it with one
+    // session id would be no better than the summary it replaces.
+    const { sink, records } = collector();
+    const chronicle = new Chronicle(sink, () => ({ sessionId: "s1" }));
+    const pipeline = new Pipeline<ToolCallCtx>();
+    pipeline.use(
+      "chronicle",
+      chronicleToolCall(
+        chronicle,
+        () => dir,
+        () => ({ agentId: "tester" }),
+      ),
+    );
+    pipeline.use("execute", async (c, next) => {
+      c.tool = { name: "write" } as ToolCallCtx["tool"];
+      await next();
+    });
+    await pipeline.run({ call: { id: "c6", name: "write", arguments: {} } });
+
+    // Both, not either: the worker is named without losing which run it was in.
+    expect(records[0]?.scope.agentId).toBe("tester");
+    expect(records[0]?.scope.sessionId).toBe("s1");
+  });
+
   it("still records when the tool throws past the stage", async () => {
     // `finally`, not a happy path: a crashed tool is the run's most interesting
     // moment, and it is the one a ledger written after `next()` would lose.

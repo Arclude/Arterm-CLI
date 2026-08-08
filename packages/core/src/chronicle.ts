@@ -242,6 +242,7 @@ async function hashFile(path: string): Promise<string | undefined> {
 export function chronicleToolCall(
   chronicle: Chronicle,
   cwd: () => string,
+  scope: () => ChronicleScope = () => ({}),
 ): Middleware<ToolCallCtx> {
   return async (ctx, next) => {
     const started = Date.now();
@@ -254,7 +255,7 @@ export function chronicleToolCall(
       chronicle.append({
         eventType: executed ? "tool.executed" : "tool.denied",
         outcome: !executed ? "denied" : ctx.isError ? "failure" : "success",
-        scope: {},
+        scope: scope(),
         ...(ctx.call.name ? { toolName: ctx.call.name } : {}),
         ...(ctx.call.id ? { toolCallId: ctx.call.id } : {}),
         durationMs: Date.now() - started,
