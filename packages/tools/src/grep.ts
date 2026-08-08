@@ -22,6 +22,7 @@ export const grepTool: Tool = {
     "Files ignored by the project's .gitignore are never searched.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   parameters: {
     type: "object",
     properties: {

@@ -11,6 +11,7 @@ import {
   Tokens,
   createPipelines,
 } from "./kernel/index.js";
+import type { ToolCallCtx } from "./kernel/pipeline.js";
 import { type LoopDetectOptions, type LoopDetector, createLoopDetector } from "./loopDetector.js";
 import { modelContextWindow } from "./modelsDev.js";
 import type { PermissionManager } from "./permissions.js";
@@ -18,6 +19,7 @@ import type { ProcessRegistry } from "./processRegistry.js";
 import { ProviderError } from "./providerError.js";
 import type { SandboxRunner } from "./sandbox.js";
 import { estimateHistoryTokens, estimateMessageTokens, estimateTokens } from "./tokenEstimate.js";
+import { planToolBatches } from "./toolBatch.js";
 import { DEFAULT_MAX_OUTPUT_BYTES, clampMiddle, spoolOutput } from "./toolOutput.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
@@ -979,18 +981,39 @@ export class Agent {
           break;
         }
 
-        for (const call of response.calls) {
+        // Calls the model asked for together, and that declare themselves safe to
+        // overlap, run at the same time. A turn is mostly waiting on I/O — five
+        // reads cost five round-trips serially and roughly one in parallel.
+        const batches = planToolBatches(response.calls, (call) => this.canRunConcurrently(call));
+        for (const batch of batches) {
           // An abort mid-turn must still leave a tool result for every recorded
           // tool_call — otherwise the next turn's history has an assistant tool_call
           // with no matching tool message, which native provider APIs reject.
           if (runSignal.aborted) {
-            await this.pushToolResult(call, {
-              output: "Tool call cancelled by the user.",
-              isError: true,
-            });
+            for (const call of batch) {
+              await this.pushToolResult(call, {
+                output: "Tool call cancelled by the user.",
+                isError: true,
+              });
+            }
             continue;
           }
-          await this.runToolCall(call, runSignal);
+          if (batch.length === 1 && batch[0]) {
+            await this.runToolCall(batch[0], runSignal);
+            continue;
+          }
+          // Every execution finishes before any result is recorded: history has
+          // to read in the order the model asked, not the order the disk
+          // answered. A batch that recorded as it completed would reorder the
+          // transcript run to run, which is both unreproducible and, for a
+          // provider that pairs tool_use with tool_result by position, wrong.
+          const ctxs = await Promise.all(
+            batch.map((call) => this.executeToolCall(call, runSignal)),
+          );
+          for (const [i, call] of batch.entries()) {
+            const ctx = ctxs[i];
+            if (ctx) await this.recordToolCtx(call, ctx);
+          }
         }
 
         // Token budget: each iteration re-bills the prompt, so the running total is
@@ -1075,11 +1098,41 @@ export class Agent {
     return { text, calls, usage };
   }
 
-  private async runToolCall(call: ToolCall, signal?: AbortSignal): Promise<void> {
-    // Permission-check and execution live in the `toolCall` pipeline (default stages
-    // `permission` + `execute`); the agent owns only recording the outcome back into
-    // history, so a feature can re-gate or wrap execution without touching this method.
-    const ctx = await this.pipelines.toolCall.run({ call, signal });
+  /**
+   * Whether this call may run alongside its siblings in the same turn.
+   *
+   * Three clauses, three distinct reasons, none of them redundant:
+   *
+   * - The TOOL declares it. Absent means no, so a tool added later is serial
+   *   until someone thinks about it.
+   * - `category: "read"` because the arbiter stage screens `execute` calls and
+   *   a screen can escalate to a prompt. Read calls never reach it, so the
+   *   ladder below is the whole answer for them.
+   * - The ladder must say `allow` OUTRIGHT. `evaluate` is pure and returns
+   *   `prompt` as a distinct outcome, which is exactly what must not happen
+   *   eight times at once into one terminal.
+   */
+  private canRunConcurrently(call: ToolCall): boolean {
+    const tool = this.toolMap.get(call.name);
+    if (!tool || tool.concurrent !== true) return false;
+    if ((tool.category ?? "execute") !== "read") return false;
+    return this.opts.permissions.evaluate(tool, call.arguments).outcome === "allow";
+  }
+
+  /**
+   * Permission-check and execution live in the `toolCall` pipeline (default stages
+   * `permission` + `execute`); the agent owns only recording the outcome back into
+   * history, so a feature can re-gate or wrap execution without touching this method.
+   *
+   * Separate from `runToolCall` because a concurrent batch has to run every
+   * execution BEFORE recording any of them: results are appended to history in
+   * the order the model asked, never the order they happened to finish.
+   */
+  private executeToolCall(call: ToolCall, signal?: AbortSignal): Promise<ToolCallCtx> {
+    return this.pipelines.toolCall.run({ call, signal });
+  }
+
+  private async recordToolCtx(call: ToolCall, ctx: ToolCallCtx): Promise<void> {
     await this.pushToolResult(call, {
       output: ctx.output ?? "",
       isError: ctx.isError ?? false,
@@ -1087,6 +1140,10 @@ export class Agent {
       path: ctx.path,
       images: ctx.images,
     });
+  }
+
+  private async runToolCall(call: ToolCall, signal?: AbortSignal): Promise<void> {
+    await this.recordToolCtx(call, await this.executeToolCall(call, signal));
   }
 
   /**

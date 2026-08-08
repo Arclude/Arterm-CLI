@@ -275,6 +275,48 @@ Don't edit the `run()` loop. Instead add/replace a middleware stage:
 4. The Brain Arbiter / risk-tier checks are the canonical extension point: extra
    `toolCall` middleware inserted `before` `execute`.
 
+### Concurrency is the loop's, not a stage's
+
+The one thing a `toolCall` stage cannot do is overlap a call with its SIBLINGS —
+a middleware sees one call. So `planToolBatches` (`toolBatch.ts`, pure and
+tested on its own) sits in `run()`, and the loop is the only place that decides
+what runs together. Measured on four concurrent `grep`s over this repo: 162ms
+serial, 91ms parallel, **1.79×**. A turn is mostly waiting.
+
+**The TOOL declares `concurrent`, and absent means no.** `category: "read"` is
+not this question and cannot be made into it — it drives the auto/plan
+permission modes, and several tools carrying it change session state anyway:
+`set_working_dir` moves the cwd every later path resolves against, `todo` and
+`remember` write stores, `batch` dispatches other tools and can reach an edit
+through one. Reading concurrency off the category would have parallelized all of
+those. The bar is not "does not write files" but "its result cannot depend on
+whether it ran before or after its siblings" — `git` fails it despite being
+read-only, because `git status` takes `index.lock` to refresh the index.
+
+`canRunConcurrently` adds two clauses to the tool's own, each for a different
+reason. `category === "read"` because the arbiter screens `execute` calls and a
+screen can escalate to a prompt. And the ladder must answer `allow` OUTRIGHT:
+`evaluate` is pure and returns `prompt` as a distinct outcome, which is exactly
+what must not happen eight times at once into one terminal.
+
+Two properties are load-bearing, and both are what the tests pin:
+
+- **Batches are RUNS, not a partition.** A safe call is never hoisted past an
+  unsafe one between it and its neighbours. Pulling the cheap reads forward
+  would reorder a turn whose author wrote it in an order for a reason, and the
+  failure surfaces as a tool seeing a file before the edit meant to precede it.
+- **Every execution finishes before ANY result is recorded.** History reads in
+  the order the model asked, never the order the disk answered — a transcript
+  that reorders run to run is unreproducible, and a provider that pairs
+  `tool_use` with `tool_result` by position is simply given the wrong answer.
+  This is why `executeToolCall` and `recordToolCtx` are separate.
+
+`MAX_CONCURRENT_TOOLS` is a resource bound, not a correctness one, and the
+overflow continues in the next batch rather than being dropped — a silently
+truncated turn leaves `tool_calls` with no matching result, which native APIs
+reject. Nothing about the event stream changed: `tool_call` is emitted while the
+response streams, before any execution, so the transcript's shape is what it was.
+
 ## Verification: one gate, two parts
 
 `packages/core/src/verify.ts` decides whether a produced result is acceptable. It

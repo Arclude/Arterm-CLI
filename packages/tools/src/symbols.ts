@@ -48,6 +48,7 @@ export const symbolsTool: Tool = {
     "to jump to a definition instead of reading whole files. Optionally filter by kind.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   parameters: {
     type: "object",
     properties: {

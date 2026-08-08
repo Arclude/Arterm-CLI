@@ -97,6 +97,7 @@ export const treeTool: Tool = {
     "source, not the artifacts.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   parameters: {
     type: "object",
     properties: {

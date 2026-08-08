@@ -78,6 +78,7 @@ export const callersTool: Tool = {
     "declare `run`, their callers are pooled, so check the paths before concluding.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   riskTier: "safe",
   parameters: {
     type: "object",
@@ -119,6 +120,7 @@ export const calleesTool: Tool = {
     "without reading the file.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   riskTier: "safe",
   parameters: {
     type: "object",
@@ -174,6 +176,7 @@ export const deadCodeTool: Tool = {
     "its own API.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   riskTier: "safe",
   parameters: {
     type: "object",
@@ -217,6 +220,7 @@ export const codeStatsTool: Tool = {
     "to re-parse from scratch.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   riskTier: "safe",
   parameters: {
     type: "object",

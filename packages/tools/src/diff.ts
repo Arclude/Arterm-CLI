@@ -22,6 +22,7 @@ export const diffTool: Tool = {
     "missing hunks and patch will refuse it.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   riskTier: "safe",
   parameters: {
     type: "object",

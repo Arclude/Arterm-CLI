@@ -39,6 +39,7 @@ export const searchTool: Tool = {
     "defined or used before reading whole files.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   parameters: {
     type: "object",
     properties: {

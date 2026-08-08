@@ -279,6 +279,25 @@ export interface Tool {
   /** True when this tool changes state (writes files, runs commands). Read tools omit it. */
   mutating?: boolean;
   /**
+   * Safe to run at the SAME TIME as the other calls in one assistant turn.
+   *
+   * Declared by the tool rather than inferred, and absent means no — the loop
+   * runs anything it is unsure about one at a time, which is what it always did.
+   *
+   * `category: "read"` is not the answer to this question and cannot be made
+   * into it: the category drives the auto/plan permission modes, and several
+   * tools that carry it change session state anyway (`set_working_dir` moves the
+   * cwd every later path resolves against, `todo` and `remember` write stores,
+   * `batch` dispatches other tools and can reach an edit through one). Reading
+   * concurrency off the category would have parallelized all of those.
+   *
+   * The bar is not "does not write files" but "its result cannot depend on
+   * whether it ran before or after its siblings". `git` fails it despite being
+   * read-only — `git status` takes `index.lock` to refresh the index, so two at
+   * once is a race over a lock file, not over the repository.
+   */
+  concurrent?: boolean;
+  /**
    * How dangerous this tool is, independent of its arguments. "destructive" tools
    * are gated even under yolo when `confirmDestructive` is on. Defaults to "safe".
    */

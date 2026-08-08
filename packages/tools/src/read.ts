@@ -69,6 +69,7 @@ export const readTool: Tool = {
     "at a screenshot or a chart rather than being told it is binary.",
   permission: "allow",
   category: "read",
+  concurrent: true,
   parameters: {
     type: "object",
     properties: {

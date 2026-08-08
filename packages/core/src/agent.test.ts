@@ -1270,3 +1270,122 @@ describe("readAssessment — the leader's completion verdict", () => {
     expect(readAssessment("CONTINUE: write the table module").note).toContain("table module");
   });
 });
+
+describe("concurrent tool calls", () => {
+  /** A tool that takes `delayMs` and logs when it starts and finishes. */
+  function timedTool(name: string, delayMs: number, log: string[], over: Partial<Tool> = {}): Tool {
+    return {
+      name,
+      description: name,
+      parameters: { type: "object" },
+      permission: "allow",
+      category: "read",
+      concurrent: true,
+      execute: async () => {
+        log.push(`start:${name}`);
+        await new Promise((r) => setTimeout(r, delayMs));
+        log.push(`end:${name}`);
+        return { output: name };
+      },
+      ...over,
+    };
+  }
+
+  /** One assistant turn asking for every call at once, then a final answer. */
+  function turnCalling(...calls: Array<[string, string]>): StubProvider {
+    return new StubProvider([
+      calls.map(([id, name]) => ({ type: "tool_call", call: { id, name, arguments: {} } })),
+      [{ type: "text", delta: "done" }],
+    ]);
+  }
+
+  function agentWith(
+    provider: ChatProvider,
+    bus: EventBus,
+    tools: Tool[],
+    perms?: PermissionManager,
+  ) {
+    return new Agent({
+      provider,
+      model: "m",
+      tools,
+      permissions: perms ?? new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus,
+      cwd: process.cwd(),
+    });
+  }
+
+  it("overlaps safe calls instead of waiting for each in turn", async () => {
+    const log: string[] = [];
+    // `slow` is asked for first but finishes last. Serially that is impossible;
+    // the finish order IS the proof, with no wall-clock threshold to go flaky.
+    const tools = [timedTool("slow", 40, log), timedTool("quick", 1, log)];
+    await agentWith(turnCalling(["c1", "slow"], ["c2", "quick"]), new EventBus(), tools).run("go");
+
+    expect(log).toEqual(["start:slow", "start:quick", "end:quick", "end:slow"]);
+  });
+
+  it("records results in the order ASKED, not the order they finished", async () => {
+    // The hazard the batch introduces. A provider pairs tool_use with
+    // tool_result, and a history that answers the second call first is a
+    // transcript no run can reproduce — and one some native APIs reject.
+    const log: string[] = [];
+    const bus = new EventBus();
+    const tools = [timedTool("slow", 40, log), timedTool("quick", 1, log)];
+    const agent = agentWith(turnCalling(["c1", "slow"], ["c2", "quick"]), bus, tools);
+    await agent.run("go");
+
+    const results = agent.history.filter((m) => m.role === "tool");
+    expect(results.map((m) => m.toolCallId)).toEqual(["c1", "c2"]);
+    expect(results.map((m) => m.content)).toEqual(["slow", "quick"]);
+  });
+
+  it("keeps a tool that did not declare itself concurrent serial", async () => {
+    // Absent means no. `bash` and every tool added later stay one at a time
+    // until someone has thought about whether they may overlap.
+    const log: string[] = [];
+    const tools = [
+      timedTool("slow", 40, log, { concurrent: undefined }),
+      timedTool("quick", 1, log, { concurrent: undefined }),
+    ];
+    await agentWith(turnCalling(["c1", "slow"], ["c2", "quick"]), new EventBus(), tools).run("go");
+
+    expect(log).toEqual(["start:slow", "end:slow", "start:quick", "end:quick"]);
+  });
+
+  it("will not overlap calls that would each raise a permission prompt", async () => {
+    // Eight prompts at once into one terminal is the failure. `evaluate` returns
+    // `prompt` as a distinct outcome precisely so this is answerable without
+    // asking anyone.
+    const log: string[] = [];
+    const tools = [timedTool("slow", 40, log), timedTool("quick", 1, log)];
+    const asking = new PermissionManager({ slow: "ask", quick: "ask" }, "ask");
+    await agentWith(
+      turnCalling(["c1", "slow"], ["c2", "quick"]),
+      new EventBus(),
+      tools,
+      asking,
+    ).run("go");
+
+    expect(log).toEqual(["start:slow", "end:slow", "start:quick", "end:quick"]);
+  });
+
+  it("does not hoist safe calls past an unsafe one between them", async () => {
+    const log: string[] = [];
+    const tools = [
+      timedTool("r1", 20, log),
+      timedTool("gate", 1, log, { concurrent: undefined }),
+      timedTool("r2", 1, log),
+    ];
+    await agentWith(
+      turnCalling(["c1", "r1"], ["c2", "gate"], ["c3", "r2"]),
+      new EventBus(),
+      tools,
+    ).run("go");
+
+    // r1 alone, then the gate, then r2 — the slow read must still complete
+    // before the gate starts, or the ordering the model wrote is not honored.
+    expect(log).toEqual(["start:r1", "end:r1", "start:gate", "end:gate", "start:r2", "end:r2"]);
+  });
+});
