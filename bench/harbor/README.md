@@ -109,6 +109,33 @@ Metrics: **`pass@k` for capability, `pass^k` for a regression gate.** On a
 ~30-task set the 95% band is about ±0.07, so gating on a single run's delta
 produces false alarms rather than signal.
 
+## Always dry-run the install first — it is free
+
+```bash
+harbor run -d terminal-bench@2.0 \
+  --agent bench.harbor.arterm_agent:ArtermAgent \
+  --model openai-compat/glm-5.2 -l 1 --install-only
+```
+
+`--install-only` skips the agent run, so **no model is called and nothing is
+billed**, while the whole fragile part still executes: dataset fetch, container
+start, `apt-get`, nvm, Node 22, `npm i -g` the tarball, and the `arterm
+--version` that proves interpreter, launcher and package resolve together in a
+fresh exec — which is exactly how `run()` will invoke it.
+
+Read `Exceptions` in the summary table, not `Mean`: with no agent run the mean
+is 0.000 either way, and a failed setup shows up only as an exception count.
+
+This is not a formality. The first time it was ever run, it failed —
+`readlink -f` on arterm's launcher resolves to the package's own file, whose
+directory holds no interpreter, so the `node` symlink pointed at nothing and
+every task in every sweep would have died in setup with `exit 127`. A paid run
+would have produced ten identical failures and a bill. Two adapter bugs were
+found this way before a single token was spent.
+
+Both are also the reason to distrust "the adapter is written" as evidence: it
+had a README, a seam check and no end-to-end run.
+
 ## Checking the seam
 
 The adapter parses a JSON document our TypeScript CLI writes. No type system
