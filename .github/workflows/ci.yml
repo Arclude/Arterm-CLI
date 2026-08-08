@@ -1,13 +1,25 @@
 name: CI
 
 on:
+  # EVERY branch, not just main. Changes land here by fast-forward rather than
+  # through a pull request, so `pull_request` is not the gate — the branch push
+  # is. With `branches: [main]` the check only ever ran after the merge it was
+  # supposed to be blocking, which is a report, not a gate.
   push:
-    branches: [main]
+    branches: ["**"]
+  # Kept for the occasional PR, which is now the exception rather than the path.
   pull_request:
     branches: [main]
   # Manual runs: re-checking a commit after a flake, or exercising the matrix
   # from a branch, without pushing an empty commit to trigger it.
   workflow_dispatch:
+
+# A force-push while the previous run is still going should not leave two
+# matrices racing over a ref that no longer exists. main is exempt: its runs are
+# the record of what was merged, and cancelling one loses that.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:
