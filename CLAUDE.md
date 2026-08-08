@@ -195,6 +195,47 @@ the fallback is the thing the short-circuit exists for, and only the log shows i
 5. If it needs config (host, paths, etc.), add fields to `ArtermConfig` in
    `packages/core/src/config.ts` with defaults in `defaultConfig()`.
 
+### Prompt caching: a turn is not one request
+
+The loop re-sends the whole prompt on **every tool call**, so the reusable part
+is billed again each iteration, unchanged. Measured on a real session against a
+capturing endpoint: 59 tools (the roster plus what the session adds at runtime)
+and the system prompt come to **10,662 tokens of fixed prefix per request** —
+223k tokens over a 20-call turn, for text that never varied.
+
+`anthropic.ts` marks three of the four breakpoints Anthropic allows: the last
+tool (which seals the whole roster, since a breakpoint caches everything before
+it), the last system block, and the last message. A write costs 1.25× and a read
+0.1×, so the break-even is a single reuse — the second iteration of the first
+turn. The fourth breakpoint is deliberately unspent: a second anchor further back
+would have to GUESS where the previous request ended (an iteration appends an
+assistant turn plus one tool result per call, so the offset is not fixed), and a
+breakpoint on a position that never repeats is a cache write nobody reads.
+
+Three things are load-bearing:
+
+- **A string cannot carry a breakpoint.** `toAnthropicSystem` switches to blocks
+  when caching, and keeps the plain string otherwise — blocks buy nothing
+  without a marker, and changing the wire for no gain is how a working path
+  breaks. `OAUTH_SYSTEM_IDENTITY` must still lead, the marker must still trail.
+- **Never manufacture an empty text block to hold a marker.** Anthropic 400s the
+  whole request on one, so `withCachePoint` returns the message untouched when
+  there is nothing to attach to. Not caching one message beats losing the turn.
+- **`thinking` blocks take no `cache_control`.** The narrowing in
+  `withCachePoint` is the type system stating which blocks a breakpoint can ride
+  on, rather than a cast asserting it.
+
+`promptCache: false` is the escape hatch, and it exists for `baseUrl`: a relay
+that validates against an older schema rejects `cache_control` outright, and a
+400 on every turn is worse than paying full price. This is Anthropic-only —
+OpenAI and its compatibles cache prefixes server-side with nothing to opt into,
+and `openai-compat.ts` already reads back `prompt_tokens_details.cached_tokens`.
+
+The accounting was already right before the markers existed: `cache_read` and
+`cache_creation` are reported separately and never folded into `promptTokens`,
+because a read costs ~10% of the input rate and merging them overstates an agent
+loop — which is mostly cache hits — by close to an order of magnitude.
+
 ## Kernel: the agent loop is pipeline-driven
 
 `packages/core/src/kernel/` holds a tiny DI layer that the agent loop runs on:

@@ -32,6 +32,16 @@ export interface ArtermConfig {
    * vendors. A cross-vendor target needs its own credentials configured.
    */
   fallbackModels: Array<{ provider?: string; model: string }>;
+  /**
+   * Mark the reusable part of the prompt cacheable (Anthropic only — OpenAI and
+   * its compatibles cache prefixes server-side with nothing to opt into).
+   *
+   * On by default. A turn is not one request: every tool call re-sends the tool
+   * roster and the system prompt unchanged, and this is what stops them being
+   * billed again each time. Switch it off only for a relay `baseUrl` that
+   * rejects `cache_control`, where the alternative is a 400 on every turn.
+   */
+  promptCache: boolean;
   /** Sampling temperature. */
   temperature: number;
   /** Per-tool permission overrides, persisted by "always allow". */
@@ -508,6 +518,7 @@ export function defaultConfig(): ArtermConfig {
     openaiCompatHeaders: {},
     modelsDir: join(ARTERM_HOME, "models"),
     fallbackModels: [],
+    promptCache: true,
     temperature: 0.7,
     permissions: {},
     mode: "ask",
@@ -593,6 +604,7 @@ const configFileSchema = z
     openaiCompatHeaders: z.record(z.string()),
     modelsDir: z.string(),
     fallbackModels: z.array(z.object({ provider: z.string().optional(), model: z.string() })),
+    promptCache: z.boolean(),
     temperature: z.number().min(0).max(2),
     permissions: z.record(z.enum(["allow", "ask", "deny"])),
     mode: z.enum(["ask", "auto", "plan", "yolo"]),

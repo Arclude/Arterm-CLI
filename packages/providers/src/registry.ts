@@ -256,8 +256,12 @@ export function createProvider(config: ArtermConfig, providerId?: string): ChatP
     case "anthropic": {
       // Prefer an explicit subscription login (OAuth) when present; otherwise API key.
       const getAccessToken = accessTokenResolver("anthropic");
-      if (getAccessToken) return new AnthropicProvider({ getAccessToken });
-      return new AnthropicProvider({ apiKey: apiKeyFor("anthropic", "ANTHROPIC_API_KEY") });
+      const promptCache = config.promptCache;
+      if (getAccessToken) return new AnthropicProvider({ getAccessToken, promptCache });
+      return new AnthropicProvider({
+        apiKey: apiKeyFor("anthropic", "ANTHROPIC_API_KEY"),
+        promptCache,
+      });
     }
     default:
       throw new Error(`Unknown provider: ${id}`);
@@ -285,8 +289,11 @@ export function allProviders(config: ArtermConfig): ChatProvider[] {
   // A subscription login (OAuth) counts just like an API key.
   const anthropicOAuth = accessTokenResolver("anthropic");
   const anthropicKey = apiKeyFor("anthropic", "ANTHROPIC_API_KEY");
-  if (anthropicOAuth) providers.push(new AnthropicProvider({ getAccessToken: anthropicOAuth }));
-  else if (anthropicKey) providers.push(new AnthropicProvider({ apiKey: anthropicKey }));
+  const promptCache = config.promptCache;
+  if (anthropicOAuth)
+    providers.push(new AnthropicProvider({ getAccessToken: anthropicOAuth, promptCache }));
+  else if (anthropicKey)
+    providers.push(new AnthropicProvider({ apiKey: anthropicKey, promptCache }));
 
   for (const [id, preset] of Object.entries(OPENAI_COMPAT_PRESETS)) {
     const apiKey = apiKeyFor(id, preset.envVar);

@@ -32,6 +32,24 @@ const OAUTH_BETA = "oauth-2025-04-20";
 const OAUTH_SYSTEM_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /**
+ * Marks a prompt prefix as cacheable — everything up to and including the block
+ * carrying it.
+ *
+ * This is the one lever that separates an agent loop's real cost from its
+ * nominal one. A turn is not one request: every tool call re-sends the whole
+ * prompt, so the tool roster (~2.9k tokens at the default tier, 4.3k at `full`)
+ * and the system prompt are billed again on each iteration, unchanged, forever.
+ * Anthropic bills a cache write at 1.25× the input rate and a read at 0.1×, so
+ * the break-even is a SINGLE reuse — which the second iteration of the first
+ * turn already reaches.
+ *
+ * Nothing else in the request changes. A prefix too short to cache (under
+ * 1024 tokens on Sonnet/Opus, 2048 on Haiku) is served normally rather than
+ * refused, so a marker that does not pay is silently free rather than an error.
+ */
+const EPHEMERAL_CACHE = { type: "ephemeral" } as const;
+
+/**
  * Retry settings handed to every SDK client. The SDK's own retry loop is turned
  * OFF and replaced with ours, because of one line in its `retryRequest`:
  *
@@ -88,6 +106,15 @@ export interface AnthropicOptions {
   baseUrl?: string;
   /** Per-response output token cap. */
   maxTokens?: number;
+  /**
+   * Mark the static prompt prefix cacheable. On by default — see
+   * `EPHEMERAL_CACHE` for why it pays from the second request onward.
+   *
+   * The escape hatch exists for `baseUrl`: a relay that validates the request
+   * body against an older schema rejects `cache_control` outright, and a 400 on
+   * every turn is a worse trade than paying full price for the prefix.
+   */
+  promptCache?: boolean;
 }
 
 export interface AnthropicConversation {
@@ -175,13 +202,86 @@ export function toAnthropicConversation(messages: Message[]): AnthropicConversat
   };
 }
 
-/** Convert Arterm tool schemas to Anthropic tool definitions (`input_schema`). */
-export function toAnthropicTools(tools: ToolSchema[]): Anthropic.Tool[] {
-  return tools.map((t) => ({
+/**
+ * Convert Arterm tool schemas to Anthropic tool definitions (`input_schema`).
+ *
+ * `cache` marks the LAST tool, which caches the whole roster: the prefix a
+ * breakpoint seals is everything before it, and tools lead the prompt. This is
+ * the most valuable of the three breakpoints and the least risky — the roster
+ * is fixed for a session, so it is written once and read by every request after.
+ */
+export function toAnthropicTools(tools: ToolSchema[], cache = false): Anthropic.Tool[] {
+  return tools.map((t, i) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters as Anthropic.Tool["input_schema"],
+    ...(cache && i === tools.length - 1 ? { cache_control: EPHEMERAL_CACHE } : {}),
   }));
+}
+
+/**
+ * The `system` parameter: a plain string, or blocks when either the OAuth
+ * identity has to lead or a cache breakpoint has to be attached (a string
+ * cannot carry one).
+ *
+ * Order matters twice over. `OAUTH_SYSTEM_IDENTITY` must be first or the
+ * subscription scope refuses the request; the breakpoint must be last or it
+ * seals less than the whole system prompt.
+ */
+export function toAnthropicSystem(
+  system: string | undefined,
+  opts: { oauth: boolean; cache: boolean },
+): string | Anthropic.TextBlockParam[] | undefined {
+  const parts = [...(opts.oauth ? [OAUTH_SYSTEM_IDENTITY] : []), ...(system ? [system] : [])];
+  if (parts.length === 0) return undefined;
+  const blocks = parts.map((text) => ({ type: "text" as const, text }));
+  if (!opts.cache) {
+    // Blocks buy nothing without a breakpoint, so the API-key path keeps sending
+    // the single string it has always sent.
+    return opts.oauth ? blocks : parts.join("\n\n");
+  }
+  const last = blocks.length - 1;
+  return blocks.map((b, i) => (i === last ? { ...b, cache_control: EPHEMERAL_CACHE } : b));
+}
+
+/**
+ * A copy of `message` whose last content block carries a cache breakpoint.
+ *
+ * The third breakpoint, and the only moving one: it seals the conversation as
+ * it stands, so the NEXT iteration — which appends the assistant turn and its
+ * tool results and re-sends everything — reads all of this back instead of
+ * paying for it again. That is where a long run's tokens actually are; the
+ * roster is a constant, the history is not.
+ *
+ * A message with no content to attach to is returned untouched. Manufacturing
+ * an empty text block to hold the marker would 400 the whole request, which is
+ * a strictly worse outcome than not caching one message.
+ */
+type CacheableBlock = Extract<
+  Anthropic.ContentBlockParam,
+  { type: "text" | "image" | "tool_use" | "tool_result" | "document" }
+>;
+
+const CACHEABLE_BLOCKS = new Set(["text", "image", "tool_use", "tool_result", "document"]);
+
+function isCacheable(block: Anthropic.ContentBlockParam): block is CacheableBlock {
+  return CACHEABLE_BLOCKS.has(block.type);
+}
+
+export function withCachePoint(message: Anthropic.MessageParam): Anthropic.MessageParam {
+  const blocks: Anthropic.ContentBlockParam[] =
+    typeof message.content === "string"
+      ? message.content
+        ? [{ type: "text", text: message.content }]
+        : []
+      : [...message.content];
+  const last = blocks.at(-1);
+  // `thinking` and `redacted_thinking` blocks carry no `cache_control` — the
+  // narrowing is the type system stating which blocks a breakpoint can ride on,
+  // rather than a cast asserting it. Our own conversion emits none of them.
+  if (!last || !isCacheable(last)) return message;
+  blocks[blocks.length - 1] = { ...last, cache_control: EPHEMERAL_CACHE };
+  return { ...message, content: blocks };
 }
 
 /** Talks to the Anthropic Messages API via the official SDK (streaming + tools). */
@@ -191,6 +291,7 @@ export class AnthropicProvider implements ChatProvider {
   private readonly apiKey: string | undefined;
   private readonly baseUrl: string | undefined;
   private readonly getAccessToken: (() => Promise<string>) | undefined;
+  private readonly promptCache: boolean;
   private limits: RateLimitSnapshot | undefined;
   /** Shared across resolveClient() calls so every request funnels one harvest. */
   private readonly transport = resilience((res) => {
@@ -202,6 +303,7 @@ export class AnthropicProvider implements ChatProvider {
     this.getAccessToken = opts.getAccessToken;
     this.baseUrl = opts.baseUrl;
     this.maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
+    this.promptCache = opts.promptCache ?? true;
   }
 
   /** Whether this provider authenticates with a subscription (OAuth) token. */
@@ -259,14 +361,18 @@ export class AnthropicProvider implements ChatProvider {
     // Resolved per attempt so a replay picks up a token refreshed in between.
     const client = await this.resolveClient();
     const { system, messages } = toAnthropicConversation(req.messages);
+    const cache = this.promptCache;
     // OAuth inference only serves requests that lead with the Claude Code identity,
     // so under a subscription token send `system` as blocks with that line first.
-    const systemParam = this.usesOauth
-      ? [
-          { type: "text" as const, text: OAUTH_SYSTEM_IDENTITY },
-          ...(system ? [{ type: "text" as const, text: system }] : []),
-        ]
-      : system;
+    const systemParam = toAnthropicSystem(system, { oauth: this.usesOauth, cache });
+    // Three breakpoints of the four Anthropic allows: the roster, the system
+    // prompt, and the conversation as it stands. The fourth is deliberately
+    // unspent — a second anchor further back would have to GUESS where the
+    // previous request ended (one iteration appends an assistant turn plus one
+    // tool result per call, so the offset is not fixed), and a breakpoint on a
+    // position that never repeats is a cache write nobody ever reads.
+    const last = cache ? messages.at(-1) : undefined;
+    const messagesParam = last ? [...messages.slice(0, -1), withCachePoint(last)] : messages;
     // Bound the stream with an idle timeout (reset on each event) so a server that
     // accepts the connection but never streams can't hang the turn forever.
     const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
@@ -278,8 +384,10 @@ export class AnthropicProvider implements ChatProvider {
           model: req.model,
           max_tokens: this.maxTokens,
           ...(systemParam ? { system: systemParam } : {}),
-          messages,
-          ...(req.tools && req.tools.length > 0 ? { tools: toAnthropicTools(req.tools) } : {}),
+          messages: messagesParam,
+          ...(req.tools && req.tools.length > 0
+            ? { tools: toAnthropicTools(req.tools, cache) }
+            : {}),
         },
         { signal: guard.signal },
       );
