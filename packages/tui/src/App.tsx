@@ -3026,12 +3026,17 @@ export function App({
       scrollBy(dir === "up" ? 1 : -1);
       return;
     }
-    // An open drill-down owns the arrows: the router has already ruled this one a
-    // keypress rather than a wheel tick, so stepping the row here is safe.
-    if (teamDetailOpen && boardRows.length > 0) {
-      stepMember(dir === "up" ? -1 : 1);
-      return;
-    }
+    // An open drill-down does NOT step rows from here, and the reason is that
+    // the router's ruling is a 25 ms timing heuristic, not a fact. A wheel set to
+    // one line per tick sends exactly what a keypress sends — one lone arrow —
+    // so this branch turned every such tick into a selection move: scrolling the
+    // transcript walked the swarm's cells at the same time. Reported from a live
+    // /team run, and unfixable at this layer, because the two inputs are
+    // byte-identical on the wire.
+    //
+    // The board keeps ⇥, Ctrl+↑↓ and Alt+↑↓ (handled in the board's own useInput,
+    // which is why its `plainArrows` gate already excluded this mode). No wheel
+    // can synthesize any of those, so they mean what they say.
     if (dir === "up") onHistoryPrev();
     else onHistoryNext();
   };
@@ -3050,20 +3055,6 @@ export function App({
           selected={teamMembers.length > 0 ? -1 : teamSel}
           detailOpen={teamMembers.length === 0 && teamDetailOpen}
           feed={teamFeeds.get(sddTasks[Math.min(teamSel, sddTasks.length - 1)]?.id ?? "") ?? []}
-        />
-      ) : null}
-      {teamMembers.length > 0 ? (
-        <TeamBoard
-          members={teamMembers}
-          columns={columns}
-          selected={teamSel}
-          detailOpen={teamDetailOpen}
-          feed={
-            teamFeeds.get(teamMembers[Math.min(teamSel, teamMembers.length - 1)]?.id ?? "") ?? []
-          }
-          kind={boardKind}
-          now={swarmClock}
-          leader={{ cost: leaderCost }}
         />
       ) : null}
       {contextOpen ? (
@@ -3177,6 +3168,27 @@ export function App({
           />
         </Box>
       )}
+      {/* The swarm board sits BELOW the prompt. It is the tallest thing in this
+          region and it grows as workers are added, so above the composer it
+          pushed the input line down the screen mid-run — the one element whose
+          position must not move while someone is typing in it. Under the prompt
+          the composer keeps its distance from the transcript, and the board
+          extends downward into space the status bar already owns. */}
+      {teamMembers.length > 0 ? (
+        <TeamBoard
+          members={teamMembers}
+          columns={columns}
+          selected={teamSel}
+          detailOpen={teamDetailOpen}
+          feed={
+            teamFeeds.get(teamMembers[Math.min(teamSel, teamMembers.length - 1)]?.id ?? "") ?? []
+          }
+          kind={boardKind}
+          now={swarmClock}
+          leader={{ cost: leaderCost }}
+          arrowsStepRows={!routedArrows}
+        />
+      ) : null}
       {autoState !== "idle" ? (
         <Box>
           <Text color={theme.monitor.swarm} bold>

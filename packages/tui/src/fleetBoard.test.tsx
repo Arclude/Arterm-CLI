@@ -307,6 +307,80 @@ describe("fleet board (parallel autonomy)", () => {
     unmount();
   });
 
+  it("puts the swarm board BELOW the prompt, so the input never moves under the typist", async () => {
+    const bus = new EventBus();
+    const { frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await tick();
+
+    bus.emit({
+      type: "autonomy_fleet_round",
+      round: 1,
+      tasks: [{ id: "r1-1", task: "port the parser", role: "refactorer" }],
+    });
+    await waitFor(ui, (f) => f.includes("AGENT SWARM"));
+
+    // The board grows a row per worker, so above the composer it pushed the
+    // prompt down the screen while a run was in flight.
+    const frame = ui();
+    const board = frame.indexOf("AGENT SWARM");
+    const prompt = frame.indexOf("message…");
+    // Both must be present: `indexOf` returns -1 for a missing needle, and
+    // "anything > -1" is a comparison that passes without measuring anything.
+    expect(board).toBeGreaterThanOrEqual(0);
+    expect(prompt).toBeGreaterThanOrEqual(0);
+    expect(board).toBeGreaterThan(prompt);
+
+    unmount();
+  });
+
+  it("never walks the swarm on a wheel tick, which is a bare arrow on the wire", async () => {
+    // Fullscreen with no mouse capture is the mode where the terminal's
+    // alternate-scroll turns each wheel tick into arrow sequences. At one line
+    // per tick that is ONE arrow — the same bytes a keypress sends — so a board
+    // that steps on bare arrows steps on every scroll. Seen on a live /team run:
+    // scrolling the transcript walked the swarm's cells alongside it.
+    const bus = new EventBus();
+    const { stdin, frames, unmount } = render(
+      createElement(App, { session: fakeSession(bus), fullscreen: true }),
+    );
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await tick();
+
+    bus.emit({
+      type: "autonomy_fleet_round",
+      round: 1,
+      tasks: [
+        { id: "r1-1", task: "port the parser", role: "refactorer" },
+        { id: "r1-2", task: "cover the parser", role: "tester" },
+      ],
+    });
+    await waitFor(ui, (f) => f.includes("refactorer") && f.includes("tester"));
+
+    stdin.write(ENTER);
+    await waitFor(ui, (f) => f.includes("⚙ refactorer") && f.includes("(1/2)"));
+    // …and the footer does not teach a binding this mode does not have.
+    expect(ui()).toContain("⇥/^↑↓ subtask");
+    expect(ui()).not.toContain("↑↓/⇥ subtask");
+
+    // A lone arrow: indistinguishable from a one-line wheel tick.
+    stdin.write(DOWN);
+    await tick(80); // well past the router's 25 ms classification window
+    expect(ui()).toContain("⚙ refactorer");
+    expect(ui()).toContain("(1/2)");
+
+    // A batched chunk: an unambiguous wheel tick, and equally not a selection.
+    stdin.write(DOWN + DOWN + DOWN);
+    await tick(80);
+    expect(ui()).toContain("(1/2)");
+
+    // Ctrl+↓ still steps the row — no wheel can synthesize that.
+    stdin.write(CTRL_DOWN);
+    await waitFor(ui, (f) => f.includes("⚙ tester") && f.includes("(2/2)"));
+
+    unmount();
+  });
+
   it("steps rows on Tab and Alt+arrows — for terminals that eat Ctrl+arrow", async () => {
     const bus = new EventBus();
     const { stdin, frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));

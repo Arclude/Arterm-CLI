@@ -255,6 +255,7 @@ export function TeamBoard({
   kind = "team",
   now = Date.now(),
   leader,
+  arrowsStepRows = false,
 }: {
   members: TeamBoardMember[];
   /** The main agent's own spend, named beside the fleet's. */
@@ -271,6 +272,14 @@ export function TeamBoard({
   kind?: TeamBoardKind;
   /** Clock for the live elapsed times; injected so tests are deterministic. */
   now?: number;
+  /**
+   * Whether bare ↑↓ step rows, which is only true when the arrow router is NOT
+   * the one reading them. Under the router a wheel tick and a keypress arrive as
+   * the same bytes, so bare arrows are left to the transcript and the prompt —
+   * and a footer that still advertised them would be teaching a binding that
+   * does nothing while quietly scrolling the transcript instead.
+   */
+  arrowsStepRows?: boolean;
 }): React.ReactElement {
   const done = members.filter((m) => m.state === "done").length;
   const failed = members.filter((m) => m.state === "failed").length;
@@ -304,7 +313,7 @@ export function TeamBoard({
       title="AGENT SWARM"
       kicker={KIND_LABEL[kind].title}
       accent={theme.monitor.swarm}
-      footer={`${detailOpen ? "↑↓/⇥" : "⇥/^↑↓"} ${KIND_LABEL[kind].unit}${
+      footer={`${detailOpen && arrowsStepRows ? "↑↓/⇥" : "⇥/^↑↓"} ${KIND_LABEL[kind].unit}${
         detailOpen ? "" : " · ⏎ inspect"
       } · esc close`}
       right={
