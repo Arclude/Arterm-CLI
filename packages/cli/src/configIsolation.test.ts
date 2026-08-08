@@ -106,3 +106,41 @@ describe("nothing derives an Arterm path from the OS home", () => {
     expect(files.some((f) => f.endsWith(join("core", "src", "config.ts")))).toBe(true);
   });
 });
+
+/**
+ * The redirect is per PACKAGE, so a rule about one package protects one package.
+ *
+ * `packages/cli` had it and `packages/core` did not, which meant a single
+ * `agent.test.ts` case spooled a real file into the developer's
+ * `~/.arterm/tool-output` — `spoolDir()` is `join(ARTERM_HOME, "tool-output")`,
+ * and with nothing redirecting it that is the live directory. Counted before and
+ * after one test: 240 files, then 241.
+ *
+ * `packages/tui` shows why "has a config" is not the check: it had one, for
+ * FORCE_COLOR, and the file's existence is precisely what stopped anyone opening
+ * it. So the assertion is about the SETTING, in every package that runs tests at
+ * all — a blanket rule, deliberately, because an exception list is a place for
+ * the next package to be forgotten.
+ */
+describe("every package that runs tests redirects ARTERM_HOME", () => {
+  it("sets it in each package's own vitest config", () => {
+    const missing: string[] = [];
+    for (const pkg of readdirSync(join(REPO_ROOT, "packages"), { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue;
+      const hasTests = readdirSync(join(REPO_ROOT, "packages", pkg.name, "src"), {
+        recursive: true,
+        encoding: "utf8",
+      }).some((f) => f.includes(".test."));
+      if (!hasTests) continue;
+      let config = "";
+      try {
+        config = readFileSync(join(REPO_ROOT, "packages", pkg.name, "vitest.config.ts"), "utf8");
+      } catch {
+        missing.push(`${pkg.name} (no vitest.config.ts)`);
+        continue;
+      }
+      if (!config.includes("ARTERM_HOME")) missing.push(`${pkg.name} (config sets no ARTERM_HOME)`);
+    }
+    expect(missing).toEqual([]);
+  });
+});
