@@ -229,6 +229,24 @@ export function warnUngatedRun(config: ArtermConfig, warn: (msg: string) => void
   }
 }
 
+/**
+ * The prompt `--print` carried, if it carried one.
+ *
+ * `--print [prompt]` takes an OPTIONAL value, so commander reports the bare flag
+ * as `true` rather than a string — and `true` is not a prompt, it is the request
+ * to go headless with the prompt arriving on stdin. Reading it as one is what
+ * made `arterm --print --json` die on `prompt.trim is not a function` before it
+ * ever looked at stdin: the documented way to pipe a prompt and get JSON back
+ * was the one invocation that could not work.
+ *
+ * Returning `undefined` for the bare flag is the whole behaviour — the caller
+ * then falls through to stdin, and an empty stdin still produces the real error
+ * ("no prompt provided"), which is the message that actually helps.
+ */
+export function printedPrompt(print: string | true | undefined): string | undefined {
+  return typeof print === "string" ? print : undefined;
+}
+
 /** The live objects `armAutonomous` flips — deliberately narrow so tests can fake them. */
 export interface RuntimeAutonomousHooks {
   config: ArtermConfig;

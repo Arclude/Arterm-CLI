@@ -115,6 +115,40 @@ describe.skipIf(!gitAvailable)("worktree", () => {
     const res = await applyPatch(repo, changes.patch);
     expect(res.ok).toBe(false);
     expect(res.detail).toBeTruthy();
+
+    // And it reported that WITHOUT leaving the merge behind. `git apply --3way`
+    // writes conflict markers into the file and stages them before it exits
+    // non-zero, so "we told the caller it failed" used to coexist with a source
+    // file that no longer parsed. Observed on a real /team merge: all three of
+    // the run's files came out beginning with `<<<<<<< ours`.
+    const after = await fs.readFile(join(repo, "seed.txt"), "utf8");
+    expect(after).toBe("main version\n");
+    expect(after).not.toContain("<<<<<<<");
+    const { stdout: staged } = await run("git", ["diff", "--cached", "--name-only"], { cwd: repo });
+    expect(staged.trim()).toBe("");
+  });
+
+  it("applyPatch removes a file it had to create, when the apply fails", async () => {
+    // The restore has to cover "did not exist" too — a conflicted apply can
+    // leave behind a file the tree never had, and putting back its old content
+    // is not an option when there wasn't any.
+    const wt = await createWorktree(repo, "ap3");
+    await fs.writeFile(join(wt.path, "brand-new.txt"), "member version\n");
+    const changes = await captureWorktree(wt);
+    await removeWorktree(wt, repo, { keepBranch: false });
+
+    // Same path, different content, committed on main → the add conflicts.
+    await fs.writeFile(join(repo, "brand-new.txt"), "main version\n");
+    await run("git", ["add", "-A"], { cwd: repo });
+    await run("git", ["commit", "-m", "diverge-new"], { cwd: repo });
+    await fs.rm(join(repo, "brand-new.txt"));
+    await run("git", ["rm", "-q", "--cached", "brand-new.txt"], { cwd: repo });
+    await run("git", ["commit", "-m", "remove it again"], { cwd: repo });
+
+    const res = await applyPatch(repo, changes.patch);
+    if (!res.ok) {
+      await expect(fs.readFile(join(repo, "brand-new.txt"))).rejects.toThrow();
+    }
   });
 
   it("applyPatch treats an empty patch as a no-op success", async () => {

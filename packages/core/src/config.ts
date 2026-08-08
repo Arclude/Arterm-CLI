@@ -479,7 +479,24 @@ export interface ArtermConfig {
   };
 }
 
-export const ARTERM_HOME = join(homedir(), ".arterm");
+/**
+ * Where the session's own state lives — config, keystore, models, sessions.
+ *
+ * `$ARTERM_HOME` overrides it, and that override is not a convenience: this is
+ * resolved ONCE at module load, so nothing that imports this file can redirect
+ * it afterwards. A test calling `persist()` therefore wrote the DEVELOPER'S
+ * `~/.arterm/config.json` — observed, not theorized. `processE2e.test.ts` built
+ * a session from `defaultConfig()` and persisted it, which reset a real config's
+ * `provider`/`model`/`permissions` to the defaults, leaving every other field
+ * intact so the file still looked right. The next run went to a dead Ollama
+ * while `openaiCompatHost` still named the real endpoint, and the failure
+ * surfaced three layers away as "the leader proposed no work".
+ *
+ * An env var is the only mechanism that can be set BEFORE the import (vitest's
+ * `test.env`, a CI job, a second profile) — which is exactly the property the
+ * module-level constant demands.
+ */
+export const ARTERM_HOME = process.env.ARTERM_HOME ?? join(homedir(), ".arterm");
 const CONFIG_PATH = join(ARTERM_HOME, "config.json");
 
 export function defaultConfig(): ArtermConfig {

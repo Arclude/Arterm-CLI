@@ -73,6 +73,29 @@ export function uriOf(path: string): string {
   return pathToFileURL(path).toString();
 }
 
+/**
+ * The key a URI is filed under, as opposed to the URI we send.
+ *
+ * `publishDiagnostics` is a PUSH: the server names the document, and it names it
+ * its own way. TypeScript's server lower-cases a Windows drive letter, so the
+ * `file:///C:/…` we sent came back as `file:///c:/…` and an exact-string lookup
+ * never found it — `lsp_diagnostics` reported "the language server published no
+ * diagnostics" for every file on Windows, which reads as a clean bill of health
+ * for a file with a type error in it.
+ *
+ * It also spells the drive colon differently: `vscode-uri`, which
+ * typescript-language-server serializes with, escapes it as `%3A`, while
+ * `pathToFileURL` leaves it literal. So the two URIs differ in two ways at once
+ * and neither is wrong — they name the same file.
+ *
+ * Windows paths are case-insensitive, so folding is safe there and catches the
+ * same disagreement about any other segment. On POSIX the case is meaningful and
+ * the URI is left exactly as it is.
+ */
+export function uriKey(uri: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? uri.replace(/%3a/gi, ":").toLowerCase() : uri;
+}
+
 export class LspClient {
   private diagnostics = new Map<string, LspDiagnostic[]>();
   private diagnosticWaiters = new Map<string, Array<() => void>>();
@@ -128,10 +151,11 @@ export class LspClient {
     rpc.onNotification((method, params) => {
       if (method !== "textDocument/publishDiagnostics") return;
       const p = params as { uri: string; diagnostics: LspDiagnostic[] };
-      client.diagnostics.set(p.uri, p.diagnostics ?? []);
-      const waiting = client.diagnosticWaiters.get(p.uri);
+      const key = uriKey(p.uri);
+      client.diagnostics.set(key, p.diagnostics ?? []);
+      const waiting = client.diagnosticWaiters.get(key);
       if (waiting) {
-        client.diagnosticWaiters.delete(p.uri);
+        client.diagnosticWaiters.delete(key);
         for (const wake of waiting) wake();
       }
     });
@@ -174,15 +198,16 @@ export class LspClient {
    */
   async didOpen(path: string, text: string, lang: CallLang): Promise<string> {
     const uri = uriOf(path);
-    if (this.opened.has(uri)) {
+    const key = uriKey(uri);
+    if (this.opened.has(key)) {
       this.rpc.notify("textDocument/didClose", { textDocument: { uri } });
-      this.opened.delete(uri);
+      this.opened.delete(key);
     }
-    this.diagnostics.delete(uri);
+    this.diagnostics.delete(key);
     this.rpc.notify("textDocument/didOpen", {
       textDocument: { uri, languageId: languageIdFor(lang), version: 1, text },
     });
-    this.opened.add(uri);
+    this.opened.add(key);
     return uri;
   }
 
@@ -195,18 +220,19 @@ export class LspClient {
    * which it got.
    */
   async waitForDiagnostics(uri: string): Promise<{ items: LspDiagnostic[]; arrived: boolean }> {
-    const existing = this.diagnostics.get(uri);
+    const key = uriKey(uri);
+    const existing = this.diagnostics.get(key);
     if (existing) return { items: existing, arrived: true };
     let timer: NodeJS.Timeout | undefined;
     await new Promise<void>((resolve) => {
-      const waiters = this.diagnosticWaiters.get(uri) ?? [];
+      const waiters = this.diagnosticWaiters.get(key) ?? [];
       waiters.push(resolve);
-      this.diagnosticWaiters.set(uri, waiters);
+      this.diagnosticWaiters.set(key, waiters);
       timer = setTimeout(resolve, diagnosticWait());
       timer.unref?.();
     });
     if (timer) clearTimeout(timer);
-    const items = this.diagnostics.get(uri);
+    const items = this.diagnostics.get(key);
     return { items: items ?? [], arrived: items !== undefined };
   }
 

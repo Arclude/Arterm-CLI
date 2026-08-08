@@ -55,4 +55,33 @@ describe("a session stops what it started", () => {
     }
     expect(alive(pid), "the process should be gone after teardown").toBe(false);
   }, 30_000);
+
+  /**
+   * The other half: `persistNow` is a SAVE, not a teardown.
+   *
+   * The TUI calls it the moment someone picks a model from the picker, and it
+   * used to point at the whole of `persist()` — so switching models killed the
+   * dev server the agent had just started, shut down the session's telemetry,
+   * and closed its language servers, all while the session went on running.
+   * Nothing noticed because every one of those failures is silent.
+   */
+  it("keeps it running when the session merely saves a model choice", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "arterm-ps-save-"));
+    const { session, persist } = await buildSession({ config: defaultConfig(), cwd });
+
+    const exec = session.agent.tools.find((t) => t.name === "exec");
+    await exec?.execute(
+      { command: "node", args: ["-e", "setInterval(() => {}, 1000)"], background: true },
+      { cwd, processes: session.processes },
+    );
+    const pid = session.processes.live()[0]?.pid as number;
+    expect(alive(pid)).toBe(true);
+
+    await session.persistNow?.();
+
+    expect(session.processes.live(), "saving is not stopping").toHaveLength(1);
+    expect(alive(pid), "a model switch must not kill the session's children").toBe(true);
+
+    await persist();
+  }, 30_000);
 });

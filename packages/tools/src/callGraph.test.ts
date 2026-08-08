@@ -24,6 +24,13 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   resetCallGraphs();
+  // Windows will not delete a file another handle still has open, so a SQLite
+  // cache left open turns the temp-dir cleanup into `EBUSY: resource busy or
+  // locked, unlink …/.cache/*.db` and fails a test whose assertions all passed.
+  // POSIX unlinks an open file happily, which is why this was invisible until
+  // the first Windows CI leg. Closing beats `force: true`, which does not help:
+  // the handle, not the existence check, is what refuses.
+  for (const g of opened.splice(0)) g.close();
   await fs.rm(dir, { recursive: true, force: true });
 });
 
@@ -33,9 +40,18 @@ async function write(rel: string, body: string) {
   await fs.writeFile(abs, body);
 }
 
+/** Every graph this file opens, so `afterEach` can close them before deleting. */
+const opened: CallGraph[] = [];
+
 /** A graph with no SQLite cache, so tests never share state through ARTERM_HOME. */
-const freshGraph = async () => {
+const openGraph = () => {
   const g = new CallGraph(dir, { dbDir: join(dir, ".cache") });
+  opened.push(g);
+  return g;
+};
+
+const freshGraph = async () => {
+  const g = openGraph();
   await g.refresh();
   return g;
 };
@@ -172,7 +188,7 @@ describe.runIf(parserOk)("CallGraph over a tree", () => {
 
   it("re-parses only what changed", async () => {
     await write("src/a.ts", "export function one() {}\n");
-    const g = new CallGraph(dir, { dbDir: join(dir, ".cache") });
+    const g = openGraph();
     await g.refresh();
     expect(g.stats().decls).toBe(1);
 
@@ -185,7 +201,7 @@ describe.runIf(parserOk)("CallGraph over a tree", () => {
 
   it("forgets a deleted file", async () => {
     await write("src/a.ts", "export function gone() {}\n");
-    const g = new CallGraph(dir, { dbDir: join(dir, ".cache") });
+    const g = openGraph();
     await g.refresh();
     expect(g.declarations("gone")).toHaveLength(1);
 

@@ -640,6 +640,8 @@ export function App({
   );
   const [goalText, setGoalText] = useState("");
   const [autoStep, setAutoStep] = useState(0);
+  /** True while the leader's own planning/assessment call is in flight. */
+  const [leaderBusy, setLeaderBusy] = useState(false);
   const [pending, setPending] = useState<PendingPermission | null>(null);
   // Requests waiting behind the active prompt, tracked off `permission_queued`
   // (the broker queues concurrent asks — a fan-out shares one prompt).
@@ -1185,6 +1187,15 @@ export function App({
           break;
         case "autonomy_step":
           setAutoStep(event.step);
+          break;
+        // The leader on the wire. Without this the screen actively lies between
+        // rounds: the swarm board reads `3/3 done · 0 LIVE`, the step counter is
+        // frozen and the status bar says idle, while the call that decides the
+        // entire next round has been running for minutes. `turn_start` cannot
+        // carry it — `plan()` is not a turn — so this is its own signal.
+        case "leader_call":
+          setLeaderBusy(event.active);
+          setStatus(event.active ? "thinking" : "idle");
           break;
         case "autonomy_reflect":
           if (event.done && event.note) push({ kind: "system", text: `✓ ${event.note}` });
@@ -3173,8 +3184,14 @@ export function App({
           </Text>
           <Text color={theme.textMuted}>
             {"  "}
-            step {autoStep} · {oneLine(goalText, 64)}
+            step {autoStep} ·{" "}
           </Text>
+          {leaderBusy ? (
+            <Text color={theme.accent} bold>
+              leader thinking ·{" "}
+            </Text>
+          ) : null}
+          <Text color={theme.textMuted}>{oneLine(goalText, 64)}</Text>
         </Box>
       ) : null}
       {todos.length > 0 ? <TodoStrip items={todos} columns={columns} /> : null}

@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Agent } from "./agent.js";
+import { Agent, readAssessment } from "./agent.js";
 import { RunBudget } from "./budget.js";
 import type { ContextStrategy } from "./contextStrategy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
@@ -1122,5 +1122,151 @@ describe("tool output ceiling", () => {
     await makeAgent(callOnceNamed("loud"), bus, [loud(400_000)]).run("go");
     const result = events.find((e) => e.type === "tool_result") as { output: string };
     expect(result.output).toContain("cut from the middle");
+  });
+});
+
+/**
+ * The leader's own two calls. Both are "best effort" by design — the tolerant
+ * parsers fall back to running the goal whole — and both used to be best effort
+ * in a way that made a total failure indistinguishable from a decision.
+ */
+describe("Agent.plan / Agent.assess — the leader's own calls", () => {
+  class DeadProvider implements ChatProvider {
+    readonly id = "ollama";
+    supportsNativeTools(): boolean {
+      return false;
+    }
+    async listModels() {
+      return [];
+    }
+    // biome-ignore lint/correctness/useYield: it throws before it can yield
+    async *chat(): AsyncIterable<ChatChunk> {
+      throw new ProviderError("ollama: fetch failed (ECONNREFUSED)", {
+        provider: "ollama",
+        kind: "network",
+      });
+    }
+  }
+
+  it("says the planning call failed instead of returning a silent empty plan", async () => {
+    // The bug: an unreachable provider returned "", the team loop read that as
+    // "the leader proposed no work", and the run exited 0 saying so. The empty
+    // plan is still the right RETURN — the loop keeps control — but the failure
+    // has to leave a trace, or a dead provider reads as a decision.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const agent = makeAgent(new DeadProvider(), bus);
+
+    expect(await agent.plan("decompose this")).toBe("");
+
+    const errors = events.filter((e) => e.type === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ type: "error" });
+    const text = (errors[0] as { error: string }).error;
+    expect(text).toContain("planning call failed");
+    expect(text).toContain("ollama");
+    expect(text).toContain("ECONNREFUSED");
+  });
+
+  it("stays quiet when the failure is the caller's own cancellation", async () => {
+    // A stopped run is not a provider fault, and an error line per aborted
+    // planning call would make /stop look like a crash.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const agent = makeAgent(new DeadProvider(), bus);
+    const ctrl = new AbortController();
+    ctrl.abort();
+
+    expect(await agent.plan("decompose this", ctrl.signal)).toBe("");
+    expect(events.filter((e) => e.type === "error")).toHaveLength(0);
+  });
+
+  it("counts what the leader spends — planning tokens are not free", async () => {
+    // A whole /team run reported `usd: 0, reported: false`: every token it burned
+    // was the leader's, and plan() read only the text chunks.
+    const bus = new EventBus();
+    const events = collect(bus);
+    const budget = new RunBudget({ tokens: 1_000_000 });
+    const provider = new StubProvider([
+      [
+        { type: "text", delta: "1. do a thing" },
+        { type: "done", usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 } },
+      ],
+    ]);
+    const agent = new Agent({
+      provider,
+      model: "m",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus,
+      cwd: process.cwd(),
+      budget,
+    });
+
+    await agent.plan("decompose this");
+
+    expect(events.filter((e) => e.type === "usage")).toHaveLength(1);
+    const state = budget.state();
+    expect(state.tokens).toBe(120);
+    // `reported: false` beside a nonzero cost is the row that made a real /team
+    // run look free. It has to flip the moment the leader is billed at all.
+    expect(state.reported).toBe(true);
+  });
+
+  it("counts what an assessment spends too", async () => {
+    const bus = new EventBus();
+    const budget = new RunBudget({ tokens: 1_000_000 });
+    const provider = new StubProvider([
+      [
+        { type: "text", delta: "DONE" },
+        { type: "done", usage: { promptTokens: 40, completionTokens: 2, totalTokens: 42 } },
+      ],
+    ]);
+    const agent = new Agent({
+      provider,
+      model: "m",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus,
+      cwd: process.cwd(),
+      budget,
+    });
+
+    const verdict = await agent.assess("ship it");
+    expect(verdict.done).toBe(true);
+    expect(budget.state().tokens).toBe(42);
+  });
+});
+
+describe("readAssessment — the leader's completion verdict", () => {
+  it("does not read the word 'done' out of a sentence that says the opposite", () => {
+    // The real reply that ended a real run. It is a model saying it is NOT
+    // finished; `\bDONE\b` found the word inside "declaring done" and returned
+    // the opposite of what the sentence means.
+    const reply = "Let me verify the actual state of the main working tree before declaring done.";
+    expect(readAssessment(reply).done).toBe(false);
+  });
+
+  it("accepts the one-word answer the prompt asks for, however it is decorated", () => {
+    for (const reply of ["DONE", "done", "DONE.", "**DONE**", '"DONE"', "DONE — all three exist"]) {
+      expect(readAssessment(reply).done, reply).toBe(true);
+    }
+  });
+
+  it("accepts a verdict a reasoning model puts on the last line", () => {
+    expect(readAssessment("Checked all three modules and the gate.\n\nDONE").done).toBe(true);
+  });
+
+  it("CONTINUE wins wherever it sits, and prose alone is never done", () => {
+    expect(readAssessment("DONE\n\nCONTINUE: one test still fails").done).toBe(false);
+    expect(readAssessment("The first two files are done, the third is not.").done).toBe(false);
+    expect(readAssessment("Nothing is done yet.").done).toBe(false);
+    expect(readAssessment("").done).toBe(false);
+  });
+
+  it("keeps the reply as the note either way", () => {
+    expect(readAssessment("CONTINUE: write the table module").note).toContain("table module");
   });
 });

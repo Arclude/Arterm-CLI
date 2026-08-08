@@ -1125,34 +1125,19 @@ export async function buildSession(opts: SessionOptions): Promise<{
     memoryBanner,
   };
 
-  const persist = async () => {
-    // Model-spawned workers are the one thing here that can still be RUNNING at
-    // teardown: nothing awaited them, which is the point of assigning without
-    // blocking. Stopping them first means a closing session does not leave a
-    // sub-agent making provider calls against a run nobody is watching.
-    fleetRegistry.dispose();
-    // Language servers are the other long-lived child. They are cached for the
-    // process precisely so a second question is cheap, which means nothing else
-    // ever closes them.
-    await disposeLspClients().catch(() => {});
-    await disposeBrowsers().catch(() => 0);
-    resetCallGraphs();
-    // The reason background execution is safe to offer at all: what the session
-    // started, the session stops. Without this a dev server launched in minute
-    // two of a six-hour run still holds its port tomorrow.
-    processes.killAll();
-    // Flush the exporter here rather than behind a fourth returned function:
-    // `persist` is the last call on EVERY teardown path (headless, session
-    // close, close-all), and a batch processor that is never shut down drops
-    // the spans of the run that just ended — the ones anyone is looking for.
-    // Never throws: a collector that went away must not fail a good run.
-    await telemetry?.shutdown().catch(() => {});
-    // Spooled tool outputs, swept here for the same reason: this is the last
-    // call on every teardown path. Done at the END of a session rather than on
-    // each write — the directory grows by a few files per run, and a sweep on
-    // the write path would add a directory listing to a tool call that is
-    // already over its budget.
-    await sweepSpool().catch(() => 0);
+  /**
+   * Write down the choices this session owns. NOT teardown.
+   *
+   * This is the half `persistNow` means: the TUI calls it the moment someone
+   * picks a model, so the choice survives a crash. The session keeps running
+   * afterwards, so nothing here may stop anything — an earlier version pointed
+   * `persistNow` at the whole of `persist()`, which meant choosing a model from
+   * the picker also killed the session's background processes and flushed its
+   * telemetry. With the sandbox added to that list it would have reset the
+   * boundary too, leaving every later `bash` refused by a runner whose proxies
+   * were gone.
+   */
+  const saveState = async () => {
     config.provider = provider.id;
     config.permissions = permissions.snapshot();
     // Persist auto/plan/ask as the default, but never make yolo sticky.
@@ -1170,9 +1155,47 @@ export async function buildSession(opts: SessionOptions): Promise<{
       mode: config.mode,
     });
   };
+
+  const persist = async () => {
+    // Model-spawned workers are the one thing here that can still be RUNNING at
+    // teardown: nothing awaited them, which is the point of assigning without
+    // blocking. Stopping them first means a closing session does not leave a
+    // sub-agent making provider calls against a run nobody is watching.
+    fleetRegistry.dispose();
+    // Language servers are the other long-lived child. They are cached for the
+    // process precisely so a second question is cheap, which means nothing else
+    // ever closes them.
+    await disposeLspClients().catch(() => {});
+    await disposeBrowsers().catch(() => 0);
+    resetCallGraphs();
+    // The reason background execution is safe to offer at all: what the session
+    // started, the session stops. Without this a dev server launched in minute
+    // two of a six-hour run still holds its port tomorrow.
+    processes.killAll();
+    // The sandbox is the third long-lived child, and the one whose absence from
+    // this list was invisible: its host-side egress proxy and socket bridge keep
+    // the event loop alive, so `arterm --print --autonomous` printed its JSON,
+    // its verdict and its usage — and then never exited. A run that has to be
+    // killed reports as a failed run, whatever it actually accomplished.
+    await sandbox?.dispose?.().catch(() => {});
+    // Flush the exporter here rather than behind a fourth returned function:
+    // `persist` is the last call on EVERY teardown path (headless, session
+    // close, close-all), and a batch processor that is never shut down drops
+    // the spans of the run that just ended — the ones anyone is looking for.
+    // Never throws: a collector that went away must not fail a good run.
+    await telemetry?.shutdown().catch(() => {});
+    // Spooled tool outputs, swept here for the same reason: this is the last
+    // call on every teardown path. Done at the END of a session rather than on
+    // each write — the directory grows by a few files per run, and a sweep on
+    // the write path would add a directory listing to a tool call that is
+    // already over its budget.
+    await sweepSpool().catch(() => 0);
+    await saveState();
+  };
   // Let the TUI persist a model/provider/login choice immediately instead of
   // only on clean exit, so it survives a crash and becomes the next default.
-  session.persistNow = persist;
+  // The SAVE half only — this session is still running.
+  session.persistNow = saveState;
 
   // Subscription (OAuth/PKCE) login driven from the TUI's /login overlay — the
   // same flow as `arterm login`, but the code is pasted into the overlay instead

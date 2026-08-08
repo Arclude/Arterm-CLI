@@ -174,3 +174,33 @@ describe("a worker's feed says why it stopped", () => {
     expect(formatMemberEvent({ type: "autonomy_stopped", reason: "cap" })).toMatch(/cap/);
   });
 });
+
+/**
+ * The leader is the one agent with no cell on the swarm board, by design — its
+ * spend is named in the header and its liveness was declared "the status bar's
+ * job". It was not doing that job: `plan()` emits no `turn_start`, so between
+ * rounds the screen showed a finished board (`3/3 done · 0 LIVE`), a frozen step
+ * counter and an idle status bar, while the call deciding the next round ran for
+ * minutes. Nothing was wrong and nothing said so.
+ */
+describe("the leader's own call is visible while it runs", () => {
+  it("says the leader is thinking, and stops saying it when the call returns", async () => {
+    const bus = new EventBus();
+    const { frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await tick();
+
+    // The banner only exists during a goal run — that is where the leader lives.
+    bus.emit({ type: "goal_set", goal: "build three modules", mode: "team" });
+    bus.emit({ type: "autonomy_step", step: 2 });
+    bus.emit({ type: "leader_call", kind: "plan", active: true });
+    await waitFor(ui, (f) => f.includes("leader thinking"));
+
+    bus.emit({ type: "leader_call", kind: "plan", active: false });
+    await waitFor(ui, (f) => !f.includes("leader thinking"));
+    // The goal banner itself stays — only the leader indicator clears.
+    expect(ui()).toContain("build three modules");
+
+    unmount();
+  });
+});

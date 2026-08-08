@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Tool, ToolContext } from "@arterm/core";
@@ -16,13 +16,21 @@ import { parseResults } from "./webSearch.js";
 import { WorkingDirStore } from "./workingDir.js";
 
 let dir: string;
-/** The same directory as the kernel sees it — `tmpdir()` is a symlink on macOS. */
+/**
+ * The same directory as `WorkingDirStore` sees it — `tmpdir()` is a symlink on
+ * macOS. It must be resolved with the SAME function the store uses
+ * (`realpathSync`), not the promise API: on Windows they disagree. `fs.realpath`
+ * is libuv's, which expands an 8.3 short name, while `realpathSync` is Node's own
+ * JS walk, which leaves it alone — so the store reported
+ * `C:\Users\RUNNER~1\…` against an expectation of `C:\Users\runneradmin\…` and
+ * eight tests failed on two spellings of one directory.
+ */
 let realDir: string;
 const ctx = (): ToolContext => ({ cwd: dir, tools: defaultTools() });
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(join(tmpdir(), "arterm-meta-test-"));
-  realDir = await fs.realpath(dir);
+  realDir = realpathSync(dir);
 });
 afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });

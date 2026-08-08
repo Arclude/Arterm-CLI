@@ -6,6 +6,7 @@ import type { Tool } from "@arterm/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bashTool } from "./bash.js";
 import { allowedCommands, createExecTool } from "./exec.js";
+import { rmWithRetry } from "./testTmp.js";
 
 let dir: string;
 let registry: ProcessRegistry;
@@ -18,7 +19,13 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   registry.killAll("SIGKILL");
-  await fs.rm(dir, { recursive: true, force: true });
+  // A signal is a request, not an exit. Windows refuses to delete a directory a
+  // live child still holds — `EBUSY: resource busy or locked, rmdir …` — which
+  // fails a test whose own assertions all passed. POSIX deletes it regardless,
+  // which is why four background tests were green everywhere but Windows.
+  // Waiting for the registry to settle is the part `killAll` cannot do itself.
+  await until(() => registry.live().length === 0).catch(() => {});
+  await rmWithRetry(dir);
 });
 
 /** Wait for a predicate, so nothing depends on a fixed sleep. */

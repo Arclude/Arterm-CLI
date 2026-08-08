@@ -54,7 +54,7 @@ import type { Session } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { ArtermUserError } from "./errors.js";
-import { applyAutonomousProfile } from "./flags.js";
+import { applyAutonomousProfile, printedPrompt } from "./flags.js";
 import { runHeadless, runHeadlessGoal } from "./headless.js";
 import { runInit } from "./init.js";
 import { runMcpServe } from "./mcpServe.js";
@@ -153,8 +153,12 @@ interface GlobalOpts {
   yolo?: boolean;
   confirmDestructive?: boolean;
   goal?: string;
-  /** One-shot prompt; runs headlessly (no TUI) and prints the result. */
-  print?: string;
+  /**
+   * One-shot prompt; runs headlessly (no TUI) and prints the result. The value
+   * is optional, so a bare `--print` (e.g. `--print --json` with the prompt on
+   * stdin) arrives as `true` rather than a string.
+   */
+  print?: string | true;
   /** With --print/piped input, emit the result as a single JSON object. */
   json?: boolean;
   /** Resume a recorded session by id. */
@@ -572,7 +576,8 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   // `--goal` runs the autonomy loop; `--print`/stdin runs one prompt. When both
   // are given the goal wins, because it is the more specific instruction — and
   // it used to be dropped on the floor here without a word.
-  const prompt = globals.goal ? "" : (globals.print ?? (await readStdin()));
+  // A bare `--print` (no value) is the flag, not the prompt — see `printedPrompt`.
+  const prompt = globals.goal ? "" : (printedPrompt(globals.print) ?? (await readStdin()));
   const config = applyVerifyFlags(await loadConfig(), globals);
   const { hardCap } = applyAutonomousProfile(config, globals);
   const providerId = globals.provider ?? config.provider;

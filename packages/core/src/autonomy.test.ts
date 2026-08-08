@@ -861,6 +861,12 @@ describe("team mode", () => {
     // Ad-hoc member → brief travels as a task-instruction prefix, not a system prompt.
     expect(task?.instruction).toBe("Write the code.");
     expect(task?.systemPrompt).toBeUndefined();
+    // Every assignment ends by naming its own edges. A member sees the whole
+    // goal and is a full agent, so without this it builds the whole goal: on a
+    // real three-member run told "one file per member", each member implemented
+    // all three modules and the merge put `<<<<<<< ours` atop every file.
+    expect(task?.task).toMatch(/do ONLY the task above/);
+    expect(task?.task).toMatch(/only the files your own task names/);
 
     const types = events.map((e) => e.type);
     expect(types.indexOf("team_plan")).toBeGreaterThan(-1);
@@ -870,6 +876,23 @@ describe("team mode", () => {
     const done = events.find((e) => e.type === "team_done");
     expect(done?.type === "team_done" && done.done).toBe(1);
     expect(engine.snapshot().team.map((m) => m.name)).toEqual(["coder"]);
+
+    // The run's summary is the CLAIM that was gated — who did what — not the
+    // leader's one-word reply. `assess()` is asked for a single word, so the
+    // note is at best "DONE"; a real run's entire summary field came back as
+    // "Let me verify the actual state of the main working tree before declaring
+    // done." A summary nobody can act on is the same as no summary.
+    const finished = events.find((e) => e.type === "autonomy_done");
+    const summary = finished?.type === "autonomy_done" ? finished.summary : "";
+    expect(summary).toContain("finished"); // the leader's note is still in there
+    expect(summary).toContain("coder"); // …and so is who did it
+    expect(summary).toContain("implement it"); // …and what they were ASSIGNED
+    // Not the assembled prompt: a member's `task` is its private-memory recall
+    // and blackboard brief with the assignment underneath, so quoting the first
+    // 120 characters of it produced rows reading
+    // `✗ coder: [Your private memory — earlier rounds, visible only to you]`.
+    // That text is what the judge is shown too.
+    expect(summary).not.toContain("private memory");
   });
 
   it("posts round results to the blackboard and prefixes next-round tasks with the brief", async () => {
@@ -922,6 +945,28 @@ describe("team mode", () => {
     const msgs = events.filter((e) => e.type === "team_message");
     expect(msgs).toHaveLength(3);
     expect(msgs.every((m) => m.type === "team_message" && m.kind === "result")).toBe(true);
+
+    // And THIS is the round whose claim can tell the two apart. The prompt above
+    // is the assignment buried under the board brief, so quoting `task` puts the
+    // scaffolding in the claim — the text the judge is gated on and the text the
+    // run reports as its summary. A real run's summary read
+    // `✗ upper-writer: [Your private memory — earlier rounds, visible only to you]`.
+    const finished = events.find((e) => e.type === "autonomy_done");
+    const summary = finished?.type === "autonomy_done" ? finished.summary : "";
+    expect(summary).toContain("fix the review notes");
+    expect(summary).not.toContain("Team board");
+    expect(summary).not.toContain("reviewer output");
+
+    // …and the claim is the WHOLE run, not the round that ended it. Round 2 ran
+    // one member; reporting only that round said a two-member team run was the
+    // work of `coder`, with the reviewer — and everything round 1 did — absent
+    // from the summary AND from the text the judge was gated on.
+    expect(summary).toContain("Round 1:");
+    expect(summary).toContain("Round 2:");
+    expect(summary).toContain("✓ coder: implement");
+    expect(summary).toContain("✓ reviewer: review");
+    // Rounds read oldest-first: the claim is a history, not a stack.
+    expect(summary.indexOf("Round 1:")).toBeLessThan(summary.indexOf("Round 2:"));
   });
 
   it("recaps a member's own result into its private memory and hands it back next round", async () => {
@@ -1116,6 +1161,46 @@ describe("AutonomyEngine verification in fan-out modes", () => {
     expect(claim).toContain("all good");
     expect(claim).toContain("✓");
     expect(claim).toContain("✗");
+    // One round needs no "when" — labelling it would be noise in the common case.
+    expect(claim).not.toContain("Round 1:");
+  });
+
+  it("parallel: the claim carries every round, dropping the OLDEST and saying so", async () => {
+    const bus = new EventBus();
+    const agent = new FakeAgent(bus);
+    // 12 rounds × 5 workers = 60 rows, over the 40-row claim budget.
+    agent.plans = Array.from({ length: 12 }, (_, r) =>
+      JSON.stringify(
+        Array.from({ length: 5 }, (_, t) => ({ task: `r${String(r + 1).padStart(2, "0")}-t${t}` })),
+      ),
+    );
+    // Not done until the 12th round; the fallback verdict ends it.
+    agent.assessVerdicts = Array.from({ length: 11 }, () => ({ done: false, note: "keep going" }));
+    agent.assessVerdict = { done: true, note: "all landed" };
+    let claim = "";
+    const engine = makeEngine(agent, bus, {
+      mode: "parallel",
+      maxSteps: 12,
+      runFleet: async (tasks) => tasks.map((t) => ({ ...t, output: "x" })),
+      verify: async (req) => {
+        claim = req.claim;
+        return { pass: true };
+      },
+    });
+
+    await engine.start("do the twelve rounds");
+
+    expect(engine.state).toBe("done");
+    // The newest rounds survive whole — a reader wants the tail first.
+    expect(claim).toContain("Round 12:");
+    expect(claim).toContain("r12-t0");
+    // 8 rounds of 5 rows fit; a 9th would not, so 4 rounds fall off the front.
+    expect(claim).toContain("Round 5:"); // the oldest round that still fits
+    expect(claim).not.toContain("Round 4:");
+    expect(claim).not.toContain("r01-t0");
+    // …and the run SAYS it dropped them. A silent truncation reads as a run that
+    // did less than it did, which is the failure the whole claim exists to prevent.
+    expect(claim).toContain("4 earlier rounds omitted");
   });
 
   it("team: a rejected round does not report the team run as finished", async () => {

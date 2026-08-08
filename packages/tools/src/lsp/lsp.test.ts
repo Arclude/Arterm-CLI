@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 process.env.ARTERM_LSP_REQUEST_MS = "800";
 process.env.ARTERM_LSP_DIAGNOSTICS_MS = "500";
 process.env.ARTERM_LSP_INIT_MS = "8000";
-import { LspClient, uriOf } from "./client.js";
+import { rmWithRetry } from "../testTmp.js";
+import { LspClient, uriKey, uriOf } from "./client.js";
 import { FrameReader, frame } from "./protocol.js";
 import { installHint, resolveServerBinary, serverFor } from "./servers.js";
 import {
@@ -38,11 +39,18 @@ let dir: string;
 const ctx = () => ({ cwd: dir });
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(join(tmpdir(), "arterm-lsp-"));
+  // Canonical, not just unique. A real session's cwd comes from `process.cwd()`,
+  // which Windows reports in its long form, while `mkdtemp` hands back the 8.3
+  // short one (`C:\Users\RUNNER~1\…`). The language server answers with paths it
+  // canonicalised itself, so the tool could not shorten them against a root
+  // spelled differently and reported an absolute path where the test wanted
+  // `a.ts`. Resolving here makes both sides talk about the same directory.
+  dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "arterm-lsp-")));
 });
 afterEach(async () => {
   await disposeLspClients();
-  await fs.rm(dir, { recursive: true, force: true });
+  // The server is a child process; its handles on `dir` outlive its exit.
+  await rmWithRetry(dir);
 });
 
 describe("frame reading", () => {
@@ -362,7 +370,42 @@ describe("the tools", () => {
 
 describe("uriOf", () => {
   it("produces a file URL the server will accept", () => {
-    expect(uriOf("/tmp/a b.ts")).toBe("file:///tmp/a%20b.ts");
+    // The subject is the ESCAPING — a raw space is what a server rejects. The
+    // input has to be an absolute path the platform recognises: `pathToFileURL`
+    // resolves a bare "/tmp/…" against the current drive on Windows, so the old
+    // literal asserted the drive letter (`file:///D:/tmp/a%20b.ts`) rather than
+    // the encoding it was written for.
+    const p = resolve(tmpdir(), "a b.ts");
+    const uri = uriOf(p);
+    expect(uri.startsWith("file:///")).toBe(true);
+    expect(uri).toContain("a%20b.ts");
+    expect(uri).not.toContain("a b.ts");
+  });
+});
+
+describe("uriKey", () => {
+  // The platform is a parameter so this is testable off Windows; the bug it
+  // covers is only reachable there, and a fix nothing can exercise is a guess.
+  it("folds case on Windows, where the server renames our drive letter", () => {
+    // What actually happened: we opened `file:///C:/…`, tsserver published
+    // `file:///c:/…`, the exact-string lookup missed, and `lsp_diagnostics`
+    // answered "no diagnostics published" for a file with a type error in it.
+    expect(uriKey("file:///C:/Users/x/a.ts", "win32")).toBe(
+      uriKey("file:///c:/Users/x/a.ts", "win32"),
+    );
+  });
+
+  it("also reconciles the escaped drive colon vscode-uri writes", () => {
+    // `pathToFileURL` leaves the colon literal; typescript-language-server
+    // serializes with vscode-uri, which escapes it. Two spellings, one file.
+    expect(uriKey("file:///C:/Users/x/a.ts", "win32")).toBe(
+      uriKey("file:///c%3A/Users/x/a.ts", "win32"),
+    );
+  });
+
+  it("leaves a POSIX uri alone, where two cases are two files", () => {
+    expect(uriKey("file:///tmp/A.ts", "linux")).toBe("file:///tmp/A.ts");
+    expect(uriKey("file:///tmp/A.ts", "linux")).not.toBe(uriKey("file:///tmp/a.ts", "linux"));
   });
 });
 
@@ -392,8 +435,12 @@ describe.runIf(realServer)("against a real typescript-language-server", () => {
   };
 
   const patient = async <T>(run: () => Promise<T>): Promise<T> => {
-    process.env.ARTERM_LSP_DIAGNOSTICS_MS = "25000";
-    process.env.ARTERM_LSP_REQUEST_MS = "25000";
+    // A bound, not a sleep: a published notification resolves the wait at once,
+    // so a generous ceiling costs nothing when the server is healthy and only
+    // buys room on a slow runner. The Windows CI leg loads the project from a
+    // cold disk, and the test itself is allowed 90s.
+    process.env.ARTERM_LSP_DIAGNOSTICS_MS = "60000";
+    process.env.ARTERM_LSP_REQUEST_MS = "60000";
     try {
       return await run();
     } finally {

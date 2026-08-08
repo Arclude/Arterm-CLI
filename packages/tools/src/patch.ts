@@ -98,7 +98,12 @@ export const patchTool: Tool = {
         ? undefined
         : await fs.readFile(resolveWithin(ctx.cwd, shown), "utf8").catch(() => "");
 
-    const base = ["apply", `-p${strip}`];
+    // `git apply` writes the result back using the working tree's newline
+    // policy, and `core.autocrlf=true` is git's default ON WINDOWS. So a patch
+    // computed from the LF text we just read came back CRLF: every line of the
+    // file changed, none of them by the model, and the tool reported success.
+    // A patch is applied literally — whatever the file had, it keeps.
+    const base = ["-c", "core.autocrlf=false", "-c", "core.eol=lf", "apply", `-p${strip}`];
     if (args.dry_run === true) base.push("--check");
     if (args.reject === true) base.push("--reject");
 
