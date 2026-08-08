@@ -1,4 +1,5 @@
 import { appendFileSync, mkdirSync, rmSync } from "node:fs";
+import { sep } from "node:path";
 import { Chronicle, verifyChain } from "@arterm/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -74,10 +75,15 @@ describe("the chronicle store", () => {
     // directory), not as the exact mangled string: the latter tests the
     // substitution regex, and would have to be rewritten every time the safe
     // set changes while proving nothing more.
-    for (const hostile of ["../../etc/passwd", "/etc/shadow", "a/../../b", ""]) {
+    for (const hostile of ["../../etc/passwd", "/etc/shadow", "a/../../b", "c:\\windows", ""]) {
       const file = chronicleFile(hostile);
-      expect(file.startsWith(`${CHRONICLE_DIR}/`)).toBe(true);
-      expect(file.slice(CHRONICLE_DIR.length + 1)).not.toContain("/");
+      // `sep`, not "/": on Windows `join` separates with a backslash, so a
+      // hardcoded slash makes this assertion fail on a path that is correct —
+      // the same POSIX assumption the LSP tools were carrying.
+      expect(file.startsWith(CHRONICLE_DIR + sep)).toBe(true);
+      const name = file.slice(CHRONICLE_DIR.length + 1);
+      expect(name).not.toContain("/");
+      expect(name).not.toContain("\\");
     }
   });
 });
