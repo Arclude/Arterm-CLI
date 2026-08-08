@@ -395,6 +395,14 @@ describe("uriKey", () => {
     );
   });
 
+  it("also reconciles the escaped drive colon vscode-uri writes", () => {
+    // `pathToFileURL` leaves the colon literal; typescript-language-server
+    // serializes with vscode-uri, which escapes it. Two spellings, one file.
+    expect(uriKey("file:///C:/Users/x/a.ts", "win32")).toBe(
+      uriKey("file:///c%3A/Users/x/a.ts", "win32"),
+    );
+  });
+
   it("leaves a POSIX uri alone, where two cases are two files", () => {
     expect(uriKey("file:///tmp/A.ts", "linux")).toBe("file:///tmp/A.ts");
     expect(uriKey("file:///tmp/A.ts", "linux")).not.toBe(uriKey("file:///tmp/a.ts", "linux"));
@@ -427,8 +435,12 @@ describe.runIf(realServer)("against a real typescript-language-server", () => {
   };
 
   const patient = async <T>(run: () => Promise<T>): Promise<T> => {
-    process.env.ARTERM_LSP_DIAGNOSTICS_MS = "25000";
-    process.env.ARTERM_LSP_REQUEST_MS = "25000";
+    // A bound, not a sleep: a published notification resolves the wait at once,
+    // so a generous ceiling costs nothing when the server is healthy and only
+    // buys room on a slow runner. The Windows CI leg loads the project from a
+    // cold disk, and the test itself is allowed 90s.
+    process.env.ARTERM_LSP_DIAGNOSTICS_MS = "60000";
+    process.env.ARTERM_LSP_REQUEST_MS = "60000";
     try {
       return await run();
     } finally {

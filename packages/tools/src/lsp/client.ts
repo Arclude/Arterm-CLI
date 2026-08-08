@@ -83,12 +83,17 @@ export function uriOf(path: string): string {
  * diagnostics" for every file on Windows, which reads as a clean bill of health
  * for a file with a type error in it.
  *
- * Windows paths are case-insensitive, so folding the whole URI is safe there and
- * catches the same disagreement about any other segment. On POSIX the case is
- * meaningful and the URI is left exactly as it is.
+ * It also spells the drive colon differently: `vscode-uri`, which
+ * typescript-language-server serializes with, escapes it as `%3A`, while
+ * `pathToFileURL` leaves it literal. So the two URIs differ in two ways at once
+ * and neither is wrong — they name the same file.
+ *
+ * Windows paths are case-insensitive, so folding is safe there and catches the
+ * same disagreement about any other segment. On POSIX the case is meaningful and
+ * the URI is left exactly as it is.
  */
 export function uriKey(uri: string, platform: NodeJS.Platform = process.platform): string {
-  return platform === "win32" ? uri.toLowerCase() : uri;
+  return platform === "win32" ? uri.replace(/%3a/gi, ":").toLowerCase() : uri;
 }
 
 export class LspClient {
