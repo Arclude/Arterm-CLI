@@ -16,6 +16,42 @@ Docker is required (Harbor runs each task in a container). The adapter installs
 Node via nvm and then `npm i -g` the tarball, so tasks need `curl` and a
 glibc-based image — the same constraint every Node agent adapter has.
 
+## Credentials, and the endpoint that is not one
+
+The adapter passes the container ONE credential — the variable that provider
+needs — because handing a sandbox running model-authored commands every key in
+the environment is a different risk than running the benchmark.
+
+The key is read from the ENVIRONMENT, never from `~/.arterm`. An interactive
+session keeps its keys in the encrypted keystore, which the container cannot
+reach and should not: exporting it for the run is what makes "this run had
+access to that credential" a visible decision rather than an inherited one.
+
+`openai-compat` and `ollama` also need their ENDPOINT, and it is not a
+credential — those two providers are *defined* by an address, while the rest
+have one fixed vendor URL compiled in:
+
+```bash
+export OPENAI_COMPAT_API_KEY=…                       # your key, this shell only
+export OPENAI_COMPAT_HOST=https://api.z.ai/api/coding/paas/v4
+harbor run -d terminal-bench@2.0 \
+  --agent bench.harbor.arterm_agent:ArtermAgent \
+  --model openai-compat/glm-5.2 -k 1
+```
+
+Passing only the key left the container dialing arterm's default
+`http://localhost:1234/v1`, where nothing listens — every task failed with a
+provider error, and the trial reported that as the agent's score. The adapter
+now refuses up front instead, and refuses a `localhost` endpoint too: inside the
+task container that names the container, not the machine running harbor, so a
+local LM Studio or Ollama needs `host.docker.internal` or a LAN address.
+
+`harness.json` records the endpoint's **origin only** — scheme and host, never
+the path or query. "openai-compat" names a protocol, not a model: the same
+string reaches Z.AI, a local vLLM and an OpenRouter relay, and they do not score
+alike. Path and query are dropped because some gateways carry a token there, and
+this file ships next to a published trajectory.
+
 ## Why not SWE-bench
 
 OpenAI stopped reporting SWE-bench Verified in Feb 2026: auditing 138 of the 500

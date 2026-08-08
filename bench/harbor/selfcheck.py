@@ -18,6 +18,7 @@ With no argument it uses the checked-in sample. To check against a live run:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -25,7 +26,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from bench.harbor.arterm_agent import HARNESS_NAME, RESULT_NAME, ArtermAgent  # noqa: E402
+from bench.harbor.arterm_agent import (  # noqa: E402
+    HARNESS_NAME,
+    RESULT_NAME,
+    ArtermAgent,
+    _endpoint_origin,
+)
 from harbor.models.agent.context import AgentContext  # noqa: E402
 
 SAMPLE = Path(__file__).resolve().parent / "sample-result.json"
@@ -87,6 +93,13 @@ def main(argv: list[str]) -> int:
                 failures.append("harness.json must record sandbox as false")
             if "k" not in harness:
                 failures.append("harness.json must carry 'k', even when null")
+            if "endpoint" not in harness:
+                failures.append("harness.json must carry 'endpoint', even when null")
+
+        # 4. A provider that IS its endpoint must refuse before the run rather
+        #    than dial arterm's default from inside the container. The failure
+        #    this guards is a whole sweep where every task fails identically.
+        failures.extend(_check_endpoint_gate())
     finally:
         shutil.rmtree(logs, ignore_errors=True)
 
@@ -94,6 +107,53 @@ def main(argv: list[str]) -> int:
         return _report(failures)
     print(f"ok — adapter contract holds against {source}")
     return 0
+
+
+def _check_endpoint_gate() -> list[str]:
+    """`openai-compat` and `ollama` are defined by an address, not a vendor.
+
+    Passing only the API key left the container dialing arterm's default
+    `http://localhost:1234/v1`, where nothing listens — so every task failed
+    with a provider error and the trial reported that as the agent's score.
+    Three properties, each a way that silence could come back.
+    """
+    failures: list[str] = []
+    agent = ArtermAgent(logs_dir=Path(tempfile.gettempdir()), model_name="openai-compat/m")
+    saved = os.environ.pop("OPENAI_COMPAT_HOST", None)
+    try:
+        try:
+            agent._require_endpoint("openai-compat")
+            failures.append("a missing OPENAI_COMPAT_HOST must refuse, not run")
+        except ValueError:
+            pass
+
+        # Inside the task container, localhost is the container.
+        os.environ["OPENAI_COMPAT_HOST"] = "http://localhost:1234/v1"
+        try:
+            agent._require_endpoint("openai-compat")
+            failures.append("a localhost endpoint must refuse: it names the container")
+        except ValueError:
+            pass
+
+        os.environ["OPENAI_COMPAT_HOST"] = "https://api.example.com/v1/chat?k=SECRET"
+        agent._require_endpoint("openai-compat")  # must not raise
+        passed = agent._provider_env("openai-compat")
+        if passed.get("OPENAI_COMPAT_HOST") != os.environ["OPENAI_COMPAT_HOST"]:
+            failures.append("the endpoint must reach the container, not just the key")
+        # The record is published beside the trajectory; a token in the query
+        # string must not ride along into it.
+        origin = _endpoint_origin("openai-compat")
+        if origin != "https://api.example.com":
+            failures.append(f"endpoint origin should drop path and query, got {origin}")
+
+        # A vendor provider has no endpoint to carry, and must not invent one.
+        if _endpoint_origin("anthropic") is not None:
+            failures.append("a fixed-URL provider must record endpoint as null")
+    finally:
+        os.environ.pop("OPENAI_COMPAT_HOST", None)
+        if saved is not None:
+            os.environ["OPENAI_COMPAT_HOST"] = saved
+    return failures
 
 
 def _report(failures: list[str]) -> int:

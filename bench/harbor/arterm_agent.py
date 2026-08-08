@@ -35,6 +35,7 @@ import os
 import shlex
 from pathlib import Path
 from typing import Any, override
+from urllib.parse import urlparse
 
 from harbor.agents.installed.base import (
     BaseInstalledAgent,
@@ -56,6 +57,27 @@ HARNESS_NAME = "harness.json"
 #: Default step cap. Generous enough for a real task, finite enough that the
 #: run reports rather than being cut off by the harness timeout.
 DEFAULT_MAX_STEPS = 200
+
+#: The one credential each provider needs, and nothing else.
+_PROVIDER_KEY = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openai-compat": "OPENAI_COMPAT_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "xai": "XAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+}
+
+#: Providers that ARE their endpoint. The rest have one fixed vendor URL, so
+#: there is nothing to carry; for these two the address is the configuration,
+#: and a run without it measures a provider error rather than an agent.
+_PROVIDER_ENDPOINT = {
+    "openai-compat": "OPENAI_COMPAT_HOST",
+    "ollama": "OLLAMA_HOST",
+}
 
 
 class ArtermAgent(BaseInstalledAgent):
@@ -135,6 +157,7 @@ class ArtermAgent(BaseInstalledAgent):
         context: AgentContext,
     ) -> None:
         provider, model = self._split_model()
+        self._require_endpoint(provider)
         agent_dir = EnvironmentPaths.agent_dir.as_posix()
         result_path = f"{agent_dir}/{RESULT_NAME}"
         stderr_path = f"{agent_dir}/{STDERR_NAME}"
@@ -201,26 +224,63 @@ class ArtermAgent(BaseInstalledAgent):
 
     @staticmethod
     def _provider_env(provider: str) -> dict[str, str]:
-        """Pass through only the key this provider needs, when the host has it.
+        """Pass through only what this provider needs, when the host has it.
 
         Deliberately narrow: handing the container every API key in the
         environment would put credentials for unrelated services inside a
         sandbox running model-authored commands.
+
+        Narrow is not the same as key-only. Most providers have one fixed vendor
+        URL compiled in, but `openai-compat` and `ollama` are defined BY their
+        endpoint, and `arterm` reads it from the environment
+        (`OPENAI_COMPAT_HOST`, `OLLAMA_HOST`) — so passing the key alone left the
+        container dialing the default `http://localhost:1234/v1`, where nothing
+        is listening. Every task would have failed with a provider error, and
+        the trial would have reported that as the agent's score.
         """
-        names = {
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "openai-compat": "OPENAI_COMPAT_API_KEY",
-            "gemini": "GEMINI_API_KEY",
-            "xai": "XAI_API_KEY",
-            "deepseek": "DEEPSEEK_API_KEY",
-            "groq": "GROQ_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY",
-            "mistral": "MISTRAL_API_KEY",
-        }
-        name = names.get(provider)
-        value = os.environ.get(name) if name else None
-        return {name: value} if name and value else {}
+        name = _PROVIDER_KEY.get(provider)
+        passed = {}
+        if name:
+            value = os.environ.get(name)
+            if value:
+                passed[name] = value
+        endpoint = _PROVIDER_ENDPOINT.get(provider)
+        if endpoint:
+            value = os.environ.get(endpoint)
+            if value:
+                passed[endpoint] = value
+        return passed
+
+    @staticmethod
+    def _require_endpoint(provider: str) -> None:
+        """Refuse before the run when a provider's endpoint cannot reach anything.
+
+        The failure this replaces is the expensive kind: a whole benchmark sweep
+        where every task fails identically and the reason is one unset variable.
+        Told once, up front, it costs nothing.
+
+        `localhost` is rejected for the same reason it is checked at all — inside
+        the task container it names the container, not the machine running
+        harbor, so a local LM Studio or Ollama needs an address the container can
+        actually route to (`host.docker.internal`, or the host's LAN address).
+        """
+        endpoint = _PROVIDER_ENDPOINT.get(provider)
+        if not endpoint:
+            return
+        value = os.environ.get(endpoint, "").strip()
+        if not value:
+            raise ValueError(
+                f"{provider} has no endpoint: set {endpoint} before `harbor run`. "
+                f"Without it every task in the container dials arterm's default "
+                f"and fails with a provider error, which scores as the agent's work."
+            )
+        host = urlparse(value).hostname or ""
+        if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+            raise ValueError(
+                f"{endpoint}={value} points at localhost, which inside the task "
+                f"container is the container itself. Use host.docker.internal or "
+                f"the host's LAN address."
+            )
 
     def _read_result(self) -> dict[str, Any] | None:
         path = self.logs_dir / RESULT_NAME
@@ -258,6 +318,12 @@ class ArtermAgent(BaseInstalledAgent):
                 "sandbox": False,
             },
             "permissionMode": "yolo",
+            # Which endpoint answered is part of the harness: "openai-compat"
+            # names a protocol, not a model — the same string reaches Z.AI, a
+            # local vLLM and an OpenRouter relay, and they do not score alike.
+            # Scheme and host ONLY: some gateways carry a token in the path or
+            # query, and this file is written next to a published trajectory.
+            "endpoint": _endpoint_origin(self._split_model()[0]),
             "network": "container policy (harbor task config)",
             "k": _int_or_none(os.environ.get("ARTERM_BENCH_K")),
             "state": (result or {}).get("state"),
@@ -273,6 +339,23 @@ class ArtermAgent(BaseInstalledAgent):
 def _default_tarball() -> str:
     """`bench/harbor/dist/arterm-cli.tgz`, relative to this file."""
     return str(Path(__file__).resolve().parent / "dist" / "arterm-cli.tgz")
+
+
+def _endpoint_origin(provider: str) -> str | None:
+    """`scheme://host[:port]` of a provider's configured endpoint, or None.
+
+    Never the path or query. A number is only comparable beside the endpoint
+    that produced it, but a gateway URL is also a place people put tokens, and
+    this record ships next to a published trajectory.
+    """
+    name = _PROVIDER_ENDPOINT.get(provider)
+    if not name:
+        return None
+    parsed = urlparse(os.environ.get(name, "").strip())
+    if not parsed.scheme or not parsed.hostname:
+        return None
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{parsed.hostname}{port}"
 
 
 def _int_or_none(value: str | None) -> int | None:
