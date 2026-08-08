@@ -33,8 +33,16 @@ pnpm exec biome format --write .   # apply formatting
 ```
 
 Root scripts mirror these: `pnpm build`, `pnpm typecheck`, `pnpm test`,
-`pnpm lint`, `pnpm format`, and `pnpm arterm` (runs the CLI via the `@arterm/cli`
+`pnpm lint`, `pnpm format`, and `pnpm arterm` (runs the CLI via the `arterm-cli`
 filter).
+
+The workspace root is `arterm-workspace`, and it may never be renamed back to
+`arterm-cli` — that is `packages/cli`, the published package. While both answered
+to one name, `pnpm --filter arterm-cli test` was ambiguous and resolved to the
+ROOT, so a command that reads as "run the CLI's tests" quietly ran `pnpm -r test`
+over every package. It was found by an agent whose verify gate was that command:
+it was handed two broken CLI tests and had to fix a `core` one as well, because
+the gate it was being held to was the whole repository.
 
 Out-of-band, after a build:
 
@@ -133,6 +141,18 @@ the fallback is the thing the short-circuit exists for, and only the log shows i
   also decides whether a confined run can test itself at all: `~/.arterm` is not
   one of the sandbox's write roots, so under `--autonomous` a path built from
   `homedir()` is not merely unredirected, it is unwritable.
+
+- **And the redirect is per PACKAGE**, so `configIsolation.test.ts` asserts every
+  package that runs tests sets `ARTERM_HOME` in its own `vitest.config.ts`.
+  `packages/cli` had one and `packages/core` did not, which is how a single
+  `agent.test.ts` case spooled a real file into `~/.arterm/tool-output` —
+  counted: 240 files before, 241 after. `packages/tui` is why the check is about
+  the SETTING rather than the file: it already had a config, for `FORCE_COLOR`,
+  and its existence is exactly what stopped anyone opening it. The rule is
+  blanket on purpose; an exception list is a place for the next package to be
+  forgotten. This was the third instance of one mistake — `config.json`, then
+  `status/`, then `tool-output/` — which is what moved the guard from naming
+  files to naming the rule.
 
 ## How-to: add a tool
 

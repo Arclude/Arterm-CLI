@@ -1,5 +1,6 @@
 {
-  "name": "arterm-cli",
+  "_comment": "The workspace root. It must NOT share a name with packages/cli, which is the published `arterm-cli`: two packages answering to one name make `pnpm --filter arterm-cli <script>` ambiguous, and it resolved to THIS file — so `--filter arterm-cli test` silently ran `pnpm -r test` over the whole repo instead of the CLI's own suite.",
+  "name": "arterm-workspace",
   "version": "0.3.2",
   "private": true,
   "type": "module",
