@@ -704,11 +704,32 @@ anonymous parallel slot, `role#index`. Without it a three-worker round records
 three writes by "implementer" and cannot say which made which, which is the
 question a fan-out exists to make hard.
 
+**The judge reads the ledger against the claim.** `VerifyRequest.evidence`
+carries a per-file block — path, ±counts, digest, which worker — and
+`buildJudgeInstruction` renders it AFTER the claim, so the two are read against
+each other. The instruction says what a disagreement means, because evidence
+nobody is told how to use is decoration: a file the claim never mentions, one it
+says it changed that is absent, or a change credited to the wrong worker IS the
+"concrete evidence" the prompt already demanded before any rejection. A record
+that merely says less than the claim is not — it covers file writes and nothing
+else.
+
+The asymmetry does not move. The judge still decides and still fails open; what
+changed is that it now has something to decide WITH. Seen working on a real run
+told not to touch `slug.ts`: the verdict came back *"The record shows only
+README.md +38/-0, confirming slug.ts was not modified, as claimed"* — the same
+question the documented failure got wrong by assuming.
+
+`evidenceBlock` returns nothing when the run wrote nothing, rather than an empty
+section: "what was recorded: (nothing)" reads as "nothing happened", which is
+false for a review or a question. Truncation at `MAX_EVIDENCE_FILES` is stated,
+the same rule `roundClaim` follows.
+
 `arterm chronicle verify` exits 1 on a broken chain, so a script can gate on it.
-Not yet wired: feeding the ledger to the judge, and a watcher that would tell a
-change the agent made from one that appeared underneath it. `bash` declares no
-path, so a file written by a shell command is invisible here — the same
-documented hole checkpoints have. Nothing prunes `$ARTERM_HOME/chronicle` yet.
+Still absent: a watcher that would tell a change the agent made from one that
+appeared underneath it. `bash` declares no path, so a file written by a shell
+command is invisible here — the same documented hole checkpoints have. Nothing
+prunes `$ARTERM_HOME/chronicle` yet.
 
 ## Measuring: `bench/harbor/`
 

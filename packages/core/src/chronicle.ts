@@ -176,10 +176,33 @@ export function verifyChain(records: readonly ChronicleRecord[]): ChronicleVerif
   };
 }
 
+/** One file's net story across a run: who touched it, how much, what it is now. */
+export interface ChronicleFileSummary {
+  path: string;
+  added: number;
+  removed: number;
+  /** The digest after the LAST write — what the file is now, not what it passed through. */
+  contentHashAfter?: string;
+  /** Every agent that wrote it. More than one is itself worth seeing in a fan-out. */
+  by: string[];
+  /** How many tool calls touched it. */
+  writes: number;
+}
+
 /** Seals records into a chain and hands them to a sink. One per session. */
 export class Chronicle {
   private sequence = 0;
   private previousHash = GENESIS_HASH;
+  /**
+   * Per-path aggregate, kept in memory so a caller can ask what the run changed
+   * without re-reading the file it just wrote.
+   *
+   * Bounded by the number of distinct files a run touches rather than by its
+   * length — a thousand edits to one file are one entry. The records themselves
+   * are NOT kept: those are what the sink is for.
+   */
+  private files = new Map<string, ChronicleFileSummary>();
+  private denied = 0;
 
   constructor(
     private readonly sink: ChronicleSink,
@@ -206,12 +229,50 @@ export class Chronicle {
     };
     const record: ChronicleRecord = { ...unsealed, hash: hashValue(unsealed) };
     this.previousHash = record.hash;
+    this.accumulate(record);
     try {
       this.sink.write(record);
     } catch {
       // See above: recorded or not, the chain is intact and the run goes on.
     }
     return record;
+  }
+
+  private accumulate(record: ChronicleRecord): void {
+    if (record.outcome === "denied") this.denied += 1;
+    const change = record.change;
+    if (!change) return;
+    const seen = this.files.get(change.path);
+    const by = record.scope.agentId;
+    if (!seen) {
+      this.files.set(change.path, {
+        path: change.path,
+        added: change.added,
+        removed: change.removed,
+        ...(change.contentHashAfter ? { contentHashAfter: change.contentHashAfter } : {}),
+        by: by ? [by] : [],
+        writes: 1,
+      });
+      return;
+    }
+    seen.added += change.added;
+    seen.removed += change.removed;
+    seen.writes += 1;
+    // The LAST digest wins: the question is what the file is now, not what it
+    // passed through on the way. `undefined` overwrites too — a file deleted
+    // after being written is deleted, however much was added first.
+    seen.contentHashAfter = change.contentHashAfter;
+    if (by && !seen.by.includes(by)) seen.by.push(by);
+  }
+
+  /** What the run changed so far, one entry per file, in first-touch order. */
+  changed(): ChronicleFileSummary[] {
+    return [...this.files.values()];
+  }
+
+  /** Tool calls the permission ladder refused. Zero is the usual answer. */
+  deniedCount(): number {
+    return this.denied;
   }
 }
 

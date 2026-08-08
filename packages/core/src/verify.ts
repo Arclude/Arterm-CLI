@@ -241,6 +241,21 @@ export interface VerifyRequest {
   spec?: string;
   /** Where a declared command runs. Must be the tree the worker actually wrote to. */
   cwd?: string;
+  /**
+   * What the run was RECORDED doing, as opposed to what it claims.
+   *
+   * Supplied by the caller from the chronicle. It closes the hole this file's
+   * own header describes — the judge reads the result and never the diff, so it
+   * cannot catch work that contradicts the goal. A worker rewrote `slug()`,
+   * committed it as `docs(…)`, and the judge passed it saying the behaviour was
+   * untouched; the ledger would have shown the file and its new digest.
+   *
+   * Presented to the judge as evidence, never as a verdict. The asymmetry this
+   * file is built on does not move: the judge still decides, and still fails
+   * open. What changes is that "concrete evidence" — which the instruction
+   * demands before any rejection — is now something it actually has.
+   */
+  evidence?: string;
   signal?: AbortSignal;
 }
 
@@ -497,6 +512,18 @@ export function buildJudgeInstruction(
   ];
   if (req.spec && req.spec !== req.goal) lines.push(`ACCEPTANCE CRITERIA:\n${req.spec}`);
   lines.push(`THE WORKER CLAIMS:\n${req.claim.slice(0, cap) || "(no claim text)"}`);
+  if (req.evidence) {
+    // Named as the RECORD and placed after the claim, so the two are read
+    // against each other. The digests were taken from disk by the tool layer,
+    // which is the one part of this prompt the worker did not author.
+    lines.push(
+      `WHAT WAS RECORDED (a ledger of the tool calls, independent of the claim — file digests were read from disk, not reported by the worker):\n${req.evidence}`,
+      "If the claim and the record disagree — a file the claim never mentions, a file it " +
+        "says it changed that is absent here, a change credited to the wrong worker — that " +
+        "IS the concrete evidence a rejection needs. A record that merely says less than the " +
+        "claim is not: it covers file writes and nothing else.",
+    );
+  }
   if (req.previousMustFix?.length) {
     lines.push(
       `A previous review required these fixes. Check EACH one specifically, then confirm nothing was broken in the process:\n${req.previousMustFix.map((m) => `- ${m}`).join("\n")}`,
