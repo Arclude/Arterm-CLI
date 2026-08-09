@@ -1175,6 +1175,106 @@ describe("tool output ceiling", () => {
     const result = events.find((e) => e.type === "tool_result") as { output: string };
     expect(result.output).toContain("cut from the middle");
   });
+
+  /**
+   * The retrieval end of the spool, which is invisible to either unit alone:
+   * `read` admits `ctx.spooled` and the agent fills it, and each side passes
+   * its own tests while the announced path stays unopenable. That is exactly
+   * how the feature shipped decorative the first time.
+   */
+  const announced = (output: string): string | undefined =>
+    /\[full output: (.+)\]/.exec(output)?.[1];
+
+  it("admits the path it announced on the NEXT call, so the model can open it", async () => {
+    /** Records the spool allowance it is handed, which is the seam under test. */
+    let handed: ReadonlySet<string> | undefined;
+    const peek: Tool = {
+      name: "peek",
+      description: "",
+      parameters: {},
+      permission: "allow",
+      category: "read",
+      execute: async (_args, ctx) => {
+        handed = new Set(ctx.spooled ?? []);
+        return { output: "ok" };
+      },
+    };
+    const provider = new StubProvider([
+      [{ type: "tool_call", call: { id: "c1", name: "loud", arguments: {} } }],
+      [{ type: "tool_call", call: { id: "c2", name: "peek", arguments: {} } }],
+      [{ type: "text", delta: "done" }],
+    ]);
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(provider, bus, [loud(50_000, 2000), peek]).run("go");
+
+    const first = events.find((e) => e.type === "tool_result") as { output: string };
+    const path = announced(first.output);
+    expect(path).toBeTruthy();
+    expect(handed?.has(path as string)).toBe(true);
+  });
+
+  it("keeps the allowance to what THIS run spooled, never the directory", async () => {
+    let handed: ReadonlySet<string> | undefined;
+    const peek: Tool = {
+      name: "peek",
+      description: "",
+      parameters: {},
+      permission: "allow",
+      category: "read",
+      execute: async (_args, ctx) => {
+        handed = new Set(ctx.spooled ?? []);
+        return { output: "ok" };
+      },
+    };
+    const bus = new EventBus();
+    await makeAgent(callOnceNamed("peek"), bus, [peek]).run("go");
+    // A sibling session's spool sits in the same directory; a run that spooled
+    // nothing must be handed nothing.
+    expect(handed?.size).toBe(0);
+  });
+
+  it("points a re-read of a spool at the same file instead of minting another", async () => {
+    /** Calls `loud`, then calls it again naming the path the first announced. */
+    class ReadBackProvider implements ChatProvider {
+      readonly id = "stub";
+      calls = 0;
+      supportsNativeTools(): boolean {
+        return true;
+      }
+      async listModels() {
+        return [];
+      }
+      async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {
+        const n = this.calls++;
+        if (n === 0) {
+          yield { type: "tool_call", call: { id: "c1", name: "loud", arguments: {} } };
+          return;
+        }
+        if (n === 1) {
+          const said = req.messages
+            .flatMap((m) => (typeof m.content === "string" ? [m.content] : []))
+            .map(announced)
+            .find((p): p is string => p !== undefined);
+          yield {
+            type: "tool_call",
+            call: { id: "c2", name: "loud", arguments: { path: said ?? "" } },
+          };
+          return;
+        }
+        yield { type: "text", delta: "done" };
+      }
+    }
+    const bus = new EventBus();
+    const events = collect(bus);
+    await makeAgent(new ReadBackProvider(), bus, [loud(50_000, 2000)]).run("go");
+
+    const results = events.filter((e) => e.type === "tool_result") as { output: string }[];
+    expect(results).toHaveLength(2);
+    const first = announced(results[0]?.output ?? "");
+    expect(first).toBeTruthy();
+    expect(announced(results[1]?.output ?? "")).toBe(first);
+  });
 });
 
 /**
