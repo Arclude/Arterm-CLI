@@ -29,6 +29,16 @@ export interface ExplainOptions {
   args?: string;
   /** Evaluate under a different mode than the configured one. */
   mode?: string;
+  /**
+   * Evaluate as an unattended run (`--autonomous`, headless `--print`).
+   *
+   * The explainer has to offer this because the ladder's answer now depends on
+   * it: a command that reads a credential store is a PROMPT with someone there
+   * and a REFUSAL without. Without the flag the inspector would describe the
+   * attended policy for the run people are least able to watch, which is the
+   * one failure `permissions explain` exists to prevent.
+   */
+  unattended?: boolean;
   json?: boolean;
   /** Skip MCP/plugin tools (faster; no servers are started). */
   builtinsOnly?: boolean;
@@ -72,7 +82,12 @@ export function parseMode(raw: string | undefined): PermissionMode | undefined {
 export function explainCall(
   config: ArtermConfig,
   tools: Array<{ tool: Tool; source: ExplainResult["source"] }>,
-  opts: { tool: string; args: Record<string, unknown>; mode?: PermissionMode },
+  opts: {
+    tool: string;
+    args: Record<string, unknown>;
+    mode?: PermissionMode;
+    unattended?: boolean;
+  },
 ): ExplainResult {
   const entry = tools.find((t) => t.tool.name === opts.tool);
   if (!entry) {
@@ -84,6 +99,7 @@ export function explainCall(
   }
   const permissions = createPermissionManager(config, {
     ...(opts.mode ? { mode: opts.mode } : {}),
+    ...(opts.unattended ? { unattended: true } : {}),
   });
   const model = brainArbiterModel(config);
   return {
@@ -176,7 +192,12 @@ export async function runPermissionsExplain(opts: ExplainOptions): Promise<void>
 
   let result: ExplainResult;
   try {
-    result = explainCall(config, tools, { tool: opts.tool, args, ...(mode ? { mode } : {}) });
+    result = explainCall(config, tools, {
+      tool: opts.tool,
+      args,
+      ...(mode ? { mode } : {}),
+      ...(opts.unattended ? { unattended: true } : {}),
+    });
   } catch (err) {
     throw new ArtermUserError((err as Error).message);
   }

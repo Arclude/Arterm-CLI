@@ -965,6 +965,7 @@ async function main(): Promise<void> {
     .description("show what would happen if the agent called <tool>, and why")
     .option("--args <json>", 'tool arguments as JSON, e.g. \'{"command":"rm -rf /"}\'')
     .option("--mode <mode>", "evaluate under ask | auto | plan | yolo (default: your config)")
+    .option("--unattended", "evaluate as --autonomous would: nobody is there to answer a prompt")
     .option("--builtins-only", "skip MCP/plugin tools (does not start their servers)")
     .option("--json", "emit the decision trace as JSON")
     .action(async (tool: string, opts, cmd: Command) => {

@@ -271,6 +271,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
     ...(opts.confirmDestructive !== undefined
       ? { confirmDestructive: opts.confirmDestructive }
       : {}),
+    // The same flag the sandbox's fail policy reads, for the same reason: an
+    // escalation is a question, and this says whether anyone is there to
+    // answer it.
+    ...(opts.unattended !== undefined ? { unattended: opts.unattended } : {}),
   });
 
   // Composition root (kernel D1): the DI Container holds the session's service graph

@@ -10,6 +10,15 @@ export interface PermissionPolicyOptions {
   mode?: PermissionMode;
   /** Re-prompt for destructive tools even in auto/yolo (overrides config). */
   confirmDestructive?: boolean;
+  /**
+   * Nobody is at the keyboard (`--autonomous`, headless `--print`).
+   *
+   * Not derivable from the mode: attended yolo is a user who typed `--yolo` and
+   * is watching, and the two want opposite answers to an escalation. `arterm
+   * permissions explain` passes it too, or the explainer would describe the
+   * attended policy for a run that is not.
+   */
+  unattended?: boolean;
 }
 
 /**
@@ -27,7 +36,13 @@ export function createPermissionManager(
   const mode: PermissionMode = opts.mode ?? (opts.yolo ? "yolo" : (config.mode ?? "ask"));
   const arbiter = config.arbiter?.enabled === false ? undefined : new RiskArbiter();
   const confirmDestructive = opts.confirmDestructive ?? config.confirmDestructive ?? false;
-  return new PermissionManager(config.permissions, mode, arbiter, confirmDestructive);
+  return new PermissionManager(
+    config.permissions,
+    mode,
+    arbiter,
+    confirmDestructive,
+    opts.unattended ?? false,
+  );
 }
 
 /**

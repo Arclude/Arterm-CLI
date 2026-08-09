@@ -64,6 +64,7 @@ node scripts/sigterm-report-e2e.mjs        # does a KILLED run still report what
 node scripts/deadline-exit-e2e.mjs         # does a run that hits its deadline STOP, and EXIT?
 node scripts/keystore-denyread-e2e.mjs     # can a sandboxed command read our own API keys?
 node scripts/shell-writes-recorded-e2e.mjs # does the ledger see what a SHELL command wrote?
+node scripts/unattended-escalation-e2e.mjs # what happens to a prompt nobody will answer?
 ```
 
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
@@ -752,8 +753,9 @@ each covers what the other cannot:
   `allow` on an escalation, and only `critical` blocks. This half matters because
   the sandbox is OFF by default for attended sessions.
   `THIRD_PARTY_CREDENTIAL_READ` (`~/.ssh/id_*`, `~/.aws/credentials`, `~/.netrc`,
-  `~/.npmrc`, …) is `high` instead, because `ssh-add` is a real thing to ask for
-  — with the stated cost that yolo therefore allows it.
+  `~/.npmrc`, …) is `high` instead, because `ssh-add` is a real thing to ask
+  for — and it carries `attendedOnly`, so where nothing would ask the question
+  it is refused rather than allowed (see the permissions section).
 
 `scripts/keystore-denyread-e2e.mjs` is what makes the mechanism half a fact
 rather than a claim: a unit test proves the LIST, and the door is only shut if
@@ -1077,12 +1079,42 @@ shell executes does not exist until after the pipe.
 `OPAQUE_BASH` is the fail-closed half. It does not try to guess the hidden
 payload — it matches the **hiding** (decode-then-execute, `eval` of a
 substitution, an interpreter handed a base64 blob, `-EncodedCommand`) and grades
-it `high`, which is the closed answer: attended gets a prompt, and every
-unattended asker — `subagentPolicy`'s and the `PermissionBroker`'s default —
-answers an escalation with "deny". `high` and not `critical` on purpose:
-`eval "$(direnv hook zsh)"` is a real thing developers run, so a prompt is the
-honest handling of "unreadable" while a block belongs to "readable and
-destructive".
+it `high`. `high` and not `critical` on purpose: `eval "$(direnv hook zsh)"` is a
+real thing developers run, so a prompt is the honest handling of "unreadable"
+while a block belongs to "readable and destructive".
+
+### An escalation is a question — so who answers it?
+
+That sentence used to end "every unattended asker answers an escalation with
+`deny`", and for sub-agents it was true. For the agent it matters most for it was
+not: `evaluate()` returns `allow` at its **yolo** branch without consulting any
+asker, so under `--autonomous` an unreadable command simply ran. Measured, not
+theorized: `cat ~/.ssh/id_rsa` and `echo … | base64 -d | sh` both executed.
+
+`RiskAssessment.attendedOnly` marks the `high`s whose escalation must become a
+**refusal** where nothing would ask — `ctx.unattended || ctx.mode === "yolo"`.
+Both halves are load-bearing. Headless has no terminal; and the TUI under
+`--autonomous` reports itself ATTENDED on purpose (someone is there at boot to
+read a sandbox error) while nobody is there six hours later when the command
+runs. The mode, not the terminal, is what says a prompt will never appear.
+
+**It is not set on every `high`, and that split is the design.** `rm -rf
+node_modules`, `git reset --hard` and `sudo apt-get install` are ordinary repair
+work that `--autonomous` exists to do — it already licenses git commits — and
+refusing them makes the mode useless, which is how a control ends up switched
+off for good. What is refused is the pair a human was the only defence against:
+a command that cannot be READ, and one that reads a SECRET. Neither is
+recoverable afterwards, because the secret is in the transcript by the time
+anyone looks.
+
+This is yolo's third fail-closed case, beside a tool-level `deny` and a
+`critical` verdict. `arterm permissions explain --unattended` evaluates under it,
+because an inspector that only describes the attended policy describes the run
+people are least able to watch. `scripts/unattended-escalation-e2e.mjs` drives
+the built binary and reads the outcome off the chronicle — which records
+denials, exactly what a run's own summary drops. 5/5 after, **3/5 before**, and
+the two halves fail independently: pin `unanswerable` to `false` and the
+refusals stop; refuse every `high` and `rm -rf node_modules` stops.
 
 The documented hole is hiding **split across calls** — `curl … > /tmp/x` in one,
 `sh /tmp/x` in the next. Each half reads as ordinary alone, the two can sit turns

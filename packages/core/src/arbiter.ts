@@ -12,6 +12,26 @@ export type RiskLevel = "low" | "medium" | "high" | "critical";
 export interface RiskAssessment {
   level: RiskLevel;
   reason?: string;
+  /**
+   * A `high` whose escalation must be REFUSED when nobody is at the keyboard,
+   * rather than allowed because yolo does not prompt.
+   *
+   * `high` means "a human should look at this", and under `--autonomous` there
+   * is no human — `evaluate()` returns `allow` at the yolo branch without ever
+   * reaching an asker. That made this file's own documented rule false for the
+   * one agent it matters most for: a fleet worker denies an escalation (its
+   * asker answers "deny"), while the leader running unattended lets it through.
+   *
+   * It is not set on every `high`, and the split is the whole point. `rm -rf
+   * node_modules`, `git reset --hard` and `sudo` are ordinary repair work that
+   * an unattended run legitimately does — `--autonomous` even licenses git
+   * writes — and refusing them would make the mode useless, which is how a
+   * control ends up switched off. What is refused is the pair a human was the
+   * only defence against: a command that cannot be READ, and one that reads a
+   * SECRET. Neither is recoverable after the fact, because the secret is in the
+   * transcript by the time anyone looks.
+   */
+  attendedOnly?: boolean;
 }
 
 /**
@@ -286,6 +306,7 @@ function assessByArgs(
         return {
           level: "high",
           reason: `this reads a credential store: ${cmd.slice(0, 60)}`,
+          attendedOnly: true,
         };
       }
     }
@@ -294,6 +315,7 @@ function assessByArgs(
         return {
           level: "high",
           reason: `command builds itself at runtime, so it cannot be screened: ${cmd.slice(0, 60)}`,
+          attendedOnly: true,
         };
       }
     }
@@ -313,6 +335,15 @@ export type ArbiterDecision = "allow" | "deny" | "escalate" | "default";
 export interface ArbiterContext {
   mode: PermissionMode;
   category: ToolCategory;
+  /**
+   * Nobody is at the keyboard (`--autonomous`, headless `--print`).
+   *
+   * The arbiter needs it because it is the only layer that knows WHY a call was
+   * escalated, and the answer to "escalate" differs by who is there to answer.
+   * The same asymmetry the sandbox and the verify gate already run on:
+   * unattended fails closed, attended fails open.
+   */
+  unattended?: boolean;
 }
 
 export interface ToolArbiter {
@@ -331,7 +362,7 @@ export class RiskArbiter implements ToolArbiter {
   decide(
     tool: Tool,
     args: Record<string, unknown>,
-    _ctx?: ArbiterContext,
+    ctx?: ArbiterContext,
   ): { decision: ArbiterDecision; reason?: string } {
     const risk = assessRisk(tool, args);
     if (risk.level === "critical") {
@@ -341,6 +372,21 @@ export class RiskArbiter implements ToolArbiter {
       };
     }
     if (risk.level === "high") {
+      // An escalation is a QUESTION, so the honest handling depends on whether
+      // it will reach anyone. Two ways it never does, and the second is the one
+      // that matters most: headless has no terminal to prompt on, and `yolo`
+      // does not prompt BY DEFINITION — `evaluate()` returns allow at its mode
+      // branch without consulting an asker at all. The TUI under
+      // `--autonomous` is exactly that case and reports itself as attended,
+      // because someone IS there at boot to read a sandbox error; nobody is
+      // there six hours later when the command runs.
+      const unanswerable = ctx?.unattended === true || ctx?.mode === "yolo";
+      if (risk.attendedOnly && unanswerable) {
+        return {
+          decision: "deny",
+          reason: `${risk.reason ?? "needs a human"} — refused because no one would be asked`,
+        };
+      }
       return { decision: "escalate", reason: risk.reason };
     }
     return { decision: "default" };

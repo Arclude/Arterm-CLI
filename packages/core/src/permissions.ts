@@ -70,17 +70,27 @@ export class PermissionManager {
   private readonly arbiter?: ToolArbiter;
   /** When true, tools tagged `riskTier: "destructive"` always re-prompt, even in auto/yolo. */
   private confirmDestructive: boolean;
+  /**
+   * Nobody is at the keyboard. Passed to the arbiter, which is the only layer
+   * that knows WHY a call was escalated — and an escalation is a question, so
+   * the answer depends on whether anyone is there to answer it. Defaults to
+   * false, so a manager built without this (a test, a standalone call) behaves
+   * exactly as it did.
+   */
+  private readonly unattended: boolean;
 
   constructor(
     overrides: Record<string, PermissionLevel> = {},
     mode: PermissionMode = "ask",
     arbiter?: ToolArbiter,
     confirmDestructive = false,
+    unattended = false,
   ) {
     this.overrides = { ...overrides };
     this.mode = mode;
     this.arbiter = arbiter;
     this.confirmDestructive = confirmDestructive;
+    this.unattended = unattended;
   }
 
   getMode(): PermissionMode {
@@ -150,7 +160,11 @@ export class PermissionManager {
     // even under yolo. "escalate" forces a human prompt; "allow" approves outright.
     let arbiterDecision: ArbiterDecision = "default";
     if (this.arbiter) {
-      const verdict = this.arbiter.decide(tool, args, { mode: this.mode, category });
+      const verdict = this.arbiter.decide(tool, args, {
+        mode: this.mode,
+        category,
+        unattended: this.unattended,
+      });
       const said =
         verdict.decision === "default"
           ? "no opinion — defers to the mode"
