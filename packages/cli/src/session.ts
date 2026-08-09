@@ -49,6 +49,7 @@ import {
   digest as digestObservations,
   estimateTokens,
   formatMemorySection,
+  gitWorkspaceWatcher,
   loadConfig,
   memberIsolation,
   planPath,
@@ -452,9 +453,23 @@ export async function buildSession(opts: SessionOptions): Promise<{
     }),
     () => ({ sessionId: sessionCheckpointId }),
   );
+  // The watcher is what makes `bash` visible to the ledger at all: the shell
+  // declares no path, so without it every file a command wrote was recorded as
+  // nothing having happened — and the judge reads this against the claim.
+  const watcher = gitWorkspaceWatcher();
   container.resolve(Tokens.Pipelines).toolCall.before(
     "permission",
-    chronicleToolCall(chronicle, () => workingDir.current()),
+    chronicleToolCall(
+      chronicle,
+      () => workingDir.current(),
+      () => ({}),
+      {
+        watcher,
+        // Resolved late: the roster grows at runtime (MCP servers, plugins), and
+        // the gate has to see what the agent actually holds when the call lands.
+        tools: () => agent.tools,
+      },
+    ),
   );
 
   // The other half of the record: not what changed, but whether anything was
@@ -531,6 +546,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
       tools: subagentTools(),
       permissions: sub?.permissions ?? permissions,
       chronicle,
+      watcher,
       // Tagged so the prompt says WHICH worker is blocked, not just the tool name.
       ask: sub?.ask ?? permissionBroker.askFor({ name: role ?? "sub-agent" }),
       cwd,
@@ -644,6 +660,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
         tools: subagentTools(),
         permissions: sub?.permissions ?? permissions,
         chronicle,
+        watcher,
         ask: sub?.ask ?? ((tool, args) => asker(tool, args)),
         cwd,
         taskDone: taskDoneTool,
@@ -768,6 +785,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
         tools: subagentTools(spec.tools),
         permissions: sub?.permissions ?? permissions,
         chronicle,
+        watcher,
         ask: sub?.ask ?? permissionBroker.askFor({ id: spec.id, name: spec.name }),
         cwd,
         taskDone: taskDoneTool,

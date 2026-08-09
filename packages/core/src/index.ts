@@ -46,6 +46,7 @@ export * from "./processRegistry.js";
 export * from "./fleetRegistry.js";
 export * from "./verify.js";
 export * from "./team.js";
+export * from "./workspaceWatch.js";
 export * from "./worktree.js";
 export * from "./runGate.js";
 export * from "./sdd.js";

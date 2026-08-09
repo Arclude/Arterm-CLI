@@ -63,6 +63,7 @@ node scripts/sandbox-lifecycle-e2e.mjs     # does a sandboxed run EXIT when it i
 node scripts/sigterm-report-e2e.mjs        # does a KILLED run still report what it did?
 node scripts/deadline-exit-e2e.mjs         # does a run that hits its deadline STOP, and EXIT?
 node scripts/keystore-denyread-e2e.mjs     # can a sandboxed command read our own API keys?
+node scripts/shell-writes-recorded-e2e.mjs # does the ledger see what a SHELL command wrote?
 ```
 
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
@@ -933,11 +934,51 @@ section: "what was recorded: (nothing)" reads as "nothing happened", which is
 false for a review or a question. Truncation at `MAX_EVIDENCE_FILES` is stated,
 the same rule `roundClaim` follows.
 
+**The shell's writes are MEASURED, because no tool can declare them.**
+`ToolResult.path` is the tool's own account of its own write, and `bash` has
+none to give: it runs a string and does not know what the string touched. So a
+run working through the shell recorded nothing at all, and an empty ledger is
+read as "this run wrote nothing" — the reading that let a rewritten `slug()`
+pass as `docs(…)`. `workspaceWatch.ts` closes it by digesting the tree before
+and after the call and recording only what MOVED. It does not parse the command:
+the command is model output, and a path read out of it is the story again in a
+costume — `sh -c 'x=out.txt; … > $x'` names nothing, and a command that merely
+mentions a file would be recorded as having written it.
+
+Four things are load-bearing:
+
+- **Git is the candidate set**, so the scope limit is stated: no repository, no
+  watcher, and a `.gitignore`d path is not watched either. The alternative is a
+  `node_modules` walk on every shell call to catch build output that is not
+  evidence of anything.
+- **The gate reads the ROSTER, not `ctx.tool`.** The stage is registered
+  `before("permission")` so denials are recorded, and `ctx.tool` is resolved BY
+  the permission stage — a gate consulting it is a gate that never opens. That
+  is not hypothetical: it silently disabled the whole feature, and only the seam
+  test caught it.
+- **One record per file, under its own `eventType`** (`file.observed`, with
+  `attributes.observedBy: "git"`). `change` is singular because a writing tool
+  writes one file while a command writes as many as it likes, and folding them
+  into the call's record would make three files read as three tool calls. The
+  attribute marks the weaker provenance: a watcher cannot prove the COMMAND made
+  the change, only that it happened around it.
+- **Counts are the delta, never the distance from HEAD.** Measuring against HEAD
+  would credit a shell command with every earlier edit to the same file, which is
+  the misattribution this ledger exists to prevent. Where no count is
+  meaningful — a revert, an untracked re-edit — it records `0/0` and
+  `evidenceBlock` renders that as "changed" rather than "+0/-0", since the digest
+  has already proved the file moved.
+
+`scripts/shell-writes-recorded-e2e.mjs` is the proof, because both unit halves
+pass while the seam is broken: it drives the built binary against a fake model
+that answers with one `bash` call and reads the JSONL off disk. 8/8 after, **3/8
+before**, and the failing line is `0 observed file(s)` for a run that wrote two.
+
 `arterm chronicle verify` exits 1 on a broken chain, so a script can gate on it.
-Still absent: a watcher that would tell a change the agent made from one that
-appeared underneath it. `bash` declares no path, so a file written by a shell
-command is invisible here — the same documented hole checkpoints have. Nothing
-prunes `$ARTERM_HOME/chronicle` yet.
+Still absent: telling a change the agent made from one that appeared underneath
+it — the watcher sees the tree, not the cause, so a build daemon writing during a
+long command is recorded as the command's work. Nothing prunes
+`$ARTERM_HOME/chronicle` yet.
 
 ## Measuring: `bench/harbor/`
 

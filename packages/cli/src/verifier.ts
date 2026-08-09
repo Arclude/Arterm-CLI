@@ -87,7 +87,13 @@ export function evidenceBlock(
     // a different fact from one the ledger has no digest for.
     const digest = f.contentHashAfter ? f.contentHashAfter.slice(0, 12) : "gone";
     const writes = f.writes > 1 ? ` (${f.writes} writes)` : "";
-    return `- ${f.path}  +${f.added}/-${f.removed}  ${digest}${writes}${who}`;
+    // "changed" rather than "+0/-0" when nothing could be counted. A shell
+    // command's writes are measured by digest (see `workspaceWatch.ts`), and
+    // for a revert or an untracked re-edit there is no line count to give —
+    // printing zeros would tell the judge the file held still, which is the one
+    // thing the digest has just proved false.
+    const size = f.added === 0 && f.removed === 0 ? "changed" : `+${f.added}/-${f.removed}`;
+    return `- ${f.path}  ${size}  ${digest}${writes}${who}`;
   });
   if (files.length > shown.length) {
     lines.push(`- …and ${files.length - shown.length} more file(s) not listed`);

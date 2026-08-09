@@ -15,6 +15,7 @@ import type { PermissionManager } from "./permissions.js";
 import type { ProcessRegistry } from "./processRegistry.js";
 import type { SandboxRunner } from "./sandbox.js";
 import type { ChatProvider, PermissionAsker, Tool } from "./types.js";
+import type { WorkspaceWatcher } from "./workspaceWatch.js";
 import {
   type WorktreeHandle,
   captureWorktree,
@@ -146,6 +147,16 @@ export interface SubagentOptions {
    * the run as a whole had no order at all.
    */
   chronicle?: Chronicle;
+  /**
+   * The tree watcher that makes a worker's SHELL writes visible to that ledger.
+   *
+   * Optional and separate from `chronicle` on purpose: a run can record what
+   * its tools declared without paying to measure what its commands did. One
+   * instance is shared with the parent — it resolves a repo root per cwd, so
+   * the same object follows a `fleet.isolation: "worktree"` worker into its own
+   * tree, which is where the writing a fan-out cares about happens.
+   */
+  watcher?: WorkspaceWatcher;
 }
 
 /**
@@ -285,6 +296,10 @@ function subagentContainer(chronicle: Chronicle, opts: SubagentOptions): Contain
       // is the question a fan-out makes hard, and a ledger that answered it
       // with one session id would be no better than the summary it replaces.
       () => ({ agentId: opts.id ?? opts.role ?? "worker" }),
+      // The worker's OWN roster, not the parent's: a fleet member is spawned
+      // with a narrowed tool set, and a gate consulting the wrong list would
+      // measure the tree around calls this worker cannot make.
+      opts.watcher ? { watcher: opts.watcher, tools: () => opts.tools } : undefined,
     ),
   );
   const container = new Container();

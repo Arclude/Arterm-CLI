@@ -32,6 +32,8 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import type { Middleware, ToolCallCtx } from "./kernel/pipeline.js";
+import type { Tool } from "./types.js";
+import type { WorkspaceWatcher } from "./workspaceWatch.js";
 
 /** Bump only for a change that makes older records unreadable. */
 export const CHRONICLE_SCHEMA_VERSION = 1 as const;
@@ -304,15 +306,24 @@ export function chronicleToolCall(
   chronicle: Chronicle,
   cwd: () => string,
   scope: () => ChronicleScope = () => ({}),
+  watch?: WorkspaceWatch,
 ): Middleware<ToolCallCtx> {
   return async (ctx, next) => {
     const started = Date.now();
     let executed = false;
+    // A tool that declares no path and runs a command is the blind spot — see
+    // `workspaceWatch.ts`. Taken BEFORE the call rather than derived after it,
+    // which is the whole difference between measuring a change and inferring
+    // one. A denied call pays for a snapshot it does not use; that is cheaper
+    // than the alternative, since whether the call runs is not known yet.
+    const before = watches(watch, ctx.call.name) ? await watch?.watcher.snapshot(cwd()) : undefined;
     try {
       await next();
       executed = ctx.tool !== undefined;
     } finally {
       const change = await describeChange(ctx, cwd);
+      const observed =
+        executed && before && watch ? await watch.watcher.changesSince(before, cwd()) : undefined;
       chronicle.append({
         eventType: executed ? "tool.executed" : "tool.denied",
         outcome: !executed ? "denied" : ctx.isError ? "failure" : "success",
@@ -321,9 +332,59 @@ export function chronicleToolCall(
         ...(ctx.call.id ? { toolCallId: ctx.call.id } : {}),
         durationMs: Date.now() - started,
         ...(change ? { change } : {}),
+        ...(observed && observed.skipped > 0
+          ? { attributes: { observedTruncated: observed.skipped } }
+          : {}),
       });
+      // One record per observed file, and NOT folded into the call's own
+      // record: `change` is singular because a writing tool writes one file,
+      // while a command writes as many as it likes. A separate `eventType`
+      // keeps the execution count honest — three files must not read as three
+      // tool calls — and marks the weaker provenance at the same time.
+      for (const observedChange of observed?.changes ?? []) {
+        chronicle.append({
+          eventType: "file.observed",
+          outcome: "success",
+          scope: scope(),
+          ...(ctx.call.name ? { toolName: ctx.call.name } : {}),
+          ...(ctx.call.id ? { toolCallId: ctx.call.id } : {}),
+          change: observedChange,
+          attributes: { observedBy: "git" },
+        });
+      }
     }
   };
+}
+
+/**
+ * Measuring the tree around a call, for the calls that need it.
+ *
+ * `tools` is here because of WHERE this stage sits. It is registered
+ * `before("permission")` so a denial is recorded, and `ctx.tool` is resolved BY
+ * the permission stage — so at snapshot time the call is still just a name, and
+ * a gate reading `ctx.tool` is a gate that never opens. That was not a
+ * theoretical ordering concern: it silently disabled the whole feature, and the
+ * seam test is what found it.
+ */
+export interface WorkspaceWatch {
+  watcher: WorkspaceWatcher;
+  /** The live roster, consulted by name. A name it does not know never runs. */
+  tools: () => Tool[];
+}
+
+/**
+ * Whether a tool's writes have to be measured rather than read off its result.
+ *
+ * The gate is "runs a command", not a name: `bash` is the case that motivated
+ * it, but `exec` has the same shape, and so does any future tool or MCP server
+ * that shells out. Read-category tools are excluded because the snapshot pair
+ * is two `git` calls plus a digest of the dirty set, which is not worth paying
+ * on every `grep`.
+ */
+function watches(watch: WorkspaceWatch | undefined, name: string): boolean {
+  if (!watch) return false;
+  const tool = watch.tools().find((t) => t.name === name);
+  return tool !== undefined && (tool.category ?? "execute") === "execute";
 }
 
 /** What the call changed, from the tool's own declaration plus the disk. */

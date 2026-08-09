@@ -20,7 +20,8 @@
  * `--tool <name>` answers with a tool call instead of text. `--tool task_done`
  * drives an autonomous run to a completion claim, which is what puts the result
  * verification gate on the path — without it the fake model never claims anything
- * and the gate is never consulted.
+ * and the gate is never consulted. `--tool-args <json>` sets that call's
+ * arguments, for a tool whose shape is not `task_done`'s.
  *
  * Modes:
  *   ok            always answers normally
@@ -59,6 +60,16 @@ const OK_MODEL = flag("ok", "backup");
 const ANSWER = flag("answer", "This answer came from the fake server.");
 /** `--tool task_done` — answer with a tool call instead of text. */
 const CALL_TOOL = flag("tool", undefined);
+/**
+ * `--tool-args '{"command":"…"}'` — the arguments that tool call carries.
+ *
+ * Defaults to `task_done`'s shape, which is what every caller wanted until a
+ * test needed the fake model to run a SHELL command (see
+ * `shell-writes-recorded-e2e.mjs`): a summary argument reaches `bash` as no
+ * command at all, so the call succeeds having done nothing, which is a pass for
+ * the wrong reason.
+ */
+const CALL_ARGS = flag("tool-args", undefined);
 
 const flakyMatch = /^flaky:(\d+)$/.exec(MODE);
 const FLAKY_FAILURES = flakyMatch ? Number(flakyMatch[1]) : 0;
@@ -114,7 +125,10 @@ function openaiStream(res) {
                 index: 0,
                 id: "call_1",
                 type: "function",
-                function: { name: CALL_TOOL, arguments: JSON.stringify({ summary: ANSWER }) },
+                function: {
+                  name: CALL_TOOL,
+                  arguments: CALL_ARGS ?? JSON.stringify({ summary: ANSWER }),
+                },
               },
             ],
           },

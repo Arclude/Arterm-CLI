@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   Chronicle,
+  type ChronicleChange,
   type ChronicleRecord,
   type ChronicleSink,
   GENESIS_HASH,
@@ -13,7 +14,8 @@ import {
 } from "./chronicle.js";
 import { Pipeline } from "./kernel/pipeline.js";
 import type { ToolCallCtx } from "./kernel/pipeline.js";
-import type { DiffRow } from "./types.js";
+import type { DiffRow, Tool } from "./types.js";
+import type { WorkspaceWatcher } from "./workspaceWatch.js";
 
 /** Collects sealed records the way a real sink would receive them. */
 function collector(): { sink: ChronicleSink; records: ChronicleRecord[] } {
@@ -246,5 +248,119 @@ describe("the toolCall stage", () => {
       "tool exploded",
     );
     expect(records).toHaveLength(1);
+  });
+});
+
+/**
+ * The shell's writes, which no tool declares.
+ *
+ * `bash` returns a string and names no path, so `describeChange` had nothing to
+ * describe and the run's most prolific writer left no trace — while the judge
+ * reads this ledger against the claim, and an empty one reads as "wrote
+ * nothing". A fake watcher stands in for git here: the git implementation has
+ * its own tests against a real repo, and what these pin is the SEAM.
+ */
+describe("the toolCall stage with a workspace watcher", () => {
+  const watcher = (changes: ChronicleChange[], skipped = 0): WorkspaceWatcher => ({
+    snapshot: async () => ({
+      root: "/repo",
+      paths: new Set<string>(),
+      states: new Map(),
+      numstat: new Map(),
+      skippedPaths: new Set<string>(),
+      skipped: 0,
+    }),
+    changesSince: async () => ({ changes, skipped }),
+  });
+
+  const run = async (
+    ctx: ToolCallCtx,
+    w: WorkspaceWatcher,
+    category: "read" | "execute" = "execute",
+  ): Promise<ChronicleRecord[]> => {
+    const { sink, records } = collector();
+    const pipeline = new Pipeline<ToolCallCtx>();
+    pipeline.use(
+      "chronicle",
+      chronicleToolCall(
+        new Chronicle(sink),
+        () => "/repo",
+        () => ({}),
+        // The roster the gate consults. It has to come from here rather than
+        // from `ctx.tool`, which the permission stage sets AFTER this one runs.
+        { watcher: w, tools: () => [{ name: ctx.call.name, category } as Tool] },
+      ),
+    );
+    pipeline.use("execute", async (c, next) => {
+      c.tool = { name: c.call.name, category } as ToolCallCtx["tool"];
+      await next();
+    });
+    await pipeline.run(ctx);
+    return records;
+  };
+
+  const observed = (records: ChronicleRecord[]) =>
+    records.filter((r) => r.eventType === "file.observed");
+
+  it("records what a command changed, though the tool declared nothing", async () => {
+    const records = await run(
+      { call: { id: "c1", name: "bash", arguments: { command: "sed -i s/a/b/ x.ts" } } },
+      watcher([{ path: "x.ts", added: 3, removed: 1, contentHashAfter: "abc" }]),
+    );
+    const files = observed(records);
+    expect(files).toHaveLength(1);
+    expect(files[0]?.change?.path).toBe("x.ts");
+    expect(files[0]?.change?.contentHashAfter).toBe("abc");
+    // The provenance is on the record: a measured change is weaker evidence
+    // than a tool's account of its own write, and the ledger says which it is.
+    expect(files[0]?.attributes?.observedBy).toBe("git");
+  });
+
+  it("keeps the execution count honest when one call writes several files", async () => {
+    // The reason these are their own records rather than a list on the call's:
+    // three files must not read as three tool calls.
+    const records = await run(
+      { call: { id: "c1", name: "bash", arguments: {} } },
+      watcher([
+        { path: "a.ts", added: 1, removed: 0 },
+        { path: "b.ts", added: 2, removed: 0 },
+        { path: "c.ts", added: 3, removed: 0 },
+      ]),
+    );
+    expect(records.filter((r) => r.eventType === "tool.executed")).toHaveLength(1);
+    expect(observed(records)).toHaveLength(3);
+  });
+
+  it("does not pay the watcher on a read-category tool", async () => {
+    // Two git calls and a digest of the dirty set per `grep` is the cost this
+    // gate exists to refuse.
+    let looked = false;
+    const counting: WorkspaceWatcher = {
+      ...watcher([]),
+      snapshot: async () => {
+        looked = true;
+        return undefined;
+      },
+    };
+    await run({ call: { id: "c1", name: "grep", arguments: {} } }, counting, "read");
+    expect(looked).toBe(false);
+  });
+
+  it("states the truncation rather than dropping it silently", async () => {
+    const records = await run({ call: { id: "c1", name: "bash", arguments: {} } }, watcher([], 12));
+    const call = records.find((r) => r.eventType === "tool.executed");
+    expect(call?.attributes?.observedTruncated).toBe(12);
+  });
+
+  it("still chains: every observed file advances the hash chain", async () => {
+    // The records are ordinary members of the ledger, not an annex — a deleted
+    // one has to break verification like any other.
+    const records = await run(
+      { call: { id: "c1", name: "bash", arguments: {} } },
+      watcher([{ path: "a.ts", added: 1, removed: 0, contentHashAfter: "h" }]),
+    );
+    expect(verifyChain(records).ok).toBe(true);
+    expect(verifyChain([records[0] as ChronicleRecord]).ok).toBe(true);
+    expect(records.map((r) => r.sequence)).toEqual([1, 2]);
   });
 });
