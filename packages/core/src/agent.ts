@@ -767,13 +767,7 @@ export class Agent {
       this.observedPromptMax > assumed
         ? ` This session has already sent ${grouped(this.observedPromptMax)} tokens successfully, so the real window is at least that.`
         : "";
-    return (
-      `${this.opts.model} is not in the model catalog, so its context window is assumed to be ` +
-      `${grouped(assumed)} tokens — the default, which is sized for a local model. ` +
-      `Compaction and tool-result clearing fire against that number, so if it is too small the ` +
-      `session compacts far more than it needs to. Set \`context.window\` in the config to the ` +
-      `model's real window.${proven}`
-    );
+    return `${this.opts.model} is not in the model catalog, so its context window is assumed to be ${grouped(assumed)} tokens — the default, which is sized for a local model. Compaction and tool-result clearing fire against that number, so if it is too small the session compacts far more than it needs to. Set \`context.window\` in the config to the model's real window.${proven}`;
   }
 
   /** Switch the active backend while preserving conversation history. */
