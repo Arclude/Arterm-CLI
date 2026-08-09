@@ -303,37 +303,56 @@ The accounting was already right before the markers existed: `cache_read` and
 because a read costs ~10% of the input rate and merging them overstates an agent
 loop — which is mostly cache hits — by close to an order of magnitude.
 
-### The context window is a BELIEF, and it was silently wrong
+### The context window is a BELIEF, and headless runs got it wrong
 
-`effectiveContextWindow()` is the catalog's value for the model, falling back to
-`context.window`. That fallback's default is 8192 — written for a local GGUF —
-and models.dev carries **no GLM model at all**, so every GLM session adopted it.
-Measured against the live endpoint: glm-5.2 accepted a **512,013-token prompt**,
-so the belief was off by a factor of sixty, and with it the tool-result clearing
-threshold (60% → 4,915) and the auto-compaction threshold (75% → 6,144). A live
-run showed the arithmetic on screen: `ctx=13,275 / ctxWindow=8,192`, a gauge
-reading 162% full.
+`effectiveContextWindow()` is the models.dev value for the model, falling back to
+`context.window`. The catalog knows glm-5.2 perfectly well — **1,000,000 tokens**
+— but it is read through `cachedCatalogSync()`, which reads
+`$ARTERM_HOME/models-dev.json` and returns an empty list when that file is
+absent. And the cache was warmed on the **TUI path only** (`startChat`'s
+fire-and-forget `fetchCatalog`), never on the headless one.
 
-Two halves, and neither invents a number:
+So the belief was correct in an interactive session on a machine that had run
+one before, and wrong everywhere else: a fresh `ARTERM_HOME` driven headlessly
+fell back to `context.window`'s 8192 — a default written for a local GGUF — and
+computed both thresholds from it, clearing tool results at 4,915 tokens and
+compacting at 6,144. A live run showed the arithmetic on screen:
+`ctx=13,275 / ctxWindow=8,192`, a gauge reading 162% full.
+
+**That is the benchmark container, every trial.** `bench/harbor` starts from a
+clean home and drives `--print --json`, so our own measurements were taken with
+a 1M-window model compacting every 6k tokens. `runHeadlessFlow` now warms the
+cache the same way `startChat` does.
+
+Two more halves, because a warm cache is not guaranteed (no network, a fetch
+that has not landed yet), and neither invents a number:
 
 - **A prompt the provider ANSWERED is proof the window is at least that big**, so
   `observedPromptMax` is a floor under the belief and `effectiveContextWindow()`
-  never returns less. It is recorded on the `done` chunk, because a rejected
-  request proves nothing. It can only raise the floor, never find the ceiling —
-  and compaction suppresses the very evidence that would raise it further, which
-  is why this is not the whole fix.
+  never returns less. Recorded on the `done` chunk, because a rejected request
+  proves nothing. It can only raise the floor, never find the ceiling — and
+  compaction suppresses the evidence that would raise it further, which is why
+  it is a safety net rather than the fix.
 - **`contextWindowNote()` says the window was ASSUMED**, naming the model, the
-  number, and the config key — emitted at boot beside the sandbox warning. It
-  reports rather than corrects: the provider's `/models` does not carry the
-  window, and swapping a wrong small default for a wrong large one trades an
-  expensive habit for a mid-run rejection.
+  number and the config key, at boot beside the sandbox warning. It reports
+  rather than corrects: swapping a wrong small default for a wrong large one
+  trades an expensive habit for a mid-run rejection, and returning `undefined`
+  is not available either — `shouldAutoCompact()` gates the strategy, so an
+  unknown window means unbounded history.
 
-It fires only for the untouched `DEFAULT_CONTEXT_WINDOW`, which is exported for
-exactly that comparison — config merging keeps no provenance, and a warning that
+It fires only for the untouched `DEFAULT_CONTEXT_WINDOW`, exported for exactly
+that comparison, since config merging keeps no provenance and a warning that
 repeats after the user has decided is one they learn to scroll past. The
-grouping locale is pinned (`en-US`), because the same warning read "8.192" on a
-Turkish host and "8,192" in CI, and a number that changes shape by host is not
-one anyone can quote back.
+grouping locale is pinned (`en-US`) — the same sentence read "8.192" on a Turkish
+host and "8,192" in CI.
+
+**A method note, because it cost an hour and a wrong commit message.**
+`fetchCatalog()` returns an ALREADY-FLAT `CatalogModel[]`. Calling
+`flattenCatalog()` on it a second time yields nothing, which read as "models.dev
+carries no GLM model at all" and produced a confident, false diagnosis that
+survived into a commit. The catalog was never the problem; the per-home cache
+was. When a probe says a public dataset is missing something obvious, suspect
+the probe.
 
 ### Reasoning is a THIRD chunk kind, and it is never recorded
 

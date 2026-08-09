@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -587,6 +588,28 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
   const { hardCap } = applyAutonomousProfile(config, globals);
   const providerId = globals.provider ?? config.provider;
   requireKnownProvider(providerId);
+
+  // Warm the models.dev cache here too, exactly as `startChat` does.
+  //
+  // It is per-ARTERM_HOME and it was warmed on the TUI path ONLY, so a headless
+  // run in a fresh home never had one — `modelContextWindow` returned undefined
+  // and the context window fell back to `context.window`'s 8192, a local-GGUF
+  // default, for a model whose real window is a million. That is not a corner
+  // case: the Harbor benchmark container starts from a fresh home every trial
+  // and drives the CLI headlessly, so our own measurements were taken with
+  // compaction firing at 6,144 tokens.
+  if (config.catalog?.enabled !== false) {
+    const ttlMs = (config.catalog?.maxAgeHours ?? 24) * 60 * 60 * 1000;
+    // Awaited when there is NO cache, fire-and-forget when it is merely stale.
+    // The difference is what the session starts believing: with nothing on disk
+    // the window is the 8192 default until the fetch lands, and a run that
+    // finishes inside one turn never sees the correction. One bounded request,
+    // once per home, buys the right window for every turn after it — and where
+    // there is no network it fails the same way it always did, which is the
+    // case the boot warning is actually for.
+    const warm = fetchCatalog({ ttlMs }).catch(() => []);
+    if (!existsSync(join(ARTERM_HOME, "models-dev.json"))) await warm;
+  }
 
   const store = createSessionStore(config);
   const resumed = await resolveResumeMessages(store, globals);
