@@ -142,7 +142,11 @@ try {
   check("the signalled run exits rather than hanging", !run.killed, `exit=${run.code}`);
 
   // The whole point. Before this, stdout was empty and the file was 0 bytes.
-  check("it wrote something to stdout at all", run.stdout.trim().length > 0, `${run.stdout.length}B`);
+  check(
+    "it wrote something to stdout at all",
+    run.stdout.trim().length > 0,
+    `${run.stdout.length}B`,
+  );
 
   let doc;
   try {
