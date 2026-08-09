@@ -243,3 +243,53 @@ describe("the ledger reaches the judge", () => {
     expect(prompt).toContain("that IS the concrete evidence a rejection needs");
   });
 });
+
+/**
+ * The doubt has to reach the judge, or it is only a comment in a JSONL file.
+ * A watcher-observed change is weaker evidence than a declared one, and the
+ * honest way to say so is to name what else was running — on the line where
+ * the change is, not as a footnote applied to everything.
+ */
+describe("the evidence block carries what else was running", () => {
+  const withObserved = (concurrent: string[]): Chronicle => {
+    const chronicle = new Chronicle({ write: () => {} });
+    chronicle.append({
+      eventType: "file.observed",
+      outcome: "success",
+      scope: {},
+      toolName: "bash",
+      change: { path: "src/a.ts", added: 3, removed: 1, contentHashAfter: "abc123def456789" },
+      attributes: { observedBy: "git", concurrent },
+    });
+    return chronicle;
+  };
+
+  it("names the other writers beside the file they might have written", () => {
+    const block = evidenceBlock(withObserved(["npm run dev", "arterm 4321 (glm-5.2)"]));
+    expect(block).toContain("src/a.ts");
+    expect(block).toContain("also running: npm run dev, arterm 4321 (glm-5.2)");
+  });
+
+  it("says nothing when nothing else was running", () => {
+    // The common case, and the reason this is not a blanket footnote: a caveat
+    // on every line is a caveat nobody reads.
+    const block = evidenceBlock(withObserved([]));
+    expect(block).toContain("src/a.ts");
+    expect(block).not.toContain("also running");
+  });
+
+  it("keeps the doubt once a file has earned it", () => {
+    // Two writes, one clean and one beside a daemon: the file is still one the
+    // ledger cannot fully vouch for.
+    const chronicle = withObserved(["vite dev"]);
+    chronicle.append({
+      eventType: "file.observed",
+      outcome: "success",
+      scope: {},
+      toolName: "bash",
+      change: { path: "src/a.ts", added: 1, removed: 0, contentHashAfter: "def" },
+      attributes: { observedBy: "git", concurrent: [] },
+    });
+    expect(evidenceBlock(chronicle)).toContain("also running: vite dev");
+  });
+});

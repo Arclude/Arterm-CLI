@@ -74,10 +74,32 @@ interface FileState {
   lines: number;
 }
 
+/**
+ * Anything else that could have written the tree while the call ran.
+ *
+ * The watcher compares two looks at the filesystem, so it can prove a file
+ * MOVED and never that the command moved it — a `tsc --watch` the agent
+ * backgrounded, or a second session in the same checkout, lands in the same
+ * diff. That gap was documented and left open, because identifying the writer
+ * needs a mechanism this does not have: fanotify wants CAP_SYS_ADMIN, ptrace
+ * costs a multiple of every command's runtime, and a per-command overlay
+ * changes where writes go.
+ *
+ * So this does not identify the cause; it bounds the doubt. The suspects are
+ * enumerable — the agent knows the processes it started, and the session
+ * registry knows its peers — and when the list is EMPTY, which is the ordinary
+ * case, nothing else was running and the attribution is as good as proven. A
+ * caveat that names its alternatives is evidence; one that applies to every
+ * record equally is noise.
+ */
+export type Witnesses = () => string[];
+
 /** The tree as it stood, against which the next look is compared. */
 export interface WorkspaceSnapshot {
   /** Absolute repo root the paths below are relative to. */
   root: string;
+  /** Other possible writers seen when this look was taken. */
+  witnesses: string[];
   /**
    * Every candidate path git named, readable or not.
    *
@@ -102,6 +124,17 @@ export interface WorkspaceChanges {
   changes: ChronicleChange[];
   /** Files the bounds kept out of the comparison, on either side. */
   skipped: number;
+  /**
+   * Other writers alive during the window, from either end of it.
+   *
+   * The UNION of both samples, not the intersection: a daemon that started
+   * halfway through and one that died halfway through are equally capable of
+   * having written the file, and a check that only counted the survivors would
+   * quietly clear the very cases it exists to flag. Empty means the question
+   * was asked and the answer was none — which is why it is an empty array
+   * rather than an absent field.
+   */
+  concurrent: string[];
 }
 
 /**
@@ -201,9 +234,24 @@ async function measure(absolute: string): Promise<FileState | undefined> {
   }
 }
 
-/** The watcher backed by git. Every failure degrades to "observed nothing". */
-export function gitWorkspaceWatcher(): WorkspaceWatcher {
+/**
+ * The watcher backed by git. Every failure degrades to "observed nothing".
+ *
+ * `witnesses` is taken here rather than threaded through the pipeline because
+ * ONE watcher instance already serves the leader and every worker — the
+ * alternative was four more plumbing points, and tonight's other two bugs were
+ * both plumbing that compiled without being connected.
+ */
+export function gitWorkspaceWatcher(opts: { witnesses?: Witnesses } = {}): WorkspaceWatcher {
   const roots = new Map<string, string | undefined>();
+  const witnesses = (): string[] => {
+    try {
+      return opts.witnesses?.() ?? [];
+    } catch {
+      // A witness list that throws must not take the ledger down with it.
+      return [];
+    }
+  };
 
   /** Repo root for a cwd, memoized — a session's cwd rarely moves. */
   async function rootOf(cwd: string, signal?: AbortSignal): Promise<string | undefined> {
@@ -222,7 +270,7 @@ export function gitWorkspaceWatcher(): WorkspaceWatcher {
   async function look(
     root: string,
     signal?: AbortSignal,
-  ): Promise<Omit<WorkspaceSnapshot, "root">> {
+  ): Promise<Omit<WorkspaceSnapshot, "root" | "witnesses">> {
     const all = [...new Set(await candidates(root, signal))];
     const watched = all.slice(0, MAX_WATCHED_FILES);
     const skippedPaths = new Set(all.slice(MAX_WATCHED_FILES));
@@ -260,18 +308,19 @@ export function gitWorkspaceWatcher(): WorkspaceWatcher {
       const root = await rootOf(cwd, signal);
       if (!root) return undefined;
       try {
-        return { root, ...(await look(root, signal)) };
+        return { root, witnesses: witnesses(), ...(await look(root, signal)) };
       } catch {
         return undefined;
       }
     },
 
     async changesSince(before, cwd, signal) {
-      let after: Omit<WorkspaceSnapshot, "root">;
+      const concurrent = [...new Set([...before.witnesses, ...witnesses()])].sort();
+      let after: Omit<WorkspaceSnapshot, "root" | "witnesses">;
       try {
         after = await look(before.root, signal);
       } catch {
-        return { changes: [], skipped: before.skipped };
+        return { changes: [], skipped: before.skipped, concurrent };
       }
       const changes: ChronicleChange[] = [];
       for (const path of new Set([...before.paths, ...after.paths])) {
@@ -301,7 +350,7 @@ export function gitWorkspaceWatcher(): WorkspaceWatcher {
       // reviewer comparing two ledgers is comparing the work and not the order
       // the filesystem happened to answer in.
       changes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      return { changes, skipped: before.skipped + after.skipped };
+      return { changes, skipped: before.skipped + after.skipped, concurrent };
     },
   };
 }

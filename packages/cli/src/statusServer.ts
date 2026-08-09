@@ -66,6 +66,50 @@ function tokenOf(req: IncomingMessage, url: URL): string | null {
   return url.searchParams.get("token");
 }
 
+/**
+ * Other live sessions working in `cwd`, as short labels.
+ *
+ * The user runs several agents at once, so "something else could have written
+ * this file" is not hypothetical here — it is the ordinary Tuesday. The
+ * discovery directory already carries what is needed (pid, cwd) and is already
+ * swept for dead pids, so this is a read rather than new bookkeeping.
+ *
+ * Liveness is re-checked per entry rather than trusted from the file: a session
+ * that crashed leaves its discovery file behind until something sweeps it, and
+ * crediting a dead process with a write is the same error as missing a live one.
+ */
+export function peerSessions(cwd: string, selfSessionId?: string): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(STATUS_DIR);
+  } catch {
+    return [];
+  }
+  const peers: string[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const d = JSON.parse(readFileSync(join(STATUS_DIR, name), "utf8")) as {
+        pid?: number;
+        cwd?: string;
+        sessionId?: string;
+        model?: string;
+      };
+      if (!d.pid || d.pid === process.pid) continue;
+      if (d.sessionId && d.sessionId === selfSessionId) continue;
+      // Same tree, not merely the same machine: a session in another checkout
+      // cannot have touched these files, and naming it would be noise.
+      if (!d.cwd || (d.cwd !== cwd && !cwd.startsWith(`${d.cwd}/`) && !d.cwd.startsWith(`${cwd}/`)))
+        continue;
+      process.kill(d.pid, 0);
+      peers.push(`arterm ${d.pid}${d.model ? ` (${d.model})` : ""}`);
+    } catch {
+      // Unreadable, or the pid is gone — either way not a witness.
+    }
+  }
+  return peers;
+}
+
 /** Delete discovery files whose pid is no longer alive. */
 function sweepStaleDiscovery(): void {
   let names: string[];

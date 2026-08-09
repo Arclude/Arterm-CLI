@@ -264,13 +264,14 @@ describe("the toolCall stage with a workspace watcher", () => {
   const watcher = (changes: ChronicleChange[], skipped = 0): WorkspaceWatcher => ({
     snapshot: async () => ({
       root: "/repo",
+      witnesses: [],
       paths: new Set<string>(),
       states: new Map(),
       numstat: new Map(),
       skippedPaths: new Set<string>(),
       skipped: 0,
     }),
-    changesSince: async () => ({ changes, skipped }),
+    changesSince: async () => ({ changes, skipped, concurrent: [] }),
   });
 
   const run = async (

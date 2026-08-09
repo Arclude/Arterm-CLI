@@ -189,6 +189,17 @@ export interface ChronicleFileSummary {
   by: string[];
   /** How many tool calls touched it. */
   writes: number;
+  /**
+   * Other writers that were alive when this file was measured as changing.
+   *
+   * Only ever set by the workspace watcher, and only when something else really
+   * was running — a tool that declares its own write needs no such caveat,
+   * because it is reporting what it did rather than what it noticed. Carried up
+   * to the summary so the judge sees it beside the change: "this file moved
+   * during the call" and "something else could have moved it" are two different
+   * pieces of evidence and belong on one line.
+   */
+  concurrent?: string[];
 }
 
 /** Seals records into a chain and hands them to a sink. One per session. */
@@ -246,6 +257,7 @@ export class Chronicle {
     if (!change) return;
     const seen = this.files.get(change.path);
     const by = record.scope.agentId;
+    const alongside = concurrentOf(record);
     if (!seen) {
       this.files.set(change.path, {
         path: change.path,
@@ -254,6 +266,7 @@ export class Chronicle {
         ...(change.contentHashAfter ? { contentHashAfter: change.contentHashAfter } : {}),
         by: by ? [by] : [],
         writes: 1,
+        ...(alongside.length > 0 ? { concurrent: alongside } : {}),
       });
       return;
     }
@@ -265,6 +278,12 @@ export class Chronicle {
     // after being written is deleted, however much was added first.
     seen.contentHashAfter = change.contentHashAfter;
     if (by && !seen.by.includes(by)) seen.by.push(by);
+    // Accumulated, never replaced: a file touched twice, once cleanly and once
+    // beside a running daemon, still has the doubt on it.
+    for (const name of alongside) {
+      seen.concurrent = seen.concurrent ?? [];
+      if (!seen.concurrent.includes(name)) seen.concurrent.push(name);
+    }
   }
 
   /** What the run changed so far, one entry per file, in first-touch order. */
@@ -276,6 +295,12 @@ export class Chronicle {
   deniedCount(): number {
     return this.denied;
   }
+}
+
+/** The other writers a record names, if any — tolerant of an untyped envelope. */
+function concurrentOf(record: ChronicleRecord): string[] {
+  const raw = record.attributes?.concurrent;
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
 }
 
 /** SHA-256 of a file's bytes, or undefined when it cannot be read. */
@@ -349,7 +374,11 @@ export function chronicleToolCall(
           ...(ctx.call.name ? { toolName: ctx.call.name } : {}),
           ...(ctx.call.id ? { toolCallId: ctx.call.id } : {}),
           change: observedChange,
-          attributes: { observedBy: "git" },
+          // `concurrent` is the doubt, bounded and named. An empty array is a
+          // finding, not a blank: it says the question was asked and nothing
+          // else was running, which is what turns "a file moved around this
+          // call" into "this call moved it".
+          attributes: { observedBy: "git", concurrent: observed?.concurrent ?? [] },
         });
       }
     }

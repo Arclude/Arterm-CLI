@@ -1028,11 +1028,28 @@ pass while the seam is broken: it drives the built binary against a fake model
 that answers with one `bash` call and reads the JSONL off disk. 8/8 after, **3/8
 before**, and the failing line is `0 observed file(s)` for a run that wrote two.
 
+**The watcher cannot name the writer, so it names the ALTERNATIVES.** Two looks
+at a filesystem prove a file moved, never who moved it, and the mechanisms that
+would prove it are all out of reach: fanotify wants `CAP_SYS_ADMIN`, ptrace costs
+a multiple of every command's runtime, and a per-command overlay changes where
+writes go. What is reachable is the suspect list — the agent knows the processes
+it backgrounded (`ProcessRegistry`), and the discovery directory knows the other
+live sessions sharing this tree (`peerSessions`, which matters here because
+several run at once). Both are sampled at BOTH ends of the window and unioned:
+a daemon that died halfway through could have written the file as easily as one
+that outlived the command, so an intersection would clear exactly the cases this
+exists to flag.
+
+`attributes.concurrent` is therefore an empty ARRAY in the ordinary case, not an
+absent field — it says the question was asked and the answer was none, which is
+what turns "a file moved around this call" into "this call moved it".
+`evidenceBlock` prints `[also running: …]` on the file's own line only when
+there is something to print, because a caveat repeated on every line is one
+nobody reads. The doubt accumulates per file and is never cleared by a later
+clean write.
+
 `arterm chronicle verify` exits 1 on a broken chain, so a script can gate on it.
-Still absent: telling a change the agent made from one that appeared underneath
-it — the watcher sees the tree, not the cause, so a build daemon writing during a
-long command is recorded as the command's work. Nothing prunes
-`$ARTERM_HOME/chronicle` yet.
+Nothing prunes `$ARTERM_HOME/chronicle` yet.
 
 ## Measuring: `bench/harbor/`
 

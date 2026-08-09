@@ -93,7 +93,13 @@ export function evidenceBlock(
     // printing zeros would tell the judge the file held still, which is the one
     // thing the digest has just proved false.
     const size = f.added === 0 && f.removed === 0 ? "changed" : `+${f.added}/-${f.removed}`;
-    return `- ${f.path}  ${size}  ${digest}${writes}${who}`;
+    // The doubt travels with the evidence. A watcher proves a file MOVED around
+    // a shell call, never that the call moved it, and the honest way to hand
+    // that to a judge is to name the alternative rather than to footnote every
+    // line equally — most lines have no alternative to name.
+    const alongside =
+      f.concurrent && f.concurrent.length > 0 ? `  [also running: ${f.concurrent.join(", ")}]` : "";
+    return `- ${f.path}  ${size}  ${digest}${writes}${who}${alongside}`;
   });
   if (files.length > shown.length) {
     lines.push(`- …and ${files.length - shown.length} more file(s) not listed`);

@@ -898,6 +898,7 @@ describe("a sub-agent's writes reach the parent's ledger", () => {
   const watcher: WorkspaceWatcher = {
     snapshot: async () => ({
       root: "/repo",
+      witnesses: [],
       paths: new Set<string>(),
       states: new Map(),
       numstat: new Map(),
@@ -907,6 +908,7 @@ describe("a sub-agent's writes reach the parent's ledger", () => {
     changesSince: async () => ({
       changes: [{ path: "worker-wrote.ts", added: 4, removed: 0, contentHashAfter: "abcd" }],
       skipped: 0,
+      concurrent: [],
     }),
   };
 

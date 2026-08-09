@@ -114,6 +114,7 @@ import type { Session } from "@arterm/tui";
 import { createChronicleSink } from "./chronicleStore.js";
 import { armAutonomous } from "./flags.js";
 import { startOtel } from "./otel.js";
+import { peerSessions } from "./statusServer.js";
 import { createVerifier } from "./verifier.js";
 
 export interface SessionOptions {
@@ -469,7 +470,21 @@ export async function buildSession(opts: SessionOptions): Promise<{
   // The watcher is what makes `bash` visible to the ledger at all: the shell
   // declares no path, so without it every file a command wrote was recorded as
   // nothing having happened — and the judge reads this against the claim.
-  const watcher = gitWorkspaceWatcher();
+  // Who ELSE could have written the tree while a command ran. The watcher
+  // cannot identify the writer, so it names the alternatives instead — and the
+  // common answer, an empty list, is the one that makes an observed change as
+  // good as attributed. Two sources, because they are the two the process can
+  // actually know about: children this session backgrounded, and other live
+  // arterm sessions sharing the directory (the user runs several at once).
+  const watcher = gitWorkspaceWatcher({
+    witnesses: () => [
+      ...processes
+        .list()
+        .filter((p) => p.state === "running")
+        .map((p) => p.label),
+      ...peerSessions(workingDir.current(), sessionCheckpointId),
+    ],
+  });
   container.resolve(Tokens.Pipelines).toolCall.before(
     "permission",
     chronicleToolCall(

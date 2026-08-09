@@ -104,3 +104,56 @@ describe("the git workspace watcher", () => {
     expect(await gitWorkspaceWatcher().snapshot(plain)).toBeUndefined();
   });
 });
+
+/**
+ * Naming the other suspects.
+ *
+ * The watcher can prove a file MOVED around a command and never that the
+ * command moved it — identifying the writer needs privileges or a per-command
+ * overlay. What it CAN do is enumerate who else was capable of it, so an empty
+ * list becomes evidence rather than an unstated assumption.
+ */
+describe("who else could have written it", () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = repo();
+  });
+
+  it("reports nothing running when nothing is", async () => {
+    const w = gitWorkspaceWatcher({ witnesses: () => [] });
+    const before = await w.snapshot(dir);
+    await writeFile(join(dir, "quiet.txt"), "a\n");
+    const { changes, concurrent } = await w.changesSince(before!, dir);
+    expect(changes.some((c) => c.path === "quiet.txt")).toBe(true);
+    // An empty ARRAY, not an absent field: the question was asked.
+    expect(concurrent).toEqual([]);
+    await rm(join(dir, "quiet.txt"));
+  });
+
+  it("unions both ends of the window, not just the survivors", async () => {
+    // A daemon that died halfway through could have written the file just as
+    // easily as one that outlived the command, so an intersection would clear
+    // exactly the cases this exists to flag.
+    let call = 0;
+    const w = gitWorkspaceWatcher({
+      witnesses: () => (call++ === 0 ? ["tsc --watch"] : ["vite dev"]),
+    });
+    const before = await w.snapshot(dir);
+    await writeFile(join(dir, "busy.txt"), "a\n");
+    const { concurrent } = await w.changesSince(before!, dir);
+    expect(concurrent).toEqual(["tsc --watch", "vite dev"]);
+    await rm(join(dir, "busy.txt"));
+  });
+
+  it("survives a witness source that throws", async () => {
+    // The ledger observes the run; it may never be the thing that ends it.
+    const w = gitWorkspaceWatcher({
+      witnesses: () => {
+        throw new Error("registry exploded");
+      },
+    });
+    const before = await w.snapshot(dir);
+    expect(before).toBeDefined();
+    await expect(w.changesSince(before!, dir)).resolves.toBeDefined();
+  });
+});
