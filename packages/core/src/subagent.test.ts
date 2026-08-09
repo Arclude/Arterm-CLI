@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { Chronicle, type ChronicleRecord } from "./chronicle.js";
 import type { AgentEvent } from "./eventBus.js";
 import { PermissionManager } from "./permissions.js";
 import {
@@ -17,6 +18,7 @@ import {
 } from "./subagent.js";
 import type { ChatProvider, Message, Tool } from "./types.js";
 import { VERDICT_TOOL_NAME, captureVerdict, decideVerdict, formatVerdictEcho } from "./verify.js";
+import type { WorkspaceWatcher } from "./workspaceWatch.js";
 
 const runCmd = promisify(execFile);
 async function hasGit(): Promise<boolean> {
@@ -855,3 +857,92 @@ describe("a session that outlives one task", () => {
 function countIn(messages: Message[], needle: string): number {
   return messages.filter((m) => m.content.includes(needle)).length;
 }
+
+/**
+ * The worker's ledger, which is where the writing actually happens.
+ *
+ * `chronicle` and `watcher` are handed down through `SubagentOptions` and
+ * re-registered on a container built for the worker — three hops of plumbing
+ * that type-check whether or not they are connected. Nothing exercised them,
+ * and the identical shape of wiring failed silently twice while this was being
+ * written: a spool allowance that was never passed, and a watcher gate reading
+ * a field set one stage too late.
+ */
+describe("a sub-agent's writes reach the parent's ledger", () => {
+  /** An execute-category tool, which is the class whose writes get measured. */
+  const shell: Tool = {
+    name: "bash",
+    description: "",
+    parameters: {},
+    permission: "allow",
+    category: "execute",
+    execute: async () => ({ output: "ok" }),
+  };
+
+  /** Calls `bash` once, then finishes. */
+  const worker: ChatProvider = {
+    id: "stub",
+    supportsNativeTools: () => true,
+    listModels: async () => [],
+    async *chat(req) {
+      const called = req.messages.some(
+        (m) => m.role === "tool" || (Array.isArray(m.content) && m.content.length > 0),
+      );
+      yield called
+        ? { type: "tool_call", call: { id: "2", name: "task_done", arguments: { summary: "ok" } } }
+        : { type: "tool_call", call: { id: "1", name: "bash", arguments: { command: "sed -i" } } };
+      yield { type: "done" };
+    },
+  };
+
+  const watcher: WorkspaceWatcher = {
+    snapshot: async () => ({
+      root: "/repo",
+      paths: new Set<string>(),
+      states: new Map(),
+      numstat: new Map(),
+      skippedPaths: new Set<string>(),
+      skipped: 0,
+    }),
+    changesSince: async () => ({
+      changes: [{ path: "worker-wrote.ts", added: 4, removed: 0, contentHashAfter: "abcd" }],
+      skipped: 0,
+    }),
+  };
+
+  const run = async (opts: Partial<SubagentOptions>) => {
+    const records: ChronicleRecord[] = [];
+    const chronicle = new Chronicle({ write: (r) => records.push(r) });
+    await runSubagent("do it", {
+      provider: worker,
+      model: "x",
+      tools: [shell],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "deny",
+      cwd: process.cwd(),
+      taskDone,
+      maxSteps: 2,
+      chronicle,
+      ...opts,
+    });
+    return records;
+  };
+
+  it("records the worker's SHELL writes, stamped with the worker's id", async () => {
+    const records = await run({ watcher, id: "implementer#1" });
+    const observed = records.filter((r) => r.eventType === "file.observed");
+    expect(observed).toHaveLength(1);
+    expect(observed[0]?.change?.path).toBe("worker-wrote.ts");
+    // "who changed this file" is the question a fan-out exists to make hard, so
+    // a record that cannot answer it is worth little in the mode that needs it.
+    expect(observed[0]?.scope.agentId).toBe("implementer#1");
+  });
+
+  it("records the call itself even with no watcher, exactly as before", async () => {
+    const records = await run({});
+    expect(records.some((r) => r.eventType === "tool.executed" && r.toolName === "bash")).toBe(
+      true,
+    );
+    expect(records.filter((r) => r.eventType === "file.observed")).toHaveLength(0);
+  });
+});

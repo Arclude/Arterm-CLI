@@ -65,6 +65,7 @@ node scripts/deadline-exit-e2e.mjs         # does a run that hits its deadline S
 node scripts/keystore-denyread-e2e.mjs     # can a sandboxed command read our own API keys?
 node scripts/shell-writes-recorded-e2e.mjs # does the ledger see what a SHELL command wrote?
 node scripts/unattended-escalation-e2e.mjs # what happens to a prompt nobody will answer?
+node scripts/spool-roundtrip-e2e.mjs       # can the model go back for a spooled result?
 ```
 
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
