@@ -1,4 +1,10 @@
-import { type ArtermConfig, type ChatProvider, Chronicle, defaultConfig } from "@arterm/core";
+import {
+  type ArtermConfig,
+  type ChatProvider,
+  Chronicle,
+  VerifyLedger,
+  defaultConfig,
+} from "@arterm/core";
 import { describe, expect, it } from "vitest";
 import { createJudgeRun, createVerifier, evidenceBlock, verifyEnabled } from "./verifier.js";
 
@@ -171,6 +177,30 @@ describe("the ledger reaches the judge", () => {
     // false for a review or a question — runs that legitimately write no files.
     expect(evidenceBlock(new Chronicle({ write: () => {} }))).toBeUndefined();
     expect(evidenceBlock(undefined)).toBeUndefined();
+  });
+
+  it("adds the verification status, and stands alone without file changes", () => {
+    // A run that edited nothing can still have run the tests, so this line is
+    // not gated on there being changes to list.
+    const ledger = new VerifyLedger();
+    ledger.observeCommand("pnpm -r test", 0);
+    const block = evidenceBlock(new Chronicle({ write: () => {} }), ledger);
+    expect(block).toContain("`pnpm test` passed after the last edit");
+  });
+
+  it("reports a pass the run then invalidated", () => {
+    // The case the chronicle alone cannot state: a passing result and a
+    // worthless one look identical without knowing what happened after it.
+    const ledger = new VerifyLedger();
+    ledger.observeCommand("pnpm test", 0);
+    ledger.markEdited(["slug.ts"]);
+    const block = evidenceBlock(withWrite(), ledger);
+    expect(block).toContain("slug.ts");
+    expect(block).toContain("does not cover the current tree");
+  });
+
+  it("stays silent when nothing verifiable ran", () => {
+    expect(evidenceBlock(undefined, new VerifyLedger())).toBeUndefined();
   });
 
   it("counts denied calls, which the claim will not mention", () => {

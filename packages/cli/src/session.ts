@@ -35,6 +35,7 @@ import {
   type TokenUsage,
   Tokens,
   type Tool,
+  VerifyLedger,
   applyPatch,
   chronicleToolCall,
   createBrainArbiterStage,
@@ -59,6 +60,7 @@ import {
   subagentRoster,
   sweepSpool,
   taskPath,
+  verifyLedgerToolCall,
 } from "@arterm/core";
 import { type CmemEngine, createCmemEngine } from "@arterm/memory";
 import {
@@ -451,6 +453,15 @@ export async function buildSession(opts: SessionOptions): Promise<{
     "permission",
     chronicleToolCall(chronicle, () => workingDir.current()),
   );
+
+  // The other half of the record: not what changed, but whether anything was
+  // CHECKED since it changed. Registered plainly (after `execute`) rather than
+  // before `permission` like the chronicle — a denied call verified nothing and
+  // edited nothing, so it is not an event here.
+  const verifyLedger = new VerifyLedger();
+  container
+    .resolve(Tokens.Pipelines)
+    .toolCall.use("verifyLedger", verifyLedgerToolCall(verifyLedger));
 
   // Checkpoints: snapshot a file's contents BEFORE the tool that writes it, so
   // a turn can be undone. Registered `before` the permission stage rather than
@@ -993,8 +1004,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
     cwd,
     config,
     // The judge stops being the only account of the run: it now reads the
-    // claim against what the tool layer recorded.
+    // claim against what the tool layer recorded — what changed, and whether
+    // anything was checked after it changed.
     chronicle,
+    verifyLedger,
   });
 
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {

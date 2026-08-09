@@ -8,11 +8,13 @@ import {
   type Tool,
   type VerdictCapture,
   type Verifier,
+  type VerifyLedger,
   captureVerdict,
   makeCommandVerifier,
   makeCompositeVerifier,
   makeJudgeVerifier,
   runSubagent,
+  verifyEvidenceLine,
 } from "@arterm/core";
 import { submitVerdictTool } from "@arterm/tools";
 
@@ -44,6 +46,12 @@ export interface VerifierDeps {
    * exactly what it was before — the judge reading the result and nothing else.
    */
   chronicle?: Chronicle;
+  /**
+   * Whether the tree has been verified since it was last edited. Optional for
+   * the same reason the chronicle is: absent, the judge simply reads one fewer
+   * fact, which is what it did before either existed.
+   */
+  verifyLedger?: VerifyLedger;
 }
 
 /** How many files the evidence block names before it starts counting instead. */
@@ -60,10 +68,18 @@ const MAX_EVIDENCE_FILES = 40;
  * Truncation is stated rather than silent, the same rule `roundClaim` follows:
  * a list that quietly stops at 40 reads as a complete account of 40 files.
  */
-export function evidenceBlock(chronicle: Chronicle | undefined): string | undefined {
-  if (!chronicle) return undefined;
+export function evidenceBlock(
+  chronicle: Chronicle | undefined,
+  ledger?: VerifyLedger,
+): string | undefined {
+  // The verification line stands on its own. A run that edited nothing can
+  // still have run the tests, and a run that edited plenty and never ran them
+  // is exactly the case worth printing — so this is not gated on there being
+  // file changes to list.
+  const verified = ledger ? verifyEvidenceLine(ledger.state()) : undefined;
+  if (!chronicle) return verified;
   const files = chronicle.changed();
-  if (files.length === 0) return undefined;
+  if (files.length === 0) return verified;
   const shown = files.slice(0, MAX_EVIDENCE_FILES);
   const lines = shown.map((f) => {
     const who = f.by.length > 0 ? ` by ${f.by.join(", ")}` : "";
@@ -80,6 +96,7 @@ export function evidenceBlock(chronicle: Chronicle | undefined): string | undefi
   if (denied > 0) {
     lines.push(`- ${denied} tool call(s) were DENIED by the permission policy and never ran`);
   }
+  if (verified) lines.push(verified);
   return lines.join("\n");
 }
 
@@ -163,7 +180,7 @@ export function createVerifier(deps: VerifierDeps): Verifier | undefined {
   // THIS session, and `core` has no way to reach it. The command gate ignores
   // the field; only `buildJudgeInstruction` renders it.
   return async (req) => {
-    const evidence = evidenceBlock(deps.chronicle);
+    const evidence = evidenceBlock(deps.chronicle, deps.verifyLedger);
     return composite(evidence ? { ...req, evidence } : req);
   };
 }

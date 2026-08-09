@@ -7,6 +7,7 @@ export * from "./toolBatch.js";
 export * from "./toolOutput.js";
 export * from "./telemetry.js";
 export * from "./chronicle.js";
+export * from "./verifyLedger.js";
 export * from "./types.js";
 export * from "./diff.js";
 export * from "./unifiedDiff.js";
