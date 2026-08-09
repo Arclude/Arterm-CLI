@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve, sep } from "node:path";
+import { keystorePaths } from "./keystore.js";
 
 /**
  * The execution boundary `bash` runs inside.
@@ -140,6 +141,12 @@ export const DEFAULT_DENIED_DOMAINS: readonly string[] = ["*:22"];
  * `allowedDomains: []` in config is honored as written — deny-all egress — which
  * is why the default list lives in `defaultConfig()` rather than being OR'd in
  * here. A user who empties the list means it.
+ *
+ * The read denial is the one thing here that is a FLOOR rather than a default,
+ * and the asymmetry is deliberate. `allowedDomains: []` has a meaning a user can
+ * intend; "let the agent read my own API keys" has none, and unlike every other
+ * entry in this file the denial costs no toolchain anything — no compiler, test
+ * runner or `git` opens Arterm's keystore. Config adds to it and cannot empty it.
  */
 export function resolveSandbox(
   settings: SandboxSettings | undefined,
@@ -153,7 +160,7 @@ export function resolveSandbox(
   const writeRoots = unique([root, canonical(tmpdir()), ...absolutize(settings.allowWrite, root)]);
   return {
     writeRoots,
-    denyRead: unique(absolutize(settings.denyRead, root)),
+    denyRead: unique([...keystorePaths(), ...absolutize(settings.denyRead, root)]),
     allowedDomains: [...(settings.allowedDomains ?? DEFAULT_ALLOWED_DOMAINS)],
     deniedDomains: [...(settings.deniedDomains ?? DEFAULT_DENIED_DOMAINS)],
     // Unattended is the case that has to fail closed. Nobody is there to read a

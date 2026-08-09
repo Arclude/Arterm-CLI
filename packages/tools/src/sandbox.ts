@@ -98,10 +98,18 @@ export async function createSandboxRunner(spec: SandboxSpec): Promise<SandboxAtt
         deniedDomains: [...spec.deniedDomains],
       },
       filesystem: {
-        // `allowWrite` is the whole boundary: everything else on the host stays
-        // readable but read-only. Making the tree unreadable instead breaks the
-        // toolchains the run needs (compilers reading /usr, git reading its own
-        // config) for no gain — the exfiltration path is egress, not read.
+        // `allowWrite` is very nearly the whole boundary: everything else on
+        // the host stays readable but read-only. Making the tree unreadable
+        // instead breaks the toolchains the run needs (compilers reading /usr,
+        // git reading its own config) for almost no gain.
+        //
+        // Almost, because "the exfiltration path is egress, not read" — what
+        // this comment used to say — is false for one class of file, and
+        // `credentials.ts` states why: a secret read into a tool result leaves
+        // through OUR request to the model, which no egress rule sees. So
+        // `denyRead` is not empty by default; it carries Arterm's own key
+        // material, which is the narrowest possible version of the denial this
+        // comment is right to reject in general.
         allowWrite: [...spec.writeRoots],
         denyRead: [...spec.denyRead],
         denyWrite: [],

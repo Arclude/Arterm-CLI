@@ -62,6 +62,7 @@ node scripts/sandbox-lifecycle-e2e.mjs     # does a sandboxed run EXIT when it i
 ```bash
 node scripts/sigterm-report-e2e.mjs        # does a KILLED run still report what it did?
 node scripts/deadline-exit-e2e.mjs         # does a run that hits its deadline STOP, and EXIT?
+node scripts/keystore-denyread-e2e.mjs     # can a sandboxed command read our own API keys?
 ```
 
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
@@ -729,6 +730,37 @@ ignored, so nothing reaches the transcript — what a full environment would sti
 buy is an outbound `curl` carrying the session's keys, from the one command that
 never crosses the boundary. `spawn` inherits `process.env` when `env` is omitted,
 so this has to be passed explicitly; omitting the settings still scrubs.
+
+**The same secret is also on DISK, and a scrub cannot reach it.** `env` is one
+door; `cat ~/.arterm/key ~/.arterm/secrets.json` is the other, and it yields
+*more* than the environment holds — every key `arterm auth set` stored was never
+there for the scrub to withhold. So the boundary is closed at both layers, and
+each covers what the other cannot:
+
+- **`resolveSandbox` seeds `denyRead` with `keystorePaths()`** — a FLOOR, not a
+  default. `allowedDomains: []` is a thing a user can intend; "let the agent read
+  my own API keys" is not, and unlike every other entry there the denial costs no
+  toolchain anything. It is the two FILES, never `ARTERM_HOME`: spooled tool
+  output lives under the same directory and the model is deliberately sent back
+  for it. The list is derived from `keystore.ts` rather than re-spelled, because
+  a denial that matches nothing fails silently.
+- **`OWN_KEYSTORE_READ` in the arbiter grades a command that names them
+  `critical`** — the one place that grade means "no legitimate call exists"
+  rather than "readable and destructive". `high` would be a question with one
+  answer, and under `--autonomous` it would not even be asked: yolo returns
+  `allow` on an escalation, and only `critical` blocks. This half matters because
+  the sandbox is OFF by default for attended sessions.
+  `THIRD_PARTY_CREDENTIAL_READ` (`~/.ssh/id_*`, `~/.aws/credentials`, `~/.netrc`,
+  `~/.npmrc`, …) is `high` instead, because `ssh-add` is a real thing to ask for
+  — with the stated cost that yolo therefore allows it.
+
+`scripts/keystore-denyread-e2e.mjs` is what makes the mechanism half a fact
+rather than a claim: a unit test proves the LIST, and the door is only shut if
+bubblewrap acts on it. Against the pre-fix build it scores **1/5**, with the
+sentinel key printed by all four reads — two of which (`cat $HOME/*`, `grep -r`)
+never name the file, which is precisely the gap a text screen cannot close. Its
+fifth check is that the spool is still readable, since denying the directory
+would have been the easy wrong fix.
 
 `withheldNote` takes the command and its output as evidence and reports only
 names they actually mention. Unconditional, it would append a credentials line

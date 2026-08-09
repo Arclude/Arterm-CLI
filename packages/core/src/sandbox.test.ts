@@ -2,6 +2,8 @@ import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ARTERM_HOME } from "./config.js";
+import { keystorePaths } from "./keystore.js";
 import {
   DEFAULT_ALLOWED_DOMAINS,
   describeSandbox,
@@ -104,5 +106,44 @@ describe("withinWriteRoots", () => {
   it("rejects an unrelated directory — the boundary is not widened to fit a caller", () => {
     const spec = resolveSandbox({ enabled: true }, { cwd: tmp() })!;
     expect(withinWriteRoots(spec, "/etc")).toBe(false);
+  });
+});
+
+/**
+ * The one denial that does not come from config.
+ *
+ * `denyRead` was empty by default and the mechanism's own comment argued reads
+ * need no boundary because "the exfiltration path is egress". For two files
+ * that is false, and `credentials.ts` says why: a secret read into a tool
+ * result leaves through Arterm's own request to the model, which no egress rule
+ * is on the path of.
+ */
+describe("the keystore is denied to a sandboxed command", () => {
+  it("denies the key and the ciphertext beside it, with nothing configured", () => {
+    const spec = resolveSandbox({ enabled: true }, { cwd: tmp() })!;
+    for (const path of keystorePaths()) expect(spec.denyRead).toContain(path);
+  });
+
+  it("keeps the floor when config sets its own list, and adds to it", () => {
+    // A floor, not a default: `allowedDomains: []` has a meaning a user can
+    // intend, and "let the agent read my own API keys" has none.
+    const root = tmp();
+    const spec = resolveSandbox({ enabled: true, denyRead: ["private"] }, { cwd: root })!;
+    for (const path of keystorePaths()) expect(spec.denyRead).toContain(path);
+    expect(spec.denyRead).toContain(join(root, "private"));
+  });
+
+  it("survives an explicitly emptied list", () => {
+    const spec = resolveSandbox({ enabled: true, denyRead: [] }, { cwd: tmp() })!;
+    expect(spec.denyRead.length).toBeGreaterThan(0);
+  });
+
+  it("denies the files, never the directory the model is sent to", () => {
+    // Spooled tool output lives under the same home and the model is handed the
+    // path; denying the directory would break the retrieval that exists so a
+    // command need not be re-run.
+    const spec = resolveSandbox({ enabled: true }, { cwd: tmp() })!;
+    expect(spec.denyRead).not.toContain(ARTERM_HOME);
+    for (const path of spec.denyRead) expect(path).not.toBe(join(ARTERM_HOME, "tool-output"));
   });
 });

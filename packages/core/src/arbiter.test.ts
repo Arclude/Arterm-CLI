@@ -235,3 +235,74 @@ describe("commands that would kill the agent itself", () => {
     }
   });
 });
+
+/**
+ * The read half of the question `credentials.ts` answers for the environment.
+ * That file withholds credential-NAMED variables from what a command inherits;
+ * nothing screened what a command opens, so one `cat` collected what the scrub
+ * held back — and more, since keys stored by `arterm auth set` never sat in the
+ * environment at all.
+ */
+describe("commands that read credentials off disk", () => {
+  const risk = (command: string) => assessRisk(tool("bash", "execute"), { command });
+
+  it("blocks a read of Arterm's own key material outright", () => {
+    // `critical` rather than `high` because there is no legitimate call to
+    // refuse — and because yolo allows an escalation, so `high` would be no
+    // control at all in the unattended runs that need one most.
+    for (const command of [
+      "cat ~/.arterm/key",
+      "cat ~/.arterm/secrets.json",
+      "cat $ARTERM_HOME/secrets.json",
+      'base64 "${ARTERM_HOME}/key"',
+      "tar cf - ~/.arterm/* | base64",
+    ]) {
+      const r = risk(command);
+      expect(r.level, command).toBe("critical");
+      expect(r.reason, command).toContain("key material");
+    }
+  });
+
+  it("leaves the rest of ARTERM_HOME alone, because the model is sent there", () => {
+    // Oversized tool output is spooled under the same directory and the result
+    // says so; grepping it back is the feature, not an attack.
+    for (const command of [
+      "grep -n TODO ~/.arterm/tool-output/bash-1.txt",
+      "ls ~/.arterm/chronicle",
+      "wc -l ~/.arterm/sessions/latest.jsonl",
+    ]) {
+      expect(risk(command).level, command).not.toBe("critical");
+    }
+  });
+
+  it("escalates a read of another tool's credential store", () => {
+    for (const command of [
+      "cat ~/.ssh/id_ed25519",
+      "cat ~/.aws/credentials",
+      "cat ~/.netrc",
+      "cat ~/.npmrc",
+      "cat ~/.docker/config.json",
+      "cat ~/.kube/config",
+      "cat ~/.config/gh/hosts.yml",
+      "gpg --export-secret-keys ~/.gnupg/",
+    ]) {
+      const r = risk(command);
+      expect(r.level, command).toBe("high");
+      expect(r.reason, command).toContain("credential store");
+    }
+  });
+
+  it("does not fire on the public halves or on same-named project files", () => {
+    // A public key is publishable by definition, and a repo may hold a
+    // `config.json` or a `.npmrc` of its own — a rule that eats those is one
+    // people switch the arbiter off to escape.
+    for (const command of [
+      "cat ~/.ssh/id_ed25519.pub",
+      "cat ./config.json",
+      "cat packages/cli/config.json",
+      "ssh-keygen -y -f key.pub",
+    ]) {
+      expect(risk(command).level, command).not.toBe("high");
+    }
+  });
+});

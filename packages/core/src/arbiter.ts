@@ -151,6 +151,62 @@ const OPAQUE_BASH: RegExp[] = [
 /** Paths whose edits warrant a human look (secrets, keys, git internals). */
 const SENSITIVE_PATH = /(^|\/)(\.env|\.git\/|id_rsa|\.ssh\/|secrets?\.|credentials)/i;
 
+/**
+ * Arterm's OWN key material, named by a command.
+ *
+ * `credentials.ts` withholds credential-named variables from what a command
+ * INHERITS, and its reasoning is that the leak needs no egress: `env` puts them
+ * in the transcript, which goes to the provider, to the session JSONL, into
+ * fleet prompts and into every later compaction. `cat ~/.arterm/key
+ * ~/.arterm/secrets.json` is the same leak by a different door, and a worse
+ * one — it yields the keys `arterm auth set` stored, which were never in the
+ * environment for the scrub to withhold.
+ *
+ * `critical`, so it is refused in every mode including yolo, and this is the
+ * one place that grade is not an over-reaction. `critical` elsewhere means
+ * readable and destructive; here it means there is no legitimate call at all —
+ * `arterm auth` manages these files, and no compiler, test runner or `git`
+ * opens them. A `high` prompt would be a question with one correct answer, and
+ * under `--autonomous` it would not even be asked (yolo returns allow on an
+ * escalation; only a critical verdict blocks).
+ *
+ * A text screen sees the spelling, not the file — `.arterm/*` in a glob, or a
+ * path assembled from a variable, walks past it. That half is the sandbox's
+ * `denyRead`, which is enforced on the inode however the command spells it.
+ * Neither is redundant: the sandbox is off by default for attended sessions,
+ * which is exactly where this list is the only control.
+ */
+const OWN_KEYSTORE_READ =
+  /(?:\.arterm|\$\{?ARTERM_HOME\}?)[/\\](?:key\b|secrets\.json\b)|(?:\.arterm|ARTERM_HOME)[/\\]\*/i;
+
+/**
+ * Credential stores this machine holds for OTHER tools.
+ *
+ * `high`, not `critical`: `ssh-add ~/.ssh/id_ed25519` and reading `~/.npmrc` to
+ * debug a registry 401 are things a developer legitimately asks for, so a
+ * prompt is the honest handling — the same line `OPAQUE_BASH` draws between
+ * "unreadable" and "readable and destructive". They are not ours to declare
+ * pointless the way the entry above is.
+ *
+ * The cost of that choice is stated rather than hidden: `high` escalates, and
+ * yolo allows an escalation, so an `--autonomous` run can read these. What
+ * bounds it there is the egress allowlist plus the fact that the transcript is
+ * the user's own; what would not bound it is grading everything critical until
+ * people turn the arbiter off.
+ */
+const THIRD_PARTY_CREDENTIAL_READ = [
+  /(?:^|[\s"'=])[~/][^\s"']*\.ssh[/\\]id_[a-z0-9_]+(?!\.pub)\b/i,
+  /\.aws[/\\]credentials\b/i,
+  /(?:^|[\s"'=/])\.netrc\b/i,
+  /\.docker[/\\]config\.json\b/i,
+  /\.kube[/\\]config\b/i,
+  /(?:^|[\s"'=/])\.npmrc\b/i,
+  /(?:^|[\s"'=/])\.pypirc\b/i,
+  /\.config[/\\]gh[/\\]hosts\.ya?ml\b/i,
+  /\.config[/\\]gcloud[/\\][^\s"']*credential/i,
+  /(?:^|[\s"'=/])\.gnupg[/\\]/i,
+];
+
 const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
 /** Raise an assessment to at least `floor`, keeping the more specific reason. */
@@ -216,8 +272,22 @@ function assessByArgs(
         };
       }
     }
+    if (OWN_KEYSTORE_READ.test(cmd)) {
+      return {
+        level: "critical",
+        reason: `this reads Arterm's own key material: ${cmd.slice(0, 60)}`,
+      };
+    }
     for (const re of HIGH_BASH) {
       if (re.test(cmd)) return { level: "high", reason: `risky command: ${cmd.slice(0, 60)}` };
+    }
+    for (const re of THIRD_PARTY_CREDENTIAL_READ) {
+      if (re.test(cmd)) {
+        return {
+          level: "high",
+          reason: `this reads a credential store: ${cmd.slice(0, 60)}`,
+        };
+      }
     }
     for (const re of OPAQUE_BASH) {
       if (re.test(cmd)) {

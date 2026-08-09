@@ -14,6 +14,33 @@ import { ARTERM_HOME } from "./config.js";
 const ALGORITHM = "aes-256-gcm";
 const KEY_DERIVATION_SALT = "arterm-keystore-v1";
 
+/** The generated master key, when `ARTERM_SECRET` is not set. */
+const KEY_FILE = "key";
+/** The encrypted secrets themselves. */
+const SECRETS_FILE = "secrets.json";
+/** File names under `ARTERM_HOME` that hold key material and nothing else. */
+const KEY_MATERIAL = [KEY_FILE, SECRETS_FILE] as const;
+
+/**
+ * The files a command must never be able to read: the ciphertext and, beside
+ * it, the master key that opens it.
+ *
+ * Exported so the sandbox's read denial is DERIVED from the code that writes
+ * them rather than repeating two string literals somewhere else — a renamed
+ * file would otherwise leave a boundary guarding a path that no longer exists,
+ * silently, since nothing fails when a denial matches nothing.
+ *
+ * `ARTERM_SECRET` in the environment replaces the key FILE, and `scrubEnv`
+ * already withholds it by name. This is the other half of that same secret:
+ * when the passphrase is unset — the ordinary case — the key sits on disk next
+ * to what it decrypts, so reading two files is the whole leak, and it yields
+ * more than `env` ever could (every key `arterm auth set` stored, which was
+ * never in the environment at all).
+ */
+export function keystorePaths(dir: string = ARTERM_HOME): string[] {
+  return KEY_MATERIAL.map((name) => join(dir, name));
+}
+
 export interface SecretBlob {
   /** base64 IV (12 bytes). */
   iv: string;
@@ -47,7 +74,7 @@ function loadMasterKey(dir: string): Buffer {
   const passphrase = process.env.ARTERM_SECRET;
   if (passphrase) return scryptSync(passphrase, KEY_DERIVATION_SALT, 32);
 
-  const keyPath = join(dir, "key");
+  const keyPath = join(dir, KEY_FILE);
   if (existsSync(keyPath)) {
     const existing = Buffer.from(readFileSync(keyPath, "utf8").trim(), "base64");
     if (existing.length === 32) return existing;
@@ -76,7 +103,7 @@ export class Keystore {
     const key = loadMasterKey(dir);
     let secrets: Record<string, SecretBlob> = {};
     try {
-      secrets = JSON.parse(readFileSync(join(dir, "secrets.json"), "utf8")) as Record<
+      secrets = JSON.parse(readFileSync(join(dir, SECRETS_FILE), "utf8")) as Record<
         string,
         SecretBlob
       >;
@@ -118,7 +145,7 @@ export class Keystore {
 
   private save(): void {
     mkdirSync(this.dir, { recursive: true });
-    const path = join(this.dir, "secrets.json");
+    const path = join(this.dir, SECRETS_FILE);
     writeFileSync(path, `${JSON.stringify(this.secrets, null, 2)}\n`, { mode: 0o600 });
     try {
       chmodSync(path, 0o600);
