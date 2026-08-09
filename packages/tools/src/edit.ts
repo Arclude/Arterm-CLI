@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { type Tool, editPreview, lineDiff } from "@arterm/core";
 import { applyRanges, matchEdit, matched } from "./editMatch.js";
-import { requireString, resolveWithin } from "./paths.js";
+import { requireString, reservePath, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
 
 export const editTool: Tool = {
@@ -19,6 +19,8 @@ export const editTool: Tool = {
   permission: "ask",
   category: "edit",
   mutating: true,
+  concurrent: true,
+  reservation: (args, cwd) => reservePath(args, cwd, "write"),
   riskTier: "caution",
   parameters: {
     type: "object",

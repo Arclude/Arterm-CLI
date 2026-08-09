@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import type { Tool, ToolResult } from "@arterm/core";
 import { MAX_IMAGE_FILE_BYTES, imageMediaType, sniffImageType } from "@arterm/core";
-import { requireString, resolveWithin } from "./paths.js";
+import { requireString, reservePath, resolveWithin } from "./paths.js";
 
 /** Bytes read off disk before paging is required. */
 const MAX_BYTES = 400_000;
@@ -70,6 +70,7 @@ export const readTool: Tool = {
   permission: "allow",
   category: "read",
   concurrent: true,
+  reservation: (args, cwd) => reservePath(args, cwd, "read"),
   parameters: {
     type: "object",
     properties: {

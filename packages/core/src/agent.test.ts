@@ -1393,6 +1393,82 @@ describe("concurrent tool calls", () => {
     expect(results.map((m) => m.content)).toEqual(["slow", "quick"]);
   });
 
+  // Admission by the paths a CALL touches. `category: "read"` was standing in
+  // for "cannot conflict", which is false for two writes to unrelated files.
+  it("overlaps two writes to DIFFERENT files", async () => {
+    const log: string[] = [];
+    const writer = (name: string, delay: number, path: string): Tool => ({
+      ...timedTool(name, delay, log, { category: "edit", mutating: true }),
+      reservation: () => ({ reads: [], writes: [path] }),
+    });
+    const tools = [writer("slow", 40, "/p/a.ts"), writer("quick", 1, "/p/b.ts")];
+    const provider = new StubProvider([
+      [
+        { type: "tool_call", call: { id: "c1", name: "slow", arguments: {} } },
+        { type: "tool_call", call: { id: "c2", name: "quick", arguments: {} } },
+      ],
+      [{ type: "text", delta: "done" }],
+    ]);
+    await agentWith(provider, new EventBus(), tools).run("go");
+    expect(log).toEqual(["start:slow", "start:quick", "end:quick", "end:slow"]);
+  });
+
+  it("serializes two writes to the SAME file", async () => {
+    const log: string[] = [];
+    const writer = (name: string, delay: number): Tool => ({
+      ...timedTool(name, delay, log, { category: "edit", mutating: true }),
+      reservation: () => ({ reads: [], writes: ["/p/same.ts"] }),
+    });
+    const tools = [writer("slow", 40), writer("quick", 1)];
+    const provider = new StubProvider([
+      [
+        { type: "tool_call", call: { id: "c1", name: "slow", arguments: {} } },
+        { type: "tool_call", call: { id: "c2", name: "quick", arguments: {} } },
+      ],
+      [{ type: "text", delta: "done" }],
+    ]);
+    await agentWith(provider, new EventBus(), tools).run("go");
+    expect(log).toEqual(["start:slow", "end:slow", "start:quick", "end:quick"]);
+  });
+
+  // The relaxation is a PREDICTION of the permission stage's answer, sound only
+  // while nothing ahead of that stage can change it. An arbiter is exactly such
+  // a stage, and eight predicted allows becoming eight prompts is the failure.
+  it("withdraws write admission when a stage sits before permission", async () => {
+    const log: string[] = [];
+    const writer = (name: string, delay: number, path: string): Tool => ({
+      ...timedTool(name, delay, log, { category: "edit", mutating: true }),
+      reservation: () => ({ reads: [], writes: [path] }),
+    });
+    const tools = [writer("slow", 40, "/p/a.ts"), writer("quick", 1, "/p/b.ts")];
+    const provider = new StubProvider([
+      [
+        { type: "tool_call", call: { id: "c1", name: "slow", arguments: {} } },
+        { type: "tool_call", call: { id: "c2", name: "quick", arguments: {} } },
+      ],
+      [{ type: "text", delta: "done" }],
+    ]);
+    const pipelines = createPipelines();
+    pipelines.toolCall.before("permission", async (_ctx, next) => {
+      await next();
+    });
+    const container = new Container();
+    container.bind(Tokens.Pipelines, () => pipelines);
+    container.bind(Tokens.RunController, () => new RunController(container));
+    const agent = new Agent({
+      provider,
+      model: "m",
+      tools,
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus: new EventBus(),
+      cwd: process.cwd(),
+      container,
+    });
+    await agent.run("go");
+    expect(log).toEqual(["start:slow", "end:slow", "start:quick", "end:quick"]);
+  });
+
   it("keeps a tool that did not declare itself concurrent serial", async () => {
     // Absent means no. `bash` and every tool added later stay one at a time
     // until someone has thought about whether they may overlap.

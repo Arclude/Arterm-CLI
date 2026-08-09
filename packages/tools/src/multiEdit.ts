@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { type Tool, lineDiff, multiEditPreview } from "@arterm/core";
-import { requireString, resolveWithin } from "./paths.js";
+import { requireString, reservePath, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
 
 interface OneEdit {
@@ -37,6 +37,8 @@ export const multiEditTool: Tool = {
   permission: "ask",
   category: "edit",
   mutating: true,
+  concurrent: true,
+  reservation: (args, cwd) => reservePath(args, cwd, "write"),
   riskTier: "caution",
   parameters: {
     type: "object",

@@ -77,3 +77,34 @@ export function optionalString(args: Record<string, unknown>, key: string): stri
   const v = args[key];
   return typeof v === "string" ? v : undefined;
 }
+
+/**
+ * The reservation a tool whose target is a single `path` argument declares.
+ *
+ * Factored here so the rule has ONE definition: a reservation is a claim the
+ * batch planner believes, and four copies of "read `args.path`" is four places
+ * for one of them to drift into naming a different argument than the one
+ * `execute` will actually open.
+ *
+ * Anything that is not a usable path answers `null` — a barrier — rather than
+ * an empty reservation. The two are opposites: empty says "touches nothing",
+ * null says "cannot say", and a call that cannot say what it touches must not
+ * be run beside one that can. `resolveWithin` throwing (a path escaping the
+ * working directory) lands here too, which is right: that call is going to
+ * fail, and it should fail on its own rather than inside a batch.
+ */
+export function reservePath(
+  args: Record<string, unknown>,
+  cwd: string,
+  mode: "read" | "write",
+): { reads: string[]; writes: string[] } | null {
+  const p = args.path;
+  if (typeof p !== "string" || p.length === 0) return null;
+  let abs: string;
+  try {
+    abs = resolveWithin(cwd, p);
+  } catch {
+    return null;
+  }
+  return mode === "write" ? { reads: [], writes: [abs] } : { reads: [abs], writes: [] };
+}

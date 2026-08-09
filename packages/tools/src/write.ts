@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { type Tool, lineDiff, writePreview } from "@arterm/core";
-import { requireString, resolveWithin } from "./paths.js";
+import { requireString, reservePath, resolveWithin } from "./paths.js";
 import { invalidateSearchIndex } from "./search.js";
 
 export const writeTool: Tool = {
@@ -10,6 +10,8 @@ export const writeTool: Tool = {
   permission: "ask",
   category: "edit",
   mutating: true,
+  concurrent: true,
+  reservation: (args, cwd) => reservePath(args, cwd, "write"),
   riskTier: "caution",
   parameters: {
     type: "object",

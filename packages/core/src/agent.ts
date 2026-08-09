@@ -19,7 +19,7 @@ import type { ProcessRegistry } from "./processRegistry.js";
 import { ProviderError } from "./providerError.js";
 import type { SandboxRunner } from "./sandbox.js";
 import { estimateHistoryTokens, estimateMessageTokens, estimateTokens } from "./tokenEstimate.js";
-import { planToolBatches } from "./toolBatch.js";
+import { type PathReservation, planToolBatches } from "./toolBatch.js";
 import { DEFAULT_MAX_OUTPUT_BYTES, clampMiddle, spoolOutput } from "./toolOutput.js";
 import { parseToolCalls, toolSystemPrompt } from "./toolProtocol.js";
 import type {
@@ -1190,18 +1190,41 @@ export class Agent {
    *
    * - The TOOL declares it. Absent means no, so a tool added later is serial
    *   until someone thinks about it.
-   * - `category: "read"` because the arbiter stage screens `execute` calls and
-   *   a screen can escalate to a prompt. Read calls never reach it, so the
-   *   ladder below is the whole answer for them.
+   * - `category: "read"`, UNLESS the call states which paths it touches (see
+   *   below). The category is not a concurrency claim — it is here because the
+   *   arbiter stage screens `execute` calls and a screen can escalate to a
+   *   prompt, and read calls never reach it.
    * - The ladder must say `allow` OUTRIGHT. `evaluate` is pure and returns
    *   `prompt` as a distinct outcome, which is exactly what must not happen
    *   eight times at once into one terminal.
+   *
+   * A tool with a {@link Tool.reservation} may pass the second clause while
+   * writing, because it answers the question the category was standing in for:
+   * the planner then keeps its writes off every other call's paths. Two writes
+   * to unrelated files are serialized today for a conflict that does not exist.
+   *
+   * That relaxation is withdrawn the moment anything is registered ahead of the
+   * `permission` stage. The `allow` computed here is a PREDICTION of what the
+   * permission stage will decide, and it is only sound while nothing in front
+   * of that stage can change the decision — which is precisely what the arbiter
+   * does. `before(name, mw)` files a stage under `before:<name>`, so this asks
+   * about the position rather than about the arbiter by name: any stage there
+   * is a stage that could turn eight predicted allows into eight prompts.
    */
-  private canRunConcurrently(call: ToolCall): boolean {
+  private canRunConcurrently(call: ToolCall): boolean | PathReservation | null {
     const tool = this.toolMap.get(call.name);
     if (!tool || tool.concurrent !== true) return false;
-    if ((tool.category ?? "execute") !== "read") return false;
-    return this.opts.permissions.evaluate(tool, call.arguments).outcome === "allow";
+    const isRead = (tool.category ?? "execute") === "read";
+    const screened = this.pipelines.toolCall.has("before:permission");
+    const mayReserve = tool.reservation !== undefined && !screened;
+    if (!isRead && !mayReserve) return false;
+    if (this.opts.permissions.evaluate(tool, call.arguments).outcome !== "allow") return false;
+    if (!tool.reservation) return true;
+    // Resolved against the cwd this call will actually run in — the same one
+    // `toolCall.execute` hands the tool, which `set_working_dir` can have moved
+    // since the turn began.
+    const cwd = this.opts.workingDir?.current() ?? this.opts.cwd;
+    return tool.reservation(call.arguments, cwd);
   }
 
   /**

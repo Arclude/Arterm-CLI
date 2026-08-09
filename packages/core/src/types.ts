@@ -6,6 +6,7 @@
 import type { CredentialSettings } from "./credentials.js";
 import type { ProcessRegistry } from "./processRegistry.js";
 import type { SandboxRunner } from "./sandbox.js";
+import type { PathReservation } from "./toolBatch.js";
 
 export type Role = "system" | "user" | "assistant" | "tool";
 
@@ -305,6 +306,32 @@ export interface Tool {
    * once is a race over a lock file, not over the repository.
    */
   concurrent?: boolean;
+  /**
+   * Which paths ONE CALL touches, so admission to a concurrent batch can be a
+   * property of the call instead of the tool.
+   *
+   * `concurrent` answers "may this tool ever share a batch" and cannot answer
+   * more: it is a constant, so every writing tool has to say no, and two writes
+   * to unrelated files — which have nothing to say to each other — are serialized
+   * for a conflict that does not exist. This says what a specific call will read
+   * and write, and the planner keeps reader↔reader overlap parallel while any
+   * overlap involving a writer closes the run.
+   *
+   * Read the paths from the argument that will actually be USED. A patch names
+   * its files in the body, so the body is the truth and a sibling `path`
+   * argument may be stale; reserving the wrong one is worse than reserving
+   * nothing, because it is a claim the planner will believe.
+   *
+   * Return `null` for arguments this tool cannot make sense of. Unknown is not
+   * harmless — it becomes a barrier, because a call that cannot state what it
+   * touches has not stated that it touches nothing. Absent means the same as
+   * `concurrent` alone said: reserves nothing, conflicts with nothing.
+   *
+   * Paths must be ABSOLUTE and normalized; the tool resolves them against the
+   * `cwd` it is handed, since a relative string is meaningless to a planner that
+   * does not know which directory it was written against.
+   */
+  reservation?(args: Record<string, unknown>, cwd: string): PathReservation | null;
   /**
    * How dangerous this tool is, independent of its arguments. "destructive" tools
    * are gated even under yolo when `confirmDestructive` is on. Defaults to "safe".
