@@ -61,6 +61,7 @@ node scripts/sandbox-lifecycle-e2e.mjs     # does a sandboxed run EXIT when it i
 
 ```bash
 node scripts/sigterm-report-e2e.mjs        # does a KILLED run still report what it did?
+node scripts/deadline-exit-e2e.mjs         # does a run that hits its deadline STOP, and EXIT?
 ```
 
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
@@ -107,6 +108,34 @@ document into somebody else's stdout. The script signals on the first `▸ step`
 rather than on a timer — a signal delivered before the first request produces an
 empty report that still parses, which is a pass for the wrong reason. Checked
 against the pre-fix binary it scores 1/4, and the failing check is `0B`.
+
+`deadline-exit-e2e.mjs` checks the two halves of `--max-duration`, which failed
+independently. The ceiling began life as a `request` pipeline stage — correct
+for tokens and dollars, which only grow when a request is SENT, and wrong for a
+clock, which runs during one. On a benchmark trial that left 120 seconds of
+margin entirely unused. Making it abort the turn was still not enough: the
+autonomy engine's next call (`assess`, `plan`, a judge sub-agent) carried a
+signal that had never been aborted, so the run hung there instead and the
+deadline read as having done nothing. Hence `RunBudget.deadlineSignal` — armed
+once, shared by every agent and sub-agent in the run, linked by `withDeadline()`
+into the calls that bypass the pipeline.
+
+The second half is the exit, and it is the subtler one: **`digest()` runs at
+TEARDOWN**, after the loop has stopped and the result document is already on
+disk, and it made its own model call with no signal at all. A run that stopped
+correctly at 8s then sat for another 80 — and to a harness that bounds by
+wall-clock, a run that stops at 8s and exits at 88s is a run that never stopped.
+It is now skipped outright when the budget is breached, because bounding the
+call is not enough: starting a fresh model call with seconds left buys a
+truncated digest at the cost of the exit.
+
+`--mode slow-stream` in `fault-server.mjs` is what makes this testable — a
+server that never goes quiet and never finishes. It is deliberately the one
+fault `streamIdleGuard` cannot catch: the guard aborts a stream that stops
+producing, and every chunk resets it, so a model reasoning for an hour looks
+exactly like one making progress. Only a deadline tells "still producing" from
+"still useful". Against the pre-fix binary the script scores 3/5 and the process
+has to be SIGKILLed.
 
 To drive the same faults **by hand** — against the TUI, or while curling the
 status server — start the standalone fake instead:

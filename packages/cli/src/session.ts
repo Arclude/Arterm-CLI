@@ -285,6 +285,14 @@ export async function buildSession(opts: SessionOptions): Promise<{
         model: modelOverride ?? config.model,
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
+        // Bounded by the run's wall-clock deadline like every other provider
+        // call. This one is easy to forget because it is not part of a turn: it
+        // runs at TEARDOWN, after the loop has stopped and the result document
+        // has already been written. Against a backend that streams without ever
+        // finishing, that made a run which correctly stopped on time hang for
+        // another eighty seconds in `digest()` — the report was on disk and the
+        // process would not exit, which to a harness is simply a timeout.
+        ...(budget.deadlineSignal ? { signal: budget.deadlineSignal } : {}),
       })) {
         if (chunk.type === "text") text += chunk.delta;
       }
@@ -932,6 +940,11 @@ export async function buildSession(opts: SessionOptions): Promise<{
   let digesting = false;
   const digest = async (): Promise<void> => {
     if (digesting) return;
+    // A run that ran OUT of wall-clock does not get to spend more of it
+    // summarizing itself. Bounding the call is not enough on its own: the
+    // deadline may still be seconds away, and starting a fresh model call with
+    // seconds left buys a truncated digest at the cost of the exit.
+    if (budget.breached) return;
     if (cmem) {
       // cmem engine: run the observer over buffered activity.
       digesting = true;
