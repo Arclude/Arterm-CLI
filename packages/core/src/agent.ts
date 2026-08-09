@@ -725,6 +725,21 @@ export class Agent {
    * The reply is read by {@link readAssessment}, and strictly — see there for
    * why a substring match was not good enough.
    */
+  /**
+   * Bind a caller's signal to the run's wall-clock deadline.
+   *
+   * `plan()` and `assess()` call the provider DIRECTLY — no request pipeline,
+   * so no `budgetGate` — and they are what the autonomy engine reaches for
+   * between turns. Against a backend that streams forever, a deadline that
+   * only bounded the turn ended the turn and then hung here instead, which
+   * looked exactly like a deadline that did nothing.
+   */
+  private withDeadline(signal?: AbortSignal): AbortSignal | undefined {
+    const deadline = this.opts.budget?.deadlineSignal;
+    if (!deadline) return signal;
+    return signal ? AbortSignal.any([signal, deadline]) : deadline;
+  }
+
   async assess(goal: string, signal?: AbortSignal): Promise<{ done: boolean; note: string }> {
     const { provider, model } = this.opts;
     const probe: Message = {
@@ -739,7 +754,7 @@ export class Agent {
         model,
         messages: [system, ...this.messages, probe],
         temperature: 0,
-        signal,
+        signal: this.withDeadline(signal),
       })) {
         if (chunk.type === "text") text += chunk.delta;
         // Counted for the same reason as `plan()`'s: an eternal run assesses on
@@ -778,7 +793,7 @@ export class Agent {
         model,
         messages: [system, ...this.messages, probe],
         temperature: 0,
-        signal,
+        signal: this.withDeadline(signal),
       })) {
         if (chunk.type === "text") text += chunk.delta;
         // The leader's planning calls are real spend. Reading only `text` here
@@ -953,6 +968,36 @@ export class Agent {
     }
     const runSignal = handle.signal;
     handle.onTeardown(() => this.bus.emit({ type: "turn_end" }));
+
+    // The wall-clock ceiling has to be able to interrupt a call ALREADY IN
+    // FLIGHT. `request.budgetGate` refuses the NEXT request, which is the right
+    // place for a token or dollar ceiling — those only grow when a request is
+    // sent — but a clock runs during one. Measured on a benchmark trial: a 780s
+    // budget under a 900s harness timeout left 120 seconds of margin, and the
+    // gate never fired once, because the run never reached another request
+    // boundary. `agent_execution` was 900.1s and the result file was 0 bytes.
+    //
+    // A silent server is already covered elsewhere (`streamIdleGuard` aborts a
+    // stream that stops producing), and that is exactly why it did not help
+    // here: the connection was streaming the whole time. Reasoning tokens reset
+    // an idle timer as readily as an answer does, so "still producing" and
+    // "still useful" are not the same thing, and only a deadline can tell them
+    // apart.
+    //
+    // Aborting the handle rather than inventing a stop path: the caller's
+    // signal (TUI Esc, autonomy stop) already lands here, so a mid-request
+    // cancellation is a route that is exercised every time somebody presses
+    // Escape. The turn then ends normally, `budget.breached` is true, and the
+    // autonomy engine reports it — no new failure mode to get wrong.
+    const deadline = this.opts.budget?.deadlineSignal;
+    if (deadline) {
+      if (deadline.aborted) handle.abort("budget:time");
+      else {
+        const onDeadline = () => handle.abort("budget:time");
+        deadline.addEventListener("abort", onDeadline, { once: true });
+        handle.onTeardown(() => deadline.removeEventListener("abort", onDeadline));
+      }
+    }
 
     try {
       // userInput.run persists the user message (record → onMessage → transcript

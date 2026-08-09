@@ -155,6 +155,14 @@ export class OpenAICompatProvider implements ChatProvider {
     // Bound the stream with an idle timeout (reset on each chunk) so a server that
     // accepts the connection but never streams can't hang the turn forever.
     const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
+    // Held outside the try so the `finally` can CANCEL it. Clearing the guard
+    // stops our timer; it does nothing to the socket, and a stream abandoned
+    // mid-flight keeps the connection — and Node's event loop — alive. Observed
+    // exactly that: a wall-clock deadline correctly ended the run at 10s, the
+    // result document was written, and the process then sat there until an
+    // external kill 80 seconds later. Same class as the sandbox teardown bug:
+    // every in-process assertion passes while the process refuses to exit.
+    let responseBody: ReadableStream<Uint8Array> | null = null;
     try {
       // Retry only covers the connection phase — a transient 429/5xx or network
       // blip shouldn't end the whole turn. Mid-stream failures still propagate.
@@ -174,6 +182,7 @@ export class OpenAICompatProvider implements ChatProvider {
       if (!res.ok || !res.body) {
         throw await providerErrorFromResponse(this.id, res, "/chat/completions");
       }
+      responseBody = res.body;
 
       const pending = new Map<number, PendingToolCall>();
       let usage: TokenUsage | undefined;
@@ -230,6 +239,11 @@ export class OpenAICompatProvider implements ChatProvider {
       yield { type: "done", usage };
     } finally {
       guard.clear();
+      // A fully drained stream is already closed and cancelling it is a no-op,
+      // so this is unconditional rather than guarded on how we got here — the
+      // paths that need it (an abort, a throw, a `break` upstream) are exactly
+      // the ones least likely to be remembered.
+      await responseBody?.cancel().catch(() => {});
     }
   }
 

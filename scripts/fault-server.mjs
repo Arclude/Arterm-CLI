@@ -72,6 +72,7 @@ const MODES = new Set([
   "auth",
   "drop-early",
   "drop-mid",
+  "slow-stream",
 ]);
 if (!MODES.has(MODE) && !flakyMatch) {
   console.error(`unknown --mode "${MODE}". See the header of this file for the list.`);
@@ -209,6 +210,27 @@ function applyFault(res, stream) {
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "half a sen" } }] })}\n\n`);
       setTimeout(() => res.socket?.destroy(), 150);
       return "socket killed mid-answer → NOT replayed";
+    // A server that never stops TALKING, which is not the same fault as one
+    // that goes quiet. `streamIdleGuard` covers silence — it aborts a stream
+    // that produces nothing for a while — and that is precisely why it cannot
+    // catch this: every chunk resets the timer, so a model that reasons for an
+    // hour looks exactly like one making progress. Observed against a real
+    // backend, where reasoning tokens kept a connection alive past a harness
+    // timeout. Only a deadline separates "still producing" from "still useful".
+    case "slow-stream": {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      const tick = setInterval(() => {
+        if (res.writableEnded || res.destroyed) {
+          clearInterval(tick);
+          return;
+        }
+        res.write(
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "thinking… " } }] })}\n\n`,
+        );
+      }, 200);
+      res.on("close", () => clearInterval(tick));
+      return "streaming reasoning forever, never finishing → only a deadline ends this";
+    }
     default: {
       if (failuresSoFar < FLAKY_FAILURES) {
         failuresSoFar++;

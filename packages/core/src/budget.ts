@@ -182,6 +182,20 @@ export class RunBudget {
     this.catalog = opts.catalog;
     this.now = opts.now ?? Date.now;
     this.startedAt = this.now();
+    if (opts.seconds !== undefined) {
+      const controller = new AbortController();
+      // An injected clock is a test's clock: it does not advance real time, so
+      // arming a real timer against it would never fire. Tests assert on
+      // `breached` / `inReservePhase`; the signal is for production wall-clock.
+      if (!opts.now) {
+        const timer = setTimeout(
+          () => controller.abort(new Error(`run time budget spent (${opts.seconds}s)`)),
+          opts.seconds * 1000,
+        );
+        timer.unref?.();
+      }
+      this.deadlineSignal = controller.signal;
+    }
   }
 
   /** True when no ceiling is configured — every check is then a no-op. */
@@ -197,6 +211,25 @@ export class RunBudget {
   get elapsedSec(): number {
     return Math.max(0, (this.now() - this.startedAt) / 1000);
   }
+
+  /**
+   * Fires when the time ceiling is reached. `undefined` with no ceiling set.
+   *
+   * The deadline belongs to the RUN, not to a turn, and that distinction was
+   * learned the hard way: a per-turn timer does end the turn it is watching —
+   * verified, the abort lands and `run()` reaches its `finally` — and then the
+   * autonomy engine makes its NEXT provider call (an assessment, a judge
+   * sub-agent) carrying a signal that was never aborted, and the run hangs
+   * there instead. Against a server streaming reasoning forever, that read as
+   * the deadline having done nothing at all.
+   *
+   * So the signal lives on the budget, which every agent and sub-agent in the
+   * run already shares, and each provider call links it alongside its own.
+   *
+   * Armed once, in the constructor. Unref'd, so a pending deadline cannot hold
+   * the process open past a run that finished early.
+   */
+  readonly deadlineSignal: AbortSignal | undefined;
 
   /**
    * Seconds left before the time ceiling, or `undefined` with none configured.
