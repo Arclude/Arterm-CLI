@@ -253,14 +253,27 @@ capturing endpoint: 59 tools (the roster plus what the session adds at runtime)
 and the system prompt come to **10,662 tokens of fixed prefix per request** —
 223k tokens over a 20-call turn, for text that never varied.
 
-`anthropic.ts` marks three of the four breakpoints Anthropic allows: the last
-tool (which seals the whole roster, since a breakpoint caches everything before
-it), the last system block, and the last message. A write costs 1.25× and a read
-0.1×, so the break-even is a single reuse — the second iteration of the first
-turn. The fourth breakpoint is deliberately unspent: a second anchor further back
-would have to GUESS where the previous request ended (an iteration appends an
-assistant turn plus one tool result per call, so the offset is not fixed), and a
-breakpoint on a position that never repeats is a cache write nobody reads.
+`anthropic.ts` marks all four breakpoints Anthropic allows: the last tool (which
+seals the whole roster, since a breakpoint caches everything before it), the last
+system block, the last message, and the end of the most recent COMPLETED tool
+round-trip. A write costs 1.25× and a read 0.1×, so the break-even is a single
+reuse — the second iteration of the first turn.
+
+The fourth was left unspent for a long time, on the argument that a second
+anchor further back "would have to GUESS where the previous request ended" —
+an iteration appends an assistant turn plus one tool result per call, so the
+offset is not fixed, and a breakpoint on a position that never repeats is a
+cache write nobody reads. That objection is about counting BACKWARDS by a fixed
+number of messages, and it dissolves once the position is computed from the
+conversation's shape. `completedTransactionIndex` finds the
+`user(tool_result…)` message that a later assistant turn has already answered:
+everything up to it is frozen for the rest of the run, so it is the longest
+prefix guaranteed to be re-sent byte-identical on every remaining request.
+Anthropic matches the LONGEST cached prefix, so the older anchor earns its keep
+exactly when the newest one misses — an expired entry, or a history the
+compactor rewrote from the tail. `withCacheBreakpoints` never marks the same
+message twice, because two markers on one position spend one of four to buy
+nothing.
 
 Three things are load-bearing:
 

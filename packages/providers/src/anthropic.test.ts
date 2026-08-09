@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import type Anthropic from "@anthropic-ai/sdk";
 import type { AddressInfo } from "node:net";
 import { type ChatChunk, type Message, ProviderError, type ToolSchema } from "@arterm/core";
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,8 @@ import {
   toAnthropicConversation,
   toAnthropicSystem,
   toAnthropicTools,
+  completedTransactionIndex,
+  withCacheBreakpoints,
   withCachePoint,
 } from "./anthropic.js";
 
@@ -277,7 +280,78 @@ describe("prompt caching", () => {
     expect(withCachePoint(empty)).toEqual(empty);
   });
 
-  it("puts all three breakpoints on the wire, and none when switched off", async () => {
+  // The fourth breakpoint. It was left unspent for fear of guessing a fixed
+  // offset; these pin that the position is computed, not counted.
+  describe("the completed-transaction anchor", () => {
+    const assistant = (text: string): Anthropic.MessageParam => ({
+      role: "assistant",
+      content: [{ type: "text", text }],
+    });
+    const toolUse = (id: string): Anthropic.MessageParam => ({
+      role: "assistant",
+      content: [{ type: "tool_use", id, name: "read", input: {} }],
+    });
+    const toolResult = (id: string): Anthropic.MessageParam => ({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: id, content: "ok" }],
+    });
+    const marks = (messages: Anthropic.MessageParam[]) =>
+      withCacheBreakpoints(messages)
+        .map((m, i) =>
+          typeof m.content === "string"
+            ? undefined
+            : m.content.some((b) => "cache_control" in b && b.cache_control)
+              ? i
+              : undefined,
+        )
+        .filter((i): i is number => i !== undefined);
+
+    it("anchors at the results of a round-trip the model has already answered", () => {
+      // [user, assistant(tool_use), user(tool_result), assistant] — index 2 is
+      // frozen: every later request re-sends it byte-identical.
+      const messages = [
+        { role: "user" as const, content: "go" },
+        toolUse("t1"),
+        toolResult("t1"),
+        assistant("done"),
+      ];
+      expect(completedTransactionIndex(messages)).toBe(2);
+      expect(marks(messages)).toEqual([2, 3]);
+    });
+
+    it("spends nothing when no round-trip has completed", () => {
+      // A text-only exchange has no frozen prefix to anchor, and a breakpoint on
+      // a position that never repeats is a write nobody reads.
+      const messages = [{ role: "user" as const, content: "hi" }, assistant("hello")];
+      expect(completedTransactionIndex(messages)).toBeUndefined();
+      expect(marks(messages)).toEqual([1]);
+    });
+
+    it("never marks the same message twice", () => {
+      // Results as the LAST message already carry the moving breakpoint; a
+      // second marker there would spend one of four to buy nothing.
+      const messages = [{ role: "user" as const, content: "go" }, toolUse("t1"), toolResult("t1")];
+      expect(completedTransactionIndex(messages)).toBeUndefined();
+      expect(marks(messages)).toEqual([2]);
+    });
+
+    it("takes the most recent completed round-trip, not the first", () => {
+      const messages = [
+        { role: "user" as const, content: "go" },
+        toolUse("t1"),
+        toolResult("t1"),
+        toolUse("t2"),
+        toolResult("t2"),
+        assistant("done"),
+      ];
+      expect(completedTransactionIndex(messages)).toBe(4);
+      expect(marks(messages)).toEqual([4, 5]);
+    });
+  });
+
+  // A text-only exchange: no completed round-trip, so the fourth anchor has
+  // nothing to attach to and three is the whole policy here.
+  it("puts the breakpoints on the wire, and none when switched off", async () => {
     const bodies: Record<string, unknown>[] = [];
     const server = await streamingServer((b) => bodies.push(b));
     const request = {

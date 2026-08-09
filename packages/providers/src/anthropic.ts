@@ -284,6 +284,66 @@ export function withCachePoint(message: Anthropic.MessageParam): Anthropic.Messa
   return { ...message, content: blocks };
 }
 
+/**
+ * Where a FINISHED tool round-trip ends, or `undefined` when none has.
+ *
+ * This is the fourth breakpoint, and the reason it was previously left unspent
+ * was a real objection: a second anchor further back "would have to GUESS where
+ * the previous request ended", since an iteration appends an assistant turn plus
+ * one tool result per call and the offset is not fixed. The objection is about
+ * counting BACKWARDS by a fixed number of messages. It dissolves once the
+ * position is computed from the conversation's own shape instead.
+ *
+ * A transaction is `assistant(tool_use…)` followed by `user(tool_result…)`. Once
+ * the next assistant turn exists, everything up to and including those results
+ * is FROZEN for the rest of the run — later iterations only append after it. So
+ * a breakpoint there is not a guess and not a position that never repeats: it is
+ * the longest prefix guaranteed to be re-sent byte-identical on every remaining
+ * request of the turn.
+ *
+ * The final message is excluded because the moving breakpoint already sits
+ * there, and two markers on one position spend a breakpoint to buy nothing.
+ * Anthropic matches the LONGEST cached prefix, so the value of the older anchor
+ * is entirely in the case where the newest one misses — an expired entry, or a
+ * history the compactor rewrote from the tail.
+ */
+export function completedTransactionIndex(
+  messages: readonly Anthropic.MessageParam[],
+): number | undefined {
+  // Stop before the last message: that one is the moving breakpoint's.
+  for (let i = messages.length - 2; i >= 0; i--) {
+    const message = messages[i];
+    const next = messages[i + 1];
+    if (!message || !next || next.role !== "assistant") continue;
+    if (message.role !== "user" || typeof message.content === "string") continue;
+    if (message.content.some((b) => b.type === "tool_result")) return i;
+  }
+  return undefined;
+}
+
+/**
+ * The message list with both conversation breakpoints attached.
+ *
+ * Applied here rather than at the two call sites so the invariant is stated
+ * once: the older anchor is only worth a breakpoint when it is a DIFFERENT
+ * message from the moving one, and marking the same position twice spends one
+ * of four on nothing.
+ */
+export function withCacheBreakpoints(
+  messages: readonly Anthropic.MessageParam[],
+): Anthropic.MessageParam[] {
+  const out = [...messages];
+  const lastIndex = out.length - 1;
+  const last = out[lastIndex];
+  if (last) out[lastIndex] = withCachePoint(last);
+  const anchor = completedTransactionIndex(messages);
+  if (anchor !== undefined && anchor !== lastIndex) {
+    const at = out[anchor];
+    if (at) out[anchor] = withCachePoint(at);
+  }
+  return out;
+}
+
 /** Talks to the Anthropic Messages API via the official SDK (streaming + tools). */
 export class AnthropicProvider implements ChatProvider {
   readonly id = "anthropic";
@@ -365,14 +425,12 @@ export class AnthropicProvider implements ChatProvider {
     // OAuth inference only serves requests that lead with the Claude Code identity,
     // so under a subscription token send `system` as blocks with that line first.
     const systemParam = toAnthropicSystem(system, { oauth: this.usesOauth, cache });
-    // Three breakpoints of the four Anthropic allows: the roster, the system
-    // prompt, and the conversation as it stands. The fourth is deliberately
-    // unspent — a second anchor further back would have to GUESS where the
-    // previous request ended (one iteration appends an assistant turn plus one
-    // tool result per call, so the offset is not fixed), and a breakpoint on a
-    // position that never repeats is a cache write nobody ever reads.
-    const last = cache ? messages.at(-1) : undefined;
-    const messagesParam = last ? [...messages.slice(0, -1), withCachePoint(last)] : messages;
+    // All four breakpoints Anthropic allows: the roster, the system prompt, the
+    // conversation as it stands, and the end of the last COMPLETED tool
+    // round-trip. That fourth used to be left unspent for fear of guessing a
+    // fixed offset; `completedTransactionIndex` computes it from the shape
+    // instead, which is a position that provably repeats — see its note.
+    const messagesParam = cache ? withCacheBreakpoints(messages) : messages;
     // Bound the stream with an idle timeout (reset on each event) so a server that
     // accepts the connection but never streams can't hang the turn forever.
     const guard = streamIdleGuard(STREAM_IDLE_TIMEOUT_MS, req.signal);
