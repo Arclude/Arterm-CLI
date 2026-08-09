@@ -1,14 +1,14 @@
 import { createServer } from "node:http";
-import type Anthropic from "@anthropic-ai/sdk";
 import type { AddressInfo } from "node:net";
+import type Anthropic from "@anthropic-ai/sdk";
 import { type ChatChunk, type Message, ProviderError, type ToolSchema } from "@arterm/core";
 import { describe, expect, it } from "vitest";
 import {
   AnthropicProvider,
+  completedTransactionIndex,
   toAnthropicConversation,
   toAnthropicSystem,
   toAnthropicTools,
-  completedTransactionIndex,
   withCacheBreakpoints,
   withCachePoint,
 } from "./anthropic.js";
