@@ -6,11 +6,19 @@ an adapter and no fork of the harness:
 ```bash
 uv venv && uv pip install harbor      # or pip install harbor
 bash bench/harbor/pack.sh             # build the tarball the adapter installs
-harbor run -d terminal-bench@2.0 \
+PYTHONPATH=. harbor run -d terminal-bench@2.0 \
   --agent bench.harbor.arterm_agent:ArtermAgent \
   --model anthropic/claude-opus-4-5 \
   -k 5
 ```
+
+`PYTHONPATH=.` is not optional and is not cosmetic. `--agent` is an import path,
+and `harbor` is a console script — the interpreter's `sys.path` starts at the
+venv's `bin`, never at the directory you typed the command in. There is no
+`bench/__init__.py` (the adapter resolves as a namespace package), so without the
+repo root on the path the run dies before Docker is touched with `ValueError:
+Failed to import module 'bench.harbor.arterm_agent': No module named 'bench'`.
+Run it from the repo root, or point `PYTHONPATH` at the root by absolute path.
 
 Docker is required (Harbor runs each task in a container). The adapter installs
 Node via nvm and then `npm i -g` the tarball, so tasks need `curl` and a
@@ -34,10 +42,34 @@ have one fixed vendor URL compiled in:
 ```bash
 export OPENAI_COMPAT_API_KEY=…                       # your key, this shell only
 export OPENAI_COMPAT_HOST=https://api.z.ai/api/coding/paas/v4
-harbor run -d terminal-bench@2.0 \
+PYTHONPATH=. harbor run -d terminal-bench@2.0 \
   --agent bench.harbor.arterm_agent:ArtermAgent \
   --model openai-compat/glm-5.2 -k 1
 ```
+
+Harbor's own `--env-file <path>` is the better home for both: it `load_dotenv`s
+into harbor's process, which is the environment the adapter reads, so the key
+never enters shell history. Keep that file OUTSIDE the repo — `.gitignore` has
+no `.env` rule, so a key parked in the working tree is one `git add .` from a
+commit:
+
+```bash
+umask 077 && $EDITOR ~/.arterm-bench-env   # KEY=value lines, no `export` needed
+PYTHONPATH=. harbor run … --env-file ~/.arterm-bench-env
+```
+
+The name matters twice, and they are not the same name. `OPENAI_COMPAT_API_KEY`
+is a HOST-side convenience — one machine can hold a real `OPENAI_API_KEY` for
+api.openai.com and a separate key for whatever compat endpoint is being
+measured. Inside the container the adapter sets it as `OPENAI_API_KEY`, because
+that is what arterm reads: `openai-compat` is the custom-host provider, not a
+hosted preset, and `registry.ts` resolves it with
+`apiKeyFor("openai-compat", "OPENAI_API_KEY")`. The adapter shipped the literal
+name `OPENAI_COMPAT_API_KEY` into the container, which nothing reads — so the
+run dialled Z.AI unauthenticated and every request 401'd. It scored as the
+agent: `reward 0.0`, `Exceptions 0`, a plausible-looking failure on a hard task.
+The tell was `usage.reported: false` with `inputTokens: 0` — a model that never
+answered, not a model that answered badly. Read that field before any number.
 
 Passing only the key left the container dialing arterm's default
 `http://localhost:1234/v1`, where nothing listens — every task failed with a
@@ -112,7 +144,7 @@ produces false alarms rather than signal.
 ## Always dry-run the install first — it is free
 
 ```bash
-harbor run -d terminal-bench@2.0 \
+PYTHONPATH=. harbor run -d terminal-bench@2.0 \
   --agent bench.harbor.arterm_agent:ArtermAgent \
   --model openai-compat/glm-5.2 -l 1 --install-only
 ```
