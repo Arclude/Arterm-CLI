@@ -344,3 +344,38 @@ describe("availableTools", () => {
     expect(names).not.toContain("lint");
   });
 });
+
+describe("read and the spool", () => {
+  // The spool told the model "[full output: …]" and `read` refused the path,
+  // which made the whole offload a dead end.
+  it("opens a path THIS run spooled, though it sits outside the cwd", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "arterm-spool-"));
+    const outside = join(mkdtempSync(join(tmpdir(), "arterm-elsewhere-")), "full.txt");
+    writeFileSync(outside, "the whole output\n");
+    const res = await readTool.execute(
+      { path: outside },
+      { cwd: dir, spooled: new Set([outside]) },
+    );
+    expect(res.isError).toBeFalsy();
+    expect(res.output).toContain("the whole output");
+  });
+
+  // Membership, not a directory prefix: a set this run created cannot be
+  // forged, while blessing the spool DIRECTORY would open every other
+  // session's output — which is another project's file contents.
+  it("still refuses the same path when this run did not spool it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "arterm-spool-"));
+    const outside = join(mkdtempSync(join(tmpdir(), "arterm-elsewhere-")), "full.txt");
+    writeFileSync(outside, "someone else's output\n");
+    await expect(readTool.execute({ path: outside }, { cwd: dir })).rejects.toThrow(
+      /escapes the working directory/,
+    );
+  });
+
+  it("confines an ordinary path exactly as before", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "arterm-spool-"));
+    await expect(
+      readTool.execute({ path: "../../etc/passwd" }, { cwd: dir, spooled: new Set(["/x"]) }),
+    ).rejects.toThrow(/escapes the working directory/);
+  });
+});

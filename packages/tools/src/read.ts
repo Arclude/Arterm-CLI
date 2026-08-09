@@ -91,7 +91,13 @@ export const readTool: Tool = {
     return `read ${String(args.path)}${at}`;
   },
   async execute(args, ctx) {
-    const abs = resolveWithin(ctx.cwd, requireString(args, "path"));
+    const requested = requireString(args, "path");
+    // A path this run spooled is admitted as itself. It is the one path the
+    // model can name that the model did not invent — see `ToolContext.spooled`
+    // — and refusing it made the "[full output: …]" line a dead end, which is
+    // what the whole spool exists to avoid.
+    const abs =
+      ctx.spooled?.has(requested) === true ? requested : resolveWithin(ctx.cwd, requested);
     const buf = await fs.readFile(abs);
 
     // Before the binary check, not after: every image file trips it, and the

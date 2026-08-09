@@ -405,6 +405,25 @@ export interface ToolContext {
    */
   credentials?: CredentialSettings;
   /**
+   * Files THIS session spooled a tool's oversized output into, which `read` may
+   * open even though they sit outside the working directory.
+   *
+   * The exception is narrow on purpose, and the reasoning is the inverse of
+   * `resolveWithin`'s. That confinement exists because a `path` argument is
+   * MODEL OUTPUT and a boundary a tool call can name is not a boundary
+   * (CVE-2025-59532). A spool path is not model output: the agent minted it,
+   * wrote it, and echoed it back in the same tool result — so admitting it
+   * grants the model nothing it was not already handed a clamped version of.
+   *
+   * Membership, not a directory prefix. Allowing the spool DIRECTORY would open
+   * every other session's spooled output, which is another project's file
+   * contents; a set of paths this run created cannot be forged or enumerated.
+   *
+   * Absent means no exception at all, which is what every standalone tool call
+   * and every test gets.
+   */
+  spooled?: ReadonlySet<string>;
+  /**
    * The agent's current tool roster, injected at execute time. Meta-tools use it:
    * `tool_search` lists/searches it and `batch` dispatches to it. Optional so
    * standalone tool calls and tests work without it.

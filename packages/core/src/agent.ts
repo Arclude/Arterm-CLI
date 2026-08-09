@@ -355,6 +355,13 @@ async function listProjectEntries(dir: string, limit = 200): Promise<string[]> {
 export class Agent {
   private messages: Message[] = [];
   private toolMap: Map<string, Tool>;
+  /**
+   * Oversized tool outputs this run wrote to disk, so `read` can open them.
+   * Per-agent rather than global: a path is admitted because THIS run minted
+   * it, and a set shared across sessions would be a directory prefix wearing a
+   * different hat.
+   */
+  private readonly spooled = new Set<string>();
   /** Prompt tokens reported by the provider on the last turn (compaction signal). */
   private lastPromptTokens?: number;
   /** Tools whose `usageHint` has already been delivered — once per session. */
@@ -453,6 +460,7 @@ export class Agent {
           const result = await ctx.tool.execute(ctx.call.arguments, {
             cwd: this.opts.workingDir?.current() ?? this.opts.cwd,
             signal: ctx.signal,
+            spooled: this.spooled,
             tools: this.opts.tools,
             ...(this.opts.sandbox ? { sandbox: this.opts.sandbox } : {}),
             ...(this.opts.credentials ? { credentials: this.opts.credentials } : {}),
@@ -466,7 +474,20 @@ export class Agent {
           const cap = ctx.tool.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
           const clamped = clampMiddle(result.output, cap);
           if (clamped.truncated) {
-            const file = await spoolOutput(result.output, ctx.tool.name);
+            // Reading a spool back is over budget again by construction, and
+            // spooling THAT would mint a second copy of a file the model
+            // already has a path to — the persist→read→persist loop. When the
+            // call already named a spooled file, point at that same file.
+            const already = ctx.call.arguments.path;
+            const reused = typeof already === "string" && this.spooled.has(already);
+            const file = reused
+              ? (already as string)
+              : await spoolOutput(result.output, ctx.tool.name);
+            // Remembered so `read` will open it. The path is admitted by
+            // MEMBERSHIP rather than by living under a blessed directory: a set
+            // this run created cannot be forged, while a directory prefix would
+            // hand the model every other session's spooled output.
+            if (file) this.spooled.add(file);
             ctx.output = file
               ? `${clamped.text}\n[full output: ${file}]`
               : `${clamped.text}\n[full output was ${clamped.originalBytes} bytes]`;
