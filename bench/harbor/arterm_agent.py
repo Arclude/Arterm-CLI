@@ -58,17 +58,38 @@ HARNESS_NAME = "harness.json"
 #: run reports rather than being cut off by the harness timeout.
 DEFAULT_MAX_STEPS = 200
 
-#: The one credential each provider needs, and nothing else.
+#: The one credential each provider needs, named as ARTERM READS IT — this is
+#: the variable set inside the container, so it must match the env var the
+#: provider registry consults, not a name that merely reads well here.
+#:
+#: `openai-compat` is the trap: it is not one of the hosted presets, it is the
+#: custom-host provider, and `registry.ts` resolves its key with
+#: `apiKeyFor("openai-compat", "OPENAI_API_KEY")`. This map said
+#: `OPENAI_COMPAT_API_KEY`, a name nothing in arterm reads. The container got a
+#: variable it ignored, dialled the endpoint unauthenticated, and every request
+#: 401'd — which the trial scored as the agent's work: `reward 0.0`,
+#: `Exceptions 0`, and `usage.reported: false` as the only tell.
 _PROVIDER_KEY = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
-    "openai-compat": "OPENAI_COMPAT_API_KEY",
+    "openai-compat": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "xai": "XAI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
     "mistral": "MISTRAL_API_KEY",
+}
+
+#: Extra names accepted ON THE HOST, tried before the container-side name.
+#: Keeping `OPENAI_COMPAT_API_KEY` usable is not backwards compatibility for its
+#: own sake: one machine can hold a real `OPENAI_API_KEY` for api.openai.com AND
+#: a key for whatever compat endpoint is being measured, and silently shipping
+#: the former to the latter is worse than a missing key. The distinction lives
+#: on the host, where both exist; inside the container only one endpoint is
+#: reachable, so the name collapses to the one arterm reads.
+_HOST_KEY_ALIASES = {
+    "openai-compat": ("OPENAI_COMPAT_API_KEY",),
 }
 
 #: Providers that ARE their endpoint. The rest have one fixed vendor URL, so
@@ -254,9 +275,11 @@ class ArtermAgent(BaseInstalledAgent):
         name = _PROVIDER_KEY.get(provider)
         passed = {}
         if name:
-            value = os.environ.get(name)
-            if value:
-                passed[name] = value
+            for source in (*_HOST_KEY_ALIASES.get(provider, ()), name):
+                value = os.environ.get(source)
+                if value:
+                    passed[name] = value
+                    break
         endpoint = _PROVIDER_ENDPOINT.get(provider)
         if endpoint:
             value = os.environ.get(endpoint)
