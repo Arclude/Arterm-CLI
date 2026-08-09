@@ -60,8 +60,17 @@ function outcomeOf(command) {
 
   const server = spawn(
     process.execPath,
-    [FAKE, "--mode", "ok", "--port", String(PORT), "--tool", "bash", "--tool-args",
-      JSON.stringify({ command })],
+    [
+      FAKE,
+      "--mode",
+      "ok",
+      "--port",
+      String(PORT),
+      "--tool",
+      "bash",
+      "--tool-args",
+      JSON.stringify({ command }),
+    ],
     { stdio: "ignore" },
   );
   try {
@@ -107,10 +116,7 @@ check(
 
 // Allowed: ordinary destructive work. This half is what keeps the control from
 // being the kind people switch off.
-check(
-  "clearing a build directory still runs",
-  outcomeOf("rm -rf node_modules") === "ran",
-);
+check("clearing a build directory still runs", outcomeOf("rm -rf node_modules") === "ran");
 check("undoing a commit still runs", outcomeOf("git reset --hard HEAD") === "ran");
 check("an ordinary command is untouched", outcomeOf("echo hello") === "ran");
 
