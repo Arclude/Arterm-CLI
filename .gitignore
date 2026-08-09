@@ -10,5 +10,10 @@ next-env.d.ts
 coverage/
 .plugins-fixtures/
 
+# Harbor benchmark: the venv it is installed into, and one directory of run
+# artifacts per sweep. Both are outputs of measuring the tree, not part of it.
+.venv-bench/
+jobs/
+
 # Understand-Anything analysis artifacts
 .understand-anything/

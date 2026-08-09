@@ -892,6 +892,58 @@ describe("run budget (agent pipeline stages)", () => {
     expect(events.filter((e) => e.type === "budget_warning")).toHaveLength(1);
   });
 
+  it("tells the model how much wall-clock time is left, on every request", async () => {
+    let t = 1_000_000;
+    const bus = new EventBus();
+    const provider = new StubProvider([[{ type: "text", delta: "ok" }, { type: "done" }]]);
+    const budget = new RunBudget({ seconds: 600, now: () => t, catalog: [] });
+    t += 60_000;
+    await agentWith(budget, provider, bus).run("go");
+    const system = provider.lastMessages?.[0]?.content ?? "";
+    expect(system).toContain("TIME:");
+    expect(system).toContain("~540s left");
+    expect(system).not.toContain("reserve phase");
+  });
+
+  // Being killed mid-edit is strictly worse than stopping with the same work
+  // reported, so the last stretch stops starting things.
+  it("switches the clock line to a reserve-phase instruction past the soft ratio", async () => {
+    let t = 1_000_000;
+    const bus = new EventBus();
+    const provider = new StubProvider([[{ type: "text", delta: "ok" }, { type: "done" }]]);
+    const budget = new RunBudget({ seconds: 600, softRatio: 0.75, now: () => t, catalog: [] });
+    t += 500_000;
+    await agentWith(budget, provider, bus).run("go");
+    const system = provider.lastMessages?.[0]?.content ?? "";
+    expect(system).toContain("reserve phase");
+    expect(system).toContain("do NOT start new work");
+  });
+
+  it("says nothing about time when no wall-clock ceiling is set", async () => {
+    const bus = new EventBus();
+    const provider = new StubProvider([[{ type: "text", delta: "ok" }, { type: "done" }]]);
+    const budget = new RunBudget({ tokens: 100_000, catalog: [] });
+    await agentWith(budget, provider, bus).run("go");
+    expect(provider.lastMessages?.[0]?.content ?? "").not.toContain("TIME:");
+  });
+
+  it("refuses the next request once the wall clock is spent, and says why", async () => {
+    let t = 1_000_000;
+    const bus = new EventBus();
+    const events = collect(bus);
+    const provider = new StubProvider(
+      Array.from({ length: 5 }, () => [
+        { type: "tool_call" as const, call: { id: "1", name: "noop", arguments: {} } },
+        { type: "done" as const },
+      ]),
+    );
+    const budget = new RunBudget({ seconds: 300, now: () => t, catalog: [] });
+    t += 301_000;
+    await agentWith(budget, provider, bus).run("go");
+    expect(provider.calls).toBe(0);
+    expect(events.some((e) => e.type === "budget_exceeded")).toBe(true);
+  });
+
   it("meters spend with no ceiling configured, but gates and announces nothing", async () => {
     // Accounting used to be installed only when a limit existed, which made
     // every unlimited run report zero tokens and zero cost — indistinguishable

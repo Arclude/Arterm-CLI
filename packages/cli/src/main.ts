@@ -184,6 +184,8 @@ interface GlobalOpts {
   maxTokens?: string;
   /** Whole-run USD ceiling. */
   maxUsd?: string;
+  /** Whole-run wall-clock ceiling, in seconds. */
+  maxDuration?: string;
   /** Roster size for this run, overriding config `tools.tier`. */
   toolsTier?: string;
   /** `--sandbox` / `--no-sandbox`; undefined means unstated (see `flags.ts`). */
@@ -871,6 +873,10 @@ async function main(): Promise<void> {
     .option("--max-steps <n>", "override autonomy.maxSteps; with eternal mode, a hard bound")
     .option("--max-tokens <n>", "stop the run after this many tokens (whole run, not per turn)")
     .option("--max-usd <amount>", "stop the run after this much spend, e.g. 2.50")
+    .option(
+      "--max-duration <seconds>",
+      "stop the run after this much wall-clock time; set it below a harness timeout",
+    )
     .option(
       "--tools-tier <tier>",
       "roster size for this run: minimal | standard | full (overrides tools.tier)",

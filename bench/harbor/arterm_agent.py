@@ -109,6 +109,19 @@ class ArtermAgent(BaseInstalledAgent):
         CliFlag("autonomy_mode", cli="--autonomy-mode", type="str"),
         CliFlag("max_usd", cli="--max-usd", type="str"),
         CliFlag("max_tokens", cli="--max-tokens", type="int"),
+        # Harbor bounds every task by wall-clock and kills the process when it
+        # expires; a killed run writes no result, so its spend is unaccounted
+        # and its partial work unreported — observed as a 0-byte
+        # arterm-result.json after a 900s task budget ran out. Set BELOW the
+        # task's own `[agent] timeout_sec` so arterm stops itself while it can
+        # still report. It has to be told rather than derived: harbor hands the
+        # agent its logs dir and model name, never its deadline.
+        CliFlag(
+            "max_duration",
+            cli="--max-duration",
+            type="int",
+            env_fallback="ARTERM_BENCH_MAX_DURATION",
+        ),
         # The roster is a fixed per-turn tax — every tool's schema is re-sent on
         # every request — and the published work says a bigger one is not merely
         # more expensive but plausibly less accurate, each sibling tool acting as
@@ -363,6 +376,10 @@ class ArtermAgent(BaseInstalledAgent):
                 "autonomyMode": self._resolved_flags.get("autonomy_mode"),
                 "maxUsd": self._resolved_flags.get("max_usd"),
                 "maxTokens": self._resolved_flags.get("max_tokens"),
+                # null means the run had no internal deadline and could only be
+                # stopped by the harness killing it — which is a different trial
+                # from one that budgeted its own time, and scores differently.
+                "maxDuration": self._resolved_flags.get("max_duration"),
                 # `null` means "arterm's configured default" and is NOT the same
                 # claim as naming a tier — the roster is the one harness setting
                 # whose effect the literature puts on accuracy as well as cost,

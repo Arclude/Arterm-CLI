@@ -343,6 +343,10 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const budget = new RunBudget({
     ...(config.budget?.runTokens !== undefined ? { tokens: config.budget.runTokens } : {}),
     ...(config.budget?.runUsd !== undefined ? { usd: config.budget.runUsd } : {}),
+    // The clock starts HERE, at session construction, not at the first turn:
+    // a harness starts counting when it launches the process, and the gap
+    // (install, model listing, config load) is time we have already spent.
+    ...(config.budget?.runSeconds !== undefined ? { seconds: config.budget.runSeconds } : {}),
     ...(config.budget?.softRatio !== undefined ? { softRatio: config.budget.softRatio } : {}),
   });
 

@@ -114,6 +114,13 @@ export interface ArtermConfig {
      */
     runTokens?: number;
     runUsd?: number;
+    /**
+     * Wall-clock ceiling in seconds. The other two bound what a run COSTS;
+     * this bounds what an evaluation harness can take away by killing the
+     * process — a killed run writes no result, so its spend is unaccounted and
+     * its partial work unreported. Set it below the harness's own limit.
+     */
+    runSeconds?: number;
     /** Fraction of a ceiling that triggers the wrap-up request (default 0.75). */
     softRatio?: number;
   };
@@ -634,6 +641,7 @@ const configFileSchema = z
         maxIterations: z.number().int().positive().optional(),
         runTokens: z.number().int().positive().optional(),
         runUsd: z.number().positive().optional(),
+        runSeconds: z.number().positive().optional(),
         softRatio: z.number().gt(0).lt(1).optional(),
       })
       .partial(),

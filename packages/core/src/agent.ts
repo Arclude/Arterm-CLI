@@ -564,6 +564,41 @@ export class Agent {
       });
     }
 
+    if (budget && !req.has("budgetClock")) {
+      // A deadline the model cannot read is one it cannot plan against: it will
+      // open a fresh subtask with ninety seconds left exactly as readily as
+      // with an hour. So the remaining time is appended to the system message
+      // on EVERY request — after `buildSystem`, which rebuilds it each turn.
+      //
+      // Past the soft ratio the line changes from a fact into an instruction.
+      // That is the reserve phase: the run stops starting new work and spends
+      // what is left finalizing, because being killed mid-edit is strictly
+      // worse than stopping with the same work reported. The threshold is the
+      // budget's existing `softRatio` rather than a second knob, and the
+      // argument already written there for tokens holds harder for time — "a
+      // model told to finish at 99% has no room to finish in".
+      //
+      // Deliberately NOT latched, unlike `takeSoftSignal`. That one fires once
+      // because repeating it spends the very tokens it is preserving; this one
+      // replaces a line that is rebuilt anyway, costs nothing to repeat, and
+      // must not be a single announcement the model can forget ten turns later.
+      req.use("budgetClock", async (ctx, next) => {
+        const remaining = budget.remainingSec;
+        if (remaining !== undefined) {
+          const secs = Math.round(remaining);
+          const advice = budget.inReservePhase
+            ? "You are in the reserve phase: do NOT start new work, do not begin edits you " +
+              "cannot finish. Bring the current change to a consistent state, then report " +
+              "what is done and what is not."
+            : "Plan what you start against it — unfinished work at the deadline is lost, " +
+              "not paused.";
+          const note = `\n\nTIME: ~${secs}s left of this run's wall-clock budget. ${advice}`;
+          ctx.system = { ...ctx.system, content: `${ctx.system.content}${note}` };
+        }
+        await next();
+      });
+    }
+
     const res = this.pipelines.response;
     if (budget && !res.has("budgetMeter")) {
       // Meter from the provider's OWN usage, never from an estimate: every

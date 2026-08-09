@@ -12,6 +12,8 @@ export interface AutonomousFlagOpts {
   maxTokens?: string;
   /** Whole-run USD ceiling (`--max-usd`). */
   maxUsd?: string;
+  /** Whole-run wall-clock ceiling in seconds (`--max-duration`). */
+  maxDuration?: string;
   /** Roster size for this run (`--tools-tier`), overriding `tools.tier`. */
   toolsTier?: string;
   /**
@@ -202,6 +204,14 @@ function applyBudgetFlags(
       warn(`⚠ invalid --max-usd "${globals.maxUsd}" — ignoring\n`);
     } else {
       config.budget = { ...config.budget, runUsd: n };
+    }
+  }
+  if (globals.maxDuration !== undefined) {
+    const n = Number(globals.maxDuration);
+    if (!Number.isFinite(n) || n <= 0) {
+      warn(`⚠ invalid --max-duration "${globals.maxDuration}" — ignoring\n`);
+    } else {
+      config.budget = { ...config.budget, runSeconds: n };
     }
   }
 }

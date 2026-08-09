@@ -167,6 +167,83 @@ describe("RunBudget", () => {
   });
 });
 
+// The clock is injected rather than slept on: a test that waits for a real
+// deadline is a slow test that still cannot pin the boundary exactly.
+describe("RunBudget wall-clock ceiling (what a harness takes away)", () => {
+  function clock() {
+    let t = 1_000_000;
+    return {
+      now: () => t,
+      advance: (sec: number) => {
+        t += sec * 1000;
+      },
+    };
+  }
+
+  it("a time ceiling alone makes the budget active", () => {
+    const c = clock();
+    const b = new RunBudget({ seconds: 100, now: c.now });
+    expect(b.inactive).toBe(false);
+    expect(b.remainingSec).toBe(100);
+  });
+
+  it("breaches on elapsed time with nothing spent", () => {
+    const c = clock();
+    const b = new RunBudget({ seconds: 100, now: c.now });
+    c.advance(99);
+    expect(b.breached).toBe(false);
+    c.advance(2);
+    expect(b.breached).toBe(true);
+    expect(b.describe()).toContain("101s/100s elapsed");
+  });
+
+  it("enters the reserve phase at the soft ratio and STAYS there", () => {
+    const c = clock();
+    const b = new RunBudget({ seconds: 100, softRatio: 0.75, now: c.now });
+    expect(b.inReservePhase).toBe(false);
+    c.advance(76);
+    expect(b.inReservePhase).toBe(true);
+    // Unlike takeSoftSignal this is a state, not a latched event: a phase the
+    // model was told about once is one it has forgotten ten turns later.
+    expect(b.inReservePhase).toBe(true);
+    expect(b.takeSoftSignal()).toBe(true);
+    expect(b.takeSoftSignal()).toBe(false);
+  });
+
+  it("remaining time floors at zero rather than going negative", () => {
+    const c = clock();
+    const b = new RunBudget({ seconds: 10, now: c.now });
+    c.advance(50);
+    expect(b.remainingSec).toBe(0);
+  });
+
+  // A fresh `seconds` per worker would hand each one the whole allowance again
+  // while the harness clock ran exactly once.
+  it("a child inherits the time LEFT, not a fresh allowance", () => {
+    const c = clock();
+    const parent = new RunBudget({ seconds: 100, now: c.now });
+    c.advance(60);
+    const child = parent.child({ tokens: 500 });
+    expect(child.remainingSec).toBe(40);
+    c.advance(41);
+    expect(child.breached).toBe(true);
+  });
+
+  it("a child with no ceilings of its own shares the parent outright", () => {
+    const c = clock();
+    const parent = new RunBudget({ seconds: 100, now: c.now });
+    expect(parent.child()).toBe(parent);
+  });
+
+  it("reports elapsed seconds even with no ceiling configured", () => {
+    const c = clock();
+    const b = new RunBudget({ now: c.now });
+    c.advance(12.5);
+    expect(b.state().elapsedSec).toBeCloseTo(12.5, 3);
+    expect(b.state().limitSeconds).toBeUndefined();
+  });
+});
+
 describe("RunBudget usage split (what an evaluation harness reads)", () => {
   const CAT = CATALOG;
 
