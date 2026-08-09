@@ -33,6 +33,16 @@ export function detectScripts(cwd: string): ProjectScripts {
   return { pm, scripts, hasBiome, hasTsconfig };
 }
 
+/** True when the working directory has a package.json at all. */
+function hasManifest(cwd: string): boolean {
+  return existsSync(join(cwd, "package.json"));
+}
+
+/** True when package.json declares the named script. */
+function hasScript(cwd: string, name: string): boolean {
+  return detectScripts(cwd).scripts[name] !== undefined;
+}
+
 interface RunOptions {
   /**
    * True when a non-zero exit is a FINDING rather than a failure. `npm audit`
@@ -131,6 +141,7 @@ function runScript(pm: Pm, script: string, extra: string[]): string[] {
 
 export const testTool: Tool = {
   name: "test",
+  available: (cwd) => hasScript(cwd, "test"),
   maxOutputBytes: 65_536,
   description:
     "Run the project's test suite (auto-detected from package.json). Optionally pass a " +
@@ -162,6 +173,7 @@ export const testTool: Tool = {
 
 export const lintTool: Tool = {
   name: "lint",
+  available: (cwd) => hasScript(cwd, "lint") || detectScripts(cwd).hasBiome,
   maxOutputBytes: 65_536,
   description:
     "Run the project's linter/check (read-only — never applies fixes). Auto-detects a " +
@@ -181,6 +193,7 @@ export const lintTool: Tool = {
 
 export const formatTool: Tool = {
   name: "format",
+  available: (cwd) => hasScript(cwd, "format") || detectScripts(cwd).hasBiome,
   maxOutputBytes: 16_384,
   description:
     "Format the project's source in place (writes files). Auto-detects a `format` script " +
@@ -201,6 +214,7 @@ export const formatTool: Tool = {
 
 export const typecheckTool: Tool = {
   name: "typecheck",
+  available: (cwd) => hasScript(cwd, "typecheck") || detectScripts(cwd).hasTsconfig,
   maxOutputBytes: 65_536,
   description:
     "Type-check the project without emitting output. Auto-detects a `typecheck` script " +
@@ -245,6 +259,7 @@ function badPackageName(name: string): string | undefined {
 
 export const installTool: Tool = {
   name: "install",
+  available: hasManifest,
   maxOutputBytes: 32_768,
   description:
     "Install the project's dependencies, or add named `packages`. Uses the detected " +
@@ -312,6 +327,7 @@ export const installTool: Tool = {
 
 export const auditTool: Tool = {
   name: "audit",
+  available: hasManifest,
   maxOutputBytes: 32_768,
   description: "Report known vulnerabilities in the project's dependencies.",
   permission: "allow",
@@ -329,6 +345,7 @@ export const auditTool: Tool = {
 
 export const outdatedTool: Tool = {
   name: "outdated",
+  available: hasManifest,
   maxOutputBytes: 16_384,
   description: "List dependencies with a newer version available.",
   permission: "allow",

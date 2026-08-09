@@ -82,6 +82,7 @@ import {
 import {
   type RollUpFn,
   WorkingDirStore,
+  availableTools,
   createBatchTool,
   createBrowserTools,
   createExecTool,
@@ -392,7 +393,9 @@ export async function buildSession(opts: SessionOptions): Promise<{
   const agent = new Agent({
     provider,
     model,
-    tools: defaultTools(config.tools?.tier),
+    // Minus the ones that cannot work here — see `Tool.available`. Resolved
+    // once, because the roster seals the first prompt-cache breakpoint.
+    tools: availableTools(defaultTools(config.tools?.tier), cwd),
     permissions: container.resolve(Tokens.PermissionPolicy),
     ask: (tool, args) => asker(tool, args),
     bus: container.resolve(Tokens.Bus),

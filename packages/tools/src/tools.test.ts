@@ -1,9 +1,12 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Tool } from "@arterm/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveWithin } from "./paths.js";
 import {
+  availableTools,
+  defaultTools,
   editTool,
   globTool,
   multiEditTool,
@@ -283,5 +286,61 @@ describe("submitVerdictTool", () => {
     const res = await submitVerdictTool.execute({ pass: "maybe", summary: "hm" }, ctx());
     expect(res.isError).toBe(true);
     expect(res.output).toContain('"maybe"');
+  });
+});
+
+describe("availableTools", () => {
+  const stub = (name: string, available?: (cwd: string) => boolean): Tool => ({
+    name,
+    description: name,
+    parameters: { type: "object" },
+    permission: "allow",
+    ...(available ? { available } : {}),
+    execute: async () => ({ output: "" }),
+  });
+
+  it("keeps a tool that declares nothing", () => {
+    // Absent means always available: the answer for every tool that only needs
+    // a filesystem.
+    expect(availableTools([stub("read")], "/tmp").map((t) => t.name)).toEqual(["read"]);
+  });
+
+  it("drops a tool that cannot work here", () => {
+    const tools = [stub("read"), stub("test", () => false)];
+    expect(availableTools(tools, "/tmp").map((t) => t.name)).toEqual(["read"]);
+  });
+
+  // A broken detector must not be able to silently remove a working tool: that
+  // presents as a model which has forgotten how to run the tests, with nothing
+  // on screen to say why.
+  it("keeps a tool whose detector throws", () => {
+    const tools = [
+      stub("test", () => {
+        throw new Error("boom");
+      }),
+    ];
+    expect(availableTools(tools, "/tmp").map((t) => t.name)).toEqual(["test"]);
+  });
+
+  it("hides the package.json tools in a directory that has none", () => {
+    // Seven of the roster read package.json. In a Python or Rust repo every one
+    // of them was offered, and every one failed the same way.
+    const dir = mkdtempSync(join(tmpdir(), "arterm-avail-"));
+    const names = availableTools(defaultTools("full"), dir).map((t) => t.name);
+    for (const gone of ["test", "lint", "typecheck", "install", "audit", "outdated"]) {
+      expect(names).not.toContain(gone);
+    }
+    expect(names).toContain("read");
+    expect(names).toContain("bash");
+  });
+
+  it("offers them again where a manifest declares the script", () => {
+    const dir = mkdtempSync(join(tmpdir(), "arterm-avail-"));
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { test: "vitest" } }));
+    const names = availableTools(defaultTools("full"), dir).map((t) => t.name);
+    expect(names).toContain("test");
+    expect(names).toContain("install");
+    // Declared no lint script and has no biome config — still absent.
+    expect(names).not.toContain("lint");
   });
 });

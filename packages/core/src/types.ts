@@ -333,6 +333,27 @@ export interface Tool {
    */
   reservation?(args: Record<string, unknown>, cwd: string): PathReservation | null;
   /**
+   * Whether this tool can do anything at all in this working directory.
+   *
+   * Offering a tool that is certain to fail is worse than not offering it: the
+   * model spends a call to discover that, and the failure text it gets back is
+   * noise it then has to reason around. Seven of the roster's tools read
+   * `package.json` — in a Python or Rust repo every one of them is offered and
+   * every one answers "No `test` script found in package.json".
+   *
+   * Resolved ONCE, when the session builds its roster, and never re-checked.
+   * That is not laziness: the tool list seals the first prompt-cache breakpoint,
+   * so a roster that changes between requests invalidates the whole cached
+   * prefix on every turn — which costs far more than the tools save. The price
+   * is that `pnpm init` (or a `set_working_dir` into a different kind of
+   * project) mid-session does not conjure the tools; a restart does.
+   *
+   * Must be cheap and synchronous: it runs once per tool at startup, on a path
+   * a human is waiting on. Absent means "always available", which is the answer
+   * for every tool that only needs a filesystem.
+   */
+  available?(cwd: string): boolean;
+  /**
    * How dangerous this tool is, independent of its arguments. "destructive" tools
    * are gated even under yolo when `confirmDestructive` is on. Defaults to "safe".
    */

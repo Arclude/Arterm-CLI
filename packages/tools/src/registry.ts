@@ -173,3 +173,27 @@ export {
   taskDoneTool,
   submitVerdictTool,
 };
+
+/**
+ * The roster minus the tools that cannot work in this directory.
+ *
+ * Applied once, where the session builds its tool list — see `Tool.available`
+ * for why this is not re-checked per request (the roster seals the first
+ * prompt-cache breakpoint, and a list that changes between requests invalidates
+ * the whole cached prefix every turn).
+ *
+ * A predicate that throws is treated as AVAILABLE. Detection is a convenience
+ * and a broken detector must not be able to silently remove a working tool from
+ * the roster — the failure would present as a model that has forgotten how to
+ * run the tests, with nothing on screen to say why.
+ */
+export function availableTools(tools: Tool[], cwd: string): Tool[] {
+  return tools.filter((tool) => {
+    if (!tool.available) return true;
+    try {
+      return tool.available(cwd);
+    } catch {
+      return true;
+    }
+  });
+}

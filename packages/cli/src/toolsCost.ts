@@ -11,11 +11,17 @@
  * "what should I cut", and the answer is always at the top.
  */
 
-import { type ToolTier, defaultTools, tierCost, toolSchemaTokens } from "@arterm/tools";
+import {
+  type ToolTier,
+  availableTools,
+  defaultTools,
+  tierCost,
+  toolSchemaTokens,
+} from "@arterm/tools";
 
 const TIERS: ToolTier[] = ["minimal", "standard", "full"];
 
-export function runToolsCost(opts: { tier?: string; json?: boolean }): void {
+export function runToolsCost(opts: { tier?: string; json?: boolean; cwd?: string }): void {
   const requested = TIERS.find((t) => t === opts.tier);
   if (opts.tier && !requested) {
     process.stderr.write(`unknown tier "${opts.tier}" — expected ${TIERS.join(" | ")}\n`);
@@ -68,6 +74,20 @@ export function runToolsCost(opts: { tier?: string; json?: boolean }): void {
       );
     }
     process.stdout.write("\n  set it with `tools.tier` in ~/.arterm/config.json\n");
+  }
+
+  // The tier is what a roster COSTS; this is what a session will actually send
+  // from here. Printed only when the two differ, so the common case stays
+  // quiet — but a directory where seven tools are missing should not have to be
+  // discovered by watching the model fail to call one.
+  const shownTier = requested ?? "full";
+  const cwd = opts.cwd ?? process.cwd();
+  const roster = defaultTools(shownTier);
+  const dropped = roster.length - availableTools(roster, cwd).length;
+  if (dropped > 0) {
+    process.stdout.write(
+      `\n  ${dropped} of these cannot work in ${cwd} and are not offered here\n`,
+    );
   }
 
   // Said plainly rather than left to be discovered: a session adds tools this
