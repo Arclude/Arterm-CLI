@@ -12,6 +12,8 @@ export interface AutonomousFlagOpts {
   maxTokens?: string;
   /** Whole-run USD ceiling (`--max-usd`). */
   maxUsd?: string;
+  /** Roster size for this run (`--tools-tier`), overriding `tools.tier`. */
+  toolsTier?: string;
   /**
    * `--sandbox` / `--no-sandbox`. Undefined means "unstated", which is what lets
    * `--autonomous` supply the boundary without overriding a deliberate choice.
@@ -78,6 +80,7 @@ export function applyAutonomousProfile(
     }
   }
   applyBudgetFlags(config, globals, warn);
+  applyToolsTierFlag(config, globals, warn);
   let hardCap = false;
   if (globals.maxSteps !== undefined) {
     const n = Number(globals.maxSteps);
@@ -201,6 +204,46 @@ function applyBudgetFlags(
       config.budget = { ...config.budget, runUsd: n };
     }
   }
+}
+
+const TOOL_TIERS = new Set(["minimal", "standard", "full"]);
+
+/**
+ * Pick the roster size for THIS run, overriding `tools.tier`.
+ *
+ * The tiers already existed; what was missing is a way to choose one without
+ * writing `~/.arterm/config.json`, and a benchmark container has no config to
+ * write — every sweep therefore measured `standard` whether or not that was the
+ * roster anyone meant to score. The same gap makes an A/B impossible: two runs
+ * that differ only in roster size cannot be expressed at all.
+ *
+ * It matters more than a tuning knob suggests. Every tool's schema is re-sent
+ * on every request, so the roster is a fixed per-turn tax — measured here at
+ * 10,662 tokens of fixed prefix across 59 tools. And the cost is not only
+ * tokens: the published work has each sibling tool acting as a distractor, with
+ * Terminal-Bench's own reference harness exposing exactly ONE tool, so a
+ * smaller roster is plausibly the more accurate one as well as the cheaper one.
+ * Neither claim is worth believing without measuring it on our own runs, which
+ * is what this flag exists to allow.
+ *
+ * An unknown tier warns and keeps the configured roster rather than falling
+ * back to a default: silently scoring a different roster than the one named is
+ * the failure this whole flag exists to end.
+ */
+function applyToolsTierFlag(
+  config: ArtermConfig,
+  globals: AutonomousFlagOpts,
+  warn: (msg: string) => void,
+): void {
+  if (globals.toolsTier === undefined) return;
+  if (!TOOL_TIERS.has(globals.toolsTier)) {
+    warn(
+      `⚠ unknown --tools-tier "${globals.toolsTier}" (expected ${[...TOOL_TIERS].join(" | ")}) — ` +
+        `keeping "${config.tools?.tier ?? "standard"}"\n`,
+    );
+    return;
+  }
+  config.tools = { ...config.tools, tier: globals.toolsTier as "minimal" | "standard" | "full" };
 }
 
 /**

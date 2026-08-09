@@ -184,6 +184,8 @@ interface GlobalOpts {
   maxTokens?: string;
   /** Whole-run USD ceiling. */
   maxUsd?: string;
+  /** Roster size for this run, overriding config `tools.tier`. */
+  toolsTier?: string;
   /** `--sandbox` / `--no-sandbox`; undefined means unstated (see `flags.ts`). */
   sandbox?: boolean;
 }
@@ -868,7 +870,11 @@ async function main(): Promise<void> {
     .option("--no-sandbox", "run shell commands unconfined, even under --autonomous")
     .option("--max-steps <n>", "override autonomy.maxSteps; with eternal mode, a hard bound")
     .option("--max-tokens <n>", "stop the run after this many tokens (whole run, not per turn)")
-    .option("--max-usd <amount>", "stop the run after this much spend, e.g. 2.50");
+    .option("--max-usd <amount>", "stop the run after this much spend, e.g. 2.50")
+    .option(
+      "--tools-tier <tier>",
+      "roster size for this run: minimal | standard | full (overrides tools.tier)",
+    );
 
   program
     .command("chat", { isDefault: true })

@@ -160,6 +160,30 @@ describe("applyAutonomousProfile (--autonomous / --autonomy-mode / --max-steps)"
     expect(bad.hardCap).toBe(false);
     expect(config.autonomy.maxSteps).toBe(4);
   });
+
+  it("--tools-tier picks the roster without writing config", () => {
+    const config = defaultConfig();
+    expect(config.tools.tier).toBe("standard");
+    applyAutonomousProfile(config, { toolsTier: "minimal" }, () => {});
+    expect(config.tools.tier).toBe("minimal");
+  });
+
+  // An unknown tier must not silently fall back to a default: scoring a roster
+  // other than the one named is the exact failure this flag exists to end.
+  it("an unknown --tools-tier keeps the configured roster and says so", () => {
+    const config = defaultConfig();
+    const warnings: string[] = [];
+    applyAutonomousProfile(config, { toolsTier: "tiny" }, (m) => warnings.push(m));
+    expect(config.tools.tier).toBe("standard");
+    expect(warnings.join("")).toContain("unknown --tools-tier");
+  });
+
+  it("leaves the roster alone when the flag is absent", () => {
+    const config = defaultConfig();
+    config.tools = { tier: "full" };
+    applyAutonomousProfile(config, {}, () => {});
+    expect(config.tools.tier).toBe("full");
+  });
 });
 
 describe("armAutonomous (the Shift+Tab runtime profile)", () => {

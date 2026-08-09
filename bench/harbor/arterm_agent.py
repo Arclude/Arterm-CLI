@@ -109,6 +109,21 @@ class ArtermAgent(BaseInstalledAgent):
         CliFlag("autonomy_mode", cli="--autonomy-mode", type="str"),
         CliFlag("max_usd", cli="--max-usd", type="str"),
         CliFlag("max_tokens", cli="--max-tokens", type="int"),
+        # The roster is a fixed per-turn tax — every tool's schema is re-sent on
+        # every request — and the published work says a bigger one is not merely
+        # more expensive but plausibly less accurate, each sibling tool acting as
+        # a distractor. Terminal-Bench's own reference harness exposes exactly
+        # one tool. Left unset the run uses arterm's configured default, so this
+        # changes nothing until a sweep names a tier; `env_fallback` is what
+        # makes the A/B expressible from the same --env-file that carries the
+        # credential, with no change to the harbor invocation between arms.
+        CliFlag(
+            "tools_tier",
+            cli="--tools-tier",
+            type="enum",
+            choices=["minimal", "standard", "full"],
+            env_fallback="ARTERM_BENCH_TOOLS_TIER",
+        ),
     ]
 
     def __init__(self, *args: Any, tarball: str | None = None, **kwargs: Any):
@@ -348,6 +363,12 @@ class ArtermAgent(BaseInstalledAgent):
                 "autonomyMode": self._resolved_flags.get("autonomy_mode"),
                 "maxUsd": self._resolved_flags.get("max_usd"),
                 "maxTokens": self._resolved_flags.get("max_tokens"),
+                # `null` means "arterm's configured default" and is NOT the same
+                # claim as naming a tier — the roster is the one harness setting
+                # whose effect the literature puts on accuracy as well as cost,
+                # so a number produced without saying which roster ran is not
+                # comparable to one produced with a tier pinned.
+                "toolsTier": self._resolved_flags.get("tools_tier"),
                 "autonomous": True,
                 # Named explicitly because their ABSENCE is the claim being made.
                 "verifyCmd": None,
