@@ -1,3 +1,4 @@
+import { writeSync } from "node:fs";
 import type { TokenUsage } from "@arterm/core";
 import type { Session } from "@arterm/tui";
 import { ArtermUserError } from "./errors.js";
@@ -173,6 +174,9 @@ export interface HeadlessGoalResult {
       usd: number;
       limitTokens?: number;
       limitUsd?: number;
+      limitSeconds?: number;
+      /** Wall-clock seconds the run took, reported whether or not it was capped. */
+      elapsedSec: number;
       wrapUpAsked: boolean;
       breached: boolean;
       /** True when some spend had no catalog price: `usd` is a floor, not a total. */
@@ -209,6 +213,85 @@ export async function runHeadlessGoal(
   const log = (line: string): void => {
     if (!opts.json) process.stderr.write(`${line}\n`);
   };
+
+  // Assembling the result is separated from finishing the run because there are
+  // now two ways out: the loop ending, and this process being killed.
+  //
+  // Read the budget counter HERE rather than tracking spend per event: the
+  // budget is the authority on what was spent, and a run with no ceiling has
+  // nothing to report — an all-zero block would read as "it cost nothing".
+  const buildResult = (killedBy?: string): HeadlessGoalResult => {
+    const spend = session.budgetState?.();
+    if (
+      spend &&
+      (spend.limitTokens !== undefined ||
+        spend.limitUsd !== undefined ||
+        spend.limitSeconds !== undefined)
+    ) {
+      guards.budget = {
+        tokens: spend.tokens,
+        usd: spend.usd,
+        ...(spend.limitTokens !== undefined ? { limitTokens: spend.limitTokens } : {}),
+        ...(spend.limitUsd !== undefined ? { limitUsd: spend.limitUsd } : {}),
+        ...(spend.limitSeconds !== undefined ? { limitSeconds: spend.limitSeconds } : {}),
+        elapsedSec: spend.elapsedSec,
+        wrapUpAsked,
+        breached: spend.breached,
+        unpriced: spend.unpriced,
+      };
+    }
+    const stopped = killedBy ?? stoppedReason;
+    return {
+      goal,
+      state: stopped === undefined ? "done" : "stopped",
+      summary: killedBy ?? (summary || stoppedReason || ""),
+      steps,
+      usage: {
+        inputTokens: spend?.inputTokens ?? 0,
+        outputTokens: spend?.outputTokens ?? 0,
+        cacheTokens: spend?.cacheTokens ?? 0,
+        totalTokens: spend?.tokens ?? 0,
+        usd: spend?.usd ?? 0,
+        unpriced: spend?.unpriced ?? false,
+        reported: spend?.reported ?? false,
+      },
+      verdicts,
+      guards,
+    };
+  };
+
+  // A harness that bounds tasks by wall-clock kills the process when the clock
+  // runs out, and until now that took the whole report with it: a real trial
+  // ended with `arterm-result.json` at 0 bytes, so fifteen minutes of paid work
+  // produced no token count, no cost and no partial summary — indistinguishable
+  // from a run that never started. `--max-duration` is the half that stops us
+  // in time; this is the half for when something stops us anyway.
+  //
+  // Deliberately NOT a graceful unwind. SIGTERM is usually followed by SIGKILL
+  // on a short fuse, so trying to end the turn cleanly risks being killed with
+  // nothing written — which is the exact failure being fixed. Emit what is
+  // known, then leave.
+  let emitted = false;
+  const emitAndExit = (signal: NodeJS.Signals, code: number): void => {
+    if (emitted) return;
+    emitted = true;
+    const result = buildResult(`terminated by ${signal} after ${steps} step(s)`);
+    // writeSync, not process.stdout.write: a pipe makes stdout async, and an
+    // async write queued immediately before exit is a write that never lands.
+    try {
+      if (opts.json) writeSync(1, `${JSON.stringify(result, null, 2)}\n`);
+      else if (result.summary) writeSync(1, `${result.summary}\n`);
+    } catch {
+      // A closed or broken stdout must not turn a termination into a crash.
+    }
+    process.exit(code);
+  };
+  // 128+signal is the shell's own convention for "died of this signal", and the
+  // honest code here: the run did not finish, and a 0 would say it did.
+  const onTerm = (): void => emitAndExit("SIGTERM", 143);
+  const onInt = (): void => emitAndExit("SIGINT", 130);
+  process.on("SIGTERM", onTerm);
+  process.on("SIGINT", onInt);
 
   const unsubscribe = session.bus.on((event) => {
     switch (event.type) {
@@ -275,42 +358,14 @@ export async function runHeadlessGoal(
     await session.autonomy.start(goal);
   } finally {
     unsubscribe();
+    // A process-level listener outlives this call. Left behind it would make a
+    // later run — or the TUI, in the same process — emit a second result
+    // document into somebody else's stdout.
+    process.off("SIGTERM", onTerm);
+    process.off("SIGINT", onInt);
   }
 
-  // Read the counter at the end rather than tracking spend per event: the
-  // budget is the authority on what was spent, and a run with no ceiling has
-  // nothing to report — an all-zero block would read as "it cost nothing".
-  const spend = session.budgetState?.();
-  if (spend && (spend.limitTokens !== undefined || spend.limitUsd !== undefined)) {
-    guards.budget = {
-      tokens: spend.tokens,
-      usd: spend.usd,
-      ...(spend.limitTokens !== undefined ? { limitTokens: spend.limitTokens } : {}),
-      ...(spend.limitUsd !== undefined ? { limitUsd: spend.limitUsd } : {}),
-      wrapUpAsked,
-      breached: spend.breached,
-      unpriced: spend.unpriced,
-    };
-  }
-
-  const state = stoppedReason === undefined ? "done" : "stopped";
-  const result: HeadlessGoalResult = {
-    goal,
-    state,
-    summary: summary || stoppedReason || "",
-    steps,
-    usage: {
-      inputTokens: spend?.inputTokens ?? 0,
-      outputTokens: spend?.outputTokens ?? 0,
-      cacheTokens: spend?.cacheTokens ?? 0,
-      totalTokens: spend?.tokens ?? 0,
-      usd: spend?.usd ?? 0,
-      unpriced: spend?.unpriced ?? false,
-      reported: spend?.reported ?? false,
-    },
-    verdicts,
-    guards,
-  };
+  const result = buildResult();
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

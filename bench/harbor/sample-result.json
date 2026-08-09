@@ -4,13 +4,13 @@
   "summary": "This answer came from the fake server.",
   "steps": 1,
   "usage": {
-    "inputTokens": 0,
-    "outputTokens": 0,
+    "inputTokens": 45,
+    "outputTokens": 35,
     "cacheTokens": 0,
-    "totalTokens": 0,
+    "totalTokens": 80,
     "usd": 0,
-    "unpriced": false,
-    "reported": false
+    "unpriced": true,
+    "reported": true
   },
   "verdicts": [
     {
@@ -26,12 +26,13 @@
     "loopCuts": 1,
     "extensions": [],
     "budget": {
-      "tokens": 0,
+      "tokens": 80,
       "usd": 0,
-      "limitUsd": 5,
+      "limitSeconds": 120,
+      "elapsedSec": 0.098,
       "wrapUpAsked": false,
       "breached": false,
-      "unpriced": false
+      "unpriced": true
     }
   }
 }

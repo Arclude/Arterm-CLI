@@ -59,6 +59,10 @@ SDD_E2E_CONTEXT=off node scripts/sdd-context-e2e.mjs   # same run, context disab
 node scripts/sandbox-lifecycle-e2e.mjs     # does a sandboxed run EXIT when it is done?
 ```
 
+```bash
+node scripts/sigterm-report-e2e.mjs        # does a KILLED run still report what it did?
+```
+
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
 fake model, then asserts on the request bodies: the spec and the dependencies'
 output reached the sub-agents. The `SDD_E2E_CONTEXT=off` run reproduces the
@@ -86,6 +90,23 @@ sandbox on, so this was every unattended run — and invisible to the Harbor
 adapter, which passes `--no-sandbox`. `dispose()` refcounts its holders: one
 process can hand the same boundary to several sessions (the TUI's manager does),
 so the LAST session out resets, or closing one would unconfine the rest.
+
+`sigterm-report-e2e.mjs` covers the third process-lifetime failure: being
+KILLED. A harness that bounds tasks by wall-clock kills the process when the
+clock expires, and that took the whole report with it — a real benchmark trial
+ended with `arterm-result.json` at **0 bytes**, so fifteen minutes of paid work
+produced no token count, no cost and no partial summary, a row
+indistinguishable from a run that never started. `runHeadlessGoal` now emits the
+document on SIGTERM/SIGINT and exits 128+signal. Three things it gets right and
+a rewrite could quietly lose: the emit is `writeSync` (a pipe makes stdout
+async, and an async write queued just before `process.exit` never lands); it is
+NOT a graceful unwind, because SIGTERM is usually followed by SIGKILL on a short
+fuse and unwinding risks dying with nothing written; and the listeners are
+removed in the `finally`, or a later run in the same process emits a second
+document into somebody else's stdout. The script signals on the first `▸ step`
+rather than on a timer — a signal delivered before the first request produces an
+empty report that still parses, which is a pass for the wrong reason. Checked
+against the pre-fix binary it scores 1/4, and the failing check is `0B`.
 
 To drive the same faults **by hand** — against the TUI, or while curling the
 status server — start the standalone fake instead:
