@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Agent, readAssessment } from "./agent.js";
 import { RunBudget } from "./budget.js";
+import { DEFAULT_CONTEXT_WINDOW } from "./config.js";
 import type { ContextStrategy } from "./contextStrategy.js";
 import { type AgentEvent, EventBus } from "./eventBus.js";
 import { Container, RunController, Tokens, createPipelines } from "./kernel/index.js";
@@ -1661,5 +1662,95 @@ describe("streamed reasoning", () => {
     expect(agent.history.at(-1)?.content).toBe("done");
     // One provider call: the reasoning did not send the loop round again.
     expect(provider.calls).toBe(1);
+  });
+});
+
+/**
+ * What the agent believes the context window is.
+ *
+ * The belief drives compaction, tool-result clearing and the gauge, and for a
+ * model the catalog does not carry it was silently `context.window`'s default —
+ * 8192, a number sized for a local GGUF. Measured against the live endpoint,
+ * glm-5.2 accepted a 512,013-token prompt, so every GLM session had been
+ * compacting against a window sixty times too small.
+ */
+describe("the context window, known and assumed", () => {
+  /** Reports a fixed prompt-token count, the way every real provider does. */
+  const reporting = (promptTokens: number): StubProvider =>
+    new StubProvider([[{ type: "done", usage: { promptTokens, completionTokens: 1 } }]]);
+
+  const agentWith = (provider: ChatProvider, contextWindow?: number): Agent =>
+    new Agent({
+      provider,
+      model: "not-in-any-catalog",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus: new EventBus(),
+      cwd: process.cwd(),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
+    });
+
+  it("never believes a window smaller than a prompt that was ACCEPTED", async () => {
+    // The absurd state this fixes: 13,275 tokens in flight against a window of
+    // 8,192, i.e. a gauge reading 162% and a threshold already behind us.
+    const agent = agentWith(reporting(13_275), 8_192);
+    expect(agent.effectiveContextWindow()).toBe(8_192);
+    await agent.run("go");
+    expect(agent.effectiveContextWindow()).toBe(13_275);
+  });
+
+  it("raises the floor only — a bigger stated window still wins", async () => {
+    const agent = agentWith(reporting(9_000), 200_000);
+    await agent.run("go");
+    expect(agent.effectiveContextWindow()).toBe(200_000);
+  });
+
+  it("says the window is assumed, and names the number it assumed", () => {
+    const note = agentWith(reporting(10), 8_192).contextWindowNote();
+    expect(note).toContain("not in the model catalog");
+    expect(note).toContain("8,192");
+    expect(note).toContain("context.window");
+  });
+
+  it("adds the proof once it has one", async () => {
+    const agent = agentWith(reporting(50_000), 8_192);
+    await agent.run("go");
+    // A floor it can prove beats an adjective: the note carries the number the
+    // provider already accepted, which is what makes the warning actionable.
+    expect(agent.contextWindowNote()).toContain("50,000");
+  });
+
+  it("stays quiet when nothing was assumed", () => {
+    expect(agentWith(reporting(10)).contextWindowNote()).toBeUndefined();
+  });
+});
+
+/**
+ * The warning must not become wallpaper. A value the user chose is a decision,
+ * and repeating it every session is how a useful line turns into one people
+ * learn to scroll past — so only the untouched default earns it.
+ */
+describe("the assumed-window warning stays rare", () => {
+  const agentWindow = (contextWindow: number): Agent =>
+    new Agent({
+      provider: new StubProvider(),
+      model: "not-in-any-catalog",
+      tools: [],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus: new EventBus(),
+      cwd: process.cwd(),
+      contextWindow,
+    });
+
+  it("warns about the default", () => {
+    expect(agentWindow(DEFAULT_CONTEXT_WINDOW).contextWindowNote()).toBeDefined();
+  });
+
+  it("says nothing once a window has been chosen deliberately", () => {
+    expect(agentWindow(512_000).contextWindowNote()).toBeUndefined();
+    // Including a smaller deliberate one: the user's number is the user's.
+    expect(agentWindow(4_096).contextWindowNote()).toBeUndefined();
   });
 });

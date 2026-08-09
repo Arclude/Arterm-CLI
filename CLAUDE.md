@@ -303,6 +303,38 @@ The accounting was already right before the markers existed: `cache_read` and
 because a read costs ~10% of the input rate and merging them overstates an agent
 loop — which is mostly cache hits — by close to an order of magnitude.
 
+### The context window is a BELIEF, and it was silently wrong
+
+`effectiveContextWindow()` is the catalog's value for the model, falling back to
+`context.window`. That fallback's default is 8192 — written for a local GGUF —
+and models.dev carries **no GLM model at all**, so every GLM session adopted it.
+Measured against the live endpoint: glm-5.2 accepted a **512,013-token prompt**,
+so the belief was off by a factor of sixty, and with it the tool-result clearing
+threshold (60% → 4,915) and the auto-compaction threshold (75% → 6,144). A live
+run showed the arithmetic on screen: `ctx=13,275 / ctxWindow=8,192`, a gauge
+reading 162% full.
+
+Two halves, and neither invents a number:
+
+- **A prompt the provider ANSWERED is proof the window is at least that big**, so
+  `observedPromptMax` is a floor under the belief and `effectiveContextWindow()`
+  never returns less. It is recorded on the `done` chunk, because a rejected
+  request proves nothing. It can only raise the floor, never find the ceiling —
+  and compaction suppresses the very evidence that would raise it further, which
+  is why this is not the whole fix.
+- **`contextWindowNote()` says the window was ASSUMED**, naming the model, the
+  number, and the config key — emitted at boot beside the sandbox warning. It
+  reports rather than corrects: the provider's `/models` does not carry the
+  window, and swapping a wrong small default for a wrong large one trades an
+  expensive habit for a mid-run rejection.
+
+It fires only for the untouched `DEFAULT_CONTEXT_WINDOW`, which is exported for
+exactly that comparison — config merging keeps no provenance, and a warning that
+repeats after the user has decided is one they learn to scroll past. The
+grouping locale is pinned (`en-US`), because the same warning read "8.192" on a
+Turkish host and "8,192" in CI, and a number that changes shape by host is not
+one anyone can quote back.
+
 ### Reasoning is a THIRD chunk kind, and it is never recorded
 
 `ChatChunk` has `thinking` beside `text` because the two have opposite fates.

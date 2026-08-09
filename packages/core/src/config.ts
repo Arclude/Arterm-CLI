@@ -516,6 +516,18 @@ export interface ArtermConfig {
 export const ARTERM_HOME = process.env.ARTERM_HOME ?? join(homedir(), ".arterm");
 const CONFIG_PATH = join(ARTERM_HOME, "config.json");
 
+/**
+ * The context window assumed for a model the catalog does not carry.
+ *
+ * Sized for a local GGUF, which is what it was written for — and silently
+ * applied to hosted models too, so every GLM session compacted against 8k while
+ * the provider was accepting half a million tokens. Exported so the warning can
+ * tell "the user chose this" from "nobody chose anything": a session that set
+ * the value deliberately must not be nagged, and config merging keeps no
+ * provenance to ask.
+ */
+export const DEFAULT_CONTEXT_WINDOW = 8192;
+
 export function defaultConfig(): ArtermConfig {
   return {
     provider: "ollama",
@@ -532,7 +544,12 @@ export function defaultConfig(): ArtermConfig {
     // Persist transcripts by default so --resume/--continue work out of the box;
     // maxSessions bounds disk usage. Set `session.mode: "off"` to disable.
     session: { mode: "jsonl", maxSessions: 100 },
-    context: { strategy: "window", window: 8192, compactAtPercent: 0.75, maxMessages: 40 },
+    context: {
+      strategy: "window",
+      window: DEFAULT_CONTEXT_WINDOW,
+      compactAtPercent: 0.75,
+      maxMessages: 40,
+    },
     budget: { maxIterations: 50 },
     // The allowlist lives here, not in `resolveSandbox`, so that emptying it in
     // config means deny-all rather than "fall back to the defaults".

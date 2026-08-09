@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { RunBudget } from "./budget.js";
+import { DEFAULT_CONTEXT_WINDOW } from "./config.js";
 import type { CompactionResult, ContextStrategy } from "./contextStrategy.js";
 import type { CredentialSettings } from "./credentials.js";
 import type { EventBus } from "./eventBus.js";
@@ -364,6 +365,21 @@ export class Agent {
   private readonly spooled = new Set<string>();
   /** Prompt tokens reported by the provider on the last turn (compaction signal). */
   private lastPromptTokens?: number;
+  /**
+   * The largest prompt this provider has ACCEPTED, in its own reported tokens.
+   *
+   * A floor under the context window, and a measurement rather than a guess: a
+   * request the backend answered is proof the window is at least that big, so a
+   * belief below it is provably false. It exists because the belief can be very
+   * wrong in the small direction — models.dev knows no GLM model, so every GLM
+   * session inherited `context.window`'s 8192 default, a number meant for a
+   * local GGUF. Measured against the live endpoint, glm-5.2 accepted a
+   * 512,013-token prompt: the assumption was off by a factor of sixty.
+   *
+   * It cannot discover the ceiling, only raise the floor, so it does not
+   * replace configuring the real value — see `contextWindowNote()`.
+   */
+  private observedPromptMax = 0;
   /** Tools whose `usageHint` has already been delivered — once per session. */
   private readonly hintedTools = new Set<string>();
   /** Loop-guard state, reset each run(): consecutive same-error streaks per tool. */
@@ -709,7 +725,55 @@ export class Agent {
    * gauge so they track whatever model is selected rather than a static default.
    */
   effectiveContextWindow(): number | undefined {
-    return modelContextWindow(this.opts.model, this.opts.provider.id) ?? this.opts.contextWindow;
+    const stated =
+      modelContextWindow(this.opts.model, this.opts.provider.id) ?? this.opts.contextWindow;
+    // Evidence outranks the stated value, in one direction only. A prompt the
+    // provider ANSWERED is proof the window is at least that large, so a
+    // smaller belief is not a conservative estimate — it is a false one, and it
+    // produced a gauge reading 162% full and a compaction threshold below the
+    // conversation already in flight.
+    if (this.observedPromptMax === 0) return stated;
+    return stated === undefined ? this.observedPromptMax : Math.max(stated, this.observedPromptMax);
+  }
+
+  /**
+   * A warning when the context window is ASSUMED rather than known, or
+   * undefined when there is nothing to say.
+   *
+   * The catalog is the only source that KNOWS, and it covers what models.dev
+   * covers — every GLM model is absent, so a GLM session silently adopted
+   * `context.window`, whose default (8192) exists for local GGUFs. Nothing
+   * announced the substitution, which is the `9aaae14` context-gauge lesson
+   * again: an assumption that reads exactly like a measurement.
+   *
+   * It reports rather than corrects, because the correct number is not
+   * derivable here — the provider's `/models` does not carry it, and inventing
+   * one trades a wrong small window for a wrong large one, where the failure is
+   * a mid-run rejection instead of an expensive habit. `observedPromptMax` is
+   * offered as the floor it can prove.
+   */
+  contextWindowNote(): string | undefined {
+    if (modelContextWindow(this.opts.model, this.opts.provider.id) !== undefined) return undefined;
+    const assumed = this.opts.contextWindow;
+    // Only the untouched default is worth a warning. A value the user set is a
+    // decision, and repeating it every session is how a useful warning becomes
+    // one people learn to scroll past.
+    if (assumed === undefined || assumed !== DEFAULT_CONTEXT_WINDOW) return undefined;
+    // Grouped with an explicit locale: the default follows the machine's, so
+    // the same warning read "8.192" here and "8,192" in CI — a number that
+    // changes shape by host is not a number anyone can quote back.
+    const grouped = (n: number) => n.toLocaleString("en-US");
+    const proven =
+      this.observedPromptMax > assumed
+        ? ` This session has already sent ${grouped(this.observedPromptMax)} tokens successfully, so the real window is at least that.`
+        : "";
+    return (
+      `${this.opts.model} is not in the model catalog, so its context window is assumed to be ` +
+      `${grouped(assumed)} tokens — the default, which is sized for a local model. ` +
+      `Compaction and tool-result clearing fire against that number, so if it is too small the ` +
+      `session compacts far more than it needs to. Set \`context.window\` in the config to the ` +
+      `model's real window.${proven}`
+    );
   }
 
   /** Switch the active backend while preserving conversation history. */
@@ -1195,8 +1259,12 @@ export class Agent {
         this.bus.emit({ type: "tool_call", call: chunk.call });
       } else if (chunk.type === "done" && chunk.usage) {
         usage = chunk.usage;
-        if (chunk.usage.promptTokens !== undefined)
+        if (chunk.usage.promptTokens !== undefined) {
           this.lastPromptTokens = chunk.usage.promptTokens;
+          // Recorded on the `done` chunk, i.e. only for a request the provider
+          // actually answered — a rejected one proves nothing about the window.
+          this.observedPromptMax = Math.max(this.observedPromptMax, chunk.usage.promptTokens);
+        }
         this.bus.emit({ type: "usage", usage: chunk.usage });
       }
     }

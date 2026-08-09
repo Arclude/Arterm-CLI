@@ -425,6 +425,15 @@ export async function buildSession(opts: SessionOptions): Promise<{
     container,
   });
 
+  // An assumed context window reads exactly like a known one, and for a model
+  // the catalog does not carry it is silently the local-GGUF default — which
+  // put every GLM session's compaction threshold at 6,144 tokens against a
+  // window measured at over half a million. Reported at boot, where the sandbox
+  // and telemetry warnings already go, because the cost is invisible otherwise:
+  // it shows up as a session that summarizes itself over and over.
+  const windowNote = agent.contextWindowNote();
+  if (windowNote) process.stderr.write(`⚠ context: ${windowNote}\n`);
+
   // GenAI telemetry (`gen_ai.*` spans + metrics), when an exporter is
   // configured. Installed as pipeline stages rather than read off the bus for
   // the model and tool spans, because duration is the point and bus events
