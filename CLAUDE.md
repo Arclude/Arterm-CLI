@@ -879,17 +879,46 @@ This is the one place in the codebase where the standing gate is deliberately
 absent, and `harness.json` records `verifyCmd: null` so the absence is a stated
 claim rather than an omission.
 
-**`--max-steps` is what keeps a timeout from erasing the work.** `autoExtend`
-buys steps while anything is happening, so under a task timeout the trial is
-killed mid-work and reports nothing; a pinned `--max-steps` is absolute, so the
-run stops and reports partial work instead. 79% of LH-TB failures are timeouts.
+**`--max-duration` is what keeps a timeout from erasing the work — `--max-steps`
+is not, and this section used to claim it was.** The reasoning was that
+`autoExtend` buys steps while anything is happening, so a pinned `--max-steps`
+being absolute would make the run stop and report instead of being killed
+mid-work. It does not follow, and the first real trial disproved it: 200 steps
+were pinned, the cap never bound because the constraint was the CLOCK, the 900s
+task budget expired, and `arterm-result.json` came back 0 bytes. Step duration
+varies by orders of magnitude across models and tasks, so a step cap chosen to
+approximate a time limit is a guess that is wrong for the next model.
+
+Two mechanisms replace that claim, and a sweep wants both. `--max-duration`
+(config `budget.runSeconds`) makes the run stop ITSELF while it can still
+report — set it under the task's `[agent] timeout_sec` with a turn's margin,
+since the ceiling is checked at the request boundary and a tool call in flight
+finishes first. Past `budget.softRatio` the model is told it is in a reserve
+phase: stop starting work, bring the change to a consistent state, report. And
+`runHeadlessGoal` emits its document on SIGTERM for when something kills us
+anyway (`scripts/sigterm-report-e2e.mjs`). 79% of LH-TB failures are timeouts —
+verified, arXiv:2607.08964 §3.4, 518/660 — so this is the failure mode, not an
+edge of it. Worth knowing before over-investing: those timed-out runs average
+only 0.10–0.35 reward, so a rescued timeout is a rescued REPORT, not usually a
+rescued task.
 
 **The container is the boundary, so the adapter passes `--no-sandbox`.** Nesting
 our bubblewrap inside Harbor's container buys nothing and hard-fails wherever
 nested user namespaces are refused. Both that and the task's network policy go
-into `harness.json`, because the same model scores 46% vs 80% across scaffolds
-and a harness change is worth 8–21 pass@1 points — a number without its harness
-is not comparable to anyone else's, or to our own from last week.
+into `harness.json`, because a number without its harness is not comparable to
+anyone else's, or to our own from last week. Harness-Bench ran 6 harnesses over
+a shared model pool and same tasks and got **52.4% to 76.2%, a 23.8pp spread**
+(arXiv:2605.27922); an ablation on TB2 credits **+7.3pp** to harness structure
+alone (arXiv:2604.25850, memory +5.6, tools +3.3, middleware +2.2, and system
+prompt **−2.3** — the one regression).
+
+Two earlier figures here, "46% vs 80% across scaffolds" and "8–21 pass@1
+points", could not be traced to any primary source and have been replaced by the
+two above. They also overstated the case: ALE-Claw fixed the model and varied
+the harness for a 6.0pp spread against 18.0pp the other way, concluding the
+model accounts for ~3× the harness, and found that STRIPPING a harness down
+raised mean score while cutting 44% of input tokens. A harness matters; it does
+not matter more than the model, and more harness is not better harness.
 
 `selfcheck.py` asserts the seam between the CLI's `--print --json` document and
 the adapter that parses it. No type system spans that boundary, so a rename on

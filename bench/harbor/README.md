@@ -112,11 +112,24 @@ grader pass" — reward hacking, and Terminal-Bench trajectories are published a
 read. The adapter has no flag to set one, and `harness.json` records
 `verifyCmd: null` so the absence is a stated claim rather than an omission.
 
-**2. `--max-steps` must be a hard cap.** `autonomy.autoExtend` keeps buying
-steps while anything is happening, so under a task timeout the trial gets killed
-mid-work and reports nothing. An explicitly pinned `--max-steps` is absolute in
-Arterm (never extended), which makes the run end by *reporting partial work*
-instead. Given 79% of LH-TB failures are timeouts, this is most of the gap.
+**2. The run must bound its own TIME, not just its steps.** This item used to
+say a pinned `--max-steps` was enough — `autonomy.autoExtend` keeps buying steps
+while anything happens, and an explicit cap is never extended, so the run would
+end by reporting partial work instead of being killed. The first real trial
+disproved it: 200 steps were pinned, the cap never bound because the constraint
+was the clock, the task's 900s agent budget expired, and `arterm-result.json`
+came back 0 bytes — no tokens, no cost, no partial summary. Step duration is not
+a proxy for wall-clock; it varies by orders of magnitude across models.
+
+Set `--max-duration` (or `ARTERM_BENCH_MAX_DURATION`) BELOW the task's
+`[agent] timeout_sec`, leaving a turn's margin: the ceiling is checked at the
+request boundary, so a tool call in flight finishes first — measured overshoot
+of 2s on a 45s budget. Past `budget.softRatio` the model is told it is in a
+reserve phase and stops starting new work. Keep `--max-steps` as well; it still
+bounds a run that spins cheaply. And if the harness kills us anyway, the result
+document is now written on SIGTERM. 79% of LH-TB failures are timeouts
+(arXiv:2607.08964 §3.4, 518/660) — though those runs average only 0.10–0.35
+reward, so what a rescued timeout mostly rescues is the REPORT.
 
 **3. The network policy is part of the score.** It belongs to the Harbor task
 config, not to us, and must be reported next to any number. The adapter also
@@ -126,12 +139,22 @@ are refused. That choice is recorded too.
 
 ## harness.json
 
-The same model scores **46% vs 80%** depending on scaffold, and a harness change
-moves pass@1 by **8–21 points**. A number without its harness is not comparable
-to anyone else's, including our own from last week. The adapter writes
-`harness.json` into the trial's agent log dir with the model, agent version,
-step cap, autonomy mode, budget ceilings, permission mode, and the two absences
-above.
+A number without its harness is not comparable to anyone else's, including our
+own from last week. Harness-Bench ran 6 harnesses over a shared model pool and
+the same tasks and measured **52.4% to 76.2% — a 23.8pp spread**
+(arXiv:2605.27922); an ablation on TB2 credits **+7.3pp** to harness structure
+(arXiv:2604.25850). The adapter writes `harness.json` into the trial's agent log
+dir with the model, agent version, step cap, time budget, roster tier, autonomy
+mode, budget ceilings, permission mode, and the two absences above.
+
+Two figures previously quoted here — "46% vs 80%" and "8–21 pass@1 points" —
+could not be traced to a primary source and are gone. Read the replacements
+against their counterweight: ALE-Claw fixed the model and varied the harness for
+a 6.0pp spread, against 18.0pp for varying the model under a fixed harness, and
+found that STRIPPING a harness down raised mean score (0.485 vs 0.464) while
+cutting 44% of input tokens and 60% of wall-clock. More harness is not better
+harness — which is also why `toolsTier` is recorded, and why the smaller roster
+is worth measuring rather than assumed to be a handicap.
 
 `k` is not knowable from inside an agent — it belongs to the `harbor run -k`
 invocation — so set `ARTERM_BENCH_K` to have it recorded. It is written as
