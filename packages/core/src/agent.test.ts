@@ -1796,7 +1796,7 @@ describe("Agent.note — the tool-less turn that stays in history", () => {
       async listModels() {
         return [];
       }
-      // eslint-disable-next-line require-yield
+      // biome-ignore lint/correctness/useYield: a provider that dies before its first chunk is the case under test
       async *chat(): AsyncIterable<ChatChunk> {
         throw new Error("ECONNREFUSED");
       }
