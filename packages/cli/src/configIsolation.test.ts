@@ -122,6 +122,27 @@ describe("nothing derives an Arterm path from the OS home", () => {
  * all — a blanket rule, deliberately, because an exception list is a place for
  * the next package to be forgotten.
  */
+/**
+ * …and the ROOT is the place a per-package rule cannot reach.
+ *
+ * Every config above is loaded only when vitest runs INSIDE that package.
+ * `pnpm exec vitest run` from the workspace root loads none of them, resolves
+ * test files across all packages, and prints the same green summary — while
+ * writing wherever the unredirected `ARTERM_HOME` points. It wiped a real
+ * `~/.arterm/config.json` to `{}`: correct delta-persist behaviour for a
+ * session built from `defaultConfig()`, performed in the developer's own home.
+ *
+ * So the root carries a config too, and this asserts it — the fourth instance
+ * of the same mistake, fixed as a default rather than as a thing to remember.
+ */
+describe("the workspace root redirects ARTERM_HOME too", () => {
+  it("has a root vitest config, so a root-run cannot write the real home", () => {
+    const config = readFileSync(join(REPO_ROOT, "vitest.config.ts"), "utf8");
+    expect(config).toContain("ARTERM_HOME");
+    expect(config).toContain("tmpdir");
+  });
+});
+
 describe("every package that runs tests redirects ARTERM_HOME", () => {
   it("sets it in each package's own vitest config", () => {
     const missing: string[] = [];

@@ -819,6 +819,9 @@ export function App({
   const [leaderCost, setLeaderCost] = useState(0);
   // The model's work list, mirrored from the bus (see core/src/todo.ts).
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  // Ids of the finished list already announced, so a model that re-writes the
+  // same all-done list (it does) does not print a second receipt.
+  const completedTodosRef = useRef<string | null>(null);
   // /context: the panel, its measured composition, and the two things that have
   // already reshaped the window this session. Compactions and cleared results
   // are counted here because the events announcing them scroll away, and "why
@@ -1428,11 +1431,38 @@ export function App({
             });
           }
           break;
-        case "todo_changed":
+        case "todo_changed": {
           // The list replaces itself wholesale — there is no incremental form,
           // so the surface stores what it was handed rather than accumulating.
-          setTodos(event.items);
+          //
+          // A list whose every item is `done` is the same fact as the empty
+          // list the store's contract says "clears the display": nothing is
+          // left. But the model finishes by marking items done, not by sending
+          // `[]`, so the strip kept three green rows and a `5/5` pinned above
+          // the status bar for the rest of the session — chrome outliving its
+          // subject, which reads as a UI that is stuck.
+          //
+          // The completion is not thrown away, it MOVES: a one-line receipt
+          // goes to the transcript, which is the durable surface and scrolls
+          // with the work it describes. Announced once per list — a model that
+          // re-sends the same finished list is not finishing twice.
+          const complete = event.items.length > 0 && event.items.every((i) => i.status === "done");
+          if (!complete) {
+            completedTodosRef.current = null;
+            setTodos(event.items);
+            break;
+          }
+          const signature = event.items.map((i) => i.id).join(" ");
+          if (completedTodosRef.current !== signature) {
+            completedTodosRef.current = signature;
+            push({
+              kind: "system",
+              text: `✓ todo list complete — ${event.items.length}/${event.items.length}`,
+            });
+          }
+          setTodos([]);
           break;
+        }
         case "goal_set":
           setAutoState("running");
           setGoalText(event.goal);
