@@ -208,5 +208,10 @@ Regenerate the sample from a real run (no API key needed) when the CLI's
 ```bash
 node scripts/fault-server.mjs --mode ok --tool task_done --port 8151 &
 arterm --print --json --goal "say hi" --autonomous --no-sandbox --max-steps 2 \
-  > bench/harbor/sample-result.json
+  --max-duration 120 > bench/harbor/sample-result.json
 ```
+
+`--max-duration` is what puts a `guards.budget` block in the sample, and the
+command without it produced a document one block smaller than the one checked
+in — so the recipe did not reproduce its own artifact, and the difference read
+as a schema change the next time anyone diffed them.

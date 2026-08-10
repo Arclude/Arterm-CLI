@@ -141,8 +141,17 @@ export interface HeadlessGoalResult {
     by?: string;
     scope?: string;
     id?: string;
-    /** True when no verdict could be obtained and the claim passed by default. */
-    skipped?: boolean;
+    /**
+     * True when no verdict could be obtained and the claim passed by default.
+     *
+     * Always present, never omitted when false. The judge fails OPEN — an
+     * unreachable reviewer accepts the claim — so this single bit is the whole
+     * difference between "verified" and "nobody checked", and an absent key
+     * spells that difference the same way a broken plumbing does. A reader
+     * cannot assert on a key that is missing for two different reasons, which
+     * is why `selfcheck.py` could check `usage.reported` and not this.
+     */
+    skipped: boolean;
     note?: string;
     mustFix?: string[];
   }[];
@@ -312,7 +321,10 @@ export async function runHeadlessGoal(
           ...(event.by ? { by: event.by } : {}),
           ...(event.scope ? { scope: event.scope } : {}),
           ...(event.id ? { id: event.id } : {}),
-          ...(event.skipped ? { skipped: true } : {}),
+          // Stated either way — see the field's note. The EVENT may omit it
+          // when false, because an event is a delta; the document is what a
+          // harness reads back, and there a missing key is an answer.
+          skipped: event.skipped === true,
           ...(event.note ? { note: event.note } : {}),
           ...(event.mustFix?.length ? { mustFix: event.mustFix } : {}),
         });

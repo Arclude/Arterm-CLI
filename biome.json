@@ -2,7 +2,16 @@
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "ignore": ["dist", "node_modules", "**/*.d.ts", ".next", "web/.next", "web/out", ".venv-bench"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      "**/*.d.ts",
+      ".next",
+      "web/.next",
+      "web/out",
+      ".venv-bench",
+      ".venv"
+    ]
   },
   "formatter": {
     "enabled": true,

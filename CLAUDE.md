@@ -1048,6 +1048,20 @@ there is something to print, because a caveat repeated on every line is one
 nobody reads. The doubt accumulates per file and is never cleared by a later
 clean write.
 
+**And the SUMMARY carries both halves, because the summary is what the judge is
+handed.** For a while it carried neither: `ChronicleFileSummary` omitted
+`concurrent` when empty and never had a field for `observedBy` at all, so the
+record on disk knew things the judge was never told. There are three states and
+an omitted key spells two — a tool declaring its own write (nobody asked what
+else was running), a watcher that asked and found none, and a watcher that found
+something — and the middle one is only worth measuring because it can be told
+from the first. Hence `concurrent: string[]` required and `observed: boolean`
+beside it, OR-accumulated for the same reason the list is: a file written
+cleanly once and noticed moving once is still one no tool fully accounted for.
+The marker `(observed — no tool declared this write)` rides on the lines that
+earned it and explains itself there, rather than adding a sentence to every
+judge prompt including the ones with nothing to explain.
+
 `arterm chronicle verify` exits 1 on a broken chain, so a script can gate on it.
 Nothing prunes `$ARTERM_HOME/chronicle` yet.
 
@@ -1117,6 +1131,16 @@ That is also why `HeadlessGoalResult.usage` is unconditional while
 distinguishes "the backend reported nothing" from "the run cost nothing" —
 without it a local model and a broken meter produce the same row, which is the
 `9aaae14` context-gauge lesson in a second place.
+
+**`verdicts[].skipped` is the third field held to that rule**, and the one where
+it costs most to break. The judge fails OPEN by design, so a skipped verdict is
+a PASS — meaning that single bit is the whole difference between "verified" and
+"nobody checked". Written only on its true branch, it said that in the same
+shape a run with the verify layer unwired would: absent. It is now stated either
+way, which is also what makes it checkable — `selfcheck.py` could assert
+`usage.reported` and could not assert this, because no reader can tell a missing
+key from a false one. The bus EVENT still omits it when false; an event is a
+delta, and the document is what a harness reads back.
 
 ## Permissions: one ladder, three callers
 

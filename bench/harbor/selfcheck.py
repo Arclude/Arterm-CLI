@@ -51,6 +51,14 @@ def main(argv: list[str]) -> int:
     for key in ("inputTokens", "outputTokens", "cacheTokens", "usd", "unpriced", "reported"):
         if key not in (result.get("usage") or {}):
             failures.append(f"result.usage is missing '{key}'")
+    # Every verdict must SAY whether it was skipped. The judge fails open, so a
+    # skipped verdict passes — and a trajectory that omits the key when false
+    # reads the same as one written by a run whose verify layer never ran. This
+    # check is only possible because the field is required: an absent key cannot
+    # be told from a false one, which is why it is not optional in the document.
+    for i, verdict in enumerate(result.get("verdicts") or []):
+        if "skipped" not in verdict:
+            failures.append(f"result.verdicts[{i}] is missing 'skipped'")
 
     # A missing field is THE failure to report. Running the checks below on a
     # document already known to be malformed replaces that message with a

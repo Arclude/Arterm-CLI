@@ -190,16 +190,30 @@ export interface ChronicleFileSummary {
   /** How many tool calls touched it. */
   writes: number;
   /**
+   * True when at least one of this file's changes was NOTICED rather than
+   * DECLARED — the workspace watcher digesting the tree around a shell call,
+   * where a tool reporting its own write would have said so itself.
+   *
+   * The record carries this as `attributes.observedBy`, and it used to stop
+   * there: the summary aggregated both provenances into one line, so the judge
+   * read "the tool says it wrote this" and "a file moved around this call" as
+   * the same claim. It is the weaker one that needs saying, and only here can
+   * it be said, because the summary is what the judge is handed.
+   *
+   * Accumulated, never cleared, for {@link concurrent}'s reason.
+   */
+  observed: boolean;
+  /**
    * Other writers that were alive when this file was measured as changing.
    *
-   * Only ever set by the workspace watcher, and only when something else really
-   * was running — a tool that declares its own write needs no such caveat,
-   * because it is reporting what it did rather than what it noticed. Carried up
-   * to the summary so the judge sees it beside the change: "this file moved
-   * during the call" and "something else could have moved it" are two different
-   * pieces of evidence and belong on one line.
+   * Only the workspace watcher can name any, and an empty list is the ordinary
+   * answer — so it is stated rather than omitted. Absent, it said two things at
+   * once: "a tool declared this write, nobody asked" and "the watcher asked and
+   * found none". Those are different evidence, and the second is only worth
+   * having because it can be told apart from the first. Read it beside
+   * {@link observed}, which says which question was asked at all.
    */
-  concurrent?: string[];
+  concurrent: string[];
 }
 
 /** Seals records into a chain and hands them to a sink. One per session. */
@@ -258,6 +272,7 @@ export class Chronicle {
     const seen = this.files.get(change.path);
     const by = record.scope.agentId;
     const alongside = concurrentOf(record);
+    const noticed = observedOf(record);
     if (!seen) {
       this.files.set(change.path, {
         path: change.path,
@@ -266,13 +281,15 @@ export class Chronicle {
         ...(change.contentHashAfter ? { contentHashAfter: change.contentHashAfter } : {}),
         by: by ? [by] : [],
         writes: 1,
-        ...(alongside.length > 0 ? { concurrent: alongside } : {}),
+        observed: noticed,
+        concurrent: [...alongside],
       });
       return;
     }
     seen.added += change.added;
     seen.removed += change.removed;
     seen.writes += 1;
+    seen.observed ||= noticed;
     // The LAST digest wins: the question is what the file is now, not what it
     // passed through on the way. `undefined` overwrites too — a file deleted
     // after being written is deleted, however much was added first.
@@ -281,7 +298,6 @@ export class Chronicle {
     // Accumulated, never replaced: a file touched twice, once cleanly and once
     // beside a running daemon, still has the doubt on it.
     for (const name of alongside) {
-      seen.concurrent = seen.concurrent ?? [];
       if (!seen.concurrent.includes(name)) seen.concurrent.push(name);
     }
   }
@@ -301,6 +317,17 @@ export class Chronicle {
 function concurrentOf(record: ChronicleRecord): string[] {
   const raw = record.attributes?.concurrent;
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+}
+
+/**
+ * Whether a record's change was noticed rather than declared.
+ *
+ * Keyed on the attribute being PRESENT, not on it reading `"git"`: a second
+ * watcher would carry its own name, and every one of them is a change nobody
+ * claimed. A tool declaring its own write sets no such attribute at all.
+ */
+function observedOf(record: ChronicleRecord): boolean {
+  return typeof record.attributes?.observedBy === "string";
 }
 
 /** SHA-256 of a file's bytes, or undefined when it cannot be read. */

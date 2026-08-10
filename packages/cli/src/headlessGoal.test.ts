@@ -42,10 +42,30 @@ describe("runHeadlessGoal", () => {
         pass: false,
         by: "command",
         scope: "goal",
+        // Stated on a verdict that was genuinely reached, not only on one that
+        // was skipped: that is the whole point of the field being required.
+        skipped: false,
         note: "exit 3",
         mustFix: ["make it exit 0"],
       },
     ]);
+  });
+
+  it("says a verdict was REACHED, not merely that it was not skipped", async () => {
+    const bus = new EventBus();
+    const session = fakeSession(bus, (b) => {
+      b.emit({ type: "autonomy_verify", pass: true, by: "judge" });
+      b.emit({ type: "autonomy_verify", pass: true, by: "judge", skipped: true });
+      b.emit({ type: "autonomy_done", summary: "shipped" });
+    });
+
+    const res = await runHeadlessGoal(session, "ship it", { json: true });
+
+    // Both verdicts PASS, and a reader of the document must still be able to
+    // tell the reviewed one from the one nobody reviewed. Omitted when false,
+    // the second row is what a run with the whole verify layer unwired emits.
+    expect(res.verdicts.map((v) => v.skipped)).toEqual([false, true]);
+    for (const v of res.verdicts) expect(v).toHaveProperty("skipped");
   });
 
   it("records an unobtainable verdict as skipped, not as a pass", async () => {

@@ -278,6 +278,25 @@ describe("the evidence block carries what else was running", () => {
     expect(block).not.toContain("also running");
   });
 
+  it("tells a NOTICED change from a DECLARED one", () => {
+    // The record has carried `observedBy` since the watcher existed, and the
+    // summary dropped it — so a tool's account of its own write and a file that
+    // merely moved around a shell call reached the judge as the same line. The
+    // marker explains itself where it appears, rather than adding a sentence to
+    // every judge prompt including the ones with nothing to explain.
+    const declared = new Chronicle({ write: () => {} });
+    declared.append({
+      eventType: "tool.executed",
+      outcome: "success",
+      scope: {},
+      toolName: "write",
+      change: { path: "src/a.ts", added: 3, removed: 1, contentHashAfter: "abc123def456789" },
+    });
+
+    expect(evidenceBlock(withObserved([]))).toContain("observed — no tool declared this write");
+    expect(evidenceBlock(declared)).not.toContain("observed —");
+  });
+
   it("keeps the doubt once a file has earned it", () => {
     // Two writes, one clean and one beside a daemon: the file is still one the
     // ledger cannot fully vouch for.

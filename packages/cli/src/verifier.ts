@@ -97,9 +97,14 @@ export function evidenceBlock(
     // a shell call, never that the call moved it, and the honest way to hand
     // that to a judge is to name the alternative rather than to footnote every
     // line equally — most lines have no alternative to name.
-    const alongside =
-      f.concurrent && f.concurrent.length > 0 ? `  [also running: ${f.concurrent.join(", ")}]` : "";
-    return `- ${f.path}  ${size}  ${digest}${writes}${who}${alongside}`;
+    const alongside = f.concurrent.length > 0 ? `  [also running: ${f.concurrent.join(", ")}]` : "";
+    // The provenance rides on the lines that earned it, and explains itself
+    // there rather than as a sentence in every judge prompt. A tool reporting
+    // its own write is a claim by something that knew what it did; a watcher
+    // digesting the tree around a shell call is not, and the two used to render
+    // identically. Only the weaker one is marked — most lines are the other.
+    const noticed = f.observed ? "  (observed — no tool declared this write)" : "";
+    return `- ${f.path}  ${size}  ${digest}${writes}${who}${noticed}${alongside}`;
   });
   if (files.length > shown.length) {
     lines.push(`- …and ${files.length - shown.length} more file(s) not listed`);

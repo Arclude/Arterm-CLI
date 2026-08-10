@@ -120,6 +120,78 @@ describe("the chain", () => {
   });
 });
 
+/**
+ * The summary is what the judge is handed, so a distinction that lives only on
+ * the record is a distinction the judge does not have. There are THREE states
+ * here and an omitted key can only spell two: a tool declaring its own write
+ * (nobody asked what else was running), a watcher that asked and found none,
+ * and a watcher that found something. The middle one is only worth measuring
+ * because it can be told from the first.
+ */
+describe("the file summary's provenance", () => {
+  const summarize = (input: Parameters<Chronicle["append"]>[0]) => {
+    const chronicle = new Chronicle({ write: () => {} });
+    chronicle.append(input);
+    return chronicle.changed()[0];
+  };
+  const change = { path: "a.ts", added: 1, removed: 0 };
+
+  it("marks a DECLARED write as neither observed nor accompanied", () => {
+    const summary = summarize({
+      eventType: "tool.executed",
+      outcome: "success",
+      scope: {},
+      toolName: "write",
+      change,
+    });
+    expect(summary?.observed).toBe(false);
+    // Stated, not omitted: the question was not asked, and this row says so
+    // with the same shape the row below uses to say it was asked and answered.
+    expect(summary?.concurrent).toEqual([]);
+  });
+
+  it("marks an OBSERVED write with nothing else running", () => {
+    const summary = summarize({
+      eventType: "file.observed",
+      outcome: "success",
+      scope: {},
+      toolName: "bash",
+      change,
+      attributes: { observedBy: "git", concurrent: [] },
+    });
+    expect(summary?.observed).toBe(true);
+    expect(summary?.concurrent).toEqual([]);
+  });
+
+  it("carries the alternatives when a watcher found some", () => {
+    const summary = summarize({
+      eventType: "file.observed",
+      outcome: "success",
+      scope: {},
+      toolName: "bash",
+      change,
+      attributes: { observedBy: "git", concurrent: ["vite dev"] },
+    });
+    expect(summary?.observed).toBe(true);
+    expect(summary?.concurrent).toEqual(["vite dev"]);
+  });
+
+  it("keeps the weaker provenance once a file has earned it", () => {
+    // Same rule the concurrent list follows: a file written cleanly once and
+    // noticed moving once is still one no tool fully accounted for.
+    const chronicle = new Chronicle({ write: () => {} });
+    chronicle.append({
+      eventType: "file.observed",
+      outcome: "success",
+      scope: {},
+      change,
+      attributes: { observedBy: "git", concurrent: [] },
+    });
+    chronicle.append({ eventType: "tool.executed", outcome: "success", scope: {}, change });
+    expect(chronicle.changed()[0]?.observed).toBe(true);
+  });
+});
+
 describe("the toolCall stage", () => {
   let dir: string;
   beforeEach(async () => {
