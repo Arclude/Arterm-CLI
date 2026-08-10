@@ -118,15 +118,20 @@ export function MultiApp({
     // but not ?1006h, downgrading wheel reports to X10 bytes the SGR parser
     // can't read (dead wheel). Every such rebind ends in a SIGWINCH kick, so
     // re-asserting here heals it; re-sending the modes is idempotent.
+    // ?25l rides along in both branches: the same renderer-pool reset that
+    // downgrades the wheel also replays a snapshot with the cursor SHOWN, and a
+    // hardware cursor over a UI that draws its own is a second cursor.
     const assertModes = mouseCapture
       ? (): void => {
-          rawStdout.write(`${ESC}[?1002l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`);
+          rawStdout.write(
+            `${ESC}[?25l${ESC}[?1002l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`,
+          );
         }
       : (): void => {
           // Clear any reporting a crashed program left behind; arrows carry the
           // wheel in fullscreen (alternate scroll), nothing in classic.
           rawStdout.write(
-            `${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
+            `${ESC}[?25l${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
           );
         };
     assertModes();

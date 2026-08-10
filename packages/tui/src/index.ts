@@ -35,6 +35,11 @@ export async function runTui(
   // window bottom.
   const fullscreen = tty && (session.config.tui?.fullscreen ?? true);
   const ESC = String.fromCharCode(27);
+  // The HARDWARE cursor goes dark for the whole run: the composer draws its own
+  // (`▏`), so the real one is always a second cursor sitting wherever the last
+  // write left it — observed parked in the void below the session panel. Hidden
+  // in classic mode too, which draws the same fake glyph.
+  if (tty) process.stdout.write(`${ESC}[?25l`);
   if (fullscreen) {
     process.stdout.write(`${ESC}[?1049h${ESC}[2J${ESC}[H`);
   } else if (tty) {
@@ -57,6 +62,10 @@ export async function runTui(
     );
     await instance.waitUntilExit();
   } finally {
+    // Restore order matters: show the cursor while still ON the alt screen,
+    // then leave it — the primary buffer must come back with a visible cursor
+    // whatever state the alt screen was in.
+    if (tty) process.stdout.write(`${ESC}[?25h`);
     if (fullscreen) process.stdout.write(`${ESC}[?1049l`);
   }
 }

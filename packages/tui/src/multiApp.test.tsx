@@ -277,6 +277,31 @@ describe("MultiApp (multi-session host)", () => {
     instance.unmount();
   });
 
+  it("hides the hardware cursor with the mode asserts, and re-hides on resize", async () => {
+    // The composer draws its own cursor (\u2758-style bar), so the REAL one is
+    // always a second cursor parked wherever the last write ended — observed
+    // below the session panel. It rides assertModes for the healing the mouse
+    // modes already get: the host pool's snapshot replay restores ?25h.
+    const bus = new EventBus();
+    const session = fakeSession(bus, "A");
+    session.config.tui = { fullscreen: true, mouse: false };
+    const instance = render(
+      createElement(MultiApp, { initial: { id: "sess-a", session }, fullscreen: true }),
+    );
+    const hides = (): number => instance.frames.join("").split(`${ESC}[?25l`).length - 1;
+    await waitFor(
+      () => String(hides()),
+      (n) => Number(n) >= 1,
+    );
+    const before = hides();
+    instance.stdout.emit("resize");
+    await waitFor(
+      () => String(hides()),
+      (n) => Number(n) > before,
+    );
+    instance.unmount();
+  });
+
   it("re-asserts SGR mouse modes on resize (heals a host-emulator reset)", async () => {
     const bus = new EventBus();
     // The rebind-heal scenario is about CAPTURE mode (?1006h downgraded to X10
