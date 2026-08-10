@@ -25,17 +25,6 @@ export type InputAction =
   | { type: "noop" };
 
 /**
- * Deletes the word immediately before the cursor (readline-style Ctrl+W): drops
- * any trailing whitespace, then the run of non-whitespace before it. The space
- * separating the previous word is kept, matching shell behaviour.
- */
-export function deleteWordBackward(value: string): string {
-  const trimmed = value.replace(/\s+$/, "");
-  const wordStart = trimmed.search(/\S+$/);
-  return wordStart === -1 ? "" : trimmed.slice(0, wordStart);
-}
-
-/**
  * A trailing `[Image #1]` is one thing, so one backspace removes it.
  *
  * It is the ONE atom in the prompt the user did not type character by
@@ -45,6 +34,22 @@ export function deleteWordBackward(value: string): string {
  * attached while the line said nothing about it.
  */
 const TRAILING_IMAGE_TOKEN = /\s?\[Image #\d+\]$/;
+
+/**
+ * Deletes the word immediately before the cursor (readline-style Ctrl+W): drops
+ * any trailing whitespace, then the run of non-whitespace before it. The space
+ * separating the previous word is kept, matching shell behaviour. A trailing
+ * `[Image #N]` counts as ONE word — it is one attachment, and eating half of
+ * it would leave a token that matches nothing while the image stays attached
+ * (the same argument as `deleteBackward`'s).
+ */
+export function deleteWordBackward(value: string): string {
+  const trimmed = value.replace(/\s+$/, "");
+  const token = TRAILING_IMAGE_TOKEN.exec(trimmed);
+  if (token) return trimmed.slice(0, token.index);
+  const wordStart = trimmed.search(/\S+$/);
+  return wordStart === -1 ? "" : trimmed.slice(0, wordStart);
+}
 
 function deleteBackward(value: string): string {
   const whole = TRAILING_IMAGE_TOKEN.exec(value);
@@ -113,8 +118,21 @@ export function reduceInput(value: string, input: string, key: KeyLike): InputAc
   if (key.return && key.meta) return { type: "change", value: `${value}\n` };
   if (key.return) return { type: "submit", value };
 
-  // Word/line deletion (checked before the plain-backspace and ctrl-swallow rules).
-  if (key.ctrl && (input === "w" || key.backspace || key.delete)) {
+  // Word/line deletion (checked before the plain-backspace and ctrl-swallow
+  // rules). Three spellings for one intent, because terminals disagree:
+  //  - Ctrl+W arrives as ctrl+"w" everywhere.
+  //  - Ctrl+Backspace arrives as a BARE \x08 in most emulators — ink's parser
+  //    labels it "backspace or ctrl+h" with NO ctrl bit — while the plain
+  //    Backspace key sends \x7f (ink's `delete`). So an unmodified
+  //    `key.backspace` IS the ctrl chord on a modern terminal; a terminal
+  //    with `stty erase ^H` loses per-char backspace here, which is the
+  //    trade every readline-family tool makes.
+  //  - Alt/Option+Backspace arrives as ESC+\x7f: `delete` with meta.
+  if (
+    (key.ctrl && (input === "w" || key.backspace || key.delete)) ||
+    (key.backspace && !key.meta) ||
+    (key.meta && (key.backspace || key.delete))
+  ) {
     return { type: "change", value: deleteWordBackward(value) };
   }
   if (key.ctrl && input === "u") return { type: "change", value: "" };

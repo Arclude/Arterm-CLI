@@ -100,7 +100,9 @@ describe("reduceInput", () => {
   });
 
   it("deletes one char on Backspace", () => {
-    expect(reduceInput("abc", "", { backspace: true })).toEqual({ type: "change", value: "ab" });
+    // The plain key is \x7f on a modern terminal — ink's `delete`. A bare
+    // \x08 (`backspace`) is the Ctrl chord and deletes a word; see below.
+    expect(reduceInput("abc", "", { delete: true })).toEqual({ type: "change", value: "ab" });
   });
 
   it("deletes a whole trailing [Image #N] on one Backspace", () => {
@@ -120,7 +122,7 @@ describe("reduceInput", () => {
   });
 
   it("still deletes one char when the line merely mentions an image elsewhere", () => {
-    expect(reduceInput("[Image #1] and more", "", { backspace: true })).toEqual({
+    expect(reduceInput("[Image #1] and more", "", { delete: true })).toEqual({
       type: "change",
       value: "[Image #1] and mor",
     });
@@ -243,5 +245,36 @@ describe("input history", () => {
   it("Up on empty history is a no-op that keeps the current text", () => {
     const { value } = historyUp(emptyHistory(), "typing");
     expect(value).toBe("typing");
+  });
+});
+
+describe("word deletion, as terminals actually spell it", () => {
+  // Ink's parser labels a bare \x08 "backspace or ctrl+h" with NO ctrl bit —
+  // that byte IS Ctrl+Backspace on a modern emulator, while the plain key
+  // sends \x7f (ink's `delete`). The user-visible bug: Ctrl+Backspace deleted
+  // one character, indistinguishable from the unmodified key.
+  it("a bare \\x08 (Ctrl+Backspace) deletes the previous word", () => {
+    const out = reduceInput("foo bar baz", "", { backspace: true });
+    expect(out).toEqual({ type: "change", value: "foo bar " });
+  });
+
+  it("plain Backspace (\\x7f) still deletes one character", () => {
+    const out = reduceInput("foo bar", "", { delete: true });
+    expect(out).toEqual({ type: "change", value: "foo ba" });
+  });
+
+  it("Alt+Backspace (ESC \\x7f — delete with meta) deletes the word", () => {
+    const out = reduceInput("foo bar", "", { delete: true, meta: true });
+    expect(out).toEqual({ type: "change", value: "foo " });
+  });
+
+  it("Ctrl+W keeps working", () => {
+    const out = reduceInput("foo bar", "w", { ctrl: true });
+    expect(out).toEqual({ type: "change", value: "foo " });
+  });
+
+  it("a trailing [Image #N] is one word — never half a token", () => {
+    const out = reduceInput("compare [Image #1]", "", { backspace: true });
+    expect(out).toEqual({ type: "change", value: "compare" });
   });
 });
