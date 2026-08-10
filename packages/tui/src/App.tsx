@@ -1175,6 +1175,15 @@ export function App({
     if (session.memoryBanner) {
       push({ kind: "system", text: session.memoryBanner });
     }
+    // The boundary SAYS it is there. It became the default for attended sessions
+    // too, and until this line the only way to discover it was a shell command
+    // failing to write one directory over — which reads as a broken tool, not as
+    // a control doing its job. The boot warnings it joins (`⚠ context:`,
+    // `⚠ sandbox unavailable`) go to stderr, which fullscreen then paints over;
+    // the transcript is where an attended user can still read it.
+    if (session.sandboxDescription) {
+      push({ kind: "system", text: `sandbox — ${session.sandboxDescription}` });
+    }
   }, [session, push]);
 
   // Subscribe to agent events (once).

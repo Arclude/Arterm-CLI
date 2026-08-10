@@ -16,13 +16,16 @@ describe("applyAutonomousProfile (--autonomous / --autonomy-mode / --max-steps)"
     expect(warnings.join("")).toContain("autonomous mode");
   });
 
-  it("--autonomous supplies the one control it does not remove: the sandbox", () => {
+  it("--autonomous keeps the boundary and hardens what happens without one", () => {
     const config = defaultConfig();
-    expect(config.sandbox.enabled).toBe(false); // attended default
+    expect(config.sandbox.enabled).toBe(true); // now the default in every mode
+    // So what `--autonomous` still supplies is not the boundary but the
+    // response to its ABSENCE, plus the announcement: an attended session warns
+    // and carries on, and there is nobody here to read that warning.
+    expect(config.sandbox.failIfUnavailable).toBeUndefined();
     const warnings: string[] = [];
     applyAutonomousProfile(config, { autonomous: true }, (m) => warnings.push(m));
     expect(config.sandbox.enabled).toBe(true);
-    // Unattended has to REFUSE rather than warn — nobody is reading stderr.
     expect(config.sandbox.failIfUnavailable).toBe(true);
     expect(warnings.join("")).toContain("sandbox ON");
   });
@@ -48,10 +51,19 @@ describe("applyAutonomousProfile (--autonomous / --autonomy-mode / --max-steps)"
     expect(warnings.join("")).toBe("");
   });
 
-  it("leaves the sandbox alone for a plain run with no flag", () => {
+  it("a plain run with no flag is confined, and fails OPEN", () => {
     const config = defaultConfig();
-    applyAutonomousProfile(config, {}, () => {});
-    expect(config.sandbox.enabled).toBe(false);
+    const warnings: string[] = [];
+    applyAutonomousProfile(config, {}, (m) => warnings.push(m));
+    expect(config.sandbox.enabled).toBe(true);
+    // Attended: a boundary that cannot be established is reported, not fatal.
+    // A session that refuses to OPEN over it gets `--no-sandbox` in a shell
+    // alias by lunchtime, and then nothing is confined at all.
+    expect(config.sandbox.failIfUnavailable).toBe(false);
+    // Silent on purpose: this is the ordinary case, and the TUI already says
+    // which boundary is in force at boot. The warnings here belong to the modes
+    // that CHANGED something — `--autonomous`, and opting out.
+    expect(warnings.join("")).toBe("");
   });
 
   it("keeps an explicit config failIfUnavailable over the unattended inference", () => {

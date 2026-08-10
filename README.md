@@ -28,9 +28,9 @@ Enter send   ? help   Alt+P models   Esc cancel   ^C quit
   `multi_edit`, `web_fetch`, `web_search`, `git`/`git_commit`,
   `test`/`lint`/`format`, `search` (BM25), `symbols`, `tool_search`, `batch`,
   and `bash`.
-  The file tools are sandboxed to the working directory; `bash` is **not**
-  sandboxed (it runs real shell commands) and is guarded by the permission
-  prompt instead.
+  The file tools are sandboxed to the working directory; `bash` runs real shell
+  commands, confined by default to this directory plus the temp dir with network
+  egress on an allowlist, and guarded by the permission prompt on top of that.
 - **Permission system** — read-only tools auto-allow; tools that mutate state or
   run commands prompt before each call, with an "always allow" that persists.
   Four modes (`ask`/`auto`/`plan`/`yolo`) cycle with **Shift+Tab**.
@@ -97,7 +97,7 @@ arterm pull <model>          # download a model via Ollama
 | `-p, --provider <id>` | Provider: `ollama`, `llamacpp`, `openai-compat`, `anthropic`, or a hosted preset (`openai`, `gemini`, `xai`, `deepseek`, `groq`, `openrouter`, `mistral`). |
 | `-m, --model <name>`  | Model name (Ollama tag) or `.gguf` filename.          |
 | `--yolo`              | Skip all permission prompts for the session.          |
-| `--sandbox` / `--no-sandbox` | Confine shell commands to this directory and an egress allowlist. On automatically under `--autonomous`. |
+| `--sandbox` / `--no-sandbox` | Confine shell commands to this directory and an egress allowlist. On by default; `--no-sandbox` runs unconfined, even under `--autonomous`. |
 | `--print <prompt>`    | Headless: run one prompt, print the reply, exit (add `--json` for structured output). |
 | `--resume <id>` / `--continue` | Resume a recorded session / the most recent one. |
 | `--goal <text>`       | Start in autonomy mode with this goal.                |
@@ -183,19 +183,23 @@ built to be safe by default:
   and `grep` are confined to the working directory; paths and glob patterns that
   escape it (absolute paths, `..` segments, symlinks) are refused — even the
   auto-allowed search tools cannot read e.g. `~/.ssh` or `/etc`.
-- **`bash` is unconfined unless you sandbox it** — by default shell commands run
-  with your full user privileges and can touch anything outside the working
-  directory. The permission prompt (shown before every `bash` call unless you opt
-  out) is the real guard; treat "always allow" and `--yolo` accordingly.
-- **Execution sandbox (`--sandbox`, on automatically under `--autonomous`)** —
-  confines shell commands to the working directory plus the temp dir, and
-  restricts network egress to an allowlist (package registries and source hosts
-  by default; SSH denied). Writes anywhere else fail with "read-only file
-  system" and a connection to an unlisted host is refused by the proxy. This is
-  the control `--autonomous` needs, because that mode turns the permission
-  prompt off: an unattended run refuses to start if the boundary cannot be
-  established, and `--no-sandbox` opts out loudly. Set `sandbox.allowedDomains`
-  to `[]` for no network at all.
+- **Execution sandbox (on by default; `--no-sandbox` opts out)** — confines
+  shell commands to the working directory plus the temp dir, and restricts
+  network egress to an allowlist (package registries and source hosts by
+  default; SSH denied). Writes anywhere else fail with "read-only file system"
+  and a connection to an unlisted host is refused by the proxy. Arterm's own
+  key material is denied outright, whatever else a command is granted. The
+  session says at startup which boundary is in force.
+  This is also the control `--autonomous` needs, because that mode turns the
+  permission prompt off — so the two differ in what happens when the boundary
+  cannot be established on a host: an unattended run refuses to start, while an
+  attended one warns and continues unconfined rather than refusing to open. Set
+  `sandbox.allowedDomains` to `[]` for no network at all, `sandbox.allowWrite`
+  for extra writable paths, or `sandbox.enabled: false` to turn it off.
+- **The permission prompt sits on top of it**, and answers a different question:
+  the prompt decides whether a command runs at all, the sandbox decides what a
+  command that IS allowed can then reach. Treat "always allow" and `--yolo` as
+  giving up the first of the two, not both.
 - **Permission prompts** — `write`, `edit`, and `bash` ask before every call
   unless you opt out per-tool ("always allow") or globally (`--yolo`). Even
   under `--yolo`, tools marked `deny` and calls the risk arbiter classifies as
@@ -240,7 +244,7 @@ Configuration lives in `~/.arterm/` and is created on demand.
 | `permissions`      | Per-tool overrides, persisted by "always allow".     | `{}`                     |
 | `budget.maxIterations` | Tool round-trips allowed in one turn.            | `50`                     |
 | `budget.turnTokens`| Per-turn token cap (unset = none).                   | —                        |
-| `sandbox.enabled`  | Confine `bash` to the working directory + an egress allowlist. | `false` (on under `--autonomous`) |
+| `sandbox.enabled`  | Confine `bash` to the working directory + an egress allowlist. | `true`                   |
 | `sandbox.allowedDomains` | Hosts `bash` may reach; `[]` means no network.  | registries + source hosts |
 | `sandbox.allowWrite` | Extra writable paths beyond the working dir and temp dir. | `[]`             |
 | `credentials.scrub` | Withhold credential-named env vars from `bash`.       | `true`                   |

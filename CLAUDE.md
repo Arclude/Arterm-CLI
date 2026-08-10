@@ -698,7 +698,7 @@ reader wants first, and it SAYS how many it dropped — parallel mode's rounds a
 bounded by `maxSteps` (200), so this truncates in practice, and a silent one
 would read as a run that did less than it did.
 
-## The sandbox: the one control `--autonomous` adds
+## The sandbox: on by default, and the one control `--autonomous` adds
 
 Every other switch `--autonomous` flips removes a control. `sandbox.ts` (policy,
 in `core`) plus `tools/src/sandbox.ts` (mechanism, over
@@ -707,6 +707,29 @@ confined to the session's write roots with egress restricted to an allowlist.
 The permission ladder cannot cover this ground — it decides *whether* a command
 runs, and yolo has already answered yes; it has nothing to say about what an
 allowed command can then reach.
+
+**It is now the default for attended sessions as well** (`defaultConfig()`), and
+the argument it reverses is worth keeping visible: an attended session has the
+prompt as its control, and a boundary that breaks a developer's own toolchain
+gets switched off permanently the first time it does. What decided it the other
+way is that the prompt answers a different question — "yes, run `pnpm test`" is
+not consent for `pnpm test` to write outside the project or dial an arbitrary
+host, the same reasoning that already put `credentials.scrub` in every mode. The
+cost stays bounded by three things that were already here: the OS temp dir is a
+write root, the allowlist carries the registries and source hosts, and an
+attended session whose boundary cannot be established warns and continues.
+
+`scripts/sandbox-default-e2e.mjs` is what makes that a fact rather than a
+`defaultConfig()` value: a config file that never mentions the sandbox, the
+built binary, and three probes through `bash` — a write inside the cwd (must
+still work), a write into this repository (outside every write root), and a read
+of `$ARTERM_HOME/key`. The `--no-sandbox` run must ACHIEVE all three, or "the
+file was not written" is equally true of a run where `bash` never executed. Its
+first draft planted a sentinel in the key file, which the keystore overwrites at
+boot, so the leak probe compared against a string that existed nowhere and
+passed in the run where everything leaked; it now reads the real key off disk
+after the run. The TUI says the boundary is in force at boot, because until then
+the first sign of one was a shell command failing to write one directory over.
 
 **The boundary never comes from model output.** Write roots are derived at boot
 from the session cwd and `realpath`'d; `wrap()` refuses a `cwd` outside them
@@ -760,9 +783,13 @@ install` runs package scripts with the same inherited environment.
 
 Three properties make it the opposite shape to the sandbox:
 
-- **On by default, in every mode.** The sandbox is off for attended sessions
-  because the prompt is the control there. A prompt does not help here: the
-  answer "yes, run `pnpm test`" is not consent to hand `pnpm test` an API key.
+- **On by default, in every mode**, and it was the argument that eventually
+  moved the sandbox too. The prompt is the control an attended session has, but
+  it answers a different question: "yes, run `pnpm test`" is not consent to hand
+  `pnpm test` an API key, and it is not consent for `pnpm test` to write outside
+  the project either. What still differs is the failure mode — a scrub cannot
+  be unavailable, while a boundary can, so `sandbox.enabled: true` degrades to a
+  warning for an attended session and refuses to start for an unattended one.
 - **Default-closed even unwired.** `scrubEnv(env)` with no settings scrubs. A
   `ToolContext` assembled without this plumbing (a sub-agent, a test, a
   standalone call) must not be the one path that still hands the keys over.
@@ -803,8 +830,10 @@ each covers what the other cannot:
   `critical`** — the one place that grade means "no legitimate call exists"
   rather than "readable and destructive". `high` would be a question with one
   answer, and under `--autonomous` it would not even be asked: yolo returns
-  `allow` on an escalation, and only `critical` blocks. This half matters because
-  the sandbox is OFF by default for attended sessions.
+  `allow` on an escalation, and only `critical` blocks. This half still matters
+  with the sandbox on by default, because a boundary that cannot be established
+  leaves an attended session running unconfined — deliberately — and the arbiter
+  is what remains when it does.
   `THIRD_PARTY_CREDENTIAL_READ` (`~/.ssh/id_*`, `~/.aws/credentials`, `~/.netrc`,
   `~/.npmrc`, …) is `high` instead, because `ssh-add` is a real thing to ask
   for — and it carries `attendedOnly`, so where nothing would ask the question

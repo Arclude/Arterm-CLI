@@ -68,6 +68,25 @@ describe("validateConfigFile", () => {
     expect(cfg.session.mode).toBe("jsonl");
     expect(cfg.session.maxSessions).toBeGreaterThan(0);
   });
+
+  it("confines shell commands by default, in every mode", () => {
+    // A policy decision, pinned: the sandbox used to be off for attended
+    // sessions on the argument that the permission prompt is the control there.
+    // It answers a different question — "yes, run `pnpm test`" is not consent to
+    // write outside the project — so the boundary is now unconditional and only
+    // the response to an UNAVAILABLE one still depends on who is watching.
+    const cfg = defaultConfig();
+    expect(cfg.sandbox?.enabled).toBe(true);
+    // Deny-all is the stronger boundary and the wrong default: a run that cannot
+    // reach a registry fails on its first install, and a sandbox people switch
+    // off is worth less than a narrower one they leave on.
+    expect(cfg.sandbox?.allowedDomains?.length).toBeGreaterThan(0);
+    // SSH is the one allowlisted protocol that carries a push.
+    expect(cfg.sandbox?.deniedDomains).toContain("*:22");
+    // NOT set here: an attended session whose boundary cannot be established
+    // warns and continues. `resolveSandbox` derives it from `unattended`.
+    expect(cfg.sandbox?.failIfUnavailable).toBeUndefined();
+  });
 });
 
 describe("team config", () => {

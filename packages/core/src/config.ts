@@ -551,14 +551,35 @@ export function defaultConfig(): ArtermConfig {
       maxMessages: 40,
     },
     budget: { maxIterations: 50 },
+    // ON for every session, attended or not.
+    //
+    // This reverses the original default, and the argument it reverses is worth
+    // keeping visible: an attended session has the permission prompt as its
+    // control, and a boundary that breaks a developer's own toolchain gets
+    // switched off permanently the first time it does. What decided it the other
+    // way is that the prompt answers a different question. "Yes, run `pnpm
+    // test`" is not consent for `pnpm test` to write outside this project or to
+    // reach an arbitrary host — the same reasoning that already puts
+    // `credentials.scrub` on in every mode, two lines down.
+    //
+    // The cost is bounded by three things that were already here: the write
+    // roots include the OS temp dir, so build tools keep working; the egress
+    // allowlist carries the package registries and source hosts, so `npm
+    // install` keeps working; and an ATTENDED session whose boundary cannot be
+    // established warns and continues rather than refusing to start
+    // (`failIfUnavailable` still defaults to unattended-only). `--no-sandbox`
+    // remains the loud escape hatch, and the TUI now says at boot when a
+    // boundary is in force — a control nobody can see is one people misread as
+    // a broken tool.
+    //
     // The allowlist lives here, not in `resolveSandbox`, so that emptying it in
     // config means deny-all rather than "fall back to the defaults".
     sandbox: {
-      enabled: false,
+      enabled: true,
       allowedDomains: [...DEFAULT_ALLOWED_DOMAINS],
       deniedDomains: [...DEFAULT_DENIED_DOMAINS],
     },
-    // On by default and everywhere — the opposite of the sandbox, because the
+    // On by default and everywhere, for the reason the sandbox now shares: the
     // channel it closes does not depend on nobody being at the keyboard.
     credentials: { scrub: true },
     tools: { tier: "standard" },

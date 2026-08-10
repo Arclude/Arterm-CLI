@@ -96,6 +96,32 @@ describe("guard events reach the transcript", () => {
     });
   }
 
+  it("says at boot that shell commands are confined, and stays quiet when they are not", async () => {
+    // The boundary is now the default for attended sessions, where nothing else
+    // announces it: the `◆ sandbox ON` line is written under `--autonomous`
+    // only, and the boot warnings it would join go to stderr, which fullscreen
+    // paints over. Without this line the first sign of a control doing its job
+    // is a shell command failing to write one directory over — which reads as a
+    // broken tool. The negative half matters as much: a session with no
+    // boundary must not claim one, so the text is driven by the session's own
+    // description rather than by the config it was built from.
+    const bus = new EventBus();
+    const confined = fakeSession(bus);
+    (confined as unknown as { sandboxDescription: string }).sandboxDescription =
+      "writes confined to /tmp/x; egress: 12 allowed domains";
+    const { frames, unmount } = render(createElement(App, { session: confined }));
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await waitFor(ui, (f) => /sandbox — writes confined to \/tmp\/x/.test(f));
+    unmount();
+
+    const bare = render(createElement(App, { session: fakeSession(new EventBus()) }));
+    const bareUi = () => [...bare.frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await waitFor(bareUi, (f) => f.includes("ARTERM"));
+    await tick(80);
+    expect(bareUi()).not.toContain("sandbox —");
+    bare.unmount();
+  });
+
   it("keeps the eternal journal's routine steps out of the transcript", async () => {
     // One line per step, most of them `ok`. Printing all of them buries the
     // transcript in a status the screen already shows; the steps worth a line

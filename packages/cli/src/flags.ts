@@ -127,11 +127,19 @@ export function applyAutonomousProfile(
  * with nobody reading the output. The permission ladder cannot help here — it
  * decides whether a command runs, and yolo has already answered yes.
  *
- * The default is deliberately asymmetric:
- *   - unattended  → sandbox ON, and fail CLOSED if it cannot be established.
- *   - attended    → sandbox OFF, because the prompt is the control and a
- *                   boundary that breaks a developer's own toolchain gets
- *                   switched off permanently the first time it does.
+ * The sandbox is now ON for both (`defaultConfig()`), and what stays asymmetric
+ * is what happens when it cannot be ESTABLISHED:
+ *   - unattended  → fail CLOSED. The run does nothing rather than doing some of
+ *                   it unconfined, because nobody is there to read a warning.
+ *   - attended    → warn and continue. A boundary that stops a developer's
+ *                   session from starting gets switched off permanently the
+ *                   first time it does, and off is worth less than degraded.
+ *
+ * That the boundary EXISTS is no longer conditional on the mode; only the
+ * response to its absence is. The prompt is still the control an attended
+ * session has, but it answers a different question — "yes, run `pnpm test`" is
+ * not consent for `pnpm test` to write outside the project or dial an arbitrary
+ * host.
  *
  * `--no-sandbox` is a real escape hatch, not a formality: some hosts have no
  * user namespaces, some workflows need egress this cannot express, and making
