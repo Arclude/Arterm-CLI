@@ -640,6 +640,23 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
     if (!existsSync(join(ARTERM_HOME, "models-dev.json"))) await warm;
   }
 
+  // User-defined agents, exactly as `startChat` loads them — the third instance
+  // of the one-bootstrap mistake (the catalog above was the first, the retention
+  // prune the second). Headless is where fleets actually run unattended, and a
+  // `/team` roster or a `spawn` role defined in `.arterm/agents/` simply did not
+  // exist on this path: `availableRoles()` fell back to the five built-ins with
+  // no error, which is the "worked in the TUI, silently degraded headless"
+  // shape. Best-effort like everything else in this bootstrap.
+  try {
+    const agentDefs = new AgentDefLoader(
+      join(process.cwd(), ".arterm", "agents"),
+      join(ARTERM_HOME, "agents"),
+    );
+    registerAgentDefinitions(await agentDefs.load());
+  } catch {
+    // A malformed definition dir must not cost a headless run its startup.
+  }
+
   const store = createSessionStore(config);
   const resumed = await resolveResumeMessages(store, globals);
 

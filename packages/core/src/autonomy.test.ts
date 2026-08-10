@@ -63,6 +63,13 @@ class FakeAgent {
     if (this.assessVerdicts) return this.assessVerdicts[this.assessN++] ?? this.assessVerdict;
     return this.assessVerdict;
   }
+  /** Prompts passed to note() — aggregate()'s tool-less integration turn. */
+  notePrompts: string[] = [];
+  async note(prompt: string): Promise<string> {
+    this.notePrompts.push(prompt);
+    this.history.push({ role: "assistant", content: prompt });
+    return "integrated";
+  }
   // Scripted decomposition output, one entry per round (defaults to "[]").
   plans: string[] = [];
   /** Prompts passed to plan() — decompose/roster/assign/phase-plan all go through it. */
@@ -88,6 +95,7 @@ function makeEngine(
     blackboard?: Blackboard;
     memberMemory?: MemberMemory;
     verify?: Verifier;
+    roundGate?: Verifier;
     verifyAttempts?: number;
     verifyPersist?: boolean;
     cycleGapMs?: number;
@@ -589,8 +597,93 @@ describe("AutonomyEngine (parallel mode)", () => {
 
     await engine.start("g");
 
-    // aggregate() calls agent.run with the subtask outputs embedded.
-    expect(agent.prompts.some((p) => p.includes("RESULT-XYZ"))).toBe(true);
+    // aggregate() goes through note() — the tool-less turn — with the subtask
+    // outputs embedded. `run()` must NOT see them: it offers the full roster,
+    // and a model that answers the integration prompt with work gets that work
+    // EXECUTED on the parent, unstamped (parallel-fleet-e2e proves the pre-fix
+    // binary does exactly this). See Agent.note.
+    expect(agent.notePrompts.some((p) => p.includes("RESULT-XYZ"))).toBe(true);
+    expect(agent.prompts).toHaveLength(0);
+  });
+
+  describe("the round gate — the standing command between claims", () => {
+    const red: Verifier = async () => ({
+      pass: false,
+      by: "command",
+      reason: "exit 1",
+      mustFix: ["2 tests failing"],
+    });
+    const green: Verifier = async () => ({ pass: true, by: "command" });
+
+    it("red on an empty decompose steers the next round instead of idling out", async () => {
+      // The measured hole: the leader proposed no work while the suite was red,
+      // and after two empty rounds the run stopped saying "no further parallel
+      // work proposed" — 19/21 green, the two failures never spoken. Red now
+      // resets the idle streak and lands in the next decompose as a steer.
+      const bus = new EventBus();
+      const agent = new FakeAgent(bus);
+      agent.plans = ["[]", "[]", "[]"];
+      // If assess were ever consulted, done:true would finish the run — so the
+      // final state doubles as proof the reflection was skipped while red.
+      agent.assessVerdict = { done: true, note: "DONE" };
+      const events = collect(bus);
+      const engine = makeEngine(agent, bus, {
+        mode: "parallel",
+        maxSteps: 3,
+        runFleet: async (tasks) => tasks.map((t) => ({ ...t, output: "" })),
+        roundGate: red,
+      });
+
+      await engine.start("g");
+
+      expect(engine.state).toBe("stopped");
+      const stop = events.find((e) => e.type === "autonomy_stopped");
+      expect(stop && "reason" in stop ? stop.reason : "").toContain("reached round limit");
+      expect(stop && "reason" in stop ? stop.reason : "").not.toContain(
+        "no further parallel work proposed",
+      );
+      // The steer reached the leader: every decompose after the first carries it.
+      expect(agent.planPrompts.length).toBe(3);
+      expect(agent.planPrompts[1]).toContain("standing verification command is FAILING");
+      expect(agent.planPrompts[1]).toContain("2 tests failing");
+    });
+
+    it("red after a round of work skips the reflection entirely", async () => {
+      const bus = new EventBus();
+      const agent = new FakeAgent(bus);
+      agent.plans = ['[{"task":"a"}]'];
+      agent.assessVerdict = { done: true, note: "DONE" };
+      const engine = makeEngine(agent, bus, {
+        mode: "parallel",
+        maxSteps: 2,
+        runFleet: async (tasks) => tasks.map((t) => ({ ...t, output: "built" })),
+        roundGate: red,
+      });
+
+      await engine.start("g");
+
+      // Aggregate still ran (context accumulates)…
+      expect(agent.notePrompts.some((p) => p.includes("built"))).toBe(true);
+      // …but the done:true reflection was never reached: red already answered.
+      expect(engine.state).toBe("stopped");
+    });
+
+    it("green leaves the old behavior untouched", async () => {
+      const bus = new EventBus();
+      const agent = new FakeAgent(bus);
+      agent.plans = ['[{"task":"a"}]'];
+      agent.assessVerdict = { done: true, note: "DONE" };
+      const engine = makeEngine(agent, bus, {
+        mode: "parallel",
+        maxSteps: 5,
+        runFleet: async (tasks) => tasks.map((t) => ({ ...t, output: "ok" })),
+        roundGate: green,
+      });
+
+      await engine.start("g");
+
+      expect(engine.state).toBe("done");
+    });
   });
 
   it("stop aborts the in-flight fleet and exits stopped", async () => {

@@ -659,8 +659,39 @@ the one outcome nobody asked for — so the paths the patch names are snapshotte
 before the apply and restored (including deleting a file that had to be created)
 when it fails.
 
+**The leader INTEGRATES through `note()`, a turn that cannot act.** `run()` is
+tools+history, `plan()`/`assess()` are tool-less probes that leave no trace;
+`aggregate()` needed the missing quadrant — history, no tools — and was built on
+`run()` with the sentence "Do not call any tools." appended. A request is not a
+gate: `scripts/parallel-fleet-e2e.mjs` answers the integration prompt with a
+write tool call, and the pre-fix binary EXECUTES it — a file no worker wrote,
+recorded unstamped, on the one agent with no worker id to carry. A method
+warning attached, because it cost a wrong "finding" that survived into two
+comments before being caught: the ledger's stamp lives at
+`record.scope.agentId`, and an analysis reading `record.agentId` declared a
+live run's 78 perfectly-stamped records "all unstamped". When a probe says a
+mechanism is broken, suspect the probe — the same lesson as `fetchCatalog`'s
+double-flatten, in the chronicle.
+
+**Between claims, the disk answers before the leader reflects** (`roundRed`,
+option `roundGate`). `gateClaim()` fires only on a completion claim, and the
+live parallel run that exposed the hole claimed nothing: 19/21 tests green,
+`decompose()` proposing `[]`, `assess()` saying not-done, and the run idling
+out with "no further parallel work proposed" while the two failures were never
+spoken to anyone. The standing COMMAND alone (never the judge — a round has no
+claim to judge, and a judge per round is spend) now runs at the parallel and
+team loops' two seams: after a fleet round, where red skips the reflection
+outright, and on an empty decompose, where red resets the idle streak — "fix
+the suite" IS further parallel work. Red output lands in `pendingSteer` exactly
+like a rejection's `mustFix`. A gate that THROWS is no signal rather than red,
+or a broken runner would spin rounds forever against the run it guards.
+`createRoundGate` (cli) builds it from `verify.command` only; without a
+standing command, rounds behave exactly as before. The e2e's fake keeps both
+halves honest by shape-routing prompts: 8/8 after, **3/8** against the pre-fix
+build — the leader-escape file exists, and the idle-out returns.
+
 **The leader is visible while it thinks** (`leader_call`, emitted around
-`Agent.plan()`/`assess()`). It is the one agent with no cell on the swarm board,
+`Agent.plan()`/`assess()`/`note()`). It is the one agent with no cell on the swarm board,
 by design — but `plan()` emits no `turn_start`, so between rounds the screen
 showed a finished board (`3/3 done · 0 LIVE`), a frozen step counter and an idle
 status bar while the call deciding the entire next round ran for minutes. Every

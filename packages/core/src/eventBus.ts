@@ -140,7 +140,7 @@ export type AgentEvent =
    * minutes. Every signal on screen says "finished" at the exact moment the
    * most important call of the run is in flight.
    */
-  | { type: "leader_call"; kind: "plan" | "assess"; active: boolean }
+  | { type: "leader_call"; kind: "plan" | "assess" | "note"; active: boolean }
   // Fresh-context verifier's judgment on a completion claim (decision 3).
   // A result was gated. Every field past `pass` is additive and optional, so the
   // desktop contract's "additive fields do NOT bump v" applies.

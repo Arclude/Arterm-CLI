@@ -55,6 +55,8 @@ describe("/team end-to-end (real AutonomyEngine ↔ App)", () => {
       setTools: () => {},
       history: [] as { role: string; content: string }[],
       run: async () => {},
+      // The engine's aggregate() goes through the tool-less note() now.
+      note: async () => "integrated",
       assess: async () => ({ done: true, note: "both changes landed" }),
       plan: async () => {
         planCall++;

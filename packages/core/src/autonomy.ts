@@ -117,6 +117,19 @@ export interface AutonomyOptions {
    * finished work.
    */
   verify?: Verifier;
+  /**
+   * The standing command gate alone, run BETWEEN claims at round boundaries
+   * (parallel/team). `verify` fires only when someone claims completion, and
+   * the round that exposed the gap claimed nothing: 19/21 tests green, the
+   * leader proposing no further work, and the two failures never spoken —
+   * the run idled out with a red suite nobody was told about. This is the
+   * command half only, deliberately: it is cheap, deterministic, and fails
+   * closed; a judge per round would be spend without a claim to judge.
+   * Red output becomes the next round's steer, exactly like a rejection's
+   * `mustFix`. Absent (no standing command configured), rounds behave as
+   * before.
+   */
+  roundGate?: Verifier;
   /** Verification attempts per unit of work before giving up. Default 2. */
   verifyAttempts?: number;
   /**
@@ -233,6 +246,7 @@ export class AutonomyEngine {
     this.blackboard = opts.blackboard;
     this.memberMemory = opts.memberMemory;
     this.verify = opts.verify;
+    this.roundGate = opts.roundGate;
     this.verifyAttempts = Math.min(5, Math.max(1, opts.verifyAttempts ?? 2));
     this.verifyPersist = opts.verifyPersist ?? false;
     this.autoExtend = opts.autoExtend ?? false;
@@ -246,6 +260,7 @@ export class AutonomyEngine {
   }
 
   private readonly verify?: Verifier;
+  private readonly roundGate?: Verifier;
   private readonly verifyAttempts: number;
   // Not readonly: `setUnattended` flips these two when a live session arms or
   // disarms autonomous mode (the TUI's Shift+Tab counterpart of `--autonomous`).
@@ -930,6 +945,14 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       if (this.paused()) continue;
 
       if (tasks.length === 0) {
+        // Before reflecting, ask the disk: a leader that proposes nothing while
+        // the standing command is red is the measured failure this closes — the
+        // run idled out at 19/21 with the two failures never spoken. Red resets
+        // the idle streak, because "fix the suite" IS further parallel work.
+        if (await this.roundRed(`round ${round}`)) {
+          this.idleStreak = 0;
+          continue;
+        }
         // Leader proposed no parallel work — reflect on whether we're done.
         const verdict = await this.agent.assess(this.goal, this.current.signal);
         this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
@@ -978,6 +1001,11 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       this.recordRound(round, results);
       await this.aggregate(round, results);
       this.bus.emit({ type: "autonomy_aggregate", round, count: results.length });
+
+      // Red after a round of work skips the reflection entirely: assessing
+      // "done?" against a failing suite spends an assess (and possibly a
+      // claim + judge) on a question the disk has already answered.
+      if (await this.roundRed(`round ${round}`)) continue;
 
       const verdict = await this.agent.assess(this.goal, this.current.signal);
       this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
@@ -1073,6 +1101,12 @@ Name ONE different concrete task that would advance the GOAL — a specific next
       if (this.paused()) continue;
 
       if (assignments.length === 0) {
+        // Same closure as the parallel loop's: a red standing command IS
+        // further team work, whatever the leader proposes.
+        if (await this.roundRed(`team round ${round}`)) {
+          this.idleStreak = 0;
+          continue;
+        }
         // Leader proposed no work — reflect on whether the goal is done.
         const verdict = await this.agent.assess(this.goal, this.current.signal);
         this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
@@ -1177,6 +1211,9 @@ Name ONE different concrete task that would advance the GOAL — a specific next
 
       await this.aggregate(round, results);
       this.bus.emit({ type: "autonomy_aggregate", round, count: results.length });
+
+      // The disk answers before the leader reflects — see the parallel twin.
+      if (await this.roundRed(`team round ${round}`)) continue;
 
       const verdict = await this.agent.assess(this.goal, this.current.signal);
       this.bus.emit({ type: "autonomy_reflect", done: verdict.done, note: verdict.note });
@@ -1429,6 +1466,41 @@ Summarize concisely for the next phase: what is now DONE, what REMAINS, and any 
     return summary || body;
   }
 
+  /**
+   * Run the standing command between claims; red becomes the next round's steer.
+   *
+   * Returns true when the gate exists AND failed — the caller then continues to
+   * another round instead of assessing or idling out. Counted as progress for
+   * the same reason a verification attempt is: a run mid-repair at the step cap
+   * deserves the extension a tool-calling run gets. A gate that THROWS is
+   * treated as no signal rather than as red — a broken runner spinning rounds
+   * forever would be this feature attacking the run it guards.
+   */
+  private async roundRed(scope: string): Promise<boolean> {
+    const gate = this.roundGate;
+    if (!gate) return false;
+    let res: VerifyResult;
+    try {
+      res = await gate({
+        goal: this.goal,
+        claim: `${scope}: standing verification check between claims`,
+        ...(this.current ? { signal: this.current.signal } : {}),
+      });
+    } catch {
+      return false;
+    }
+    if (res.pass !== false) return false;
+    if (this.current?.signal.aborted) return false;
+    this.progressSinceExtend += 1;
+    const fixes = (res.mustFix ?? []).slice(0, 4).join("; ");
+    const line =
+      `The standing verification command is FAILING${fixes ? ` — ${fixes}` : ""}` +
+      `${res.reason ? ` (${res.reason})` : ""}. Fix that before or alongside any new work.`;
+    this.pendingSteer = this.pendingSteer ? `${this.pendingSteer}\n${line}` : line;
+    this.bus.emit({ type: "autonomy_reflect", done: false, note: `standing gate red — ${scope}` });
+    return true;
+  }
+
   /** Ask the leader to split the next chunk of work into ≤fanout independent subtasks. */
   private async decompose(round: number): Promise<AutonomyTask[]> {
     const steer = this.pendingSteer;
@@ -1478,15 +1550,25 @@ Reply with ONLY a JSON array shaped like ${jsonShape} (role optional, one of: ${
     return out;
   }
 
-  /** Feed the round's results back into the leader's history so context accumulates. */
+  /**
+   * Feed the round's results back into the leader's history so context
+   * accumulates — through {@link Agent.note}, which offers NO tools.
+   *
+   * This used to be `agent.run()` with the sentence "Do not call any tools."
+   * appended — a request, not a gate, on a turn holding the full roster.
+   * `parallel-fleet-e2e.mjs` shows what that was worth: its fake answers the
+   * integration prompt with a write tool call, and the pre-fix binary executes
+   * it — an unstamped record for a file no worker wrote. The integration step
+   * is a NOTE, and now structurally cannot be anything else.
+   */
   private async aggregate(round: number, results: AutonomyTaskResult[]): Promise<void> {
     const body = results.map((r, i) => `### Subtask ${i + 1}: ${r.task}\n${r.output}`).join("\n\n");
     const prompt = `Round ${round} of parallel work toward the GOAL "${this.goal}" produced these subtask results:
 
 ${body}
 
-Integrate them: note concisely what is now done and what still remains. Do not call any tools.`;
-    await this.agent.run(prompt, this.current?.signal);
+Integrate them: note concisely what is now done and what still remains.`;
+    await this.agent.note(prompt, this.current?.signal);
   }
 
   private stepPrompt(): string {

@@ -1754,3 +1754,62 @@ describe("the assumed-window warning stays rare", () => {
     expect(agentWindow(4_096).contextWindowNote()).toBeUndefined();
   });
 });
+
+describe("Agent.note — the tool-less turn that stays in history", () => {
+  it("offers NO tools on the wire, and keeps the exchange in history", async () => {
+    // The quadrant aggregate() needed: run() is tools+history, plan()/assess()
+    // are tool-less probes that leave no trace. Built on run() with a prose
+    // "do not call any tools", the integration step did the fleet's job itself
+    // on a live GLM run — 78 parent-side tool executions. Structural now.
+    const provider = new StubProvider([[{ type: "text", delta: "integrated: A is done" }]]);
+    const bus = new EventBus();
+    const agent = makeAgent(provider, bus, [
+      {
+        name: "write",
+        description: "w",
+        parameters: { type: "object", properties: {} },
+        permission: "allow",
+        async execute() {
+          return { output: "" };
+        },
+      },
+    ]);
+
+    const out = await agent.note("Round 1 produced these results: A built.");
+
+    expect(out).toBe("integrated: A is done");
+    // The seam the whole fix rests on: the request carried no tool schemas,
+    // so there is nothing the model can execute, whatever it answers.
+    expect(provider.lastTools).toBeUndefined();
+    // And unlike plan(), the exchange accumulates for the next round.
+    const history = agent.history;
+    expect(history.at(-2)?.content).toContain("Round 1 produced");
+    expect(history.at(-1)?.content).toBe("integrated: A is done");
+  });
+
+  it("records nothing on a failed call — no bare user turn left behind", async () => {
+    const provider = new (class implements ChatProvider {
+      readonly id = "dead";
+      supportsNativeTools(): boolean {
+        return false;
+      }
+      async listModels() {
+        return [];
+      }
+      // eslint-disable-next-line require-yield
+      async *chat(): AsyncIterable<ChatChunk> {
+        throw new Error("ECONNREFUSED");
+      }
+    })();
+    const bus = new EventBus();
+    const events = collect(bus);
+    const agent = makeAgent(provider, bus);
+
+    const out = await agent.note("integrate this");
+
+    expect(out).toBe("");
+    expect(agent.history).toHaveLength(0);
+    // Best-effort but never silent — plan()'s policy.
+    expect(events.some((e) => e.type === "error")).toBe(true);
+  });
+});

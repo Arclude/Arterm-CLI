@@ -201,3 +201,26 @@ export function createVerifier(deps: VerifierDeps): Verifier | undefined {
     return composite(evidence ? { ...req, evidence } : req);
   };
 }
+
+/**
+ * The standing command alone, for the engine's ROUND boundary — or undefined
+ * when no standing command is configured, which leaves rounds exactly as they
+ * were. Deliberately not the composite: a round has no claim to judge, and the
+ * judge is spend; the command is cheap, deterministic, and fails closed. The
+ * live run this closes idled out at 19/21 tests green with the two failures
+ * never surfaced to anyone — the gate existed and was simply never on the path
+ * between claims.
+ */
+export function createRoundGate(deps: VerifierDeps): Verifier | undefined {
+  if (!verifyEnabled(deps.config)) return undefined;
+  const command = deps.config.verify?.command;
+  if (!command) return undefined;
+  return makeCommandVerifier({
+    cwd: deps.cwd,
+    defaultCommand: command,
+    ...(deps.config.verify?.commandTimeoutMs !== undefined
+      ? { timeoutMs: deps.config.verify.commandTimeoutMs }
+      : {}),
+    ...(deps.config.credentials ? { credentials: deps.config.credentials } : {}),
+  });
+}

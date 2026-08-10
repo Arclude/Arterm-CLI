@@ -46,6 +46,9 @@ Enter send   ? help   Alt+P models   Esc cancel   ^C quit
 - **Agent teams** — `/team <task>` has a leader assemble named specialist
   members (from your `.arterm/agents/*.md` definitions, or ad-hoc), run them in
   parallel git worktrees with a live member board, and auto-apply their patches.
+  Definitions load from the project (`.arterm/agents/`) and globally
+  (`~/.arterm/agents/`), in the TUI and headless alike, and double as `spawn`
+  roles beside the built-in five.
 - **Headless mode** — `arterm --print "prompt"` (or piped stdin) for scripts;
   `--json` for structured output; `--resume`/`--continue` to pick up a session.
 - **Native + JSON-fallback tool-calling** — uses a backend's native

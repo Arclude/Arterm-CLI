@@ -911,6 +911,73 @@ export class Agent {
     return text.trim();
   }
 
+  /**
+   * One tool-less turn that STAYS in history — the leader's integration step.
+   *
+   * The quadrant the other three calls leave empty: `run()` is tools+history,
+   * `plan()`/`assess()` are probes (no tools, no history). `aggregate()` needed
+   * history-no-tools and was built on `run()` with a prose "Do not call any
+   * tools" — a request, not a gate. A live GLM run was first MISREAD as the
+   * leader doing exactly that (the analysis read `record.agentId` where the
+   * stamp lives at `record.scope.agentId`; read correctly, every worker was
+   * stamped and the leader executed nothing). What stayed true is the shape:
+   * one prose sentence stood between the leader and the fleet's job, and the
+   * pre-fix binary demonstrably takes the bait — `parallel-fleet-e2e.mjs`
+   * answers the integration prompt with a write tool call, and pre-fix that
+   * file EXISTS, recorded unstamped, which is how a hijack would poison the
+   * ledger's attribution as well as the division of labour.
+   *
+   * No `tools` on the request means there is nothing to execute — and nothing
+   * to recover either: the JSON-fallback tool parser lives in the loop, and
+   * this call never enters the loop. A model that answers with a tool-call
+   * shape anyway produces text that is kept as text, which is exactly the
+   * degradation this wants: an integration note, not an action.
+   */
+  async note(prompt: string, signal?: AbortSignal): Promise<string> {
+    const { provider, model } = this.opts;
+    const probe: Message = { role: "user", content: prompt };
+    let text = "";
+    this.bus.emit({ type: "leader_call", kind: "note", active: true });
+    try {
+      const system = await this.buildSystem(true);
+      for await (const chunk of provider.chat({
+        model,
+        messages: [system, ...this.messages, probe],
+        temperature: 0,
+        signal: this.withDeadline(signal),
+      })) {
+        if (chunk.type === "text") text += chunk.delta;
+        // Metered like plan()/assess(): this runs once per fleet round, and an
+        // unmetered leader is how a whole /team run once reported usd: 0.
+        else if (chunk.type === "done" && chunk.usage) {
+          this.bus.emit({ type: "usage", usage: chunk.usage });
+          this.opts.budget?.spend(chunk.usage, model, provider.id);
+        }
+      }
+    } catch (err) {
+      // Best-effort, never silent — plan()'s policy for plan()'s reason.
+      if (signal?.aborted) return "";
+      this.bus.emit({
+        type: "error",
+        error: `integration call failed (${provider.id}/${model}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        retryable: true,
+      });
+      return "";
+    } finally {
+      this.bus.emit({ type: "leader_call", kind: "note", active: false });
+    }
+    const out = text.trim();
+    // The whole point over plan(): the exchange accumulates, so round N+1's
+    // decompose sees what round N concluded. An empty answer records nothing —
+    // a failed call must not leave a bare user turn for the next request.
+    if (out) {
+      this.messages.push(probe, { role: "assistant", content: out });
+    }
+    return out;
+  }
+
   private toolSchemas(): ToolSchema[] {
     return this.opts.tools.map((t) => ({
       name: t.name,

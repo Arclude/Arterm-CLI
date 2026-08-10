@@ -115,7 +115,7 @@ import { createChronicleSink } from "./chronicleStore.js";
 import { armAutonomous } from "./flags.js";
 import { startOtel } from "./otel.js";
 import { peerSessions } from "./statusServer.js";
-import { createVerifier } from "./verifier.js";
+import { createRoundGate, createVerifier } from "./verifier.js";
 
 export interface SessionOptions {
   config: ArtermConfig;
@@ -1058,6 +1058,16 @@ export async function buildSession(opts: SessionOptions): Promise<{
     chronicle,
     verifyLedger,
   });
+  // The command half alone, for round boundaries — undefined without a standing
+  // command, leaving parallel/team rounds exactly as they were.
+  const roundGate = createRoundGate({
+    provider: () => provider,
+    model: () => agent.model,
+    tools: () => agent.tools,
+    context: () => createContextStrategy(config),
+    cwd,
+    config,
+  });
 
   const autonomy = new AutonomyEngine(agent, bus, taskDoneTool, {
     mode: config.autonomy?.mode ?? "once",
@@ -1070,6 +1080,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     blackboard,
     memberMemory,
     verify: verifier,
+    ...(roundGate ? { roundGate } : {}),
     verifyAttempts: config.verify?.attempts,
     verifyPersist: config.verify?.persist,
     autoExtend: config.autonomy?.autoExtend,

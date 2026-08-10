@@ -16,7 +16,8 @@ export function createSpawnTool(spawn: SpawnFn): Tool {
     description:
       "Delegate a focused sub-task to a fresh sub-agent that works autonomously and returns " +
       "its result. Use for independent or parallelizable chunks of work (e.g. 'review file X', " +
-      "'research Y'). Optional role: reviewer | researcher | tester | implementer | explorer.",
+      "'research Y'). Optional role: reviewer | researcher | tester | implementer | explorer, " +
+      "or any agent defined under .arterm/agents/ (project) or ~/.arterm/agents/ (global).",
     permission: "ask",
     category: "execute",
     mutating: true,
