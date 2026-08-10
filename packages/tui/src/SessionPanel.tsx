@@ -75,6 +75,12 @@ function summaryLabel(entry: SessionPanelEntry): string {
  * Session dashboard (opened with ←): counts up top, one row per session with
  * its live status, last result and age, the selected row's recent prompts, and
  * a composer that starts a new session working IN THE BACKGROUND.
+ *
+ * `fill` (fullscreen) makes it the whole surface — list at the top, a flexible
+ * void in the middle, the composer and the key hints pinned to the BOTTOM,
+ * where every other full-screen surface in this UI keeps its prompt. Without
+ * it the dashboard was a small box floating over nine-tenths of empty screen,
+ * which reads as a rendering accident rather than a place.
  */
 export function SessionPanel({
   entries,
@@ -83,6 +89,7 @@ export function SessionPanel({
   input,
   canCreate,
   columns,
+  fill = false,
 }: {
   entries: SessionPanelEntry[];
   activeId: string;
@@ -90,25 +97,51 @@ export function SessionPanel({
   input: string;
   canCreate: boolean;
   columns: number;
+  fill?: boolean;
 }): React.ReactElement {
   const counts = { awaiting: 0, working: 0, completed: 0, new: 0 };
   for (const e of entries) counts[bucketOf(e)] += 1;
   const titleW = Math.max(12, Math.min(44, columns - 46));
   const summaryW = Math.max(10, Math.min(36, columns - titleW - 18));
+  const composer = canCreate ? (
+    <Box>
+      <Text color="cyan">{" › "}</Text>
+      {input ? (
+        <Text>{input}</Text>
+      ) : (
+        <Text color="gray" dimColor>
+          yeni oturum için görev tanımla…
+        </Text>
+      )}
+      <Text color="cyan">▏</Text>
+      <Text color="gray" dimColor>
+        {"  Enter = arka planda başlat"}
+      </Text>
+    </Box>
+  ) : null;
+  const hints = (
+    <Text color="gray" dimColor>
+      {" ↑↓ seç · Enter aç · Esc geri · ^X kapat · ^C çıkış"}
+    </Text>
+  );
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="cyan"
+      paddingX={1}
+      {...(fill ? { flexGrow: 1 } : {})}
+    >
       <Box>
         <Text color="cyan" bold>
           ── OTURUMLAR ──
         </Text>
-        <Text color="gray" dimColor>
-          {"  ↑↓ seç · Enter aç · Esc geri · ^X kapat"}
+        <Text color="gray">
+          {`  ${counts.awaiting} onay bekliyor · ${counts.working} çalışıyor · ${counts.completed} tamamlandı`}
+          {counts.new > 0 ? ` · ${counts.new} yeni` : ""}
         </Text>
       </Box>
-      <Text color="gray">
-        {`${counts.awaiting} onay bekliyor · ${counts.working} çalışıyor · ${counts.completed} tamamlandı`}
-        {counts.new > 0 ? ` · ${counts.new} yeni` : ""}
-      </Text>
+      <Box height={1} />
       {entries.map((entry, i) => {
         const sel = i === selected;
         return (
@@ -141,22 +174,18 @@ export function SessionPanel({
           </Box>
         );
       })}
-      {canCreate ? (
-        <Box marginTop={1}>
-          <Text color="cyan">{" › "}</Text>
-          {input ? (
-            <Text>{input}</Text>
-          ) : (
-            <Text color="gray" dimColor>
-              yeni oturum için görev tanımla…
-            </Text>
-          )}
-          <Text color="cyan">▏</Text>
-          <Text color="gray" dimColor>
-            {"  Enter = arka planda başlat"}
-          </Text>
-        </Box>
-      ) : null}
+      {fill ? (
+        <>
+          <Box flexGrow={1} />
+          {composer}
+          {hints}
+        </>
+      ) : (
+        <>
+          {composer ? <Box marginTop={1}>{composer}</Box> : null}
+          {hints}
+        </>
+      )}
     </Box>
   );
 }

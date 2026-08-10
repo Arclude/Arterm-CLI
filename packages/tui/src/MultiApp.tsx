@@ -363,7 +363,15 @@ export function MultiApp({
         />
       ))}
       {panelOpen ? (
-        <Box flexDirection="column" width={columns}>
+        <Box
+          flexDirection="column"
+          width={columns}
+          // Fullscreen: the dashboard OWNS the window, list up top and the
+          // composer pinned to the bottom — a floating box over nine-tenths of
+          // void read as a broken screen, not as a surface. Classic mode keeps
+          // the compact box, because there the transcript below is real.
+          {...(fullscreen ? { height: rawStdout?.rows ?? 24 } : {})}
+        >
           <SessionPanel
             entries={panelEntries}
             activeId={active?.id ?? ""}
@@ -371,6 +379,7 @@ export function MultiApp({
             input={panelInput}
             canCreate={Boolean(createSession) && !creating}
             columns={columns}
+            fill={fullscreen}
           />
         </Box>
       ) : null}
