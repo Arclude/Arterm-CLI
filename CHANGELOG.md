@@ -5,6 +5,35 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-08-11
+
+### Added
+
+- **The dashboard takes the whole screen — and takes images.** The session
+  panel now owns the window in fullscreen: list at the top, composer and key
+  hints pinned to the bottom, where every other full-screen surface here keeps
+  its prompt — instead of floating as a small box over nine-tenths of empty
+  terminal. And a task typed there can carry pictures: drop a file onto the
+  terminal and its path lands in the composer, or press `^V` to paste the
+  clipboard image as an `[Image #1]` token. Held images ride into the
+  background session and reach the model as real image parts; deleting the
+  token detaches the image, and an empty clipboard says so in the panel's note
+  line rather than failing silently.
+
+### Fixed
+
+- **A file dropped onto the dashboard was swallowed whole.** A drag arrives as
+  one bracketed-paste chunk whose ESC-framed markers read as `meta`, and the
+  panel's text branch was gated on `!meta` — so the entire path vanished
+  before anything downstream could see it. Pastes are now handled before every
+  other branch, newlines flattened to spaces.
+- **Ctrl+Backspace deleted one character, indistinguishable from the plain
+  key.** The terminal sends `0x08` for Ctrl+Backspace with no ctrl bit for the
+  key parser to attach, so the word-delete branch was unreachable. `0x08`,
+  `Ctrl+W` and `Alt+Backspace` now kill the word behind the cursor — and an
+  `[Image #N]` token counts as one word, so one press removes the whole atom
+  instead of leaving `[Image #` behind with the image still attached.
+
 ## [0.9.0] — 2026-08-11
 
 ### Added
