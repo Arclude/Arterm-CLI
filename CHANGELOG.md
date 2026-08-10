@@ -5,6 +5,31 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-08-11
+
+### Added
+
+- **The session panel is a dashboard, and a typed task starts in the
+  background.** `←` now opens counts up top (awaiting approval · working ·
+  completed), one row per session with status glyph, title, last result and a
+  coarse age — an idle row says what CAME of the session (the first line of its
+  last assistant message), not just that it stopped. The composer at the bottom
+  creates a session that begins working immediately while the dashboard stays
+  up: type the task, press Enter, stay where you are; the new row appears
+  preselected and Enter opens it when wanted. Under the cosmetics, one real
+  bug: the panel used to show every background session frozen at whatever it
+  was doing when the panel opened.
+
+### Fixed
+
+- **The terminal's own cursor no longer haunts the screen.** The composer draws
+  its cursor itself, and nothing ever hid the hardware one — it sat blinking
+  wherever the last write ended, typically in the void below the session panel.
+  Hidden for the whole run now, re-hidden on every resize (the same
+  host-emulator reset healing the mouse modes get), and restored on exit while
+  still on the alternate screen, so the primary buffer always comes back with a
+  visible cursor.
+
 ## [0.8.0] — 2026-08-10
 
 ### Fixed
