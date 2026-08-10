@@ -110,10 +110,20 @@ afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-/** Renders App over the temp cwd and waits for the composer to exist. */
-async function mounted(seen: string[]) {
+/**
+ * Renders App over the temp cwd and waits for the composer to exist.
+ *
+ * `fullscreen` is a parameter because it is the mode every real session runs in
+ * (`tui.fullscreen` defaults true on a TTY) and the one this file used to leave
+ * untested — App reads arrows off RAW stdin there, in addition to the parsed
+ * key events, so a picker can navigate correctly in the mode the tests drive
+ * and move two rows per press in the mode people use.
+ */
+async function mounted(seen: string[], opts: { fullscreen?: boolean } = {}) {
   const bus = new EventBus();
-  const view = render(createElement(App, { session: fakeSession(bus, seen) }));
+  const view = render(
+    createElement(App, { session: fakeSession(bus, seen), fullscreen: opts.fullscreen ?? false }),
+  );
   const latest = () => view.frames[view.frames.length - 1] ?? "";
   await waitFor(latest, (f) => f.includes("message…"));
   return { ...view, latest };
@@ -130,19 +140,65 @@ describe("the @ picker", () => {
     unmount();
   }, 30_000);
 
-  it("narrows as the query is typed, and says how many it is not showing", async () => {
+  it("narrows as the query is typed, and says how many there are", async () => {
     for (let i = 0; i < 12; i += 1) await fs.writeFile(join(dir, `alpha${i}.ts`), "x");
     await fs.writeFile(join(dir, "beta.ts"), "x");
     const { stdin, latest, unmount } = await mounted([]);
 
     stdin.write("read @");
-    await waitFor(latest, (f) => f.includes("more — keep typing"));
+    // Thirteen matches in an eight-row box: the count is what says the box is a
+    // window onto a longer list rather than the end of one.
+    await waitFor(latest, (f) => f.includes("1/13"));
     stdin.write("beta");
-    await waitFor(latest, (f) => f.includes("beta.ts"));
-    // A list that quietly stops reads as a complete one; with the query narrowed
-    // there is nothing left to count, so the note must be gone as well.
-    expect(latest()).not.toContain("more — keep typing");
+    await waitFor(latest, (f) => f.includes("1/1 ·"));
     expect(latest()).not.toContain("alpha0.ts");
+    unmount();
+  }, 30_000);
+
+  it("scrolls to a match the box cannot draw, instead of ending at eight", async () => {
+    // The complaint this was written for: with nine files the ninth was
+    // unreachable and the highlight walked off the top of a list that still
+    // looked complete. Asserted structurally rather than by filename, because
+    // the candidate walk does not promise an order.
+    for (let i = 0; i < 13; i += 1) await fs.writeFile(join(dir, `alpha${i}.ts`), "x");
+    const { stdin, latest, unmount } = await mounted([]);
+
+    stdin.write("read @alpha");
+    await waitFor(latest, (f) => f.includes("1/13"));
+    const drawn = (): Set<string> => new Set(latest().match(/alpha\d+\.ts/g) ?? []);
+    const before = drawn();
+    expect(before.size).toBe(8);
+
+    for (let i = 0; i < 8; i += 1) stdin.write(DOWN);
+    await waitFor(latest, (f) => f.includes("9/13"));
+    const picked = (
+      latest()
+        .split("\n")
+        .find((l) => l.includes("▸")) ?? ""
+    ).match(/alpha\d+\.ts/)?.[0];
+    expect(picked).toBeDefined();
+    // The ninth match is a row the box could not draw when it opened, and it is
+    // both on screen and selected now.
+    expect(before.has(picked as string)).toBe(false);
+    unmount();
+  }, 30_000);
+
+  it("moves ONE row per ↓ in fullscreen, where two listeners hear the same key", async () => {
+    // Fullscreen reads arrows off raw stdin (to tell a wheel tick from a
+    // keypress) while `useInput` parses the SAME emitter — so one ↓ reached the
+    // picker twice and the selection skipped a file. The bug is invisible to
+    // every other test here: they render App with fullscreen off.
+    for (let i = 0; i < 6; i += 1) await fs.writeFile(join(dir, `alpha${i}.ts`), "x");
+    const { stdin, latest, unmount } = await mounted([], { fullscreen: true });
+
+    stdin.write("read @alpha");
+    await waitFor(latest, (f) => f.includes("1/6"));
+    stdin.write(DOWN);
+    await waitFor(latest, (f) => f.includes("2/6"));
+    // The router holds a lone arrow for 25 ms before ruling it a keypress, so a
+    // second move arrives AFTER the wait above — never before it.
+    await tick(150);
+    expect(latest()).toContain("2/6");
     unmount();
   }, 30_000);
 

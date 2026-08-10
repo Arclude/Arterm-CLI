@@ -36,6 +36,8 @@ import { join } from "node:path";
 const BIN = join(import.meta.dirname, "..", "packages", "cli", "dist", "main.js");
 const KEEP = process.env.KEEP_TRANSCRIPT === "1";
 const FILE_TEXT = "the sky is teal";
+/** One ↓, as the terminal sends it. */
+const DOWN = "\u001b[B";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** A fake OpenAI-compatible endpoint that records what it was sent. */
@@ -87,7 +89,21 @@ function sandbox(port) {
   return home;
 }
 
-/** A git repo, because the picker's candidate set is `git ls-files` in one. */
+/**
+ * A git repo, because the picker's candidate set is `git ls-files` in one.
+ *
+ * More files than the box has rows, so the list is a WINDOW here rather than a
+ * short list that happens to fit — the ninth match being unreachable is
+ * invisible in a directory with three files. `git ls-files` sorts, and the
+ * fillers are named to sort AFTER the two the rest of the script picks from, so
+ * adding them does not push `notes.md` off the opening screen.
+ */
+const FILLERS = 12;
+/** Candidates: `.gitignore`, `notes.md`, `other.ts`, then the fillers. */
+const CANDIDATES = 3 + FILLERS;
+/** Sorted ninth: three named files, then `zfill00`… — so index 8 is `zfill05`. */
+const NINTH = "zfill05.ts";
+
 function workspace() {
   const dir = mkdtempSync(join(tmpdir(), "arterm-mention-work-"));
   execFileSync("git", ["init", "-q"], { cwd: dir });
@@ -95,6 +111,9 @@ function workspace() {
   writeFileSync(join(dir, "other.ts"), "export const x = 1;\n");
   writeFileSync(join(dir, ".gitignore"), "ignored.md\n");
   writeFileSync(join(dir, "ignored.md"), "not offered\n");
+  for (let i = 0; i < FILLERS; i += 1) {
+    writeFileSync(join(dir, `zfill${String(i).padStart(2, "0")}.ts`), "export const y = 1;\n");
+  }
   return dir;
 }
 
@@ -156,7 +175,60 @@ async function main() {
       "the candidate set is `git ls-files`, and the scope limit is the point",
     );
 
-    // The narrowing has to be WAITED for against a fresh mark. Waiting for
+    // ── ↑↓, in the mode people actually run ──────────────────────────────────
+    // A real pty means fullscreen, and fullscreen reads arrows off RAW stdin (to
+    // tell a wheel tick from a keypress) while Ink parses the same bytes into
+    // key events. One ↓ was therefore delivered to the picker twice and the
+    // selection skipped a file — reported from a live session, and passing in
+    // every in-process test, because those render the composer with fullscreen
+    // off. The counter is the observable: `2/15` is index 1, `3/15` is the
+    // second move nobody asked for.
+    const navMark = seen.length;
+    child.stdin.write(DOWN);
+    assert(
+      await waitFor((f) => f.slice(navMark).includes(`2/${CANDIDATES}`), "the second row"),
+      "↓ steps to the next match",
+    );
+    // The router holds a lone arrow for 25 ms before ruling it a keypress, so a
+    // second move lands AFTER this sleep — never before the wait above returns.
+    await sleep(400);
+    // Anchored on the positive, like the git-ignore check above it: "3/15 never
+    // appeared" is also true of a build with no counter on screen at all, and a
+    // check that passes against the binary without the fix is measuring the
+    // harness. Against that binary this scored a vacuous ✓ before the `&&`.
+    assert(
+      seen.slice(navMark).includes(`2/${CANDIDATES}`) &&
+        !seen.slice(navMark).includes(`3/${CANDIDATES}`),
+      "…and only to the next one — one ↓ is one move",
+      "a second listener answered the same keypress",
+    );
+
+    // ── the box is a window, not the end of the list ─────────────────────────
+    const winMark = seen.length;
+    for (let i = 0; i < 7; i += 1) {
+      child.stdin.write(DOWN);
+      await sleep(80);
+    }
+    const ninth = await waitFor(
+      (f) => f.slice(winMark).includes(`9/${CANDIDATES}`),
+      "the ninth match",
+    );
+    // Counted is not drawn: the box held eight rows while the selection walked
+    // past them, so the ninth file was unreachable AND the highlight left the
+    // screen. Asserting the marked ROW is what tells those apart.
+    const markedRow = seen
+      .slice(winMark)
+      .split(/\r?\n/)
+      .filter((l) => l.includes("▸"))
+      .pop();
+    assert(
+      ninth && (markedRow ?? "").includes(NINTH),
+      "the ninth match is DRAWN and selected, not just counted",
+      `marked row was: ${JSON.stringify(markedRow ?? null)}`,
+    );
+
+    // Back to the top, so the rest of the run picks from a fresh query. The
+    // narrowing has to be WAITED for against a fresh mark. Waiting for
     // "notes.md" would be vacuous — it is already on screen from the empty
     // query — so ⇥ fired before the list narrowed often enough to make this
     // script flap between 9/9 and 6/9, picking whichever row was first.

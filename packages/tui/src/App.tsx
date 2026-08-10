@@ -33,7 +33,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ComposerFrame } from "./Composer.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { LoginOverlay } from "./LoginOverlay.js";
-import { MENTION_ROWS, MentionPicker } from "./MentionPicker.js";
+import { MentionPicker } from "./MentionPicker.js";
 import { Item, fmtBytes } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
@@ -69,6 +69,7 @@ import { formatRateLimits } from "./limitsView.js";
 import { Markdown } from "./markdown.js";
 import { formatMcpView, publishedServers } from "./mcpView.js";
 import {
+  MENTION_MATCH_CAP,
   applyMention,
   filterCandidates,
   mentionQuery,
@@ -901,11 +902,14 @@ export function App({
   const mentionOpenRef = useRef(false);
   mentionOpenRef.current = mentionOpen;
   const mentionPickableRef = useRef(false);
-  // A generous filter cap so the "…N more" count is a real number rather than
-  // the row budget restated. It is still a cap: the honest report of a query
-  // matching two thousand files is "keep typing", not two thousand rows.
+  // A generous filter cap: the box scrolls through everything it is given, so
+  // this is how far ↓ can walk and what `3/47` counts. It is still a cap, and
+  // the picker marks it — two thousand matches are reported as "200+", because
+  // the honest answer to a query that broad is "keep typing", not two thousand
+  // rows nobody scrolls.
   const mentionMatches = useMemo(
-    () => (mentionOpen ? filterCandidates(mentionTyped ?? "", mentionFiles, 200) : []),
+    () =>
+      mentionOpen ? filterCandidates(mentionTyped ?? "", mentionFiles, MENTION_MATCH_CAP) : [],
     [mentionOpen, mentionTyped, mentionFiles],
   );
   mentionPickableRef.current = mentionOpen && mentionMatches.length > 0;
@@ -1060,7 +1064,15 @@ export function App({
     // wheel never becomes arrows, so ↑/↓ are purely keyboard (direct history).
     if (!fullscreen || mouseCapture) return;
     const onRawInput = (chunk: string): void => {
-      if (!visibleRef.current || overlayOpenRef.current) return;
+      // The `@` picker is an overlay like the others, and it has to bail out
+      // HERE, because `useInput` listens on this very emitter (ink's own
+      // `use-input` subscribes to `internal_eventEmitter`'s "input"). One ↓ was
+      // therefore delivered twice — once raw to the router below, once parsed to
+      // the picker's own handler — and the selection moved two rows per press.
+      // Invisible to `mention.test.tsx`, which renders App with `fullscreen`
+      // unset while every real session has it on (`tui.fullscreen` defaults
+      // true), so this path was live for users and dead for the test.
+      if (!visibleRef.current || overlayOpenRef.current || mentionOpenRef.current) return;
       const runs = parseArrowChunk(chunk);
       if (!runs) return;
       for (const run of runs) arrowRouter.feed(run.dir, run.count);
@@ -3271,15 +3283,11 @@ export function App({
   // to the measured content.
   overlayOpenRef.current = pickerOpen || loginOpen || interview !== null;
   arrowHistoryRef.current = (dir) => {
-    // The picker is the third claimant on ↑↓ and it wins while it is open. It
-    // has to be answered HERE as well as in its own handler: under the
-    // fullscreen router the arrows never arrive as Ink key events at all — they
-    // are read off raw stdin so a wheel tick can be told from a keypress — so a
-    // picker wired only to `useInput` navigates in one mode and not the other.
-    if (mentionOpen) {
-      stepMention(dir === "up" ? -1 : 1);
-      return;
-    }
+    // The `@` picker is NOT answered here, unlike the claimants below it. Its
+    // own `useInput` handler already sees every arrow in both modes — the raw
+    // listener and `useInput` read the same emitter — so a branch here would be
+    // the second of two moves for one keypress, which is exactly what it was.
+    // The raw listener returns early while the picker is open instead.
     if (teamSuggest) {
       scrollBy(dir === "up" ? 1 : -1);
       return;
@@ -3391,10 +3399,10 @@ export function App({
               reason the swarm board went below). */}
           {mentionOpen ? (
             <MentionPicker
-              matches={mentionMatches.slice(0, MENTION_ROWS)}
+              matches={mentionMatches}
               index={mentionIndex}
               query={mentionTyped ?? ""}
-              total={mentionMatches.length}
+              capped={mentionMatches.length >= MENTION_MATCH_CAP}
             />
           ) : null}
           <InputLine

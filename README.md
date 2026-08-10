@@ -120,7 +120,8 @@ When a tool wants to write, edit, or run a shell command, Arterm shows a
 permission prompt: `[y]` allow once · `[a]` always allow this tool · `[n]` deny.
 
 Typing `@` opens a file picker over the project — `↑↓` to choose, `⇥` or `Enter`
-to insert, `Esc` to dismiss — and the file's contents ride out with the message,
+to insert, `Esc` to dismiss. The list shows eight rows and scrolls through the
+rest, with `3/47` saying where you are in it; the file's contents ride out with the message,
 so you can ask about a file without spending a turn on the model reading it. The
 path stays in your sentence, which is how you say which file you mean when you
 attach several. Files git ignores are not offered but can still be typed in

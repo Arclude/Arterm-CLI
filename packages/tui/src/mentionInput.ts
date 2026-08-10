@@ -122,3 +122,32 @@ export function movePick(index: number, delta: number, count: number): number {
   if (count <= 0) return 0;
   return (((index + delta) % count) + count) % count;
 }
+
+/**
+ * How many matches are ranked at all, and therefore the largest number the
+ * picker can honestly count. A query matching two thousand files is reported as
+ * "200+", never as two thousand rows nobody will walk.
+ */
+export const MENTION_MATCH_CAP = 200;
+
+/**
+ * The first row a box `rows` tall draws, so the highlighted one is always in it.
+ *
+ * Without this the box drew rows 1..8 of however many matched while the
+ * selection walked past 8 — so the ninth file was unreachable, and the highlight
+ * simply vanished off the top of a list that looked complete. Both halves of one
+ * missing function: a window is what makes a bounded box a VIEW of a list rather
+ * than a truncation of it.
+ *
+ * Stateless, and centred rather than edge-triggered, for the reason openness is
+ * derived from the text one file over: a remembered scroll offset is a second
+ * copy of "where we are" that can disagree with the index, and the one it
+ * disagrees with is what the user can see. The price is that the list starts
+ * moving once the selection passes the middle instead of waiting for the edge;
+ * the gain is that the same index always draws the same eight rows.
+ */
+export function pickWindow(index: number, count: number, rows: number): number {
+  if (rows <= 0 || count <= rows) return 0;
+  const picked = Math.min(Math.max(index, 0), count - 1);
+  return Math.min(Math.max(picked - Math.floor(rows / 2), 0), count - rows);
+}

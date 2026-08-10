@@ -933,6 +933,35 @@ A flag is cleared by the next keystroke, so the list springs back mid-word; a
 text prefix never stops matching, because the composer only appends, so the
 picker would stay shut for the rest of the line including the next mention.
 
+**And then two LISTENERS, one keypress — in the mode the tests did not drive.**
+Fullscreen (`tui.fullscreen`, default true on a TTY) reads arrows off RAW stdin,
+because the router needs the arrows-per-chunk count to tell a wheel tick from a
+keypress. That listener and `useInput` subscribe to the same emitter — ink's
+`use-input` is itself an `internal_eventEmitter.on("input", …)` — so the belief
+written into the first fix, that "under the fullscreen router the arrows never
+arrive as Ink key events at all", was simply false. The picker was answered in
+BOTH places and one ↓ moved two rows. The raw listener now returns early while
+the picker is open, exactly as it already did for the model picker, login and
+the interview; the router's own branch is gone, since a claimant with its own
+`useInput` needs no second one.
+
+`mounted(seen, { fullscreen })` in `mention.test.tsx` exists because of it. Every
+test here rendered App with fullscreen OFF, which is the mode nobody runs — the
+suite was green while the feature skipped a file per press for every user. This
+is the `9aaae14` context-gauge lesson in the TUI: a default that differs between
+the harness and the product means the harness measures something else.
+
+**Eight rows is a WINDOW, not the end of the list** (`pickWindow`). It was a
+truncation, and the two are identical on screen until the ninth match: past that
+the file could not be reached and the highlight walked off the top of a list that
+still looked complete, so "your file is not in the project" was the reading for a
+file that was in it. The window is computed from the index rather than remembered
+— a stored scroll offset is a second copy of "where we are", and the one it can
+disagree with is what the user can see. `3/47` replaced "…N more — keep typing"
+for the same honesty rule that note was written for: with the box scrolling,
+typing is no longer the only way to reach row nine. `200+` marks the ranking cap,
+because a count that silently stops counting is the same lie one row up.
+
 `mention.test.tsx` is the seam, and it is the reason to trust any of the above:
 severing the one line that appends the block to what `Agent.run` is sent leaves
 eight of nine tests passing and the entire picker working on screen.
@@ -941,6 +970,15 @@ in a real pty, reading the request body off a fake endpoint — 9/9 after, 0/9
 before. Its first draft scored 1/9 before, and the passing check was "a
 git-ignored file is not offered", which is also true of a screen with no picker
 on it; a negative assertion needs a positive anchor or it measures the harness.
+
+The pty is also the only harness that runs the picker in fullscreen, which is
+why the navigation checks live there: 13/13 after the double-step and window
+fixes, **10/13** against the binary built before them. Same anchor lesson, a
+second time — "the counter never reached 3/15" scored a vacuous ✓ on a build
+whose picker draws no counter at all, so the check asserts 2/15 arrived AND 3/15
+did not. Its workspace carries twelve filler files for the same reason: in a
+directory with three, a box that truncates and a box that scrolls are the same
+box.
 
 ## Telemetry: `gen_ai.*`, pinned
 
