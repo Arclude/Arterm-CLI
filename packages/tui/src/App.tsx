@@ -14,11 +14,16 @@ import {
   attachImageFiles,
   cachedCatalogSync,
   extractImagePaths,
+  extractMentions,
   fetchCatalog,
   findModelById,
   imagePlaceholder,
+  listCandidates,
+  mentionBlock,
+  mentionSummary,
   priceUsage,
   readClipboardImage,
+  readMentions,
   searchCatalog,
   stillMentioned,
   toolCallPreview,
@@ -28,6 +33,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ComposerFrame } from "./Composer.js";
 import { ContextPanel } from "./ContextPanel.js";
 import { LoginOverlay } from "./LoginOverlay.js";
+import { MENTION_ROWS, MentionPicker } from "./MentionPicker.js";
 import { Item, fmtBytes } from "./MessageList.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
@@ -62,6 +68,13 @@ import {
 import { formatRateLimits } from "./limitsView.js";
 import { Markdown } from "./markdown.js";
 import { formatMcpView, publishedServers } from "./mcpView.js";
+import {
+  applyMention,
+  filterCandidates,
+  mentionQuery,
+  mentionStart,
+  movePick,
+} from "./mentionInput.js";
 import { formatProcesses, parsePsArgs } from "./psView.js";
 import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
@@ -100,6 +113,8 @@ function InputLine({
   onHistoryNext,
   onTab,
   externalArrows = false,
+  mentionOpen = () => false,
+  mentionPickable = () => false,
 }: {
   active: boolean;
   value: string;
@@ -124,6 +139,31 @@ function InputLine({
   onTab?: () => void;
   /** ↑/↓ are owned by App: its arrow router (fullscreen) or board navigation. */
   externalArrows?: boolean;
+  /**
+   * Whether the `@` file picker is open RIGHT NOW — App owns ↑↓, ⇥, ⏎ and Esc
+   * for as long as it is.
+   *
+   * Ink runs every mounted `useInput` handler for the same keypress, so this is
+   * not a hint: without it BOTH fire, and Enter attaches a file *and* submits
+   * the line it was being attached to.
+   *
+   * A getter and not a boolean, for `valueRef`'s reason one paragraph down. ⇥
+   * closes the picker by changing the TEXT, and a prop carries the value from
+   * the last render — so an Enter arriving before React re-rendered found both
+   * handlers still believing the picker was up, and was swallowed by neither.
+   * Reproduced in `mention.test.tsx` as a Tab immediately followed by Enter.
+   */
+  mentionOpen?: () => boolean;
+  /**
+   * Whether the picker has a row ⇥/⏎ would take.
+   *
+   * Separate from `mentionOpen` because the list stays up saying "no file
+   * matches" — which is worth showing — while owning ⏎ there would mean a line
+   * naming a path the list does not offer (an ignored file, an absolute path)
+   * could not be sent at all. Openness governs ↑↓ and Esc; only a pickable row
+   * governs ⇥ and ⏎.
+   */
+  mentionPickable?: () => boolean;
 }): React.ReactElement {
   const suggestion = commandSuggestion(value, commands);
   // The input handler reads the CURRENT value through this ref, never its own
@@ -151,6 +191,11 @@ function InputLine({
       // separates wheel-synthesized arrows (scroll) from keyboard ones (history),
       // and an open board drill-down steps its rows with them.
       if (externalArrows && (key.upArrow || key.downArrow)) return;
+      // The picker owns its navigation keys outright while it is up. Typing is
+      // deliberately still ours: every other character narrows the query, which
+      // is what makes the list feel like part of the line rather than a mode.
+      if (mentionOpen() && (key.upArrow || key.downArrow || key.escape)) return;
+      if (mentionPickable() && (key.tab || key.return)) return;
       // Tab completes a slash command to its first match; with nothing to
       // complete it falls through to `onTab` (the board's row step). Shift+Tab is
       // the permission-mode cycle, handled in App — leave it alone.
@@ -686,6 +731,27 @@ export function App({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const attachRef = useRef<PendingAttachment[]>([]);
   attachRef.current = attachments;
+  /**
+   * The `@` picker's list, built once per session on the first `@` typed.
+   *
+   * Lazily rather than at boot, because most sessions never mention a file and
+   * `git ls-files` on a large tree is not free. Cached rather than rebuilt per
+   * keystroke for the same reason — the filter runs over the array, and the
+   * array is what costs a process.
+   */
+  const [mentionFiles, setMentionFiles] = useState<string[]>([]);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  /**
+   * The position of the `@` whose picker Esc closed.
+   *
+   * Neither a boolean nor the dismissed TEXT would work, and both are the
+   * obvious first tries. A flag is cleared by the next keystroke, so the list
+   * springs back mid-word. A text prefix never stops matching — the composer
+   * only appends — so the picker stays dismissed for the rest of the line,
+   * including the next mention. The index is the one name for "this mention"
+   * that survives its query growing and that the following `@` does not share.
+   */
+  const [mentionDismissed, setMentionDismissed] = useState<number | null>(null);
   const [history, setHistory] = useState<HistoryNav>(emptyHistory);
   const [model, setModel] = useState(session.agent.model);
   /**
@@ -821,6 +887,78 @@ export function App({
   const turnRef = useRef({ inTok: 0, outTok: 0, rounds: 0, changedFiles: new Set<string>() });
 
   const push = useCallback((item: DisplayItem) => setItems((prev) => [...prev, item]), []);
+
+  // ── The `@` file picker ────────────────────────────────────────────────────
+  // Openness is DERIVED from the text rather than stored. The composer is
+  // append-only, so "a mention is being typed" is a property of the line and
+  // nothing else; a second copy of that fact in state is a second thing to keep
+  // in sync, and the one it would disagree with is what the user can see.
+  const mentionTyped = mentionQuery(input);
+  const mentionOpen = mentionTyped !== undefined && mentionDismissed !== mentionStart(input);
+  // The live answer, for the handlers — see `applyMentionPick`. Assigned during
+  // render like the other mirrors in this component, and cleared early by the
+  // one action that closes the picker without waiting for a render.
+  const mentionOpenRef = useRef(false);
+  mentionOpenRef.current = mentionOpen;
+  const mentionPickableRef = useRef(false);
+  // A generous filter cap so the "…N more" count is a real number rather than
+  // the row budget restated. It is still a cap: the honest report of a query
+  // matching two thousand files is "keep typing", not two thousand rows.
+  const mentionMatches = useMemo(
+    () => (mentionOpen ? filterCandidates(mentionTyped ?? "", mentionFiles, 200) : []),
+    [mentionOpen, mentionTyped, mentionFiles],
+  );
+  mentionPickableRef.current = mentionOpen && mentionMatches.length > 0;
+  // Built on the first `@` of the session and kept. `visible` gates it so a
+  // hidden App in multi-session mode does not spawn a git process for a picker
+  // nobody is looking at.
+  useEffect(() => {
+    if (!visible || mentionTyped === undefined || mentionFiles.length > 0) return;
+    let live = true;
+    void listCandidates(process.cwd()).then((files) => {
+      if (live) setMentionFiles(files);
+    });
+    return () => {
+      live = false;
+    };
+  }, [visible, mentionTyped, mentionFiles.length]);
+  // The highlight returns to the top whenever the query changes: after typing
+  // one more character the old index points at a different file, and a picker
+  // whose selection moves on its own is one people stop trusting Enter with.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the query IS the trigger
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionTyped]);
+
+  const applyMentionPick = useCallback(() => {
+    const pick = mentionMatches[mentionIndex];
+    if (!pick) return;
+    // Shut SYNCHRONOUSLY, before the state update that will shut it anyway.
+    // Applying a pick closes the picker by changing the text, and React gets to
+    // that a render later — in between, a keypress finds every handler still
+    // believing the picker is up. That is one lost Enter for anyone who types
+    // ⇥⏎ quickly, and it is invisible: the line simply does not send.
+    mentionOpenRef.current = false;
+    mentionPickableRef.current = false;
+    setInput((v) => applyMention(v, pick));
+  }, [mentionMatches, mentionIndex]);
+  const stepMention = useCallback(
+    (delta: number) => setMentionIndex((i) => movePick(i, delta, mentionMatches.length)),
+    [mentionMatches.length],
+  );
+  // Everything the picker owns, in one handler, mounted only while it is up.
+  // `InputLine` bails on exactly these keys for exactly this window — see the
+  // `mentionOpen` prop, and note that Ink fires every handler for one keypress.
+  useInput(
+    (_input, key) => {
+      if (!mentionOpenRef.current) return;
+      if (key.escape) return setMentionDismissed(mentionStart(input) ?? null);
+      if (key.upArrow) return stepMention(-1);
+      if (key.downArrow) return stepMention(1);
+      if (key.tab || key.return) return applyMentionPick();
+    },
+    { isActive: visible && mentionOpen },
+  );
 
   // The mouse is NEVER captured (SGR reporting eats click-drag): in the normal
   // buffer the terminal owns the wheel (native scrollback) and drag-to-select,
@@ -2832,6 +2970,26 @@ export function App({
         push({ kind: "system", text: `not attached — ${why}` });
       }
 
+      // `@path` files, the text counterpart of the images above and read at the
+      // same moment for the same reason: what the user typed is the truth, so a
+      // mention deleted before Enter was never made.
+      const mentionPaths = extractMentions(text);
+      const read =
+        mentionPaths.length > 0
+          ? await readMentions(mentionPaths, process.cwd())
+          : { mentions: [], rejected: [] };
+      for (const why of read.rejected) {
+        push({ kind: "system", text: `not attached — ${why}` });
+      }
+      // Success gets a line too, which images do not need — a picture announces
+      // itself on the composer's rail, while a mention is indistinguishable from
+      // a path someone merely typed. The size is the point: it is spent on every
+      // iteration of the turn, not once.
+      if (read.mentions.length > 0) {
+        push({ kind: "system", text: `attached — ${mentionSummary(read.mentions)}` });
+      }
+      const block = mentionBlock(read.mentions);
+
       push({
         kind: "user",
         text,
@@ -2846,8 +3004,13 @@ export function App({
       });
       const controller = new AbortController();
       abortRef.current = controller;
+      // The TRANSCRIPT keeps the user's own line (pushed above) while the model
+      // is sent that line plus the files. Appending rather than substituting is
+      // what keeps `@src/a.ts` meaning something in the sentence it was typed
+      // into, and the fence in `mentionBlock` is what keeps a file's contents
+      // from reading as more of the user's instructions.
       await session.agent.run(
-        text,
+        block ? `${text}\n\n${block}` : text,
         controller.signal,
         attached.length > 0 ? { images: attached.map((a) => a.image) } : undefined,
       );
@@ -3108,6 +3271,15 @@ export function App({
   // to the measured content.
   overlayOpenRef.current = pickerOpen || loginOpen || interview !== null;
   arrowHistoryRef.current = (dir) => {
+    // The picker is the third claimant on ↑↓ and it wins while it is open. It
+    // has to be answered HERE as well as in its own handler: under the
+    // fullscreen router the arrows never arrive as Ink key events at all — they
+    // are read off raw stdin so a wheel tick can be told from a keypress — so a
+    // picker wired only to `useInput` navigates in one mode and not the other.
+    if (mentionOpen) {
+      stepMention(dir === "up" ? -1 : 1);
+      return;
+    }
     if (teamSuggest) {
       scrollBy(dir === "up" ? 1 : -1);
       return;
@@ -3212,6 +3384,19 @@ export function App({
               ⏳ +{queue.length - 3} more queued
             </Text>
           ) : null}
+          {/* Above the prompt, never below: the composer sits at the bottom of
+              the screen, so a list under it would be off-screen or would push
+              the input line down on every keystroke — the one element whose
+              position must not move while someone is typing in it (the same
+              reason the swarm board went below). */}
+          {mentionOpen ? (
+            <MentionPicker
+              matches={mentionMatches.slice(0, MENTION_ROWS)}
+              index={mentionIndex}
+              query={mentionTyped ?? ""}
+              total={mentionMatches.length}
+            />
+          ) : null}
           <InputLine
             active={visible && !teamSuggest}
             value={input}
@@ -3251,6 +3436,8 @@ export function App({
             // App owns ↑/↓ in two cases: the fullscreen arrow router, and an open
             // board drill-down (where they step rows instead of recalling history).
             externalArrows={routedArrows || (teamDetailOpen && boardRows.length > 0)}
+            mentionOpen={() => mentionOpenRef.current}
+            mentionPickable={() => mentionPickableRef.current}
           />
         </Box>
       )}

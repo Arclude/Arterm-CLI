@@ -64,6 +64,7 @@ node scripts/sigterm-report-e2e.mjs        # does a KILLED run still report what
 node scripts/deadline-exit-e2e.mjs         # does a run that hits its deadline STOP, and EXIT?
 node scripts/keystore-denyread-e2e.mjs     # can a sandboxed command read our own API keys?
 node scripts/shell-writes-recorded-e2e.mjs # does the ledger see what a SHELL command wrote?
+node scripts/mention-attach-e2e.mjs        # does `@file` put the FILE in front of the model?
 node scripts/unattended-escalation-e2e.mjs # what happens to a prompt nobody will answer?
 node scripts/spool-roundtrip-e2e.mjs       # can the model go back for a spooled result?
 ```
@@ -878,6 +879,68 @@ other half (`readClipboardImage`, over wl-paste/xclip/pngpaste — OSC 52 has a
 copy but no read). Every reader is tried rather than one chosen from
 `$WAYLAND_DISPLAY`, because the environment answers which display server runs,
 not which helper is installed.
+
+### `@` names a TEXT file, and the same exception applies
+
+`core/src/mentions.ts` is `attachments.ts` for files that are not pictures, and
+it inherits the whole argument above: a path typed into the composer is not model
+output, so it is resolved and not confined, and what keeps that honest is that
+NOTHING in the tool layer may call it. Everything that is not about location
+still holds — the size ceiling, and a refusal that NAMES the file, because
+silence there reads as "the model is reading it".
+
+Two things differ from the image path, and both follow from text being
+divisible. An over-large image is refused, since half an image is not a smaller
+image; an over-large file is CLIPPED, keeping both ends the way `sdd.ts`'s
+handoff does, with the omission stated INSIDE the returned text so it travels
+into the prompt. And the ceiling is a SPEND limit rather than a display one: the
+loop re-sends the whole prompt on every tool call, so a mentioned file is billed
+once per iteration, not once. What replaces the magic-number check is the NUL
+byte — the same test `git diff` uses — chosen over an extension allow-list
+because the files people mention have names like `Makefile`.
+
+`mentionBlock` fences each file under the path the user typed, and the fence is
+load-bearing: this feature exists to ask questions ABOUT files, and a file's
+contents pasted inline are indistinguishable from the user's own instructions.
+The `@token` stays in the sentence for `imagePlaceholder`'s reason — it is how
+you say which file "does this handle the empty case?" is about.
+
+`fileCandidates.ts` is what the picker completes over, split out because listing
+and reading fail differently: a list may come back empty, a named file must
+explain itself. Git is the candidate set where there is a repository
+(`--others --exclude-standard`, so a file created ten seconds ago completes —
+which is exactly when you want to point at it), and a bounded walk where there
+is not, because a terminal agent is used plenty of places that are not
+repositories and an empty picker there reads as broken rather than as scoped. A
+`.gitignore`d file is not OFFERED and is still readable when typed in full.
+
+**Two handlers, one keypress, and both were wrong about the same render.** Ink
+runs every mounted `useInput` for a key, so the picker and the composer must
+agree on who owns ⇥⏎↑↓ — and openness is derived from the TEXT, which React
+learns about a render late. A Tab immediately followed by Enter therefore found
+both handlers still believing the picker was up, and the Enter was swallowed by
+neither: the line simply did not send. Hence `mentionOpen` is a GETTER over a ref
+rather than a prop, cleared synchronously by the action that closes the picker —
+the same reason `valueRef` exists three lines above it.
+
+Ownership is split in two because the list stays up saying "no file matches",
+which is worth showing: openness governs ↑↓ and Esc, but only a PICKABLE row
+governs ⇥ and ⏎. Owning ⏎ with nothing to pick would make a path the list does
+not offer — an ignored file, an absolute path — impossible to submit at all.
+
+Esc remembers the mention's `@` POSITION, not a flag and not the dismissed text.
+A flag is cleared by the next keystroke, so the list springs back mid-word; a
+text prefix never stops matching, because the composer only appends, so the
+picker would stay shut for the rest of the line including the next mention.
+
+`mention.test.tsx` is the seam, and it is the reason to trust any of the above:
+severing the one line that appends the block to what `Agent.run` is sent leaves
+eight of nine tests passing and the entire picker working on screen.
+`scripts/mention-attach-e2e.mjs` is the same question asked of the BUILT binary
+in a real pty, reading the request body off a fake endpoint — 9/9 after, 0/9
+before. Its first draft scored 1/9 before, and the passing check was "a
+git-ignored file is not offered", which is also true of a screen with no picker
+on it; a negative assertion needs a positive anchor or it measures the harness.
 
 ## Telemetry: `gen_ai.*`, pinned
 

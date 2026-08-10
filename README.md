@@ -107,6 +107,7 @@ arterm pull <model>          # download a model via Ollama
 | Key / command          | Action                                            |
 | ---------------------- | ------------------------------------------------- |
 | `Enter`                | Send the message.                                 |
+| `@`                    | Attach a file — opens a picker over this project.  |
 | `?`                    | Show help.                                         |
 | `Alt+P` / `/model`     | Open the interactive model picker.                |
 | `/model <name\|N>`     | Switch model directly (by name or list number).   |
@@ -117,6 +118,15 @@ arterm pull <model>          # download a model via Ollama
 
 When a tool wants to write, edit, or run a shell command, Arterm shows a
 permission prompt: `[y]` allow once · `[a]` always allow this tool · `[n]` deny.
+
+Typing `@` opens a file picker over the project — `↑↓` to choose, `⇥` or `Enter`
+to insert, `Esc` to dismiss — and the file's contents ride out with the message,
+so you can ask about a file without spending a turn on the model reading it. The
+path stays in your sentence, which is how you say which file you mean when you
+attach several. Files git ignores are not offered but can still be typed in
+full, and a file that is too large is attached as an excerpt that says so.
+Dragging an image onto the prompt, or `Ctrl+V` with one on the clipboard,
+attaches it the same way.
 
 ## Providers
 
