@@ -22,7 +22,10 @@ beforeEach(async () => {
   dir = await fs.mkdtemp(join(tmpdir(), "arterm-project-"));
 });
 afterEach(async () => {
-  await fs.rm(dir, { recursive: true, force: true });
+  // Retried for the same Windows race the mention tests hit: a just-exited npm
+  // child can still hold the temp dir as its cwd, and rmdir there fails EBUSY
+  // on a test that passed. Cleanup does not get to fail the suite.
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /** A package.json whose scripts are node one-liners, so no toolchain is needed. */
@@ -57,7 +60,9 @@ describe("project commands and the session's credentials", () => {
     expect((await lintTool.execute({}, ctx())).output.trim().split("\n").pop()).toBe("visible");
     await pkg({ lint: show("PATH") });
     expect((await lintTool.execute({}, ctx())).output.trim().split("\n").pop()).not.toBe("absent");
-  });
+    // 15s, not vitest's 5: this case spawns npm twice, and a cold Windows
+    // runner has been measured past the default on the second spawn alone.
+  }, 15_000);
 
   it("hands it over when the session switched the scrub off", async () => {
     await pkg({ lint: show("ARTERM_TEST_API_KEY") });
