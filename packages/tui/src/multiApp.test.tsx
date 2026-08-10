@@ -128,9 +128,26 @@ describe("MultiApp (multi-session host)", () => {
     m.stdin.write("merhaba");
     await waitFor(m.seen, (f) => f.includes("merhaba"));
     m.stdin.write(ENTER);
-    // The new session becomes active and its initialPrompt runs through the agent.
+    // The session starts working IN THE BACKGROUND: its initialPrompt reaches
+    // the agent while the dashboard stays up — that is the whole point of
+    // typing a task here instead of opening a fresh session first.
     await waitFor(m.seen, (f) => f.includes("B:merhaba"));
+    expect(m.last()).toContain("OTURUMLAR");
     expect(m.createdCount()).toBe(1);
+    // The new row is preselected; Enter opens it.
+    m.stdin.write(ENTER);
+    await waitFor(m.last, (f) => !f.includes("OTURUMLAR"));
+    m.unmount();
+  });
+
+  it("the dashboard counts its buckets", async () => {
+    const m = mountMulti();
+    await tick();
+    m.stdin.write(LEFT);
+    await waitFor(m.seen, (f) => f.includes("OTURUMLAR"));
+    // One fresh session, nothing running: the counts line says exactly that.
+    await waitFor(m.seen, (f) => f.includes("0 onay bekliyor · 0 çalışıyor · 0 tamamlandı"));
+    expect(m.last()).toContain("1 yeni");
     m.unmount();
   });
 
@@ -145,6 +162,9 @@ describe("MultiApp (multi-session host)", () => {
     await tick();
     m.stdin.write(ENTER);
     await waitFor(m.seen, (f) => f.includes("B:ikinci"));
+    // Creation no longer switches — open the preselected new row explicitly.
+    m.stdin.write(ENTER);
+    await waitFor(m.last, (f) => !f.includes("OTURUMLAR"));
 
     // While B is visible, emit a full turn on hidden session A's bus.
     m.busA.emit({ type: "turn_start" });
@@ -182,7 +202,12 @@ describe("MultiApp (multi-session host)", () => {
     await tick();
     m.stdin.write(ENTER);
     await waitFor(m.seen, (f) => f.includes("B:ikinci"));
-    await waitFor(m.last, (f) => f.includes("2/2"));
+    // Creation no longer switches — open the preselected new row explicitly.
+    m.stdin.write(ENTER);
+    // The badge can only render inside a VISIBLE App with two sessions, so its
+    // appearance IS the switch — and scanning `seen` sidesteps lastFrame being
+    // a bare control-sequence write (clearForSwitch emits those as frames).
+    await waitFor(m.seen, (f) => f.includes("2/2"));
 
     // Close B: the CLI release hook fires and A is back on screen, badge gone.
     m.stdin.write(CTRL_X);

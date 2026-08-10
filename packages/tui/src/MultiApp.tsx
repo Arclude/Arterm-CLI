@@ -59,7 +59,11 @@ export function MultiApp({
   // Sessions whose permission prompt is waiting (fed by each App).
   const [awaiting, setAwaiting] = useState<ReadonlySet<string>>(new Set());
   // Meta changes (background activity) repaint the badge/panel via this tick.
-  const [, setMetaTick] = useState(0);
+  // The VALUE is consumed below: panelEntries snapshots each meta with .get()
+  // inside a useMemo, and a memo that does not depend on the tick re-renders
+  // with the STALE snapshot — the panel showed every background session frozen
+  // at whatever it was doing when the panel opened.
+  const [metaTick, setMetaTick] = useState(0);
 
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -199,8 +203,19 @@ export function MultiApp({
             meta: new SessionMeta(made.session),
             initialPrompt: prompt || undefined,
           };
+          // The new row's index is the length BEFORE the append. Read off the
+          // ref AFTER setEntries this was one past the end — the awaits above
+          // give React room to flush, so the ref is not reliably stale — and
+          // Enter on an out-of-range selection silently did nothing.
+          const nextIndex = entriesRef.current.length;
           setEntries((cur) => [...cur, entry]);
-          switchTo(made.id);
+          // STAY on the panel — the whole point of typing a task here is a
+          // session that works in the BACKGROUND (the initialPrompt submits on
+          // mount whether or not the App is visible). Switching on create made
+          // the panel a detour; Claude Code's dashboard is the model: the new
+          // row appears, its status turns busy, Enter opens it when wanted.
+          setPanelInput("");
+          setPanelSel(nextIndex);
         } finally {
           setCreating(false);
         }
@@ -280,7 +295,8 @@ export function MultiApp({
           createFromPanel(typed);
           return;
         }
-        const target = entriesRef.current[panelSelRef.current];
+        const list = entriesRef.current;
+        const target = list[Math.min(panelSelRef.current, list.length - 1)];
         if (target) switchTo(target.id);
         return;
       }
@@ -313,7 +329,9 @@ export function MultiApp({
         awaitingPermission: awaiting.has(e.id),
         goal: e.meta.get().goal,
       })),
-    [entries, awaiting],
+    // metaTick is the freshness dependency, not dead weight — see its decl.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: metaTick IS the invalidation signal
+    [entries, awaiting, metaTick],
   );
 
   return (

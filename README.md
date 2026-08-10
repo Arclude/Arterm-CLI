@@ -49,6 +49,11 @@ Enter send   ? help   Alt+P models   Esc cancel   ^C quit
   Definitions load from the project (`.arterm/agents/`) and globally
   (`~/.arterm/agents/`), in the TUI and headless alike, and double as `spawn`
   roles beside the built-in five.
+- **Background sessions** — `←` opens the session dashboard: live counts
+  (awaiting approval · working · completed), one row per session with its last
+  result and age, and a composer that starts a NEW session working in the
+  background — type the task, press Enter, stay where you are. `Enter` opens a
+  row, `Ctrl+←/→` cycles sessions, `Ctrl+X` closes one.
 - **Headless mode** — `arterm --print "prompt"` (or piped stdin) for scripts;
   `--json` for structured output; `--resume`/`--continue` to pick up a session.
 - **Native + JSON-fallback tool-calling** — uses a backend's native

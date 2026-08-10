@@ -10,6 +10,13 @@ export interface SessionMetaState {
   /** Completed turns (turn_end count) — a cheap "how much happened" signal. */
   rounds: number;
   lastActivityAt: number;
+  /**
+   * First line of the last assistant message — the panel's "what came of it"
+   * column. The alternative was replaying each session's transcript in the
+   * panel renderer, which would read history on every repaint for a string
+   * that only changes when a message lands.
+   */
+  lastAssistantSnippet?: string;
 }
 
 /**
@@ -40,6 +47,11 @@ export class SessionMeta {
         case "tool_denied":
           this.patch({ status: "thinking", activeTool: undefined });
           break;
+        case "assistant_message": {
+          const first = event.message.content.split("\n").find((l) => l.trim().length > 0) ?? "";
+          this.patch({ lastAssistantSnippet: first.trim().slice(0, 80) || undefined });
+          break;
+        }
         case "turn_end":
           this.patch({
             status: "idle",

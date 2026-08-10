@@ -20,25 +20,61 @@ function clip(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, Math.max(1, max - 1))}…`;
 }
 
-function statusGlyph(entry: SessionPanelEntry): React.ReactElement {
-  if (entry.awaitingPermission) return <Text color="yellow">⏳</Text>;
-  if (entry.meta.status !== "idle" || entry.meta.autonomyRunning)
-    return <Text color="yellow">●</Text>;
-  return <Text color="green">●</Text>;
+/**
+ * A compact "how long ago" — the panel's rightmost column. Coarse on purpose:
+ * the question it answers is "which of these did I touch recently", and
+ * seconds-precision past the first minute is churn the eye has to re-read on
+ * every repaint.
+ */
+export function age(sinceMs: number, now: number = Date.now()): string {
+  const s = Math.max(0, Math.round((now - sinceMs) / 1000));
+  if (s < 60) return `${s}sn`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}dk`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}sa`;
+  return `${Math.round(h / 24)}g`;
 }
 
-function activityLabel(entry: SessionPanelEntry): string {
+/** One of the header's three buckets. A fresh session has completed nothing. */
+export function bucketOf(entry: SessionPanelEntry): "awaiting" | "working" | "completed" | "new" {
+  if (entry.awaitingPermission) return "awaiting";
+  if (entry.meta.status !== "idle" || entry.meta.autonomyRunning) return "working";
+  return entry.meta.rounds > 0 ? "completed" : "new";
+}
+
+function statusGlyph(entry: SessionPanelEntry): React.ReactElement {
+  switch (bucketOf(entry)) {
+    case "awaiting":
+      return <Text color="yellow">⏳</Text>;
+    case "working":
+      return <Text color="yellow">●</Text>;
+    case "completed":
+      return <Text color="green">●</Text>;
+    case "new":
+      return <Text color="gray">○</Text>;
+  }
+}
+
+/**
+ * The row's right-hand summary: what the session is DOING while busy, what it
+ * last SAID once idle. The idle half is the column the panel existed without —
+ * every finished row read "boşta", which says a session stopped and nothing
+ * about what came of it.
+ */
+function summaryLabel(entry: SessionPanelEntry): string {
   if (entry.awaitingPermission) return "izin bekliyor";
   if (entry.meta.status === "tool") return `⚙ ${entry.meta.activeTool ?? "tool"}`;
   if (entry.meta.status === "thinking") return "✎ yazıyor";
   if (entry.meta.autonomyRunning && entry.goal) return `🎯 ${entry.goal}`;
-  return "boşta";
+  if (entry.meta.lastAssistantSnippet) return entry.meta.lastAssistantSnippet;
+  return entry.meta.rounds > 0 ? "tamamlandı" : "yeni";
 }
 
 /**
- * Session switcher overlay (opened with ←): every session with its live
- * activity, the selected one's recent prompts, and a create-input line that
- * starts a NEW session from whatever is typed into it.
+ * Session dashboard (opened with ←): counts up top, one row per session with
+ * its live status, last result and age, the selected row's recent prompts, and
+ * a composer that starts a new session working IN THE BACKGROUND.
  */
 export function SessionPanel({
   entries,
@@ -55,7 +91,10 @@ export function SessionPanel({
   canCreate: boolean;
   columns: number;
 }): React.ReactElement {
-  const titleW = Math.max(12, Math.min(48, columns - 34));
+  const counts = { awaiting: 0, working: 0, completed: 0, new: 0 };
+  for (const e of entries) counts[bucketOf(e)] += 1;
+  const titleW = Math.max(12, Math.min(44, columns - 46));
+  const summaryW = Math.max(10, Math.min(36, columns - titleW - 18));
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Box>
@@ -63,9 +102,13 @@ export function SessionPanel({
           ── OTURUMLAR ──
         </Text>
         <Text color="gray" dimColor>
-          {"   ↑↓ seç · Enter geç · ^X oturumu kapat · Esc kapat"}
+          {"  ↑↓ seç · Enter aç · Esc geri · ^X kapat"}
         </Text>
       </Box>
+      <Text color="gray">
+        {`${counts.awaiting} onay bekliyor · ${counts.working} çalışıyor · ${counts.completed} tamamlandı`}
+        {counts.new > 0 ? ` · ${counts.new} yeni` : ""}
+      </Text>
       {entries.map((entry, i) => {
         const sel = i === selected;
         return (
@@ -80,10 +123,11 @@ export function SessionPanel({
                 {statusGlyph(entry)}
                 <Text> {clip(entry.title, titleW).padEnd(titleW)}</Text>
               </Text>
-              <Text color="gray">
+              <Text color="gray" wrap="truncate">
                 {"  "}
-                {clip(activityLabel(entry), 28)}
-                {entry.meta.rounds > 0 ? ` · ${entry.meta.rounds} tur` : ""}
+                {clip(summaryLabel(entry), summaryW).padEnd(summaryW)}
+                {"  "}
+                <Text dimColor>{age(entry.meta.lastActivityAt).padStart(4)}</Text>
                 {entry.id === activeId ? "  ← aktif" : ""}
               </Text>
             </Box>
@@ -100,10 +144,16 @@ export function SessionPanel({
       {canCreate ? (
         <Box marginTop={1}>
           <Text color="cyan">{" › "}</Text>
-          <Text>{input}</Text>
+          {input ? (
+            <Text>{input}</Text>
+          ) : (
+            <Text color="gray" dimColor>
+              yeni oturum için görev tanımla…
+            </Text>
+          )}
           <Text color="cyan">▏</Text>
           <Text color="gray" dimColor>
-            {"  yaz + Enter = yeni oturum"}
+            {"  Enter = arka planda başlat"}
           </Text>
         </Box>
       ) : null}
