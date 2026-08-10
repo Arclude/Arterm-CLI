@@ -106,3 +106,47 @@ describe("project tools", () => {
     expect(formatTool.mutating).toBe(true);
   });
 });
+
+describe("git and the session's credentials", () => {
+  // `git` is not sandboxed — it is a fixed read-only subcommand list with the
+  // code-running flags refused — so the environment is the only thing standing
+  // between a repository's own config and the user's provider keys. A repo can
+  // point git at an external program (`diff.external`, `core.fsmonitor`), and
+  // that program inherits whatever git was spawned with. This was the one
+  // process-spawning tool that still handed over the whole environment while
+  // `bash`, `exec` and the project scripts had been scrubbed.
+  beforeEach(() => {
+    process.env.ARTERM_TEST_API_KEY = "sk-leaked";
+    process.env.ARTERM_TEST_PLAIN = "visible";
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(process.env, "ARTERM_TEST_API_KEY");
+    Reflect.deleteProperty(process.env, "ARTERM_TEST_PLAIN");
+  });
+
+  it.skipIf(!gitAvailable)("does not hand a credential-named variable to git", async () => {
+    await run("git", ["init", "-q"], { cwd: dir });
+    // `diff.external` is the vector in one line: git runs it, and it prints the
+    // environment it was given rather than a diff.
+    const probe = join(dir, "probe.sh");
+    await fs.writeFile(
+      probe,
+      '#!/bin/sh\necho "KEY=${ARTERM_TEST_API_KEY:-absent} PLAIN=${ARTERM_TEST_PLAIN:-absent}"\n',
+    );
+    await fs.chmod(probe, 0o755);
+    await run("git", ["config", "diff.external", probe], { cwd: dir });
+    await fs.writeFile(join(dir, "f.txt"), "one\n");
+    await run("git", ["add", "-A"], { cwd: dir });
+    await run("git", ["-c", "user.email=t@e.c", "-c", "user.name=t", "commit", "-qm", "base"], {
+      cwd: dir,
+    });
+    await fs.writeFile(join(dir, "f.txt"), "two\n");
+
+    const res = await gitTool.execute({ subcommand: "diff" }, ctx());
+    // The positive anchor: the external program DID run, so "no key" is a
+    // measurement rather than a program that never executed.
+    expect(res.output).toContain("PLAIN=visible");
+    expect(res.output).toContain("KEY=absent");
+    expect(res.output).not.toContain("sk-leaked");
+  });
+});

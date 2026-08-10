@@ -177,7 +177,9 @@ arterm --provider llamacpp --model <file.gguf>
 ## Security
 
 Arterm runs models that can read your files and execute shell commands, so it is
-built to be safe by default:
+built to be safe by default. [SECURITY.md](./SECURITY.md) is the full statement —
+including what these controls do **not** cover, and how to report a
+vulnerability. The short version:
 
 - **Directory sandbox (file tools)** — `read`, `write`, `edit`, `ls`, `glob`,
   and `grep` are confined to the working directory; paths and glob patterns that

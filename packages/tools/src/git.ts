@@ -1,4 +1,5 @@
-import type { Tool } from "@arterm/core";
+import type { CredentialSettings, Tool } from "@arterm/core";
+import { scrubEnv } from "@arterm/core";
 import { requireString, resolveWithin } from "./paths.js";
 
 const MAX_OUTPUT = 16 * 1024;
@@ -23,14 +24,29 @@ function truncate(s: string): string {
   return s.length > MAX_OUTPUT ? `${s.slice(0, MAX_OUTPUT)}\n…[truncated]` : s;
 }
 
-async function runGit(args: string[], cwd: string, signal?: AbortSignal) {
+async function runGit(
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+  credentials?: CredentialSettings,
+) {
   // Lazy: execa is loaded on first git use, not at startup.
   const { execa } = await import("execa");
+  // Scrubbed for the same reason `bash` is, and `extendEnv: false` for the same
+  // reason: execa MERGES `env` into `process.env` by default, so a scrubbed map
+  // alone would hand the originals over anyway. git is not sandboxed — it is a
+  // fixed read-only subcommand list with the code-running flags refused — but a
+  // repository's own config can still point git at an external program
+  // (`diff.external`, `core.fsmonitor`), and that program inherits whatever
+  // this passes. Nothing here needs a provider key, so nothing here gets one.
+  const { env } = scrubEnv({ ...process.env }, credentials);
   const result = await execa("git", args, {
     cwd,
     shell: false,
     reject: false,
     all: true,
+    env,
+    extendEnv: false,
     ...(signal ? { cancelSignal: signal } : {}),
   });
   const out = truncate((result.all ?? `${result.stdout}\n${result.stderr}`).trim());
@@ -75,7 +91,7 @@ export const gitTool: Tool = {
     if (bad) {
       return { output: `Refused argument on read-only git: ${bad}`, isError: true };
     }
-    return runGit([...base, ...extra], ctx.cwd, ctx.signal);
+    return runGit([...base, ...extra], ctx.cwd, ctx.signal, ctx.credentials);
   },
 };
 
@@ -107,7 +123,7 @@ export const gitCommitTool: Tool = {
     const paths = Array.isArray(args.paths) ? args.paths.filter((p) => typeof p === "string") : [];
 
     if (args.all === true || paths.length === 0) {
-      const add = await runGit(["add", "-A"], ctx.cwd, ctx.signal);
+      const add = await runGit(["add", "-A"], ctx.cwd, ctx.signal, ctx.credentials);
       if (add.isError) return add;
     } else {
       for (const p of paths) {
@@ -117,10 +133,15 @@ export const gitCommitTool: Tool = {
           return { output: (err as Error).message, isError: true };
         }
       }
-      const add = await runGit(["add", "--", ...(paths as string[])], ctx.cwd, ctx.signal);
+      const add = await runGit(
+        ["add", "--", ...(paths as string[])],
+        ctx.cwd,
+        ctx.signal,
+        ctx.credentials,
+      );
       if (add.isError) return add;
     }
 
-    return runGit(["commit", "-m", message], ctx.cwd, ctx.signal);
+    return runGit(["commit", "-m", message], ctx.cwd, ctx.signal, ctx.credentials);
   },
 };
