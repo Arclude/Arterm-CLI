@@ -5,6 +5,28 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-08-10
+
+### Security
+
+- **`git` no longer inherits the session's environment.** It was the last
+  process-spawning tool still handed the full environment — `bash`, `exec` and
+  the project scripts had all been scrubbed. `git` is deliberately not
+  sandboxed (it is a fixed list of read-only subcommands with the code-running
+  flags refused), so the environment was the only thing standing between a
+  repository's own config and your provider keys: a repo can point git at an
+  external program through `diff.external` or `core.fsmonitor`, and that
+  program inherits whatever git was spawned with.
+
+### Added
+
+- **[SECURITY.md](./SECURITY.md)** — the threat model, the controls in the
+  current source, and, at equal length, the gaps that are known and accepted:
+  the sandbox confines commands rather than Arterm (MCP servers, the verify
+  command and plugins are outside it), the transcript is an exfiltration
+  channel no egress rule can see, the allowlist prevents an arbitrary channel
+  rather than every channel, and reads are less constrained than writes.
+
 ## [0.6.0] — 2026-08-10
 
 ### Changed
