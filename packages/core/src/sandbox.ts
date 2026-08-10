@@ -296,11 +296,10 @@ export function confinementNote(
       }, and everything else is refused by a proxy`,
     );
   }
-  return (
-    `[Arterm ran this command inside a sandbox: ${parts.join("; ")}. ` +
-    "Work inside the project directory or the temp dir, or ask the user to " +
-    "rerun with --no-sandbox — retrying the same path will fail the same way.]"
-  );
+  const advice =
+    "Work inside the project directory or the temp dir, or ask the user to rerun with " +
+    "--no-sandbox — retrying the same path will fail the same way.";
+  return `[Arterm ran this command inside a sandbox: ${parts.join("; ")}. ${advice}]`;
 }
 
 /** Resolve to an absolute, symlink-free path; fall back to the plain resolve. */
