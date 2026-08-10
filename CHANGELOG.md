@@ -5,7 +5,33 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0] — 2026-08-10
+## [0.8.0] — 2026-08-10
+
+### Fixed
+
+- **The fleet leader integrates through a turn that cannot act.** The
+  parallel/team "integrate the round's results" step used to be a full agent
+  turn with the whole tool roster offered and the sentence "Do not call any
+  tools." appended — a request, not a gate. A fake model that answers the
+  integration prompt with a write tool call proves the pre-fix binary executes
+  it: a file no worker wrote, recorded without a worker id. The step now runs
+  through `Agent.note()` — history, no tools — so a leader that answers with
+  work produces text nobody runs.
+- **A red suite between claims becomes the next round's steer.** The
+  verification gate used to fire only on a completion claim, and a live
+  parallel run showed the cost: 19/21 tests green, the leader proposing no
+  further work, and the run idling out with the two failures never surfaced to
+  anyone. With a standing command configured (`verify.command` /
+  `--verify-cmd`), it now also runs at round boundaries in the parallel and
+  team loops — red skips the "is the goal done?" reflection, resets the
+  idle-out counter, and lands in the next round's prompt exactly like a
+  rejection's must-fix list. Without a standing command, rounds behave as
+  before.
+- **User agent definitions load on the headless path too.** `.arterm/agents/`
+  (project) and `~/.arterm/agents/` (global) definitions — `/team` members and
+  `spawn` roles — were registered only by the interactive bootstrap, so a
+  headless `--goal` run quietly fell back to the five built-in roles. Headless
+  is where fleets actually run unattended; both paths now register them.
 
 ### Changed
 

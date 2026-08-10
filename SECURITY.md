@@ -4,7 +4,7 @@ Arterm runs a language model's output on your machine. This document says what
 is constrained, what is **not**, and which of the gaps are known and accepted —
 so that a control is not read as a guarantee it cannot give.
 
-Reviewed against the source at **v0.6.1**.
+Reviewed against the source at **v0.8.0**.
 
 ## Reporting a vulnerability
 
