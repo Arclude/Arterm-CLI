@@ -14,7 +14,10 @@ describe("listCandidates", () => {
     dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "arterm-candidates-")));
   });
   afterEach(async () => {
-    await fs.rm(dir, { recursive: true, force: true });
+    // `maxRetries` for the reason `mention.test.tsx` states: these cases spawn
+    // git with `dir` as its cwd, and Windows locks a directory a live process
+    // is sitting in.
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   describe("in a repository", () => {

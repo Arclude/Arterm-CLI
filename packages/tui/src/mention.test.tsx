@@ -102,7 +102,12 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   process.chdir(cwd);
-  await fs.rm(dir, { recursive: true, force: true });
+  // Retried, because the picker's candidate list spawns `git ls-files` with
+  // this directory as its cwd, and on Windows a child process holding a cwd
+  // keeps it locked until it exits — `rmdir` there fails EBUSY on a test that
+  // passed. Cleanup is not what any of this is about, so it does not get to
+  // fail the suite.
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /** Renders App over the temp cwd and waits for the composer to exist. */
