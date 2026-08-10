@@ -70,7 +70,7 @@ import { type StatusServer, shouldPublish, startStatusServer } from "./statusSer
 import { runToolsCost } from "./toolsCost.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
-const VERSION = "0.5.0";
+const VERSION = "0.6.0";
 
 /** Provider ids the CLI can build — the single source of truth for `--provider`. */
 const PROVIDER_IDS: readonly string[] = providerCatalog.map((p) => p.id);

@@ -5,6 +5,33 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-08-10
+
+### Changed
+
+- **`bash` is confined by default, in every session.** `sandbox.enabled` was
+  true only for `--autonomous` runs; it is now the default for attended ones as
+  well. Shell commands write to the working directory and the temp dir, reach a
+  short allowlist of hosts, and cannot read Arterm's own key material. The
+  argument this reverses is that an attended session has the permission prompt
+  as its control — but the prompt answers a different question: "yes, run `pnpm
+  test`" is not consent for `pnpm test` to write outside the project or dial an
+  arbitrary host, the same reasoning that already put the credential scrub in
+  every mode. What stays asymmetric is the response to a boundary that cannot be
+  **established**: an unattended run still refuses to start, while an attended
+  one warns and continues, because a session that refuses to OPEN over a missing
+  bubblewrap earns `--no-sandbox` in a shell alias by lunchtime. Turn it off with
+  `--no-sandbox` or `sandbox.enabled: false`.
+- **A refused command now says so — to the model as well as to you.** A write
+  the boundary stopped came back as the kernel's own sentence and nothing else
+  (`Read-only file system`, `[exit code 1]`), so the model's next move was
+  `sudo`, another path, or telling you your disk was broken. Failing commands in
+  a confined session now carry a note naming the path, the writable roots, and
+  the way out. It is failure-coupled and evidence-coupled — silent on success,
+  and silent on a failing test suite that never left the project — and it matches
+  PATHS rather than the kernel's phrasing, which arrives translated on a
+  non-English host. The session also states the boundary in force at startup.
+
 ## [0.5.0] — 2026-08-10
 
 ### Added
