@@ -6,6 +6,7 @@ import { ARTERM_HOME } from "./config.js";
 import { keystorePaths } from "./keystore.js";
 import {
   DEFAULT_ALLOWED_DOMAINS,
+  confinementNote,
   describeSandbox,
   resolveSandbox,
   withinWriteRoots,
@@ -145,5 +146,65 @@ describe("the keystore is denied to a sandboxed command", () => {
     const spec = resolveSandbox({ enabled: true }, { cwd: tmp() })!;
     expect(spec.denyRead).not.toContain(ARTERM_HOME);
     for (const path of spec.denyRead) expect(path).not.toBe(join(ARTERM_HOME, "tool-output"));
+  });
+});
+
+describe("confinementNote", () => {
+  const spec = () =>
+    resolveSandbox({ enabled: true }, { cwd: mkdtempSync(join(tmpdir(), "cn-")) })!;
+
+  it("says nothing when there is no boundary", () => {
+    // An unconfined session's failures have nothing to do with this, and a note
+    // that appears anyway teaches the model to ignore the one that matters.
+    expect(confinementNote(undefined, "/home/someone/x: Read-only file system")).toBeUndefined();
+  });
+
+  it("says nothing about a failure that names no outside path", () => {
+    // The case that decides whether this is usable at all: a failing test suite
+    // inside the project must not be attributed to the sandbox.
+    const s = spec();
+    const inside = join(s.writeRoots[0] as string, "src/app.test.ts");
+    expect(confinementNote(s, `FAIL ${inside}\n1 test failed`)).toBeUndefined();
+  });
+
+  it("does not point at the interpreter every error line names", () => {
+    // `/usr/bin/bash: line 1: ...` is outside the write roots and explains
+    // nothing; without this the note would fire on every failing command.
+    expect(
+      confinementNote(spec(), "/usr/bin/bash: line 1: frobnicate: command not found"),
+    ).toBeUndefined();
+  });
+
+  it("names the outside path, the roots, and the way out", () => {
+    const s = spec();
+    const note = confinementNote(s, "/home/someone/notes.txt: Read-only file system") ?? "";
+    expect(note).toContain("/home/someone/notes.txt");
+    expect(note).toContain(s.writeRoots[0] as string);
+    expect(note).toContain("--no-sandbox");
+    // Advisory, and explicitly not "try again": a retry costs a whole turn to
+    // reach the same refusal.
+    expect(note).toContain("will fail the same way");
+  });
+
+  it("matches PATHS, not the kernel's sentence", () => {
+    // The message arrives translated on a non-English host — "Salt-okunur dosya
+    // sistemi" is what this was first measured against — so matching the phrase
+    // would have silently never fired for the users most likely to hit it.
+    const note = confinementNote(spec(), "/home/someone/x.txt: Salt-okunur dosya sistemi");
+    expect(note).toContain("/home/someone/x.txt");
+  });
+
+  it("calls the keystore what it is, rather than an unwritable path", () => {
+    const s = spec();
+    const key = s.denyRead[0] as string;
+    expect(confinementNote(s, `cat: ${key}: No such file or directory`)).toContain("key material");
+  });
+
+  it("explains a refused host when the proxy is what answered", () => {
+    const note = confinementNote(
+      spec(),
+      "curl: (56) Received HTTP code 403 from proxy after CONNECT",
+    );
+    expect(note).toContain("egress");
   });
 });

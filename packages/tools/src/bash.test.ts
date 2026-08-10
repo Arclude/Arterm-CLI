@@ -179,6 +179,44 @@ describe("bashTool inside a sandbox", () => {
     expect(res.output.trim()).toBe("1");
   });
 
+  it("hands a FAILING command's output to the boundary, and appends what it says", async () => {
+    // The seam the whole diagnosis rests on. A refused write surfaces as the
+    // kernel's own sentence and nothing else, so without this the model is told
+    // a disk is read-only and reaches for `sudo`. The fake echoes what it was
+    // given, which proves both halves: it was called WITH THE OUTPUT, and the
+    // answer reached the tool result.
+    const res = await bashTool.execute(
+      { command: node("console.error('boom'); process.exit(1)") },
+      {
+        ...ctx(),
+        sandbox: fakeSandbox({
+          explain: (output) => (output.includes("boom") ? "[confined: saw boom]" : undefined),
+        }),
+      },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("[confined: saw boom]");
+  });
+
+  it("says nothing when the command SUCCEEDED, or when the boundary has nothing to say", async () => {
+    // Failure-coupled and evidence-coupled, in that order. A note on a
+    // successful command is noise; a note on every failure is noise the model
+    // learns to skip, and it would blame the sandbox for a failing test suite.
+    const explain = (): string => "[confined: should not appear]";
+    const ok = await bashTool.execute(
+      { command: node("console.log('fine')") },
+      { ...ctx(), sandbox: fakeSandbox({ explain }) },
+    );
+    expect(ok.output).not.toContain("confined");
+
+    const quiet = await bashTool.execute(
+      { command: node("process.exit(1)") },
+      { ...ctx(), sandbox: fakeSandbox({ explain: () => undefined }) },
+    );
+    expect(quiet.isError).toBe(true);
+    expect(quiet.output).not.toContain("confined");
+  });
+
   it("turns a refusal into an error result instead of running unconfined", async () => {
     const marker = join(dir, "escaped.txt");
     const res = await bashTool.execute(

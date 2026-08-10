@@ -84,6 +84,17 @@ export interface SandboxRunner {
   /** Release per-command state (masked credential files, proxy leases). */
   release(): void;
   /**
+   * Why a command that just FAILED might have failed because of this boundary,
+   * or `undefined` when nothing in its output points here — see
+   * {@link confinementNote}, which this delegates to.
+   *
+   * On the runner rather than in `ToolContext` because the spec is already
+   * here: the context carries the runner, and a second copy of the boundary
+   * beside it is a second thing that can disagree with the first. Optional for
+   * the reason `dispose` is — a test double stays an object literal.
+   */
+  explain?(output: string): string | undefined;
+  /**
    * Tear the boundary itself down at session end.
    *
    * Optional so a test double stays a three-line object literal, and mandatory
@@ -192,6 +203,104 @@ export function describeSandbox(spec: SandboxSpec): string {
       ? "no network"
       : `${spec.allowedDomains.length} allowed domain${spec.allowedDomains.length === 1 ? "" : "s"}`;
   return `writes confined to ${spec.writeRoots.join(", ")}; egress: ${net}`;
+}
+
+/**
+ * Paths a refusal never explains anything about.
+ *
+ * Every error line names an interpreter — `/usr/bin/bash: line 1: …` — and
+ * `/usr/bin/bash` is outside the write roots, so without this the note would
+ * fire on every failing command and point at the shell. These are also places a
+ * write already fails for an ordinary user with no sandbox in sight, so
+ * excluding them costs the diagnosis nothing it could have said.
+ */
+const UNINFORMATIVE_PREFIXES = [
+  "/usr/",
+  "/bin/",
+  "/sbin/",
+  "/lib",
+  "/opt/",
+  "/etc/",
+  "/proc/",
+  "/sys/",
+  "/dev/",
+];
+
+/** Absolute paths named in text: POSIX `/a/b`, and Windows `C:\a\b`. */
+function pathsIn(text: string): string[] {
+  const posix = text.match(/(?<![\w.])\/[^\s:;,"'`)\]]+/g) ?? [];
+  const win = text.match(/(?<![\w])[A-Za-z]:\\[^\s:;,"'`)\]]+/g) ?? [];
+  return unique([...posix, ...win].map((p) => p.replace(/[.,)]+$/, "")));
+}
+
+/**
+ * Why a command that just FAILED might have failed because it was confined.
+ *
+ * The same shape as `withheldNote` one file over, and the same shape as the
+ * post-failure diagnosis in WrongStack's shell tool, for the same three
+ * reasons: it is **failure-coupled** (a command that succeeded was not stopped
+ * by anything), it is **advisory** (it never blocks, mutates or retries), and
+ * it returns `undefined` when it has nothing specific to say. A note appended
+ * to every failing command in a confined session is one the model learns to
+ * ignore, and it would attribute a failing test suite to the sandbox.
+ *
+ * The reason it exists is what the boundary looks like from the inside. A
+ * refused write surfaces as the KERNEL's message and nothing else —
+ * `Read-only file system`, `[exit code 1]` — with no mention of Arterm, so the
+ * model's next move is `sudo`, or another path, or telling the user their disk
+ * is broken. Confinement that reads as breakage is worse than confinement that
+ * explains itself, and the explanation has to reach the MODEL, not just the
+ * screen: it is the model that decides what to do next.
+ *
+ * Evidence is the OUTPUT, never the command. A command names the paths it
+ * intends to touch (`cd /tmp && …`) and would make this fire whenever any of
+ * them appeared in a failure with another cause; the output names the path the
+ * write actually died on. That also keeps it locale-independent — it matches
+ * PATHS, not `Read-only file system`, which arrives translated on a Turkish
+ * host and would silently never match.
+ */
+export function confinementNote(
+  spec: SandboxSpec | undefined,
+  output: string,
+  limit = 2,
+): string | undefined {
+  if (!spec) return undefined;
+  const named = pathsIn(output);
+  const denied = named.filter((p) => spec.denyRead.some((d) => p === d || p.startsWith(`${d}/`)));
+  const outside = named.filter(
+    (p) =>
+      !denied.includes(p) &&
+      !UNINFORMATIVE_PREFIXES.some((prefix) => p.startsWith(prefix)) &&
+      !withinWriteRoots(spec, p),
+  );
+  // The proxy's refusal is OUR message, so unlike the kernel's it is stable
+  // text — but only worth mentioning when egress is actually restricted.
+  const blockedHost = /\bproxy\b/i.test(output) && spec.allowedDomains.length > 0;
+  if (denied.length === 0 && outside.length === 0 && !blockedHost) return undefined;
+
+  const parts: string[] = [];
+  if (denied.length > 0) {
+    parts.push(
+      `${denied.slice(0, limit).join(", ")} is Arterm's own key material and is never readable`,
+    );
+  }
+  if (outside.length > 0) {
+    parts.push(
+      `${outside.slice(0, limit).join(", ")} is outside the writable roots (${spec.writeRoots.join(", ")})`,
+    );
+  }
+  if (blockedHost && outside.length === 0 && denied.length === 0) {
+    parts.push(
+      `network egress is limited to ${spec.allowedDomains.length} allowed host${
+        spec.allowedDomains.length === 1 ? "" : "s"
+      }, and everything else is refused by a proxy`,
+    );
+  }
+  return (
+    `[Arterm ran this command inside a sandbox: ${parts.join("; ")}. ` +
+    "Work inside the project directory or the temp dir, or ask the user to " +
+    "rerun with --no-sandbox — retrying the same path will fail the same way.]"
+  );
 }
 
 /** Resolve to an absolute, symlink-free path; fall back to the plain resolve. */

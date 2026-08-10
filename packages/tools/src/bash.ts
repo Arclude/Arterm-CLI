@@ -168,7 +168,13 @@ export const bashTool: Tool = {
       // evidence: a note fires when one of them names the variable, and stays
       // quiet under a failing test run that never mentioned it.
       const note = withheldNote(withheld, `${command}\n${out}`);
-      const tail = `\n[exit code ${result.exitCode}]${note ? `\n${note}` : ""}`;
+      // The boundary's own half of the same idea. A refused write arrives as the
+      // kernel's message and nothing else, so the model is told a disk is
+      // read-only rather than that it is confined — and then tries `sudo`.
+      const confined = ctx.sandbox?.explain?.(out);
+      const tail = `\n[exit code ${result.exitCode}]${note ? `\n${note}` : ""}${
+        confined ? `\n${confined}` : ""
+      }`;
       return { output: `${out}${tail}`.trim(), isError: true };
     } catch (err) {
       return { output: `Command failed: ${asMessage(err)}`, isError: true };

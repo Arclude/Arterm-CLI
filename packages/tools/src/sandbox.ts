@@ -1,5 +1,5 @@
 import type { SandboxRunner, SandboxSpec } from "@arterm/core";
-import { describeSandbox, withinWriteRoots } from "@arterm/core";
+import { confinementNote, describeSandbox, withinWriteRoots } from "@arterm/core";
 
 /**
  * The MECHANISM half of the sandbox — see `core/src/sandbox.ts` for the policy.
@@ -131,6 +131,10 @@ export async function createSandboxRunner(spec: SandboxSpec): Promise<SandboxAtt
 
   const runner: SandboxRunner = {
     describe: describeSandbox(spec),
+    // The spec lives here, so the diagnosis does too — `ToolContext` carries the
+    // runner and nothing else, and a second copy of the boundary threaded
+    // alongside it is a second thing that can disagree with the first.
+    explain: (output) => confinementNote(spec, output),
     async wrap(command, cwd, signal) {
       // The one input that arrives from outside the boot-time spec. A command
       // asked to run outside the boundary is refused rather than run with the

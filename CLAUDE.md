@@ -728,8 +728,42 @@ file was not written" is equally true of a run where `bash` never executed. Its
 first draft planted a sentinel in the key file, which the keystore overwrites at
 boot, so the leak probe compared against a string that existed nowhere and
 passed in the run where everything leaked; it now reads the real key off disk
-after the run. The TUI says the boundary is in force at boot, because until then
-the first sign of one was a shell command failing to write one directory over.
+after the run. Its fake model is INLINE rather than `fault-server.mjs`, because
+the second question it asks is what the model was TOLD — and that meant learning
+the hard way that `spawnSync` blocks the event loop the in-process server
+answers on, so the CLI asked, nothing replied, and every probe reported "did not
+happen" while the boundary looked like it was working.
+
+**A boundary that cannot explain itself reads as a broken disk.**
+`confinementNote` is the other half of making this default usable, and it is the
+same shape as `withheldNote` in `credentials.ts` — and as `diagnoseBashism` in
+WrongStack's shell tool, which is where the pattern was read from. Three
+properties, all three load-bearing:
+
+- **Failure-coupled.** A command that succeeded was not stopped by anything.
+- **Evidence-coupled**, so it is silent on a failing test suite inside the
+  project. The evidence is the OUTPUT, never the command: a command names the
+  paths it INTENDS to touch (`cd /tmp && …`) and would fire whenever one
+  appeared in a failure with another cause, while the output names the path the
+  write actually died on.
+- **It matches PATHS, not the kernel's sentence.** `Read-only file system`
+  arrives translated — it was first measured as `Salt-okunur dosya sistemi` — so
+  a phrase match would have silently never fired for exactly the users most
+  likely to hit it.
+
+`UNINFORMATIVE_PREFIXES` is why it can be evidence-coupled at all: every error
+line names an interpreter (`/usr/bin/bash: line 1: …`), which is outside the
+write roots and explains nothing, so without that list the note would fire on
+every failing command and point at the shell. Those paths are also unwritable
+for an ordinary user with no sandbox in sight, so excluding them costs the
+diagnosis nothing.
+
+It hangs off `SandboxRunner.explain` rather than a `ToolContext.sandboxSpec`,
+because the runner already closes over the spec and a second copy of the
+boundary beside it is a second thing that can disagree with the first. Measured
+against the built binary, the model used to be handed `Salt-okunur dosya
+sistemi` + `[exit code 1]` and nothing else — the input from which the next move
+is `sudo`. The TUI's boot line is the same fix on the human side.
 
 **The boundary never comes from model output.** Write roots are derived at boot
 from the session cwd and `realpath`'d; `wrap()` refuses a `cwd` outside them
