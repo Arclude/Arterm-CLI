@@ -103,6 +103,10 @@ describe("team config", () => {
       blackboard: true,
       memory: true,
     });
+    // The turn cap is a progress gate by default — a working turn extends
+    // instead of dying at an arbitrary round count (measured: two live turns
+    // each stopped at exactly 50 with the model mid-edit).
+    expect(cfg.budget?.autoExtendTurn).toBe(true);
   });
 
   it("accepts a valid block and drops invalid fields with a warning", () => {

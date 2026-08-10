@@ -355,6 +355,10 @@ export async function runHeadlessGoal(
         guards.extensions.push({ newLimit: event.newLimit, reason: event.reason });
         log(`⤢ step limit extended to ${event.newLimit} — ${event.reason}`);
         break;
+      case "turn_extended":
+        guards.extensions.push({ newLimit: event.total, reason: "turn iteration cap (progress)" });
+        log(`⤢ turn iteration cap extended to ${event.total} — still making progress`);
+        break;
       case "autonomy_done":
         summary = event.summary;
         log("■ goal complete");

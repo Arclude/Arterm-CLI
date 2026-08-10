@@ -267,6 +267,11 @@ export class StatusState {
       case "autonomy_extended":
         this.extensions += 1;
         break;
+      // The turn-level progress gate (`budget.autoExtendTurn`) — same meaning,
+      // one level down, so it lands in the same counter.
+      case "turn_extended":
+        this.extensions += 1;
+        break;
       case "autonomy_verify":
         this.lastVerdict = {
           pass: ev.pass,

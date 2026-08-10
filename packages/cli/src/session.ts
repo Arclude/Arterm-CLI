@@ -413,6 +413,7 @@ export async function buildSession(opts: SessionOptions): Promise<{
     compactAtPercent: config.context?.compactAtPercent,
     turnTokenBudget: config.budget?.turnTokens,
     maxIterations: config.budget?.maxIterations,
+    autoExtendTurn: config.budget?.autoExtendTurn,
     clearToolResults: config.context?.clearToolResults,
     clearAtPercent: config.context?.clearAtPercent,
     keepRecentToolResults: config.context?.keepRecentToolResults,

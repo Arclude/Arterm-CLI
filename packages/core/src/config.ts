@@ -102,6 +102,14 @@ export interface ArtermConfig {
      */
     maxIterations?: number;
     /**
+     * Extend the turn at the cap while it is still making progress (default
+     * true). The cap's job is the runaway turn, and the loop detector owns
+     * that diagnosis — so the boundary grants another `maxIterations` tranche
+     * unless the detector has CUT this turn. `false` restores the hard stop.
+     * Sub-agents and the verify judge are never extended either way.
+     */
+    autoExtendTurn?: boolean;
+    /**
      * Whole-RUN ceilings, as opposed to the per-turn caps above — the thing
      * that bounds an unattended run in money rather than in steps. At
      * `softRatio` of either ceiling the run is asked to wrap up; at the ceiling
@@ -566,7 +574,7 @@ export function defaultConfig(): ArtermConfig {
       compactAtPercent: 0.75,
       maxMessages: 40,
     },
-    budget: { maxIterations: 50 },
+    budget: { maxIterations: 50, autoExtendTurn: true },
     // ON for every session, attended or not.
     //
     // This reverses the original default, and the argument it reverses is worth
@@ -694,6 +702,7 @@ const configFileSchema = z
       .object({
         turnTokens: z.number().int().positive().optional(),
         maxIterations: z.number().int().positive().optional(),
+        autoExtendTurn: z.boolean().optional(),
         runTokens: z.number().int().positive().optional(),
         runUsd: z.number().positive().optional(),
         runSeconds: z.number().positive().optional(),

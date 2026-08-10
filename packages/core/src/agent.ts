@@ -187,6 +187,14 @@ export interface AgentOptions {
   /** Hard cap on tool-call round-trips per user turn. */
   maxIterations?: number;
   /**
+   * At the iteration cap, grant another `maxIterations` tranche while the turn
+   * is still making tool calls and the loop detector has not CUT it — the
+   * turn-level counterpart of `autonomy.autoExtend`. Opt-in per agent: the
+   * session wires it from `budget.autoExtendTurn` for the main agent only, so
+   * sub-agents and the verify judge keep the hard caps their callers chose.
+   */
+  autoExtendTurn?: boolean;
+  /**
    * Token budget per turn: summed prompt+completion tokens across the turn's
    * iterations (each iteration re-bills the prompt, so the sum is the real
    * spend). Crossing it stops the loop and emits a `run_limit` event.
@@ -1156,9 +1164,15 @@ export class Agent {
       });
       this.bus.emit({ type: "turn_start" });
 
-      const limit = handle.getIterationLimit() ?? maxIterations;
+      let limit = handle.getIterationLimit() ?? maxIterations;
       const budget = this.opts.turnTokenBudget;
       let usedTokens = 0;
+      // A detector CUT this turn vetoes the extension at the boundary below.
+      let cutsThisTurn = 0;
+      const offCut = this.bus.on((e) => {
+        if (e.type === "loop_cut") cutsThisTurn += 1;
+      });
+      handle.onTeardown(() => offCut());
       // True only when the loop ran out of iterations with the model still mid-work —
       // that stop must be announced, not silent (see the run_limit emit below).
       let exhausted = true;
@@ -1254,6 +1268,19 @@ export class Agent {
             exhausted = false;
             break;
           }
+        }
+
+        // The cap is a runaway guard and the loop DETECTOR owns that diagnosis,
+        // so under `autoExtendTurn` the boundary is a progress gate rather than
+        // a wall: a turn still making tool calls gets another tranche instead
+        // of dying mid-edit at an arbitrary number. Measured before this
+        // existed: two working turns ended at exactly 50 rounds each, and each
+        // was restarted only by a human typing "continue". Token and wall-clock
+        // ceilings above are never extended — this trades only the count.
+        if (i === limit - 1 && this.opts.autoExtendTurn === true && cutsThisTurn === 0) {
+          limit += maxIterations;
+          handle.iterationLimit(limit);
+          this.bus.emit({ type: "turn_extended", granted: maxIterations, total: limit });
         }
       }
       if (exhausted) {

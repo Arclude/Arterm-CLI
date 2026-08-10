@@ -734,6 +734,42 @@ describe("Agent loop guards & limits (loopGuard stage / run_limit event)", () =>
     expect(limit).toMatchObject({ kind: "iterations", limit: 2, used: 2 });
   });
 
+  it("extends past the cap while the turn is still working (autoExtendTurn)", async () => {
+    const bus = new EventBus();
+    const events = collect(bus);
+    // Varied arguments on purpose: five identical calls would trip the
+    // repeat-window CUT at 5 — the separate guard this gate defers to.
+    const varied = (id: string): ChatChunk[] => [
+      { type: "tool_call", call: { id, name: "echo", arguments: { n: id } } },
+    ];
+    const provider = new StubProvider([
+      varied("c1"),
+      varied("c2"),
+      varied("c3"),
+      varied("c4"),
+      varied("c5"),
+      [{ type: "text", delta: "done" }],
+    ]);
+    const agent = new Agent({
+      provider,
+      model: "m",
+      tools: [echo],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus,
+      cwd: process.cwd(),
+      maxIterations: 2,
+      autoExtendTurn: true,
+    });
+    await agent.run("go");
+    // Six responses reached the provider: five tool rounds plus the final
+    // text — the 2-cap granted itself tranches instead of dying mid-work.
+    expect(provider.calls).toBe(6);
+    const ext = events.filter((e) => e.type === "turn_extended");
+    expect(ext.map((e) => (e as { total: number }).total)).toEqual([4, 6]);
+    expect(events.some((e) => e.type === "run_limit")).toBe(false);
+  });
+
   it("a clean run emits no run_limit", async () => {
     const bus = new EventBus();
     const events = collect(bus);

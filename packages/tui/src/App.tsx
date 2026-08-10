@@ -1351,6 +1351,12 @@ export function App({
                 : `⚠ turn stopped: token budget spent (${event.used}/${event.limit}) — send a message to continue`,
           });
           break;
+        case "turn_extended":
+          push({
+            kind: "system",
+            text: `⤢ iteration cap extended: +${event.granted} (now ${event.total}) — the turn is still making progress; Esc stops it`,
+          });
+          break;
         // The guards, made visible. Each of the next six events was emitted by
         // core and handled nowhere here, so the terminal showed a run that
         // paused, repeated itself, was granted more steps, or refused to send a

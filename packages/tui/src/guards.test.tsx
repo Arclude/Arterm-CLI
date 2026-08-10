@@ -77,6 +77,7 @@ describe("guard events reach the transcript", () => {
       { newLimit: 60, reason: "tool calls since last grant" },
       /extended to 60/,
     ],
+    ["turn_extended", { granted: 50, total: 100 }, /iteration cap extended.*\+50.*now 100/],
     ["budget_warning", { spent: "$0.42" }, /budget.*\$0\.42.*wrapping up/],
     ["budget_exceeded", { spent: "$1.00" }, /budget exhausted.*refused before it was sent/],
     ["autonomy_backoff", { ms: 2000, attempt: 3 }, /retrying in 2\.0s \(attempt 3\)/],

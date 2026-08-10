@@ -101,6 +101,9 @@ export type AgentEvent =
   // The turn hit a hard cap (iteration count or token budget) and stopped early —
   // surfaced so limit stops are never silent (the reply may be mid-thought).
   | { type: "run_limit"; kind: "iterations" | "tokens"; limit: number; used: number }
+  // The iteration cap granted itself another tranche mid-turn (progress gate —
+  // see `autoExtendTurn` in agent.ts). Token/clock ceilings never extend.
+  | { type: "turn_extended"; granted: number; total: number }
   | { type: "turn_end" }
   // A turn failed. When the failure came from a provider it carries the taxonomy
   // (see ProviderError), so a UI can say "out of quota" instead of pasting a
