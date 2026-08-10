@@ -24,7 +24,14 @@
  * ledger without any tool having declared it.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +46,19 @@ const WROTE = ["made-by-the-shell.txt", "also-by-the-shell.txt"];
 
 const home = mkdtempSync(join(tmpdir(), "arterm-shellwrite-home-"));
 const work = mkdtempSync(join(tmpdir(), "arterm-shellwrite-work-"));
+
+// A second session, alive for the whole run and working in the same tree.
+//
+// The watcher cannot say WHO wrote a file, so it records who else could have —
+// and the case it was built for is this one, because several agents run at
+// once here. A live pid plus a discovery file is all that makes a peer real to
+// `peerSessions`, and a `sleep` gives both without a second model.
+const peer = spawn("sleep", ["120"], { stdio: "ignore" });
+mkdirSync(join(home, "status"), { recursive: true });
+writeFileSync(
+  join(home, "status", `${peer.pid}-peer.json`),
+  JSON.stringify({ v: 1, pid: peer.pid, sessionId: "peer", cwd: work, model: "peer-model" }),
+);
 
 // A real repository, because git IS the watcher's candidate set — outside one
 // there is nothing to watch, which is a stated scope limit and would make this
@@ -85,6 +105,7 @@ const server = spawn(
 
 const done = (code) => {
   server.kill("SIGKILL");
+  peer.kill("SIGKILL");
   process.exit(code);
 };
 
@@ -147,6 +168,14 @@ check(
 );
 check("it is attributed to the call that caused it", hit?.toolName === "bash" && !!hit?.toolCallId);
 check("the provenance says it was measured, not declared", hit?.attributes?.observedBy === "git");
+// The doubt, bounded and named. Empty would be a finding too — but with a peer
+// deliberately alive in the same tree, empty means the wiring never ran.
+check(
+  "the other session alive in this tree is named",
+  Array.isArray(hit?.attributes?.concurrent) &&
+    hit.attributes.concurrent.some((w) => w.includes(String(peer.pid))),
+  JSON.stringify(hit?.attributes?.concurrent),
+);
 
 // One call is one execution however many files it wrote — the per-file records
 // are separate events on purpose, and folding them in would inflate every count
