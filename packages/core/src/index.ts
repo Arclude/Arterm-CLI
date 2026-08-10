@@ -22,6 +22,7 @@ export * from "./brainArbiter.js";
 export * from "./keystore.js";
 export * from "./modelsDev.js";
 export * from "./sessions.js";
+export * from "./retention.js";
 export * from "./sessionStore.js";
 export * from "./storeRegistry.js";
 export * from "./memory.js";

@@ -88,6 +88,9 @@ hash-chained JSONL per session under `$ARTERM_HOME/chronicle/`, built from the
 seam rather than from the model's summary: the tool's own path and diff, and a
 content hash read back off the disk. Shell writes are measured by digesting the
 tree around the call. `arterm chronicle verify` exits 1 on a broken chain.
+Ledgers are kept for `retention.chronicleDays` (default 90) and then deleted as
+whole files — never as individual records, which is what the chain exists to
+catch. Raise the number if your audit window is longer.
 
 **Key material at rest** (`core/src/keystore.ts`). `$ARTERM_HOME/key` is written
 `0600` (a no-op on Windows) and holds the master key for `secrets.json`.

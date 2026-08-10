@@ -19,9 +19,11 @@ import {
   findModelById,
   loadConfig,
   projectKey,
+  pruneDirByAge,
   readProjectRecords,
   registerAgentDefinitions,
   retentionFromConfig,
+  spoolDir,
 } from "@arterm/core";
 import { formatObservationsText, openMemStore, startCmemMcpServer } from "@arterm/memory";
 import {
@@ -55,6 +57,7 @@ import type { Session } from "@arterm/tui";
 import { Command } from "commander";
 import { openBrowser } from "./browser.js";
 import { runChronicleList, runChronicleShow, runChronicleVerify } from "./chronicleCmd.js";
+import { CHRONICLE_DIR } from "./chronicleStore.js";
 import { ArtermUserError } from "./errors.js";
 import { applyAutonomousProfile, printedPrompt } from "./flags.js";
 import { runHeadless, runHeadlessGoal } from "./headless.js";
@@ -70,7 +73,7 @@ import { type StatusServer, shouldPublish, startStatusServer } from "./statusSer
 import { runToolsCost } from "./toolsCost.js";
 import { isKnownProvider, parsePort, unknownProviderMessage } from "./validate.js";
 
-const VERSION = "0.6.1";
+const VERSION = "0.7.0";
 
 /** Provider ids the CLI can build — the single source of truth for `--provider`. */
 const PROVIDER_IDS: readonly string[] = providerCatalog.map((p) => p.id);
@@ -325,6 +328,27 @@ function probeCompatHostInBackground(
     .catch(() => {});
 }
 
+/**
+ * Age out the flat stores nothing else bounds: the spool and the chronicle.
+ *
+ * Called from BOTH bootstraps (`startChat`, `runHeadlessFlow`), because the
+ * catalog warming two paragraphs below each call is the documented lesson: a
+ * best-effort helper wired into one path is simply off in the other, and
+ * headless is where the spool actually grew. Never awaited and never fatal —
+ * a store that cannot be pruned must not cost a session its startup — with
+ * `ARTERM_DEBUG` as the only witness, same as the transcript prune.
+ */
+function pruneHomeArtifacts(config: ArtermConfig): void {
+  const debug = (what: string) => (err: unknown) => {
+    if (process.env.ARTERM_DEBUG) {
+      process.stderr.write(`⚠ ${what} prune failed: ${(err as Error).message}\n`);
+    }
+    return [] as string[];
+  };
+  void pruneDirByAge(spoolDir(), config.retention?.spoolDays).catch(debug("spool"));
+  void pruneDirByAge(CHRONICLE_DIR, config.retention?.chronicleDays).catch(debug("chronicle"));
+}
+
 async function startChat(globals: GlobalOpts): Promise<void> {
   const config = applyVerifyFlags(await loadConfig(), globals);
   const { hardCap } = applyAutonomousProfile(config, globals);
@@ -346,6 +370,11 @@ async function startChat(globals: GlobalOpts): Promise<void> {
   const store = createSessionStore(config);
   const resumed = await resolveResumeMessages(store, globals);
   const initialMessages = resumed?.messages;
+
+  // Trim the ageing stores nothing else bounds — the spool grew to 39MB in
+  // three weeks without this. Fire-and-forget: unlike the transcript prune
+  // below, no store handle is about to be opened over these.
+  void pruneHomeArtifacts(config);
 
   // Trim old transcripts (best-effort) before any session opens a store handle.
   try {
@@ -613,6 +642,11 @@ async function runHeadlessFlow(globals: GlobalOpts): Promise<void> {
 
   const store = createSessionStore(config);
   const resumed = await resolveResumeMessages(store, globals);
+
+  // Same prune as `startChat`, for the catalog-warming reason: a helper wired
+  // into one bootstrap is OFF in the other, and headless runs are where the
+  // spool actually accumulated — every probe and benchmark trial writes there.
+  void pruneHomeArtifacts(config);
 
   const { session, persist, digest } = await buildSession({
     config,

@@ -1243,7 +1243,13 @@ earned it and explains itself there, rather than adding a sentence to every
 judge prompt including the ones with nothing to explain.
 
 `arterm chronicle verify` exits 1 on a broken chain, so a script can gate on it.
-Nothing prunes `$ARTERM_HOME/chronicle` yet.
+Ledgers age out after `retention.chronicleDays` (default 90) via
+`pruneDirByAge`, which both bootstraps run at startup — the spool
+(`tool-output/`, default 7 days) taught the lesson at 39MB in three weeks, and
+pruning by MTIME is what makes an ACTIVE file safe with no bookkeeping: an
+appended chronicle is always fresh. Whole files only, never records — deleting
+a record is exactly what the hash chain exists to catch, while a deleted FILE
+is a bounded, stated retention policy.
 
 ## Measuring: `bench/harbor/`
 

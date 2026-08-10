@@ -406,6 +406,22 @@ export interface ArtermConfig {
     /** Cache freshness before a background refresh (default 24h). */
     maxAgeHours?: number;
   };
+  /**
+   * Age-based retention for the flat stores under `$ARTERM_HOME` that grow
+   * without it (sessions have their own knobs under `session`). Pruned
+   * best-effort at startup; `0` means everything qualifies, and "keep forever"
+   * is a large number, matching `session.maxAgeDays`'s arithmetic.
+   */
+  retention?: {
+    /** Days to keep spooled tool output (`tool-output/`, default 7). */
+    spoolDays?: number;
+    /**
+     * Days to keep chronicle ledgers (`chronicle/`, default 90). Deliberately
+     * long: it is the audit record, and a run's account of itself should
+     * outlive the run by more than a sprint.
+     */
+    chronicleDays?: number;
+  };
   /** Loopback status server for the Arterm desktop app (docs/desktop-integration.md). */
   statusServer?: {
     /**
@@ -626,6 +642,7 @@ export function defaultConfig(): ArtermConfig {
     },
     arbiter: { enabled: true },
     catalog: { enabled: true, maxAgeHours: 24 },
+    retention: { spoolDays: 7, chronicleDays: 90 },
     statusServer: { enabled: "auto", port: 0 },
     confirmDestructive: false,
     sdd: { maxQuestions: 4, maxTasks: 12, handoffChars: 12_000, specChars: 6_000 },
@@ -790,6 +807,12 @@ const configFileSchema = z
       .object({
         enabled: z.boolean().optional(),
         maxAgeHours: z.number().positive().optional(),
+      })
+      .partial(),
+    retention: z
+      .object({
+        spoolDays: z.number().nonnegative().optional(),
+        chronicleDays: z.number().nonnegative().optional(),
       })
       .partial(),
     statusServer: z

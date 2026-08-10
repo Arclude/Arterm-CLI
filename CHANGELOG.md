@@ -5,6 +5,37 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-08-10
+
+### Changed
+
+- **The config file carries your choices, not a fossil of old defaults.**
+  `saveConfig` used to serialize the whole resolved config, which pinned every
+  default at whatever the current version's value was — so a release changing a
+  default could never reach an existing home. Measured with v0.6.0's sandbox
+  flip: it applied only to freshly created homes, because every existing config
+  carried `sandbox.enabled: false` written by the previous full persist. The
+  file now carries the DELTA against the defaults: on your first clean exit it
+  shrinks to the keys you actually chose (a real one went from 2.5KB to 310
+  bytes), values equal to the current default un-pin and track the product from
+  then on, and values that differ — including old defaults, which are
+  indistinguishable from choices — survive whole. Unknown keys survive too.
+  The one thing a delta cannot express is "I choose today's default and want it
+  frozen against tomorrow's"; state a differing value to mean that.
+
+### Added
+
+- **Retention for the stores nothing bounded.** Spooled tool output
+  (`~/.arterm/tool-output/`, measured at 39MB after three weeks) now ages out
+  after `retention.spoolDays` (default 7), and chronicle ledgers after
+  `retention.chronicleDays` (default 90 — it is the audit record, so it
+  deliberately outlives the runs it describes). Pruning is by mtime, so an
+  actively appended file is safe by construction; it runs best-effort at
+  startup on both the TUI and headless paths, and deletes whole files only —
+  never individual chronicle records, which is what the hash chain exists to
+  catch. Sessions already had retention (`session.maxSessions` / `maxAgeDays`);
+  this closes the gap for the other two stores.
+
 ## [0.6.1] — 2026-08-10
 
 ### Security

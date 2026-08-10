@@ -252,6 +252,8 @@ Configuration lives in `~/.arterm/` and is created on demand.
 | `credentials.scrub` | Withhold credential-named env vars from `bash`.       | `true`                   |
 | `credentials.allow` | Names handed to `bash` anyway (e.g. `GITHUB_TOKEN` for `gh`). | `[]`            |
 | `credentials.deny`  | Extra names always withheld (e.g. `DATABASE_URL`).    | `[]`                     |
+| `retention.spoolDays` | Days to keep spooled tool output (`tool-output/`). | `7`                      |
+| `retention.chronicleDays` | Days to keep chronicle ledgers.               | `90`                     |
 | `telemetry.enabled`| Export OpenTelemetry GenAI spans/metrics over OTLP.   | `false`                  |
 | `telemetry.endpoint` | OTLP/HTTP base URL (or `OTEL_EXPORTER_OTLP_ENDPOINT`). | —                    |
 
