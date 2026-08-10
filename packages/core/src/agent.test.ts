@@ -876,7 +876,9 @@ describe("run budget (agent pipeline stages)", () => {
     expect(provider.calls).toBe(3);
     expect(events.some((e) => e.type === "budget_exceeded")).toBe(true);
     expect(budget.breached).toBe(true);
-  });
+    // 15s: pure in-process work, but a cold Windows CI worker has eaten the 5s
+    // default on this exact case — the same budget project.test.ts needed.
+  }, 15_000);
 
   it("announces the soft threshold once per run", async () => {
     const bus = new EventBus();
