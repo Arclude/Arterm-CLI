@@ -1,7 +1,14 @@
+import {
+  type PendingAttachment,
+  imagePlaceholder,
+  readClipboardImage,
+  stillMentioned,
+} from "@arterm/core";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App } from "./App.js";
 import { SessionPanel, type SessionPanelEntry } from "./SessionPanel.js";
+import { deleteBackward, isPaste, stripPaste } from "./editing.js";
 import { Box, useApp, useInput, useStdout } from "./ink.js";
 import { SessionMeta } from "./sessionMeta.js";
 import type { Session } from "./types.js";
@@ -11,6 +18,8 @@ interface Entry {
   session: Session;
   meta: SessionMeta;
   initialPrompt?: string;
+  /** Images pasted into the panel composer, keyed to tokens in the prompt. */
+  initialImages?: PendingAttachment[];
 }
 
 /** First user prompt of a session — the panel's row title. */
@@ -55,6 +64,15 @@ export function MultiApp({
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelSel, setPanelSel] = useState(0);
   const [panelInput, setPanelInput] = useState("");
+  // Clipboard images pasted while the panel is up, waiting for the create.
+  // Same contract as the composer's: the [Image #N] token in the TEXT is the
+  // truth, and the held list follows it at submit time.
+  const [panelImages, setPanelImages] = useState<PendingAttachment[]>([]);
+  const panelImagesRef = useRef(panelImages);
+  panelImagesRef.current = panelImages;
+  // One-line feedback ("clipboard holds no image") — the panel has no
+  // transcript to say it in, so it gets its own dim line, cleared on typing.
+  const [panelNote, setPanelNote] = useState("");
   const [creating, setCreating] = useState(false);
   // Sessions whose permission prompt is waiting (fed by each App).
   const [awaiting, setAwaiting] = useState<ReadonlySet<string>>(new Set());
@@ -202,11 +220,15 @@ export function MultiApp({
       void (async () => {
         try {
           const made = await createSession();
+          // The text decides which images ride: backspacing a token out of the
+          // prompt un-attaches its image, exactly as in the composer.
+          const kept = stillMentioned(prompt, panelImagesRef.current);
           const entry: Entry = {
             id: made.id,
             session: made.session,
             meta: new SessionMeta(made.session),
             initialPrompt: prompt || undefined,
+            ...(kept.length > 0 ? { initialImages: kept } : {}),
           };
           // The new row's index is the length BEFORE the append. Read off the
           // ref AFTER setEntries this was one past the end — the awaits above
@@ -220,6 +242,7 @@ export function MultiApp({
           // the panel a detour; Claude Code's dashboard is the model: the new
           // row appears, its status turns busy, Enter opens it when wanted.
           setPanelInput("");
+          setPanelImages([]);
           setPanelSel(nextIndex);
         } finally {
           setCreating(false);
@@ -276,6 +299,37 @@ export function MultiApp({
   // close selected, Esc close panel.
   useInput(
     (input, key) => {
+      // A DRAG onto the dashboard arrives as a bracketed paste — one chunk
+      // whose ESC-framed markers read as `meta`, so the old text branch (gated
+      // on !meta) swallowed the whole path and the drop did NOTHING. This is
+      // why "attach an image to a new session" looked unsupported: the wiring
+      // downstream existed, the first keystroke never landed. Checked before
+      // every other branch, because a paste must never trigger chords.
+      if (isPaste(input) || (!key.ctrl && !key.meta && input.length > 1)) {
+        const text = (isPaste(input) ? stripPaste(input) : input).replace(/\n/g, " ");
+        if (text) {
+          setPanelNote("");
+          setPanelInput((s) => s + text);
+        }
+        return;
+      }
+      // Ctrl+V: a clipboard IMAGE becomes a held attachment plus its token in
+      // the line — the composer's contract, so the background session's
+      // `runPlain` picks it up with the same `stillMentioned` walk.
+      if (key.ctrl && (input === "v" || input === "V")) {
+        void (async () => {
+          const { attachment, error } = await readClipboardImage();
+          if (!attachment) {
+            setPanelNote(error ?? "panoda görsel yok");
+            return;
+          }
+          const placeholder = imagePlaceholder(panelImagesRef.current.length + 1);
+          setPanelImages((held) => [...held, { attachment, placeholder }]);
+          setPanelInput((v) => (v.length === 0 || v.endsWith(" ") ? v : `${v} `) + placeholder);
+          setPanelNote("");
+        })();
+        return;
+      }
       if (key.escape) {
         setPanelOpen(false);
         setPanelInput("");
@@ -306,10 +360,12 @@ export function MultiApp({
         return;
       }
       if (key.backspace || key.delete) {
-        setPanelInput((s) => s.slice(0, -1));
+        // Token-aware: a trailing [Image #N] goes whole, like the composer's.
+        setPanelInput((s) => deleteBackward(s));
         return;
       }
       if (input && !key.ctrl && !key.meta && !key.tab) {
+        setPanelNote("");
         setPanelInput((s) => s + input);
       }
     },
@@ -348,6 +404,7 @@ export function MultiApp({
           visible={!panelOpen && e.id === active?.id}
           initialGoal={e.id === initial.id ? initialGoal : undefined}
           initialPrompt={e.initialPrompt}
+          initialImages={e.initialImages}
           onOpenSessions={openPanel}
           onCycleSession={cycle}
           onCloseSession={() => closeEntry(e.id)}
@@ -380,6 +437,7 @@ export function MultiApp({
             canCreate={Boolean(createSession) && !creating}
             columns={columns}
             fill={fullscreen}
+            note={panelNote}
           />
         </Box>
       ) : null}

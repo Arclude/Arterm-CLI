@@ -140,6 +140,25 @@ describe("MultiApp (multi-session host)", () => {
     m.unmount();
   });
 
+  it("a DRAG onto the dashboard (bracketed paste) lands in the composer", async () => {
+    // The drop used to do nothing: the ESC-framed paste markers read as meta,
+    // and the text branch was gated on !meta — so the whole path was swallowed
+    // and "attach an image to a new session" looked unsupported while every
+    // wire below it worked.
+    const m = mountMulti();
+    await tick();
+    m.stdin.write(LEFT);
+    await waitFor(m.seen, (f) => f.includes("OTURUMLAR"));
+    await tick();
+    const ESC2 = String.fromCharCode(27);
+    m.stdin.write(`${ESC2}[200~/tmp/kanit.png${ESC2}[201~`);
+    await waitFor(m.seen, (f) => f.includes("/tmp/kanit.png"));
+    // Still the panel, still one session: nothing was created or switched.
+    expect(m.last()).toContain("OTURUMLAR");
+    expect(m.createdCount()).toBe(0);
+    m.unmount();
+  });
+
   it("the dashboard counts its buckets", async () => {
     const m = mountMulti();
     await tick();

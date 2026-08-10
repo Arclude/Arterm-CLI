@@ -51,7 +51,12 @@ export function deleteWordBackward(value: string): string {
   return wordStart === -1 ? "" : trimmed.slice(0, wordStart);
 }
 
-function deleteBackward(value: string): string {
+/**
+ * One backspace: a trailing `[Image #N]` goes whole (see TRAILING_IMAGE_TOKEN),
+ * anything else loses one character. Exported for the session panel's input,
+ * which carries the same tokens without the composer's full keymap.
+ */
+export function deleteBackward(value: string): string {
   const whole = TRAILING_IMAGE_TOKEN.exec(value);
   return whole ? value.slice(0, whole.index) : value.slice(0, -1);
 }
@@ -82,7 +87,7 @@ export function isMouseSequence(input: string): boolean {
 }
 
 /** Strips bracketed-paste markers and normalises newlines to plain pasted text. */
-function stripPaste(s: string): string {
+export function stripPaste(s: string): string {
   // The ESC byte that frames each marker is dropped first (avoiding a control
   // char in the regex), then the literal marker bodies "[200~" / "[201~".
   const esc = String.fromCharCode(27);

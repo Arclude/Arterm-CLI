@@ -90,6 +90,7 @@ export function SessionPanel({
   canCreate,
   columns,
   fill = false,
+  note = "",
 }: {
   entries: SessionPanelEntry[];
   activeId: string;
@@ -98,6 +99,8 @@ export function SessionPanel({
   canCreate: boolean;
   columns: number;
   fill?: boolean;
+  /** One-line feedback under the composer (e.g. "panoda görsel yok"). */
+  note?: string;
 }): React.ReactElement {
   const counts = { awaiting: 0, working: 0, completed: 0, new: 0 };
   for (const e of entries) counts[bucketOf(e)] += 1;
@@ -119,9 +122,15 @@ export function SessionPanel({
       </Text>
     </Box>
   ) : null;
+  const noteLine = note ? (
+    <Text color="yellow" dimColor>
+      {"   "}
+      {note}
+    </Text>
+  ) : null;
   const hints = (
     <Text color="gray" dimColor>
-      {" ↑↓ seç · Enter aç · Esc geri · ^X kapat · ^C çıkış"}
+      {" ↑↓ seç · Enter aç · Esc geri · ^V görsel yapıştır · ^X kapat · ^C çıkış"}
     </Text>
   );
   return (
@@ -178,11 +187,13 @@ export function SessionPanel({
         <>
           <Box flexGrow={1} />
           {composer}
+          {noteLine}
           {hints}
         </>
       ) : (
         <>
           {composer ? <Box marginTop={1}>{composer}</Box> : null}
+          {noteLine}
           {hints}
         </>
       )}

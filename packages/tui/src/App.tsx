@@ -647,6 +647,7 @@ export function App({
   session,
   initialGoal,
   initialPrompt,
+  initialImages,
   fullscreen = false,
   visible = true,
   onOpenSessions,
@@ -662,6 +663,8 @@ export function App({
   initialGoal?: string;
   /** First user message of a session created from the session panel. */
   initialPrompt?: string;
+  /** Clipboard images pasted into the panel composer, tokens already in the prompt. */
+  initialImages?: PendingAttachment[];
   /** Alternate-screen mode: pinned footer + in-app scroll (see runTui). */
   fullscreen?: boolean;
   /**
@@ -3088,8 +3091,16 @@ export function App({
   useEffect(() => {
     if (!initialPrompt || initialPromptSentRef.current) return;
     initialPromptSentRef.current = true;
+    // Panel-pasted images are seeded through the REF as well as the state:
+    // dispatch runs in this same tick, and runPlain reads attachRef — a state
+    // update alone would land one render too late and the tokens in the prompt
+    // would match nothing.
+    if (initialImages?.length) {
+      attachRef.current = [...initialImages];
+      setAttachments([...initialImages]);
+    }
     void dispatch(initialPrompt);
-  }, [initialPrompt, dispatch]);
+  }, [initialPrompt, initialImages, dispatch]);
 
   // Background-session badge: tell the host when a permission prompt is waiting.
   useEffect(() => {
