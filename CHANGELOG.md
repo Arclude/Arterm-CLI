@@ -5,6 +5,121 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-08-10
+
+### Added
+
+- **A ledger of what a run DID, apart from what it said it did.** Every tool
+  call appends a hash-chained record (`$ARTERM_HOME/chronicle/`) built from the
+  seam rather than the story: the path and diff come from the TOOL, the content
+  hash is read back off the disk, and none of the three can be written by a
+  model composing a summary. Sub-agents write into the parent's chain, stamped
+  with which worker made each change, so a fan-out has one order instead of
+  three. The judge is now handed that evidence beside the claim — a run told not
+  to touch `slug.ts` was passed with *"the record shows only README.md +38/-0,
+  confirming slug.ts was not modified"*, which is the question the documented
+  failure got wrong by assuming. `bash` has no write to declare, so its writes
+  are MEASURED: the tree is digested before and after the call and only what
+  moved is recorded, with the other processes that were live at both ends listed
+  beside it — a watcher can prove a file changed, never who changed it.
+  `arterm chronicle verify` exits 1 on a broken chain.
+- **Roughly forty new tools**, all permission-gated: four LSP tools (the
+  compiler's answers, not a name match), a call graph from a real parser,
+  `patch` with a diff it can actually apply, a project runner (typecheck,
+  install, audit, outdated, logs), a work list that survives compaction, plans
+  and task graphs the model writes on the shape `/sdd` executes, memory / meta /
+  llm / skill / MCP tools, a fleet the model drives rather than the engine, and
+  fifteen browser tools whose screenshots come back inline. The roster is a tax,
+  so it is measurable and adjustable per run.
+- **`@file` in the composer.** Typing `@` opens a picker over the project —
+  eight rows that SCROLL, with `3/47` saying where you are — and the file's
+  contents ride out with the message, fenced under the path you typed, so a
+  question about a file costs no turn spent on the model reading it. Ignored
+  files are not offered and can still be typed in full; an over-large file is
+  clipped at both ends and says so inside the text.
+- **Images the USER hands over.** `Message.images` promised "a picture you
+  pasted" from the day it was written and nothing ever filled it. Drag one onto
+  the prompt or press `Ctrl+V`: a terminal delivers a drop as a PATH, so the
+  submitted line is read for one. The bytes decide what an image is, never the
+  file's name, and a refusal always NAMES the file. `[Image #1]` holds its place
+  in the sentence, and one Backspace takes both the token and the attachment.
+- **`gen_ai.*` telemetry.** Model and tool spans come from pipeline stages, not
+  from the bus, so tool time never hides inside the provider's latency.
+  Attribute names are pinned to one semconv release and stated on every export.
+  Telemetry can never fail a run: a bad endpoint degrades to one stderr line.
+- **A clock, not just a step count.** `--max-duration` (`budget.runSeconds`)
+  makes a run stop ITSELF while it can still report, with a reserve phase past
+  `budget.softRatio`; a killed run emits its result document on SIGTERM instead
+  of leaving a 0-byte file where fifteen minutes of paid work should be. The
+  deadline signal is armed once and shared by every agent and sub-agent, so the
+  call after the abort stops too.
+- **`bench/harbor`** — a Harbor adapter that runs `arterm` under Terminal-Bench
+  with no fork of the harness, and records the harness it ran under, because a
+  number without one is not comparable to anyone else's.
+- **A terminal UI with a palette, a glyph language and a ruler** — status chips,
+  one frame for the boards, `/context` saying what is filling the window,
+  `/rewind` to undo a turn's file changes, `/limits`, `/mouse`, AUTONOMOUS on
+  Shift+Tab, and drag-select by default. Reasoning is shown while it happens:
+  a backend that streams only `reasoning_content` used to look like a hang.
+
+### Changed
+
+- **Prompt caching pays for itself from the second iteration.** All four
+  Anthropic breakpoints are now spent, including one anchored on the last
+  COMPLETED tool round-trip — the longest prefix guaranteed to be re-sent
+  byte-identical for the rest of the run. Measured on a real session: 10,662
+  tokens of fixed prefix per request, 223k over a twenty-call turn, for text
+  that never varied.
+- **Independent tool calls run together.** The loop plans batches; the TOOL
+  declares whether it may overlap, and absent means no. Batches are runs, not a
+  partition — nothing is hoisted past an unsafe neighbour — and every execution
+  finishes before any result is recorded, so history reads in the order the
+  model asked. 1.79× on four concurrent greps over this repo.
+- **`--autonomous` adds a control instead of only removing them**: `bash` runs
+  confined to the session's write roots with egress on an allowlist. The
+  boundary never comes from model output. Unattended fails closed, attended
+  warns and continues, and `--no-sandbox` is a loud escape hatch.
+- **A command is no longer HANDED the keys.** The environment is scrubbed by
+  name for every tool call and for the verify command, in every mode, default-
+  closed even when unwired — and the keystore files are denied to a sandboxed
+  read, since `cat ~/.arterm/secrets.json` yields more than the environment ever
+  held. The arbiter grades a command it cannot READ (`base64 -d | sh`) as high
+  rather than letting a deny-list fail open, and refuses the unreadable and the
+  secret-reading ones where nobody is there to answer the prompt.
+
+### Fixed
+
+- **Every GLM session believed its context window was 8k.** The models.dev
+  cache was warmed on the TUI path only, so a headless run — that is, every
+  benchmark trial — read the 8192 written for a local GGUF and compacted a
+  1M-window model every 6,144 tokens. A prompt the provider answered is now a
+  floor under the belief, and a boot-time note says when the window was ASSUMED.
+- **The `@` picker moved two rows per ↓ and could not reach its ninth match.**
+  Fullscreen reads arrows off raw stdin while ink's `useInput` reads the same
+  emitter, so one keypress was answered twice; and eight rows was a truncation
+  rather than a window.
+- **A sandboxed run did its work, printed its verdict, and never exited** —
+  host-side boundary processes held the event loop open, which reports as a
+  failed run whatever it accomplished. The deadline had the mirror bug: the run
+  stopped on time, then teardown's digest call ran unbounded for another eighty
+  seconds.
+- **A failed merge no longer leaves conflict markers in your source files.**
+  `git apply --3way` writes them on conflict *and* exits non-zero, so the caller
+  was correctly told "this did not apply" over files that no longer parsed.
+- **The leader was silent, uncounted, invisible and misread**: planning calls
+  now show on screen, meter their usage, surface their errors instead of
+  reporting "no further work proposed" with exit 0, and a reply that reads
+  "let me verify before declaring done" is no longer parsed as DONE.
+- **`pnpm test` overwrote the developer's own `~/.arterm/config.json`**, the
+  status server wrote there too, and the redirect turned out to be per package.
+  Three instances of one mistake, now guarded as a rule rather than as files.
+- **Three observables said "nothing happened" the same way they said "this never
+  ran"**: a skipped verdict, a spend of zero, and an empty witness list are each
+  stated explicitly now, because a missing key and a false one read alike.
+- Windows is supported rather than assumed: path separators, file URIs, newline
+  policy in the diff round-trip, and the deterministic gate that passed
+  everything there.
+
 ## [0.4.0] — 2026-08-05
 
 ### Added
