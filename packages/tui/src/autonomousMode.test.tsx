@@ -121,6 +121,47 @@ describe("Shift+Tab AUTONOMOUS slot", () => {
     unmount();
   });
 
+  it("switches the mode WHILE A TURN RUNS — the advice a plan denial prints must work then", async () => {
+    const bus = new EventBus();
+    const modes: string[] = [];
+    let finish: () => void = () => {};
+    const session = fakeSession(bus, {
+      setMode: (m: unknown) => {
+        modes.push(String(m));
+      },
+      agent: {
+        model: "fake",
+        effectiveContextWindow: () => 8192,
+        reset: () => {},
+        tools: [],
+        run: async () => {
+          bus.emit({ type: "turn_start" });
+          await new Promise<void>((r) => {
+            finish = r;
+          });
+          bus.emit({ type: "turn_end" });
+        },
+      },
+    } as unknown as Partial<Session>);
+    const { frames, stdin, unmount } = render(createElement(App, { session }));
+    const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await tick();
+
+    stdin.write("uzun bir görev");
+    await tick();
+    stdin.write(ENTER);
+    await waitFor(ui, (f) => f.includes("thinking"));
+
+    // The turn is in flight. This is the exact moment a plan-mode denial says
+    // "switch to ask/auto (Shift+Tab)" — the gesture must not be dead here.
+    stdin.write(SHIFT_TAB);
+    await waitFor(ui, (f) => f.includes("permission mode → AUTO"));
+    expect(modes).toEqual(["auto"]);
+
+    finish();
+    unmount();
+  });
+
   it("keeps the plain three-mode cycle when the session cannot arm", async () => {
     const bus = new EventBus();
     // No setAutonomous (headless/test session): plan wraps to ask, as before.

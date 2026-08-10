@@ -2080,9 +2080,18 @@ export function App({
   // Shift+Tab cycles ASK → AUTO → PLAN → AUTONOMOUS → ASK. The last slot is
   // not a permission mode: it arms the unattended profile on the live session
   // and routes plain prompts into the autonomy engine.
+  //
+  // Deliberately active WHILE A TURN RUNS — `status` is not in the gate. A
+  // plan-mode denial tells the user to "switch to ask/auto (Shift+Tab)" at the
+  // exact moment the model is burning turns against it, and the ladder reads
+  // the mode fresh on every tool call, so a mid-turn switch rescues the very
+  // next call. Gating on idle made the advice on screen a lie.
   useInput(
     (_input, key) => {
       if (key.tab && key.shift) {
+        // The mention picker owns Tab while it is up (Ink fires every active
+        // handler for one keypress) — completing a path must not also flip modes.
+        if (mentionOpenRef.current) return;
         if (autoArmed) {
           setAutonomous(false);
           return;
@@ -2093,7 +2102,7 @@ export function App({
       }
     },
     {
-      isActive: visible && status === "idle" && !pickerOpen && !loginOpen && !pending && !interview,
+      isActive: visible && !pickerOpen && !loginOpen && !pending && !interview,
     },
   );
 

@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shift+Tab was dead while a turn ran — exactly when plan-mode denials say
+  to press it.** The mode-cycle handler was gated on an idle status, so a
+  model burning turns against "plan mode is read-only — switch to ask/auto
+  (Shift+Tab)" could not be rescued without cancelling the turn. The gate is
+  gone: the permission ladder reads the mode fresh on every tool call, so a
+  mid-turn switch applies to the very next call the model makes. (The mention
+  picker still owns Tab while it is up.)
 - **A file dropped onto the dashboard was swallowed whole.** A drag arrives as
   one bracketed-paste chunk whose ESC-framed markers read as `meta`, and the
   panel's text branch was gated on `!meta` — so the entire path vanished
