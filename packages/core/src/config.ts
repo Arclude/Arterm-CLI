@@ -126,9 +126,9 @@ export interface ArtermConfig {
   };
   /**
    * Execution boundary for `bash` — filesystem confinement plus an egress
-   * allowlist (see `sandbox.ts`). Off by default for attended sessions, where
-   * the permission prompt is the control; `--autonomous` turns it on, because
-   * that mode's whole point is that the prompt is gone.
+   * allowlist (see `sandbox.ts`). On by default in every mode since v0.6.0;
+   * what still differs by mode is the response to a boundary that cannot be
+   * established (attended warns and continues, unattended refuses to start).
    */
   sandbox: {
     enabled?: boolean;
@@ -903,7 +903,69 @@ export async function loadConfig(): Promise<ArtermConfig> {
   }
 }
 
+/** Deep equality over JSON-shaped values (objects, arrays, primitives). */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => jsonEqual(v, b[i]));
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    return ka.length === kb.length && ka.every((k) => jsonEqual(a[k], b[k]));
+  }
+  return false;
+}
+
+/**
+ * The part of a config that differs from the defaults — what the file is FOR.
+ *
+ * `saveConfig` used to serialize the whole resolved config, which pinned every
+ * default at whatever the current version's value was: `loadConfig` merges the
+ * defaults in, a clean exit writes them all back out, and from then on the file
+ * asserts values nobody chose. Config merging keeps no provenance (the
+ * `DEFAULT_CONTEXT_WINDOW` problem), so a later release changing a default
+ * could never reach an existing home — measured with `sandbox.enabled`, whose
+ * v0.6.0 flip to on-by-default applied only to freshly created homes, because
+ * every existing config carried `false` written by the previous full persist.
+ *
+ * Persisting the DELTA fixes the future and migrates the past in the same
+ * move: a pinned value equal to the current default is dropped on the next
+ * save, so the key returns to tracking the product default, while a value that
+ * differs survives whole. The one thing this cannot express is "I choose
+ * today's default and want it frozen against tomorrow's" — a file can say that
+ * only by stating a value, and a delta keeps exactly the stated-and-different
+ * ones. That trade is the standard one (git config works this way), and the
+ * alternative was every default being frozen for everyone forever.
+ *
+ * Unknown keys (forward compatibility: a newer version's settings read by an
+ * older one) have no default to equal, so they always survive. Arrays are
+ * atomic — an edited allowlist is kept whole, an untouched one is dropped
+ * whole; element-wise diffing would make the file unreadable and the merge
+ * ambiguous. The round-trip law tested in `config.test.ts`: merging the
+ * defaults with `configDelta(cfg)` reproduces `cfg` exactly.
+ */
+export function configDelta(
+  config: Record<string, unknown>,
+  defaults: Record<string, unknown> = defaultConfig() as unknown as Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (value === undefined) continue;
+    const base = defaults[key];
+    if (isPlainObject(value) && isPlainObject(base)) {
+      const sub = configDelta(value, base);
+      if (Object.keys(sub).length > 0) out[key] = sub;
+      continue;
+    }
+    if (jsonEqual(value, base)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 export async function saveConfig(config: ArtermConfig): Promise<void> {
   await fs.mkdir(dirname(CONFIG_PATH), { recursive: true });
-  await fs.writeFile(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  const delta = configDelta(config as unknown as Record<string, unknown>);
+  await fs.writeFile(CONFIG_PATH, `${JSON.stringify(delta, null, 2)}\n`, "utf8");
 }

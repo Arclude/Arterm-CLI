@@ -606,9 +606,25 @@ What keeps an unattended run from spinning is not the cap but the guards
   run after two exhausted budgets instead of hammering silently forever.
 
 When testing any of this against `fault-server.mjs` with a reused sandbox HOME,
-pin `openaiCompatHost` in that HOME's config per run: the CLI persists the full
-config on exit, so a stale saved host silently redirects the next run away from
-your fake server (zero requests, instant provider errors).
+pin `openaiCompatHost` in that HOME's config per run: a host is never a default,
+so `saveConfig` persists it on exit, and a stale saved one silently redirects
+the next run away from your fake server (zero requests, instant provider
+errors).
+
+**`saveConfig` writes the DELTA against `defaultConfig()`, never the resolved
+config** (`configDelta`). The full persist pinned every default at whatever the
+current version's value was — `loadConfig` merges the defaults in, a clean exit
+wrote them all back out — so a release changing a default could never reach an
+existing home. Measured with `sandbox.enabled`: the v0.6.0 flip applied only to
+freshly created homes, while every existing config carried `false` nobody had
+chosen. The delta fixes the future and migrates the past in one move (a pinned
+value equal to the current default drops on the next save; on the real config
+this took 2,545 bytes to 310), at the one cost that "I choose today's default,
+frozen forever" cannot be expressed — a delta keeps stated-and-different values
+only. Two guards on it: the round-trip law in `config.test.ts` (merging the
+defaults with the delta reproduces the config exactly), and `configTrust`'s
+scan capping `mergeConfig(` occurrences — which a docstring here once tripped,
+so the law above is described in words rather than spelled as the call.
 
 **A `/sdd` worker's prompt is the task plus its context, built in `taskPrompt()`:**
 the spec the graph was cut from (`specBlock()`) and the quoted output of every
