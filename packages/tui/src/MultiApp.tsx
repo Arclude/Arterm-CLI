@@ -221,7 +221,7 @@ export function MultiApp({
         }
       })();
     },
-    [createSession, creating, switchTo],
+    [createSession, creating],
   );
 
   // Ctrl+X: close one session. The last one standing closes the whole app —
@@ -319,6 +319,7 @@ export function MultiApp({
       (e.meta.get().status !== "idle" || e.meta.get().autonomyRunning || awaiting.has(e.id)),
   ).length;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: metaTick is the invalidation signal — the memo reads live meta via .get()
   const panelEntries = useMemo<SessionPanelEntry[]>(
     () =>
       entries.map((e) => ({
@@ -329,8 +330,6 @@ export function MultiApp({
         awaitingPermission: awaiting.has(e.id),
         goal: e.meta.get().goal,
       })),
-    // metaTick is the freshness dependency, not dead weight — see its decl.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: metaTick IS the invalidation signal
     [entries, awaiting, metaTick],
   );
 
