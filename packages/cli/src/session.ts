@@ -15,6 +15,7 @@ import {
   EventBus,
   FleetRegistry,
   GenAiTelemetry,
+  type HookContext,
   MemberMemory,
   MemoryRecorder,
   type Message,
@@ -50,11 +51,15 @@ import {
   estimateTokens,
   formatMemorySection,
   gitWorkspaceWatcher,
+  hasAnyHook,
+  hookToolCall,
+  hooksSuppressed,
   loadConfig,
   memberIsolation,
   planPath,
   resolveSandbox,
   runFleet,
+  runObserverHook,
   runSubagent,
   saveConfig,
   subagentPolicy,
@@ -500,6 +505,68 @@ export async function buildSession(opts: SessionOptions): Promise<{
       },
     ),
   );
+
+  // Lifecycle hooks: another program's chance to watch, and to gate.
+  //
+  // Installed only when something is configured AND this process is not itself
+  // running inside a hook — the `ARTERM_HOOKS_DISABLED` guard only guards what
+  // reads it, and a hook that shells out to `arterm` is the ordinary case
+  // (logging a turn, asking a question), not an exotic one.
+  const hookSettings = config.hooks;
+  if (hasAnyHook(hookSettings) && !hooksSuppressed()) {
+    const hookCtx = (): HookContext => ({
+      sessionId: sessionCheckpointId,
+      cwd: workingDir.current(),
+      credentials: config.credentials,
+    });
+    if (hookSettings?.preTool?.trim() || hookSettings?.postTool?.trim()) {
+      // `before("execute")`, not before `permission`: the gate answers "may this
+      // run?", and a call the ladder already refused is not going to. The
+      // chronicle wants the opposite seam, because a denial IS its subject.
+      container
+        .resolve(Tokens.Pipelines)
+        .toolCall.before("execute", hookToolCall(hookSettings, hookCtx));
+    }
+    if (hookSettings?.turnEnd?.trim()) {
+      let turnStarted = 0;
+      let lastText = "";
+      let failure = "";
+      bus.on((event) => {
+        if (event.type === "turn_start") {
+          turnStarted = Date.now();
+          // Reset per turn, or one bad turn marks every later one failed.
+          failure = "";
+        } else if (event.type === "assistant_message") lastText = event.message.content ?? "";
+        else if (event.type === "error") failure = event.error;
+        else if (event.type === "turn_end") {
+          // A hook that is told "ok" about every turn cannot be used to notice a
+          // failure, which is most of what an observer is for. `error` is
+          // emitted before the `turn_end` of the turn it belongs to, so the last
+          // one seen since `turn_start` is this turn's outcome.
+          runObserverHook(
+            hookSettings.turnEnd ?? "",
+            "turn_end",
+            {
+              ARTERM_HOOK_STATUS: failure ? "error" : "ok",
+              ...(failure ? { ARTERM_HOOK_ERROR: failure } : {}),
+              ARTERM_HOOK_DURATION_MS: String(turnStarted ? Date.now() - turnStarted : 0),
+              ARTERM_HOOK_MODEL: agent.model,
+              ARTERM_HOOK_LAST_ASSISTANT_TEXT: lastText.slice(0, 4000),
+            },
+            hookCtx(),
+          );
+        }
+      });
+    }
+    if (hookSettings?.sessionStart?.trim()) {
+      runObserverHook(
+        hookSettings.sessionStart,
+        "session_start",
+        { ARTERM_HOOK_SOURCE: "create" },
+        hookCtx(),
+      );
+    }
+  }
 
   // The other half of the record: not what changed, but whether anything was
   // CHECKED since it changed. Registered plainly (after `execute`) rather than
@@ -1275,6 +1342,23 @@ export async function buildSession(opts: SessionOptions): Promise<{
   };
 
   const persist = async () => {
+    // The mirror of `sessionStart`, fired FIRST so an observer sees the session
+    // end while its subject still exists — the checkpoint, the spool and the
+    // background processes are all about to be swept below. Detached and
+    // unref'd like every observer, so a slow script cannot hold up an exit that
+    // is already happening.
+    if (hookSettings?.sessionEnd?.trim() && !hooksSuppressed()) {
+      runObserverHook(
+        hookSettings.sessionEnd,
+        "session_end",
+        { ARTERM_HOOK_SOURCE: "close" },
+        {
+          sessionId: sessionCheckpointId,
+          cwd: workingDir.current(),
+          credentials: config.credentials,
+        },
+      );
+    }
     // Model-spawned workers are the one thing here that can still be RUNNING at
     // teardown: nothing awaited them, which is the point of assigning without
     // blocking. Stopping them first means a closing session does not leave a
