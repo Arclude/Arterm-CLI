@@ -46,7 +46,7 @@ bubblewrap/seccomp/landlock araması yalnızca alakasız isabetler veriyor.
 |---|---|---|---|
 | Tool başına izin sorusu | **yok** | tam merdiven (`allow/deny/prompt`) | TS |
 | Sandbox (dosya/ağ sınırı) | **yok** | bubblewrap + egress allowlist | TS |
-| Ortam değişkeni temizliği | **yok** — `bash` ve hook'lar tüm ortamı miras alır | `scrubEnv`, ad tabanlı | TS |
+| Ortam değişkeni temizliği | **yok** — `bash` ve hook'lar tüm ortamı miras alırdı | `scrubEnv`, ad tabanlı | **portlandı** |
 | Anahtar dosyalarının okunması | sıradan bir komut | `denyRead` + arbiter `critical` | TS |
 | `webfetch` SSRF koruması | **yok** (yalnızca şema kontrolü) | var | TS |
 | Komut risk analizi | **`arterm-command-risk`** — hasar yarıçapına göre | regex deny-list | **upstream** |
@@ -108,6 +108,46 @@ sızan tam olarak odur.
   yüklüyor (biri varsayılanı kurar, biri kalıcılığı kapatır, biri uyarır).
   Kayan bir ikinci yazım gürültülü biçimde patlamaz — sadece eşleşmeyi
   bırakır, ve o okuyucuların hepsi sessizce tersini yapar.
+
+### Kimlik bilgileri: bir komuta NE VERİLİYOR
+
+`arterm_base::credentials`, TS'deki `core/src/credentials.ts`'in portu. Sandbox
+(henüz yok) bir komutun nereye ulaşabileceğini söyler; bu, komutun eline ne
+verildiğini. Sızıntı tek komut boyu: `env` yazar, ve o an anahtarlar
+transkriptte — bir sonraki turda sağlayıcıya gider, oturum dosyasına yazılır,
+her sonraki sıkıştırmaya katlanır. Modelin bunu istemesi de gerekmez; `npm
+install` paket betiklerini aynı miras alınan ortamla çalıştırır.
+
+Bağlandığı üç kapı: `tool/bash.rs` (üç spawn noktası, `build_shell_command` ve
+detached sarmalayıcı), `hooks.rs`, ve `mcp/client.rs`.
+
+Taşıyıcı üç özellik:
+
+- **`env_clear()` önce gelir, yoksa hiçbir şey yapılmamış olur.** Çocuk ebeveynin
+  ortamını miras alır, `envs()` yalnızca EKLER — yani temizlenmiş haritayı tek
+  başına vermek, alıkonan isimleri yine de göndermek demektir. Ölçüldü:
+  `env_clear` mutasyonla kaldırıldığında canary `sk-ant-…` alt sürece ulaşıyor
+  ve seam testi düşüyor. TS tarafının `extendEnv: false` dersinin aynısı.
+- **İsimlere bakar, değerlere değil.** "Bu bir token'a benziyor" tahmini eninde
+  sonunda bir `PATH` girdisini yer, ve araç zincirini bozan denetim kapatılır.
+  `SSH_AUTH_SOCK` ve `XDG_SESSION_*` kasten eşleşmez — bu özelliği batıracak
+  yanlış pozitifler onlardır.
+- **Bağlanmamışken bile varsayılan kapalı.** `scrub_env(base, None)` temizler.
+  Bu plumbing'i hiç okumamış bir çağıran (bir hook, bir test) anahtarları hâlâ
+  veren tek yol olmamalı.
+
+MCP tarafında bir açık kapandı: oradaki yerel liste `_API_KEY` / `_ACCESS_TOKEN`
+/ `_AUTH_TOKEN` son ekleri artı beş sabit isimdi ve **`ARTERM_SECRET` hiçbirine
+uymuyordu** — yani keystore'u açan değişken, yapılandırılmış her MCP sunucusuna
+veriliyordu. `GITHUB_TOKEN` ve `*_PASSWORD` de öyle. Artık tek kural, tek yerde:
+aynı soruyu yanıtlayan iki liste birbirinden kayar, ve kayma sessizdir — dar
+olan sadece eşleşmeyi bırakır.
+
+`withheld_note` başarısız komuta ne alamadığını söyler, ve iki koşula bağlıdır:
+komut BAŞARISIZ olmalı, ve kanıt (komut metni + çıktı) ismi gerçekten anmalı.
+Koşulsuz olsaydı, ortamında anahtar bulunan her oturumda başarısız olan her test
+koşusunun altına bir kimlik satırı eklerdi — modeli, o hatayla hiç ilgisi olmayan
+bir nedene yönlendirerek.
 
 **Daha fazlası olduğunu varsayın.** Denetlenmemiş kalanlar: `arterm.sh/account`
 (abonelik/cihaz akışı), `api.arterm.sh/v1` (`subscription_api`), ve

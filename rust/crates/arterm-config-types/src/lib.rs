@@ -904,6 +904,35 @@ pub struct SponsorsConfig {
     pub endpoint: String,
 }
 
+/// What a spawned command is handed from the session's environment.
+///
+/// The mechanism and the full argument live in `arterm_base::credentials`.
+/// The one thing worth repeating here: **the default is to scrub**, and it
+/// applies to a caller that never read this config at all, because a spawn
+/// assembled without the wiring must not be the one path that still hands the
+/// keys over.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CredentialsConfig {
+    /// Withhold credential-named variables from spawned commands.
+    pub scrub: bool,
+    /// Names handed through even though they look like a credential.
+    pub allow: Vec<String>,
+    /// Extra names always withheld, whatever they are called (e.g.
+    /// `DATABASE_URL`, which carries a password no name-rule can see).
+    pub deny: Vec<String>,
+}
+
+impl Default for CredentialsConfig {
+    fn default() -> Self {
+        Self {
+            scrub: true,
+            allow: Vec::new(),
+            deny: Vec::new(),
+        }
+    }
+}
+
 /// The discovery endpoint that only ever came from a shipped default.
 ///
 /// Spelled once and read everywhere that has to recognize it, because the

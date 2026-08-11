@@ -368,32 +368,32 @@ impl McpClient {
     }
 }
 
-/// Secrets that an MCP child must not receive merely because arterm has them.
+/// The environment an MCP child is handed.
 ///
-/// This intentionally applies only to inherited values. A server can still be
-/// given any of these names through `McpServerConfig::env`.
-fn is_sensitive_inherited_env_key(key: &str) -> bool {
-    let key = key.to_ascii_uppercase();
-    key.ends_with("_API_KEY")
-        || key.ends_with("_ACCESS_TOKEN")
-        || key.ends_with("_AUTH_TOKEN")
-        || matches!(
-            key.as_str(),
-            "AWS_ACCESS_KEY_ID"
-                | "AWS_SECRET_ACCESS_KEY"
-                | "AWS_SESSION_TOKEN"
-                | "AZURE_CLIENT_SECRET"
-                | "GOOGLE_APPLICATION_CREDENTIALS"
-        )
-}
-
+/// This used to carry its own list — the `_API_KEY` / `_ACCESS_TOKEN` /
+/// `_AUTH_TOKEN` suffixes plus five fixed names — and the gap it left is why it
+/// is gone: **`ARTERM_SECRET` matched none of them**, so the one variable that
+/// unlocks the keystore holding every other key was handed to every MCP server
+/// the user configured. So were `GITHUB_TOKEN` and any `*_PASSWORD`.
+///
+/// One rule now, in `crate::credentials`, for the same reason the discovery
+/// endpoint is spelled once: two lists that answer the same question drift, and
+/// the drift is silent — the narrower one just stops matching, and nothing
+/// says so.
+///
+/// The scrub still applies only to INHERITED values. A server can be given any
+/// of these names explicitly through `McpServerConfig::env`, which is the
+/// caller stating a credential on purpose rather than one arriving because
+/// arterm happened to hold it — the same distinction `credentials.allow` makes.
 fn mcp_child_env(
-    mut inherited: HashMap<String, String>,
+    inherited: HashMap<String, String>,
     explicit: &HashMap<String, String>,
 ) -> HashMap<String, String> {
-    inherited.retain(|key, _| !is_sensitive_inherited_env_key(key));
-    inherited.extend(explicit.clone());
-    inherited
+    let settings = crate::config::config().credentials.clone();
+    let scrubbed = crate::credentials::scrub_env(inherited, Some(&settings));
+    let mut env: HashMap<String, String> = scrubbed.env.into_iter().collect();
+    env.extend(explicit.clone());
+    env
 }
 
 impl Drop for McpClient {
@@ -404,25 +404,61 @@ impl Drop for McpClient {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{McpClient, is_sensitive_inherited_env_key, mcp_child_env};
+    use super::{McpClient, mcp_child_env};
     use crate::mcp::protocol::McpServerConfig;
     use std::collections::HashMap;
 
+    fn inherited_survivors(keys: &[&str]) -> Vec<String> {
+        let inherited: HashMap<String, String> = keys
+            .iter()
+            .map(|k| ((*k).to_string(), "value".to_string()))
+            .collect();
+        let mut survivors: Vec<String> = mcp_child_env(inherited, &HashMap::new())
+            .into_keys()
+            .collect();
+        survivors.sort();
+        survivors
+    }
+
     #[test]
     fn inherited_mcp_env_scrubs_provider_credentials() {
-        for key in [
+        let scrubbed = [
             "ANTHROPIC_API_KEY",
             "openai_api_key",
             "CURSOR_ACCESS_TOKEN",
             "AWS_SECRET_ACCESS_KEY",
             "AWS_SESSION_TOKEN",
             "GOOGLE_APPLICATION_CREDENTIALS",
-        ] {
-            assert!(is_sensitive_inherited_env_key(key), "must scrub {key}");
-        }
-        for key in ["PATH", "HOME", "RUST_LOG", "ARTERM_OPENROUTER_API_KEY_NAME"] {
-            assert!(!is_sensitive_inherited_env_key(key), "must preserve {key}");
-        }
+        ];
+        assert!(
+            inherited_survivors(&scrubbed).is_empty(),
+            "these must not reach an MCP child: {:?}",
+            inherited_survivors(&scrubbed)
+        );
+
+        let preserved = ["PATH", "HOME", "RUST_LOG"];
+        assert_eq!(inherited_survivors(&preserved).len(), preserved.len());
+    }
+
+    /// The gap the local list left, and the reason this moved to the shared
+    /// rule: `ARTERM_SECRET` unlocks the keystore holding every other key, and
+    /// it matched none of `_API_KEY` / `_ACCESS_TOKEN` / `_AUTH_TOKEN` nor any
+    /// of the five fixed names — so it was handed to every configured MCP
+    /// server. `GITHUB_TOKEN` and `*_PASSWORD` went the same way.
+    #[test]
+    fn the_keystore_key_no_longer_reaches_an_mcp_child() {
+        assert!(inherited_survivors(&["ARTERM_SECRET", "GITHUB_TOKEN", "DB_PASSWORD"]).is_empty());
+    }
+
+    /// A stated consequence of the shared rule rather than an accident. The old
+    /// suffix list preserved this because it ends in `_NAME`; the shared rule
+    /// judges the whole name and sees `_API_KEY_` inside it. It names a
+    /// variable rather than holding a key, so withholding it costs nothing an
+    /// MCP server needs — and `credentials.allow` hands it back for anyone it
+    /// does cost. Pinned so the change is a decision on record, not a surprise.
+    #[test]
+    fn a_name_containing_api_key_is_withheld_too() {
+        assert!(inherited_survivors(&["ARTERM_OPENROUTER_API_KEY_NAME"]).is_empty());
     }
 
     #[test]

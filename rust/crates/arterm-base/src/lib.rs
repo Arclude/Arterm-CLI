@@ -29,6 +29,7 @@ pub mod compaction;
 pub mod config;
 pub mod console;
 pub mod copilot_usage;
+pub mod credentials;
 pub mod dictation;
 #[cfg(feature = "embeddings")]
 pub mod embedding;
@@ -93,6 +94,6 @@ pub mod todo;
 pub mod transport;
 pub mod usage;
 pub mod util;
+pub use arterm_core::{terminal_eprint, terminal_eprintln, terminal_print, terminal_println};
 #[cfg(not(feature = "embeddings"))]
 pub use embedding_stub as embedding;
-pub use arterm_core::{terminal_eprint, terminal_eprintln, terminal_print, terminal_println};

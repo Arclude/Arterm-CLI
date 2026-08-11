@@ -528,10 +528,49 @@ impl Drop for ProcessGroupKillGuard {
     }
 }
 
+/// The environment a spawned command actually gets: this process's, minus the
+/// credential-named variables.
+///
+/// The session's own keys live here — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+/// and `ARTERM_SECRET`, which unlocks the keystore holding the rest — and one
+/// `env` would put all of them in the transcript, from where they are sent to
+/// the provider, written to the session file, and folded into every later
+/// compaction. See `arterm_base::credentials` for the whole argument.
+fn scrubbed_child_env() -> arterm_base::credentials::ScrubbedEnv {
+    let config = crate::config::config();
+    arterm_base::credentials::scrub_current_env(Some(&config.credentials))
+}
+
+/// Names withheld from the environment of a command spawned right now.
+///
+/// Recomputed rather than threaded out of [`build_shell_command`], because it
+/// is wanted only on the error path — a failing command asking "why is
+/// GITHUB_TOKEN unset" — and paying for it on every successful spawn to carry
+/// it through three call sites would be the wrong trade. Both reads see the
+/// same process environment and the same config, so they agree.
+fn withheld_from_child_env() -> Vec<String> {
+    scrubbed_child_env().withheld
+}
+
+/// Replace a command's inherited environment with the scrubbed one.
+///
+/// **`env_clear` is what makes this a scrub rather than a decoration.** A child
+/// inherits the parent's environment, so `envs` alone only ADDS to what is
+/// already there and every withheld name would still arrive. Called before the
+/// command's own additions (`TMPDIR`, `ARTERM_SCRATCH_DIR`) so those survive.
+macro_rules! apply_env_hygiene {
+    ($cmd:expr) => {{
+        let scrubbed = scrubbed_child_env();
+        $cmd.env_clear();
+        $cmd.envs(scrubbed.env);
+    }};
+}
+
 fn build_shell_command(cmd_str: &str) -> TokioCommand {
     #[cfg(windows)]
     {
         let mut cmd = TokioCommand::new("cmd.exe");
+        apply_env_hygiene!(cmd);
         // cmd.exe does not use the standard C runtime argument-decoding rules.
         // Passing the command through `arg` makes Rust escape nested quotes for
         // CommandLineToArgvW, which can corrupt commands such as:
@@ -549,6 +588,7 @@ fn build_shell_command(cmd_str: &str) -> TokioCommand {
     #[cfg(not(windows))]
     {
         let mut cmd = TokioCommand::new("bash");
+        apply_env_hygiene!(cmd);
         cmd.arg("-c").arg(cmd_str);
         configure_tool_scratch(&mut cmd);
         cmd
@@ -558,6 +598,7 @@ fn build_shell_command(cmd_str: &str) -> TokioCommand {
 #[cfg(unix)]
 fn build_detached_shell_wrapper(command: &str) -> StdCommand {
     let mut cmd = StdCommand::new("bash");
+    apply_env_hygiene!(cmd);
     cmd.arg("-lc")
         .arg(
             r#"eval "$ARTERM_RELOAD_DETACH_COMMAND"; status=$?; printf '\n--- Command finished with exit code: %s ---\n' "$status"; exit "$status""#,
@@ -569,7 +610,24 @@ fn build_detached_shell_wrapper(command: &str) -> StdCommand {
     cmd
 }
 
-fn format_command_output(mut output: String, exit_code: Option<i32>) -> String {
+fn format_command_output(mut output: String, exit_code: Option<i32>, command: &str) -> String {
+    // Failure-coupled and evidence-coupled, the same shape as the sandbox's
+    // confinement note. A command that succeeded was not short of anything, and
+    // almost every session has a key in its environment — so an unconditional
+    // note would append a credentials line to every failing test run in the
+    // repo, pointing the model at the wrong cause.
+    //
+    // Computed against the FULL output, before truncation: a tool's "set
+    // GITHUB_TOKEN" line is as likely to sit at the end of a long log as at the
+    // start, and truncating first would drop exactly the sentence this keys on.
+    let note = exit_code.filter(|code| *code != 0).and_then(|_| {
+        arterm_base::credentials::withheld_note(
+            &withheld_from_child_env(),
+            &format!("{command}\n{output}"),
+            arterm_base::credentials::WITHHELD_NOTE_LIMIT,
+        )
+    });
+
     if output.len() > MAX_OUTPUT_LEN {
         output = truncate_str(&output, MAX_OUTPUT_LEN).to_string();
         output.push_str("\n... (output truncated)");
@@ -577,6 +635,10 @@ fn format_command_output(mut output: String, exit_code: Option<i32>) -> String {
 
     if let Some(code) = exit_code.filter(|code| *code != 0) {
         output.push_str(&format!("\n\nExit code: {}", code));
+    }
+
+    if let Some(note) = note {
+        output.push_str(&format!("\n\n{note}"));
     }
 
     if output.trim().is_empty() {
@@ -595,7 +657,7 @@ mod utf8_truncation_tests {
     #[test]
     fn format_command_output_truncates_on_utf8_boundary() {
         let input = format!("{}é", "a".repeat(29_999));
-        let output = format_command_output(input, None);
+        let output = format_command_output(input, None, "echo");
         assert!(output.ends_with("\n... (output truncated)"));
         assert!(output.starts_with(&"a".repeat(29_999)));
     }
@@ -812,6 +874,11 @@ impl BashTool {
         let stdin_tx = ctx.stdin_request_tx.clone();
         let tool_call_id = ctx.tool_call_id.clone();
         let title_for_work = title.clone();
+        // The command TEXT, not the title: `title` falls back to the command but
+        // is `params.intent` when one was given, and an intent is prose the model
+        // wrote about the command rather than the command. `withheld_note` matches
+        // variable names against this, so it has to be what actually ran.
+        let command_for_output = params.command.clone();
 
         // Run the command (read stdout/stderr, service stdin, wait for exit) in a
         // dedicated task so that, if it exceeds the foreground timeout, we can hand
@@ -916,7 +983,7 @@ impl BashTool {
                     }
                     output.push_str(&stderr);
                 }
-                let output = format_command_output(output, status.code());
+                let output = format_command_output(output, status.code(), &command_for_output);
                 Ok(ToolOutput::new(output).with_title(title_for_work))
             });
 
@@ -1022,14 +1089,17 @@ impl BashTool {
                     .unwrap_or_default();
                 let _ = tokio::fs::remove_file(&info.output_file).await;
                 let _ = tokio::fs::remove_file(&info.status_file).await;
-                return Ok(
-                    ToolOutput::new(format_command_output(output, status.code())).with_title(
-                        params
-                            .intent
-                            .clone()
-                            .unwrap_or_else(|| params.command.clone()),
-                    ),
-                );
+                return Ok(ToolOutput::new(format_command_output(
+                    output,
+                    status.code(),
+                    &params.command,
+                ))
+                .with_title(
+                    params
+                        .intent
+                        .clone()
+                        .unwrap_or_else(|| params.command.clone()),
+                ));
             }
 
             if started.elapsed() >= timeout_duration {

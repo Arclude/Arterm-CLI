@@ -203,6 +203,17 @@ fn build_hook_process(
         .split_first()
         .expect("parse_hook_command guarantees at least one part");
     let mut cmd = std::process::Command::new(expand_home(program));
+
+    // A hook is a spawned command, so it is the same door `bash` was, with the
+    // same keys behind it. `env_clear` first, or `envs` would merely add to an
+    // environment the child already inherited in full. Everything this function
+    // adds afterwards — the event env, the client's terminal env — is ours and
+    // survives, which is why the scrub goes here rather than at the end.
+    let scrubbed =
+        crate::credentials::scrub_current_env(Some(&crate::config::config().credentials));
+    cmd.env_clear();
+    cmd.envs(scrubbed.env);
+
     cmd.args(args);
     if let Some(cwd) = event.cwd.as_deref().filter(|cwd| !cwd.is_empty())
         && std::path::Path::new(cwd).is_dir()

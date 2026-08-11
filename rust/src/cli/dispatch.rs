@@ -899,9 +899,10 @@ async fn run_default_command(args: Args) -> Result<()> {
     // like the telemetry notice it sits beside.
     {
         let config = crate::config::config();
-        if let Some(note) =
-            crate::sponsors::discovery_endpoint_note(config.sponsors.enabled, &config.sponsors.endpoint)
-        {
+        if let Some(note) = crate::sponsors::discovery_endpoint_note(
+            config.sponsors.enabled,
+            &config.sponsors.endpoint,
+        ) {
             let (dim, reset) = if crate::console::stderr_supports_ansi() {
                 ("\x1b[90m", "\x1b[0m")
             } else {

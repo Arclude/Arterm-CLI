@@ -467,7 +467,10 @@ fn test_parse_heuristic_progress_handles_phase_output() {
 
     assert_eq!(progress.kind, BackgroundTaskProgressKind::Indeterminate);
     assert_eq!(progress.percent, None);
-    assert_eq!(progress.message.as_deref(), Some("Compiling arterm v0.10.2"));
+    assert_eq!(
+        progress.message.as_deref(),
+        Some("Compiling arterm v0.10.2")
+    );
     assert_eq!(progress.source, BackgroundTaskProgressSource::ParsedOutput);
 }
 
@@ -1013,4 +1016,59 @@ async fn indirect_dispatch_paths_cannot_bypass_the_gate() {
         "background dispatch must be gated too, not just foreground"
     );
     assert!(canary.exists(), "the file must survive a backgrounded call");
+}
+
+/// The whole point, asked of a real `bash` rather than of the pure function.
+///
+/// `scrub_env` is unit-tested next to itself; what this checks is the seam —
+/// that `build_shell_command` actually applies it, and applies it with
+/// `env_clear` first. Without the clear, `envs` would merely ADD to an
+/// environment the child already inherited in full and every assertion below
+/// would fail while every unit test still passed. That is the failure mode this
+/// exists for: the mechanism working and the wiring absent look identical from
+/// the pure function's side.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_spawned_command_cannot_read_the_session_keys() {
+    let _guard = arterm_base::storage::lock_test_env();
+
+    // SAFETY: the test-env lock serializes every test that mutates the process
+    // environment, which is what makes these writes sound.
+    unsafe {
+        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-canary-must-not-leak");
+        std::env::set_var("ARTERM_SECRET", "keystore-canary-must-not-leak");
+        std::env::set_var("ARTERM_BASH_SCRUB_PROBE", "probe-value-must-survive");
+    }
+
+    let output = build_shell_command("env")
+        .output()
+        .await
+        .expect("run env under the tool's own command builder");
+    let env_dump = String::from_utf8_lossy(&output.stdout);
+
+    unsafe {
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("ARTERM_SECRET");
+        std::env::remove_var("ARTERM_BASH_SCRUB_PROBE");
+    }
+
+    for canary in [
+        "sk-ant-canary-must-not-leak",
+        "keystore-canary-must-not-leak",
+    ] {
+        assert!(
+            !env_dump.contains(canary),
+            "a model-authored command was handed {canary}"
+        );
+    }
+
+    // The positive anchor, and it is not optional: "the key is absent" is
+    // equally true of a build where `env` never ran, or ran with an empty
+    // environment. Something ordinary has to survive for the negative to mean
+    // anything.
+    assert!(
+        env_dump.contains("probe-value-must-survive"),
+        "a non-credential variable must still reach the command; env said: {env_dump}"
+    );
+    assert!(env_dump.contains("PATH="), "PATH must survive: {env_dump}");
 }

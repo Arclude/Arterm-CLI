@@ -353,7 +353,10 @@ fn test_env_override_focus_hook() {
 
     let mut cfg = Config::default();
     cfg.apply_env_overrides();
-    assert_eq!(cfg.terminal.focus_hook.as_deref(), Some("niri-focus-arterm"));
+    assert_eq!(
+        cfg.terminal.focus_hook.as_deref(),
+        Some("niri-focus-arterm")
+    );
 
     // Empty env value disables a config-file hook.
     crate::env::set_var("ARTERM_FOCUS_HOOK", "");
