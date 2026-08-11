@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         None => {
             let config = arterm_config::load_config();
             let mut app = arterm_tui::App::new()?;
-            let result = app.run(&config);
+            let result = app.run(&config).await;
             let cleanup = app.cleanup();
             result?;
             cleanup?;
