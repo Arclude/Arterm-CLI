@@ -363,6 +363,14 @@ async function listProjectEntries(dir: string, limit = 200): Promise<string[]> {
  */
 export class Agent {
   private messages: Message[] = [];
+  /**
+   * Typed while the turn was running, waiting for a safe point to be folded in.
+   * Drained by the `request.softInterrupt` stage; whatever is still here when
+   * the turn ends is handed back by `takeInterjections()` so the caller can
+   * send it as an ordinary prompt — a message the user typed is never dropped
+   * because the loop happened to finish first.
+   */
+  private readonly pendingInterjections: string[] = [];
   private toolMap: Map<string, Tool>;
   /**
    * Oversized tool outputs this run wrote to disk, so `read` can open them.
@@ -602,6 +610,44 @@ export class Agent {
       });
     }
 
+    if (!req.has("softInterrupt")) {
+      // Something the user typed WHILE the turn was running, folded into the
+      // conversation instead of cancelling it.
+      //
+      // The alternative is what this replaces: hold the message until the turn
+      // ends, so a correction ("not that file") arrives after the work it was
+      // meant to redirect. Cancelling instead is worse still — it throws away
+      // the partial work, re-sends the whole prompt, and reads as a stutter.
+      //
+      // The seam is the ONE place a user turn can be added without breaking the
+      // shape the providers require: every `tool_use` must be answered by its
+      // `tool_result` before anything else, so the only safe point is after a
+      // round's results are all recorded and before the next request goes out —
+      // which is exactly here, at the top of an iteration. Hence the guard on
+      // the last message being a tool result: it is not a heuristic, it is the
+      // definition of that point. On the first iteration the last message is
+      // the user's own input and there is nothing to interleave with.
+      req.use("softInterrupt", async (ctx, next) => {
+        if (this.pendingInterjections.length > 0) {
+          const last = ctx.messages[ctx.messages.length - 1];
+          if (last?.role === "tool") {
+            const text = this.pendingInterjections.join("\n\n");
+            this.pendingInterjections.length = 0;
+            // `record`, not `ctx.messages.push`. The two look equivalent because
+            // `ctx.messages` IS `this.messages` here, and for the live turn they
+            // are — but the push alone skips `onMessage`, the hook that writes
+            // history down. The message would then steer this turn and vanish
+            // from the transcript and the checkpoint, so a resumed session
+            // would replay a conversation the user's correction never happened
+            // in: the divergence is silent and permanent.
+            await this.record({ role: "user", content: text });
+            this.bus.emit({ type: "interjected", text });
+          }
+        }
+        await next();
+      });
+    }
+
     if (!req.has("buildSystem")) {
       req.use("buildSystem", async (ctx, next) => {
         ctx.system = await this.buildSystem(ctx.native);
@@ -715,6 +761,32 @@ export class Agent {
   reset(): void {
     this.messages = [];
     this.lastPromptTokens = undefined;
+    this.pendingInterjections.length = 0;
+  }
+
+  /**
+   * Add something to the RUNNING turn without cancelling it.
+   *
+   * Lands at the next safe point — after the current round's tool results are
+   * recorded, before the next request — so the model reads it as part of the
+   * conversation it is already having. Costs nothing when no turn is running:
+   * the stage only fires between a tool result and a request, so a caller that
+   * interjects into an idle agent gets the text back from
+   * `takeInterjections()` and can send it as an ordinary prompt.
+   */
+  interject(text: string): void {
+    const trimmed = text.trim();
+    if (trimmed) this.pendingInterjections.push(trimmed);
+  }
+
+  /** True while something typed mid-turn has not yet reached the model. */
+  get hasPendingInterjection(): boolean {
+    return this.pendingInterjections.length > 0;
+  }
+
+  /** Takes back anything that never found a safe point, emptying the queue. */
+  takeInterjections(): string[] {
+    return this.pendingInterjections.splice(0, this.pendingInterjections.length);
   }
 
   get model(): string {

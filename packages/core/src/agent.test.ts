@@ -1851,3 +1851,118 @@ describe("Agent.note — the tool-less turn that stays in history", () => {
     expect(events.some((e) => e.type === "error")).toBe(true);
   });
 });
+
+describe("soft interrupt (typing into a running turn)", () => {
+  /** A tool that interjects from INSIDE the turn — the only honest way to test this. */
+  function interjecting(holder: { agent?: Agent }, text: string, calls: { n: number }): Tool {
+    return {
+      name: "look",
+      description: "",
+      parameters: {},
+      permission: "allow",
+      category: "read",
+      execute: async () => {
+        calls.n += 1;
+        if (calls.n === 1) holder.agent?.interject(text);
+        return { output: `read ${calls.n}` };
+      },
+    };
+  }
+
+  it("reaches the model MID-TURN, after the round's tool results", async () => {
+    // The whole point: a correction typed while the agent works has to arrive
+    // before the work it was meant to redirect, not after the turn ends. And it
+    // must not cancel — the partial work stands and the prompt is not re-sent.
+    const bus = new EventBus();
+    const holder: { agent?: Agent } = {};
+    const calls = { n: 0 };
+    const provider = new StubProvider([
+      [
+        { type: "tool_call", call: { id: "c1", name: "look", arguments: {} } },
+        { type: "tool_call", call: { id: "c2", name: "look", arguments: {} } },
+      ],
+      [{ type: "text", delta: "understood" }],
+    ]);
+    const agent = makeAgent(provider, bus, [interjecting(holder, "use the OTHER file", calls)]);
+    holder.agent = agent;
+    const events = collect(bus);
+    await agent.run("go");
+
+    // It landed, and the turn ran to completion rather than being restarted.
+    expect(provider.calls).toBe(2);
+    const sent = provider.lastMessages ?? [];
+    const injected = sent.findIndex((m) => m.role === "user" && m.content === "use the OTHER file");
+    expect(injected).toBeGreaterThan(-1);
+
+    // Position is the contract, not decoration: every tool_use must be answered
+    // by its tool_result before anything else, so the injection has to sit
+    // after ALL of the round's tool messages — both of them, not just the one
+    // whose execution queued it.
+    const lastTool = sent.map((m) => m.role).lastIndexOf("tool");
+    expect(lastTool).toBeGreaterThan(-1);
+    expect(injected).toBeGreaterThan(lastTool);
+    expect(sent.filter((m) => m.role === "tool")).toHaveLength(2);
+
+    // Announced when it LANDS, so a UI never says "sent" about a queue.
+    expect(events.filter((e) => e.type === "interjected")).toHaveLength(1);
+    expect(agent.hasPendingInterjection).toBe(false);
+  });
+
+  it("keeps what never found a safe point, rather than dropping it", async () => {
+    // Interjecting into an idle agent is the ordinary race: the turn ended
+    // while the user was still typing. The text is a message a human wrote, so
+    // the caller gets it back to send as an ordinary prompt.
+    const bus = new EventBus();
+    const agent = makeAgent(new StubProvider(), bus);
+    await agent.run("hi");
+    agent.interject("  and one more thing  ");
+    expect(agent.hasPendingInterjection).toBe(true);
+    expect(agent.takeInterjections()).toEqual(["and one more thing"]);
+    expect(agent.hasPendingInterjection).toBe(false);
+  });
+
+  it("never lands on a turn with no tool round to land after", async () => {
+    // A text-only turn has no point D: the last message is the user's own
+    // input, and appending a second user message there would say the user spoke
+    // twice. It waits instead.
+    const bus = new EventBus();
+    const agent = makeAgent(new StubProvider([[{ type: "text", delta: "ok" }]]), bus);
+    agent.interject("mid-air");
+    await agent.run("go");
+    expect(agent.hasPendingInterjection).toBe(true);
+  });
+
+  it("writes the interjection to history, so a resumed session has it too", async () => {
+    // The bug this pins: pushing onto the pipeline's `messages` steers the live
+    // turn and nothing else. `onMessage` is what persists a message, so an
+    // interjection that skips it survives only in memory — the transcript and
+    // the checkpoint would show a turn that answered a correction nobody can
+    // see, and a resume would replay the conversation without it.
+    const bus = new EventBus();
+    const holder: { agent?: Agent } = {};
+    const calls = { n: 0 };
+    const recorded: Message[] = [];
+    const agent = new Agent({
+      provider: new StubProvider([
+        [{ type: "tool_call", call: { id: "c1", name: "look", arguments: {} } }],
+        [{ type: "text", delta: "understood" }],
+      ]),
+      model: "m",
+      tools: [interjecting(holder, "use the OTHER file", calls)],
+      permissions: new PermissionManager({}, "yolo"),
+      ask: async () => "allow",
+      bus,
+      cwd: process.cwd(),
+      onMessage: async (m) => {
+        recorded.push(m);
+      },
+    });
+    holder.agent = agent;
+    await agent.run("go");
+
+    const persisted = recorded.filter(
+      (m) => m.role === "user" && m.content === "use the OTHER file",
+    );
+    expect(persisted).toHaveLength(1);
+  });
+});
