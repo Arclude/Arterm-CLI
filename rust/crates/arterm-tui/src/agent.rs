@@ -3,7 +3,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::mpsc;
 
-use arterm_core::{Message, StreamChunk, ToolCall, ToolSchema};
+use arterm_core::{
+    Message, PermissionManager, PermissionVerdict, StreamChunk, ToolCall, ToolSchema,
+};
 
 /// Default maximum number of stream + tool-call iterations per turn.
 /// Prevents infinite loops if the model keeps requesting tools without converging.
@@ -16,6 +18,9 @@ pub struct Agent {
     pub provider: Arc<dyn arterm_providers::ChatProvider>,
     pub tools: arterm_tools::ToolRegistry,
     pub system: String,
+    /// Permission system: controls which tools run automatically and which
+    /// require user approval. Defaults to [`PermissionMode::Ask`].
+    pub permissions: PermissionManager,
 }
 
 /// Events the agent emits during a turn, for the TUI to render.
@@ -29,6 +34,16 @@ pub enum AgentEvent {
     ToolCall { name: String, args: String },
     /// A tool result.
     ToolResult { name: String, output: String, is_error: bool },
+    /// A tool call needs user approval before it can run.
+    ///
+    /// Emitted when the permission mode requires asking. The TUI should prompt
+    /// the user and respond via a permission-response channel (not yet wired).
+    PermissionRequest {
+        tool_call_id: String,
+        tool_name: String,
+        args: String,
+        message: String,
+    },
     /// The turn is complete.
     TurnEnd,
     /// An error occurred.
@@ -95,9 +110,34 @@ impl Agent {
                     args: tc.arguments.to_string(),
                 });
 
-                let (output, is_error) = self
-                    .execute_tool(&tc.name, tc.arguments.clone())
-                    .await;
+                // --- Permission check ---
+                // Ask the permission manager whether this tool may run.
+                let (output, is_error) = match self.check_permission(&tc.name) {
+                    PermissionVerdict::Allow => {
+                        self.execute_tool(&tc.name, tc.arguments.clone()).await
+                    }
+                    PermissionVerdict::Deny => {
+                        (format!("permission denied for tool '{}'", tc.name), true)
+                    }
+                    PermissionVerdict::Ask(prompt) => {
+                        // Emit a permission request so the TUI can prompt the
+                        // user. TODO: await an interactive response and branch
+                        // on allow/deny once a response channel exists.
+                        let _ = tx.send(AgentEvent::PermissionRequest {
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            args: tc.arguments.to_string(),
+                            message: prompt,
+                        });
+                        (
+                            format!(
+                                "tool '{}' requires permission — interactive approval not yet implemented",
+                                tc.name
+                            ),
+                            true,
+                        )
+                    }
+                };
 
                 let _ = tx.send(AgentEvent::ToolResult {
                     name: tc.name.clone(),
@@ -147,28 +187,67 @@ impl Agent {
             .collect()
     }
 
-    /// Build the full system prompt, appending a description of available tools.
+    /// Build the full system prompt for the coding agent.
+    ///
+    /// Composes several layers:
+    /// 1. **Custom context (prepended)** — anything in `self.system` (e.g. a
+    ///    custom `system_prompt` from config, or provider/model info) goes
+    ///    first so user instructions take precedence.
+    /// 2. **Base persona** — `arterm_config::default_system_prompt()`, the
+    ///    built-in coding-agent identity with behavioural guidelines.
+    /// 3. **Working directory** — the current directory for filesystem context.
+    /// 4. **Tool catalogue** — each registered tool's name and description,
+    ///    plus guidance on *how* to use tools effectively.
     fn build_system_prompt(&self, tools: &[ToolSchema]) -> String {
-        if tools.is_empty() {
-            return self.system.clone();
+        // 1 — If a custom system prompt was provided (via config or caller),
+        //     prepend it so user instructions take precedence.
+        let mut prompt = String::new();
+        if !self.system.trim().is_empty() {
+            prompt.push_str(self.system.trim());
+            prompt.push_str("\n\n");
         }
 
-        let mut lines = String::new();
-        for t in tools {
-            lines.push_str(&format!("  - **{}**: {}\n", t.name, t.description));
+        // 2 — Built-in persona and behavioural guidelines (the base).
+        prompt.push_str(&arterm_config::default_system_prompt());
+
+        // 3 — Working directory so the model knows where it operates.
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "(unknown)".to_string());
+        prompt.push_str(&format!("\n\n## Working Directory\n\n{cwd}"));
+
+        // 4 — Dynamic tool catalogue with usage guidance.
+        if !tools.is_empty() {
+            prompt.push_str("\n\n## Available Tools\n\n");
+            prompt.push_str(
+                "You have the following tools. The provider handles the tool-call \
+                 wire format automatically — you only need to choose the right tool \
+                 and supply the correct arguments.\n\n\
+                 **How to work effectively:**\n\
+                 - Explore before acting: read files and search before editing.\n\
+                 - After making changes, run builds or tests to verify.\n\
+                 - Prefer targeted edits over rewriting entire files.\n\
+                 - Iterate in a closed loop until the task is truly complete.\n\n",
+            );
+            for t in tools {
+                prompt.push_str(&format!("- **{}**: {}\n", t.name, t.description));
+            }
+            prompt.push_str(
+                "\nWhen your work is complete, respond with text only — no further \
+                 tool calls.",
+            );
         }
 
-        format!(
-            "{base}\n\n\
-             ## Available Tools\n\n\
-             You have access to the following tools. Call them when appropriate to \
-             accomplish the user's request:\n\n\
-             {lines}\
-             \nWhen you have finished using tools and have the final answer, respond \
-             with text only.",
-            base = self.system,
-            lines = lines,
-        )
+        prompt
+    }
+
+    /// Check whether the named tool may run under the current permission
+    /// settings. Unknown tools are allowed (they will fail in [`execute_tool`]).
+    fn check_permission(&self, tool_name: &str) -> PermissionVerdict {
+        match self.tools.get(tool_name) {
+            Some(tool) => self.permissions.check(tool_name, tool.permission()),
+            None => PermissionVerdict::Allow,
+        }
     }
 
     /// Execute a single tool by name, returning `(output, is_error)`.

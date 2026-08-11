@@ -3,6 +3,7 @@ mod markdown;
 
 use anyhow::Result;
 use crossterm::{
+    cursor::Show,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     },
@@ -19,7 +20,7 @@ use ratatui::{
 };
 use std::io::{self, Stdout};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use arterm_config::ArtermConfig;
@@ -50,7 +51,20 @@ pub struct App {
 
 impl App {
     /// Initialise the terminal (alternate screen + raw mode + mouse capture).
+    ///
+    /// A panic hook is installed so that if the application crashes the
+    /// terminal is restored before the panic message is printed.
     pub fn new() -> Result<Self> {
+        // Panic hook: restore the terminal before the default handler prints
+        // the panic info, so a crash never leaves the terminal in raw mode.
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = disable_raw_mode();
+            let mut stdout = io::stdout();
+            let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture, Show);
+            default_hook(info);
+        }));
+
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -100,6 +114,7 @@ impl App {
                 provider: Arc::from(provider),
                 tools: arterm_tools::ToolRegistry::defaults(),
                 system,
+                permissions: arterm_core::PermissionManager::default(),
             };
             let agent_tx = agent_tx;
             tokio::spawn(async move {
@@ -119,11 +134,14 @@ impl App {
 
         // Welcome banner.
         self.messages.push(TranscriptEntry::System(format!(
-            "Arterm {} · {}/{} · Type a message and press Enter. Ctrl+C to quit.",
+            "Arterm {} · {}/{} · Type a message and press Enter. Press Ctrl+C twice to quit.",
             env!("CARGO_PKG_VERSION"),
             config.provider,
             config.model
         )));
+
+        // Track first Ctrl+C press for the two-press-to-quit pattern.
+        let mut last_ctrl_c: Option<Instant> = None;
 
         // ── Main event loop ────────────────────────────────────────────────
         loop {
@@ -159,9 +177,17 @@ impl App {
                             self.scroll_offset = 0;
                             let _ = user_tx.send(input);
                         }
-                        // ── Ctrl+C → quit ───────────────────────────────────
+                        // ── Ctrl+C → quit (two-press within 3 s) ────────────
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            break;
+                            match last_ctrl_c {
+                                Some(t) if t.elapsed() < Duration::from_secs(3) => break,
+                                _ => {
+                                    last_ctrl_c = Some(Instant::now());
+                                    self.messages.push(TranscriptEntry::System(
+                                        "Press Ctrl+C again to quit.".to_string(),
+                                    ));
+                                }
+                            }
                         }
                         // ── Type characters ─────────────────────────────────
                         KeyCode::Char(c) => {
@@ -216,6 +242,12 @@ impl App {
             AgentEvent::TurnEnd => {
                 self.agent_busy = false;
                 self.live.clear();
+            }
+            AgentEvent::PermissionRequest { tool_name, message, .. } => {
+                self.messages.push(TranscriptEntry::System(format!(
+                    "permission required: {tool_name} — {message}"
+                )));
+                self.scroll_offset = 0;
             }
             AgentEvent::Error(e) => {
                 self.live.clear();
@@ -367,6 +399,20 @@ impl App {
         )?;
         self.terminal.show_cursor()?;
         Ok(())
+    }
+}
+
+/// RAII safety net: if [`App::cleanup`] is never called (e.g. early return,
+/// panic), the terminal is still restored when `App` is dropped.
+impl Drop for App {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
+        let _ = self.terminal.show_cursor();
     }
 }
 

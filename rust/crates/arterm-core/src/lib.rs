@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub mod permission;
+pub use permission::{PermissionManager, PermissionMode, PermissionVerdict};
+
 /// A single message in the conversation history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "lowercase")]

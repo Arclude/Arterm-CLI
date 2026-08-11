@@ -39,6 +39,7 @@ impl ToolRegistry {
         let mut reg = Self::new();
         reg.register(Box::new(crate::read::ReadTool));
         reg.register(Box::new(crate::write::WriteTool));
+        reg.register(Box::new(crate::edit::EditTool));
         reg.register(Box::new(crate::bash::BashTool));
         reg.register(Box::new(crate::glob::GlobTool));
         reg.register(Box::new(crate::grep::GrepTool));
@@ -78,6 +79,7 @@ impl Default for ToolRegistry {
 
 pub mod read;
 pub mod write;
+pub mod edit;
 pub mod bash;
 pub mod glob;
 pub mod grep;
