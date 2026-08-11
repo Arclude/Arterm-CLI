@@ -1,6 +1,6 @@
 # Refactoring Roadmap
 
-This document defines the safe, incremental path for refactoring jcode while preserving behavior.
+This document defines the safe, incremental path for refactoring arterm while preserving behavior.
 
 See also:
 
@@ -69,7 +69,7 @@ See also:
 ## Verification Matrix
 
 - Compile: `cargo check -q`
-- Compile timing: `scripts/bench_compile.sh check --runs 3 --touch <hot-file>` and `scripts/bench_compile.sh release-jcode --runs 3`
+- Compile timing: `scripts/bench_compile.sh check --runs 3 --touch <hot-file>` and `scripts/bench_compile.sh release-arterm --runs 3`
 - Warnings: `scripts/check_warning_budget.sh`
 - Security: `scripts/security_preflight.sh`
 - Unit+integration tests: `cargo test -q`

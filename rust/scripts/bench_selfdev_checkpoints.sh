@@ -21,8 +21,8 @@ Options:
 Checkpoints:
   cold_check           cargo check after cargo clean
   warm_check_edit      touched-file cargo check loop
-  cold_selfdev_build   selfdev jcode build after cargo clean
-  warm_selfdev_edit    touched-file selfdev jcode build loop
+  cold_selfdev_build   selfdev arterm build after cargo clean
+  warm_selfdev_edit    touched-file selfdev arterm build loop
 USAGE
 }
 
@@ -134,11 +134,11 @@ PY
 
 if [[ $skip_cold -eq 0 ]]; then
   cold_check_json=$(run_bench cold_check check --cold)
-  cold_selfdev_json=$(run_bench cold_selfdev_build selfdev-jcode --cold)
+  cold_selfdev_json=$(run_bench cold_selfdev_build selfdev-arterm --cold)
 fi
 
 warm_check_json=$(run_bench warm_check_edit check --runs "$runs" --touch "$touch_path")
-warm_selfdev_json=$(run_bench warm_selfdev_edit selfdev-jcode --runs "$runs" --touch "$touch_path")
+warm_selfdev_json=$(run_bench warm_selfdev_edit selfdev-arterm --runs "$runs" --touch "$touch_path")
 
 summary_json=$(python3 - <<'PY' "$touch_path" "$runs" "$cold_check_json" "$warm_check_json" "$cold_selfdev_json" "$warm_selfdev_json"
 import json

@@ -1,4 +1,4 @@
-"""Minimal jcode gateway WebSocket client (stdlib only).
+"""Minimal arterm gateway WebSocket client (stdlib only).
 
 Used to validate cross-machine remote sessions: pair over HTTP, then drive a
 session on another host over the gateway WebSocket.

@@ -27,11 +27,11 @@ pub(crate) enum ProviderAuthArg {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "jcode")]
-#[command(version = jcode_build_meta::version())]
+#[command(name = "arterm")]
+#[command(version = arterm_build_meta::version())]
 #[command(about = "J-Code: A coding agent using Claude Max or ChatGPT Pro subscriptions")]
 pub(crate) struct Args {
-    /// Initial provider to use (jcode, claude, openai, openai-api, openrouter, azure, opencode, opencode-go, zai, 302ai, baseten, cortecs, comtegra, deepseek, fpt, firmware, huggingface, moonshotai, nebius, scaleway, stackit, groq, mistral, perplexity, togetherai, deepinfra, xai, nvidia-nim, lmstudio, ollama, chutes, cerebras, alibaba-coding-plan, openai-compatible, cursor, copilot, gemini, antigravity, google, or auto-detect). Interactive sessions can switch providers with /model.
+    /// Initial provider to use (arterm, claude, openai, openai-api, openrouter, azure, opencode, opencode-go, zai, 302ai, baseten, cortecs, comtegra, deepseek, fpt, firmware, huggingface, moonshotai, nebius, scaleway, stackit, groq, mistral, perplexity, togetherai, deepinfra, xai, nvidia-nim, lmstudio, ollama, chutes, cerebras, alibaba-coding-plan, openai-compatible, cursor, copilot, gemini, antigravity, google, or auto-detect). Interactive sessions can switch providers with /model.
     #[arg(short, long, default_value = "auto", global = true)]
     pub(crate) provider: ProviderChoice,
 
@@ -71,7 +71,7 @@ pub(crate) struct Args {
     #[arg(long, global = true, hide = true, value_name = "CHORD")]
     pub(crate) spawn_hotkey: Option<String>,
 
-    /// Disable auto-detection of jcode repository and self-dev mode
+    /// Disable auto-detection of arterm repository and self-dev mode
     #[arg(long, global = true)]
     pub(crate) no_selfdev: bool,
 
@@ -142,10 +142,10 @@ pub(crate) enum Command {
         server_name: Option<String>,
     },
 
-    /// Run as an Agent Client Protocol (ACP) adapter backed by the Jcode daemon
+    /// Run as an Agent Client Protocol (ACP) adapter backed by the Arterm daemon
     Acp,
 
-    /// Manage the background server daemon (e.g. `jcode server stop`).
+    /// Manage the background server daemon (e.g. `arterm server stop`).
     Server {
         #[command(subcommand)]
         action: ServerCommand,
@@ -170,10 +170,10 @@ pub(crate) enum Command {
 
     /// Login to a provider via OAuth, API key, or local credentials
     Login {
-        /// Provider to log in to. Equivalent to --provider for this command, e.g. `jcode login google`.
+        /// Provider to log in to. Equivalent to --provider for this command, e.g. `arterm login google`.
         // Distinct clap id: the global `--provider` flag also has id "provider";
         // sharing the id makes clap drop the flag inside `login` (so
-        // `jcode login --provider x` errors) and propagate the global default
+        // `arterm login --provider x` errors) and propagate the global default
         // into this positional.
         #[arg(value_enum, id = "login_provider", value_name = "PROVIDER")]
         provider: Option<ProviderChoice>,
@@ -219,7 +219,7 @@ pub(crate) enum Command {
         #[arg(long)]
         api_base: Option<String>,
 
-        /// OpenAI-compatible API key. If omitted, jcode prompts securely when needed.
+        /// OpenAI-compatible API key. If omitted, arterm prompts securely when needed.
         #[arg(long)]
         api_key: Option<String>,
 
@@ -228,7 +228,7 @@ pub(crate) enum Command {
         api_key_env: Option<String>,
     },
 
-    /// Log in to and manage your Jcode account
+    /// Log in to and manage your Arterm account
     Account {
         #[command(subcommand)]
         action: AccountCommand,
@@ -237,7 +237,7 @@ pub(crate) enum Command {
     /// Run in simple REPL mode (no TUI)
     Repl,
 
-    /// Update jcode to the latest version
+    /// Update arterm to the latest version
     Update,
 
     /// Show build/version information in human or JSON form
@@ -262,7 +262,7 @@ pub(crate) enum Command {
         build: bool,
     },
 
-    /// Debug socket CLI - interact with running jcode server
+    /// Debug socket CLI - interact with running arterm server
     Debug {
         /// Debug command to run (list, start, sessions, create_session, message, tool, state, history, etc.)
         #[arg(default_value = "help")]
@@ -305,7 +305,7 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Ambient(AmbientCommand),
 
-    /// Optional Jcode Cloud/Jade integration commands
+    /// Optional Arterm Cloud/Jade integration commands
     #[command(subcommand)]
     Cloud(CloudCommand),
 
@@ -323,12 +323,12 @@ pub(crate) enum Command {
     /// Review and respond to pending ambient permission requests
     Permissions,
 
-    /// Inject externally transcribed text into the active Jcode TUI
+    /// Inject externally transcribed text into the active Arterm TUI
     Transcript {
         /// Transcript text. If omitted, reads from stdin.
         text: Option<String>,
 
-        /// How to apply the transcript inside Jcode
+        /// How to apply the transcript inside Arterm
         #[arg(long, value_enum, default_value = "send")]
         mode: TranscriptModeArg,
 
@@ -337,14 +337,14 @@ pub(crate) enum Command {
         session: Option<String>,
     },
 
-    /// Run configured dictation: send to last-focused jcode client or type raw text
+    /// Run configured dictation: send to last-focused arterm client or type raw text
     Dictate {
-        /// Type the transcript into the focused app instead of sending to jcode
+        /// Type the transcript into the focused app instead of sending to arterm
         #[arg(long)]
         r#type: bool,
     },
 
-    /// Set up the platform global hotkey to launch jcode
+    /// Set up the platform global hotkey to launch arterm
     SetupHotkey {
         /// Internal: run as the macOS hotkey listener process.
         #[arg(long, hide = true)]
@@ -363,7 +363,7 @@ pub(crate) enum Command {
         uninstall: bool,
     },
 
-    /// Install a launcher so jcode appears in your app launcher
+    /// Install a launcher so arterm appears in your app launcher
     SetupLauncher,
 
     /// Browser automation setup and status
@@ -512,7 +512,7 @@ pub(crate) enum Command {
         coverage_limit: usize,
     },
 
-    /// Save or restore the current set of open jcode windows across a system reboot
+    /// Save or restore the current set of open arterm windows across a system reboot
     Restart {
         #[command(subcommand)]
         action: RestartCommand,
@@ -532,14 +532,14 @@ pub(crate) enum Command {
 
     /// Serve the stable harness API on a Unix socket, for SDK clients.
     ///
-    /// This is the endpoint the TypeScript SDK (`@1jehuang/jcode-sdk`) connects to. It
+    /// This is the endpoint the TypeScript SDK (`@1jehuang/arterm-sdk`) connects to. It
     /// ships in the released binary on purpose: the API is only "generally
     /// available" if reaching it does not require a Rust toolchain and a
     /// source checkout.
     #[cfg(unix)]
     #[command(name = "api-bridge", alias = "api")]
     ApiBridge {
-        /// Path of the API socket to listen on (default: $XDG_RUNTIME_DIR/jcode-api.sock)
+        /// Path of the API socket to listen on (default: $XDG_RUNTIME_DIR/arterm-api.sock)
         ///
         /// Named `--api-socket` rather than `--socket` because the global
         /// `--socket` already selects the *internal daemon* socket, and clap
@@ -564,7 +564,7 @@ pub(crate) enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Open the public Jcode account management page
+    /// Open the public Arterm account management page
     Manage,
     /// Revoke the current key when reachable, then securely clear local state
     Logout,
@@ -668,7 +668,7 @@ pub(crate) enum CloudSessionsCommand {
 
     /// Upload a specific local session JSON file to Jade cloud storage
     Upload {
-        /// Path to a local Jcode session JSON file
+        /// Path to a local Arterm session JSON file
         session_file: String,
 
         /// Upload without Jade's redaction pass
@@ -679,10 +679,10 @@ pub(crate) enum CloudSessionsCommand {
         jade: JadeCloudOptions,
     },
 
-    /// Upload the newest local Jcode session to Jade cloud storage
+    /// Upload the newest local Arterm session to Jade cloud storage
     UploadLatest {
-        /// Directory containing local Jcode session JSON files
-        #[arg(long, default_value = "~/.jcode/sessions")]
+        /// Directory containing local Arterm session JSON files
+        #[arg(long, default_value = "~/.arterm/sessions")]
         sessions_dir: String,
 
         /// Upload without Jade's redaction pass
@@ -695,7 +695,7 @@ pub(crate) enum CloudSessionsCommand {
 
     /// Sync new or changed local sessions to Jade cloud storage (idempotent; safe to schedule)
     Sync {
-        /// Directory containing local Jcode session JSON files (default: ~/.jcode/sessions)
+        /// Directory containing local Arterm session JSON files (default: ~/.arterm/sessions)
         #[arg(long)]
         sessions_dir: Option<String>,
 
@@ -816,7 +816,7 @@ pub(crate) struct JadeCloudOptions {
     #[arg(long)]
     pub(crate) region: Option<String>,
 
-    /// Path to the private Jade session helper. Defaults to $JCODE_JADE_SESSIONS_HELPER or ~/jade/scripts/jade_sessions.py.
+    /// Path to the private Jade session helper. Defaults to $ARTERM_JADE_SESSIONS_HELPER or ~/jade/scripts/jade_sessions.py.
     #[arg(long)]
     pub(crate) helper: Option<String>,
 }
@@ -840,9 +840,9 @@ impl CloudSessionViewFormat {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum RestartCommand {
-    /// Save a reboot snapshot of currently active jcode windows
+    /// Save a reboot snapshot of currently active arterm windows
     Save {
-        /// Restore this reboot snapshot automatically the next time plain `jcode` starts
+        /// Restore this reboot snapshot automatically the next time plain `arterm` starts
         #[arg(long)]
         auto_restore: bool,
     },
@@ -926,11 +926,11 @@ pub(crate) enum ProviderCommand {
         #[arg(long, conflicts_with = "no_api_key")]
         api_key_env: Option<String>,
 
-        /// API key value to store in jcode's private provider env file. Prefer --api-key-stdin for shell history safety.
+        /// API key value to store in arterm's private provider env file. Prefer --api-key-stdin for shell history safety.
         #[arg(long, conflicts_with_all = ["api_key_stdin", "no_api_key"])]
         api_key: Option<String>,
 
-        /// Read the API key from stdin and store it in jcode's private provider env file
+        /// Read the API key from stdin and store it in arterm's private provider env file
         #[arg(long, conflicts_with = "no_api_key")]
         api_key_stdin: bool,
 
@@ -946,7 +946,7 @@ pub(crate) enum ProviderCommand {
         #[arg(long)]
         auth_header: Option<String>,
 
-        /// Private env file name under jcode's app config directory for stored API keys
+        /// Private env file name under arterm's app config directory for stored API keys
         #[arg(long)]
         env_file: Option<String>,
 

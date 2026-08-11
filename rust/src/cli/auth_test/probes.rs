@@ -6,8 +6,8 @@ fn generic_credential_paths_for_provider(
     };
 
     match provider.target {
-        crate::provider_catalog::LoginProviderTarget::Jcode => {
-            vec![config_dir.join(crate::subscription_catalog::JCODE_ENV_FILE)]
+        crate::provider_catalog::LoginProviderTarget::Arterm => {
+            vec![config_dir.join(crate::subscription_catalog::ARTERM_ENV_FILE)]
         }
         crate::provider_catalog::LoginProviderTarget::OpenRouter => {
             vec![config_dir.join("openrouter.env")]
@@ -59,7 +59,7 @@ fn auth_state_label(state: crate::auth::AuthState) -> &'static str {
 /// "openai-compatible" for a profile the user named explicitly is what made
 /// #712 so hard to diagnose.
 fn probe_display_name(provider: crate::provider_catalog::LoginProviderDescriptor) -> String {
-    if let Ok(profile) = std::env::var("JCODE_NAMED_PROVIDER_PROFILE")
+    if let Ok(profile) = std::env::var("ARTERM_NAMED_PROVIDER_PROFILE")
         && !profile.trim().is_empty()
         && provider.id == "openai-compatible"
     {
@@ -90,7 +90,7 @@ fn probe_generic_provider_auth(
     report.push_step(
         "refresh_probe",
         true,
-        "Skipped: provider does not expose a dedicated refresh probe in jcode today.".to_string(),
+        "Skipped: provider does not expose a dedicated refresh probe in arterm today.".to_string(),
     );
 }
 
@@ -299,7 +299,7 @@ async fn probe_cursor_auth(report: &mut AuthTestProviderReport) {
     report.push_step(
         "refresh_probe",
         true,
-        "Skipped: Cursor provider does not expose a native refresh-token probe in jcode today."
+        "Skipped: Cursor provider does not expose a native refresh-token probe in arterm today."
             .to_string(),
     );
 }

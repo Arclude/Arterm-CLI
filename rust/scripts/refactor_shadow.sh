@@ -7,44 +7,44 @@ umask 077
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 user_name="${USER:-$(id -un)}"
 runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
-default_home="${HOME}/.jcode-refactor"
-default_socket="${runtime_dir}/jcode-refactor-${user_name}.sock"
+default_home="${HOME}/.arterm-refactor"
+default_socket="${runtime_dir}/arterm-refactor-${user_name}.sock"
 
-ref_home="${JCODE_REF_HOME:-$default_home}"
-ref_socket="${JCODE_REF_SOCKET:-$default_socket}"
-ref_profile="${JCODE_REF_PROFILE:-debug}"
+ref_home="${ARTERM_REF_HOME:-$default_home}"
+ref_socket="${ARTERM_REF_SOCKET:-$default_socket}"
+ref_profile="${ARTERM_REF_PROFILE:-debug}"
 
 case "$ref_profile" in
-  debug) default_bin="$repo_root/target/debug/jcode" ;;
-  release) default_bin="$repo_root/target/release/jcode" ;;
+  debug) default_bin="$repo_root/target/debug/arterm" ;;
+  release) default_bin="$repo_root/target/release/arterm" ;;
   *)
-    printf 'error: unsupported JCODE_REF_PROFILE: %s (expected debug or release)\n' "$ref_profile" >&2
+    printf 'error: unsupported ARTERM_REF_PROFILE: %s (expected debug or release)\n' "$ref_profile" >&2
     exit 1
     ;;
 esac
 
-ref_bin="${JCODE_REF_BIN:-$default_bin}"
+ref_bin="${ARTERM_REF_BIN:-$default_bin}"
 
 usage() {
   cat <<'USAGE'
 Usage:
   scripts/refactor_shadow.sh env
   scripts/refactor_shadow.sh build [--release]
-  scripts/refactor_shadow.sh serve [-- <jcode serve args>]
-  scripts/refactor_shadow.sh run [-- <jcode args>]
-  scripts/refactor_shadow.sh connect [-- <jcode connect args>]
+  scripts/refactor_shadow.sh serve [-- <arterm serve args>]
+  scripts/refactor_shadow.sh run [-- <arterm args>]
+  scripts/refactor_shadow.sh connect [-- <arterm connect args>]
   scripts/refactor_shadow.sh check
 
 What it does:
-  - Runs jcode in an isolated refactor environment
-  - Uses separate JCODE_HOME and JCODE_SOCKET
-  - Refuses to run against ~/.jcode to protect live sessions
+  - Runs arterm in an isolated refactor environment
+  - Uses separate ARTERM_HOME and ARTERM_SOCKET
+  - Refuses to run against ~/.arterm to protect live sessions
 
 Environment overrides:
-  JCODE_REF_HOME      Isolated home dir (default: ~/.jcode-refactor)
-  JCODE_REF_SOCKET    Isolated socket path
-  JCODE_REF_PROFILE   debug|release (default: debug)
-  JCODE_REF_BIN       Explicit jcode binary path
+  ARTERM_REF_HOME      Isolated home dir (default: ~/.arterm-refactor)
+  ARTERM_REF_SOCKET    Isolated socket path
+  ARTERM_REF_PROFILE   debug|release (default: debug)
+  ARTERM_REF_BIN       Explicit arterm binary path
 USAGE
 }
 
@@ -54,14 +54,14 @@ die() {
 }
 
 assert_safe_paths() {
-  [[ -n "$ref_home" ]] || die "JCODE_REF_HOME resolved to empty path"
-  [[ -n "$ref_socket" ]] || die "JCODE_REF_SOCKET resolved to empty path"
-  [[ "$ref_home" = /* ]] || die "JCODE_REF_HOME must be an absolute path: $ref_home"
-  [[ "$ref_socket" = /* ]] || die "JCODE_REF_SOCKET must be an absolute path: $ref_socket"
+  [[ -n "$ref_home" ]] || die "ARTERM_REF_HOME resolved to empty path"
+  [[ -n "$ref_socket" ]] || die "ARTERM_REF_SOCKET resolved to empty path"
+  [[ "$ref_home" = /* ]] || die "ARTERM_REF_HOME must be an absolute path: $ref_home"
+  [[ "$ref_socket" = /* ]] || die "ARTERM_REF_SOCKET must be an absolute path: $ref_socket"
 
-  local prod_home="${HOME}/.jcode"
+  local prod_home="${HOME}/.arterm"
   if [[ "$ref_home" == "$prod_home" ]]; then
-    die "refusing to run with production home ($prod_home); set JCODE_REF_HOME to an isolated path"
+    die "refusing to run with production home ($prod_home); set ARTERM_REF_HOME to an isolated path"
   fi
 }
 
@@ -83,7 +83,7 @@ ensure_socket_parent() {
 
 ensure_binary() {
   if [[ ! -x "$ref_bin" ]]; then
-    die "jcode binary not found or not executable: $ref_bin (run 'scripts/refactor_shadow.sh build')"
+    die "arterm binary not found or not executable: $ref_bin (run 'scripts/refactor_shadow.sh build')"
   fi
 }
 
@@ -102,7 +102,7 @@ remove_stale_socket() {
 }
 
 run_isolated() {
-  JCODE_HOME="$ref_home" JCODE_SOCKET="$ref_socket" "$@"
+  ARTERM_HOME="$ref_home" ARTERM_SOCKET="$ref_socket" "$@"
 }
 
 normalize_args() {
@@ -114,13 +114,13 @@ normalize_args() {
 
 cmd_env() {
   cat <<EOF_OUT
-JCODE_REF_HOME=$ref_home
-JCODE_REF_SOCKET=$ref_socket
-JCODE_REF_PROFILE=$ref_profile
-JCODE_REF_BIN=$ref_bin
+ARTERM_REF_HOME=$ref_home
+ARTERM_REF_SOCKET=$ref_socket
+ARTERM_REF_PROFILE=$ref_profile
+ARTERM_REF_BIN=$ref_bin
 
 # One-off command example:
-JCODE_HOME=$ref_home JCODE_SOCKET=$ref_socket $ref_bin --version
+ARTERM_HOME=$ref_home ARTERM_SOCKET=$ref_socket $ref_bin --version
 EOF_OUT
 }
 

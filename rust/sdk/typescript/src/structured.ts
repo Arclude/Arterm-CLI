@@ -7,7 +7,7 @@ import {
 } from "ajv";
 import { HarnessError } from "./errors.js";
 
-/** JSON Schema accepted by {@link JcodeClient.runStructured}. */
+/** JSON Schema accepted by {@link ArtermClient.runStructured}. */
 export type StructuredOutputSchema<T = unknown> = JSONSchemaType<T> | AnySchema;
 
 /** A normalized parse or JSON Schema validation problem. */

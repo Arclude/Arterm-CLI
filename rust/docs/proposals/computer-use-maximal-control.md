@@ -116,13 +116,13 @@ These give genuinely off-screen, non-interfering control. Higher setup cost.
 | **Input Monitoring** | reading global input stream (only if we add capture) | Request API exists |
 
 Plan: a `request_permissions` action that calls
-`AXIsProcessTrustedWithOptions(prompt=true)` (adds jcode to the list + shows the
+`AXIsProcessTrustedWithOptions(prompt=true)` (adds arterm to the list + shows the
 dialog) and deep-links to the exact System Settings pane, then polls
 `AXIsProcessTrusted()`. One prompt + one toggle; never zero-touch for Accessibility
 (Apple's anti-malware boundary).
 
-Important: the permission attaches to the **host binary/terminal** running jcode.
-For a stable experience we likely want a signed jcode.app with a fixed bundle id so
+Important: the permission attaches to the **host binary/terminal** running arterm.
+For a stable experience we likely want a signed arterm.app with a fixed bundle id so
 the grant persists across updates (otherwise each new binary path re-prompts).
 
 ## Safety model (high blast radius)
@@ -142,7 +142,7 @@ the grant persists across updates (otherwise each new binary path re-prompts).
 3. **Tier 3 clipboard + AXObserver waits** - reliability.
 4. **`run_applescript`/JXA bridge (Tier 4)** - headless scripting for many apps.
 5. **Virtual-display / second-session (Tier 4)** - true parallel, non-interfering.
-6. Signed jcode.app bundle for durable permissions.
+6. Signed arterm.app bundle for durable permissions.
 7. Vision OCR (Tier 5) as needed.
 
 ## Crates
@@ -191,7 +191,7 @@ A first-class `setup` action that:
    first Apple Event), plus install/bundle health.
 2. **Requests** what it can programmatically:
    - `AXIsProcessTrustedWithOptions(prompt=true)` — shows the Accessibility dialog
-     and pre-adds jcode to the list (toggled off).
+     and pre-adds arterm to the list (toggled off).
    - `CGRequestScreenCaptureAccess()` — prompts for Screen Recording.
    - First Apple Event to a target app — triggers its Automation prompt.
 3. **Deep-links** to the exact System Settings pane for anything still missing:
@@ -210,8 +210,8 @@ TCC permissions attach to the **running binary's identity**. A bare dev/cli bina
 changes path/signature across updates, so macOS re-prompts every time. To make a
 grant stick:
 
-- Ship/install jcode as a **signed `.app` bundle with a stable bundle id**
-  (e.g. `com.jcode.app`) and a Designated Requirement, so the Accessibility /
+- Ship/install arterm as a **signed `.app` bundle with a stable bundle id**
+  (e.g. `com.arterm.app`) and a Designated Requirement, so the Accessibility /
   Screen Recording grant persists across updates.
 - `setup` should detect "running from an unstable/unsigned path" and offer to
   install the proper bundle, so the user grants **once**.

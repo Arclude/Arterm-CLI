@@ -13,7 +13,7 @@ broad suite, including tasks where triggering would be wrong.
 ## Run it
 
 ```bash
-python scripts/benchmark_discovery_rate.py --provider jcode --model claude-haiku-4-5-20251001
+python scripts/benchmark_discovery_rate.py --provider arterm --model claude-haiku-4-5-20251001
 python scripts/benchmark_discovery_rate.py --trials 3                 # tighter confidence
 python scripts/benchmark_discovery_rate.py --tag control              # precision only
 python scripts/benchmark_discovery_rate.py --tag selection            # selection accuracy only
@@ -121,15 +121,15 @@ bypasses.
 ## Benchmark traffic marking
 
 Like the catalog benchmark, the runner starts a dedicated server with
-`JCODE_DISCOVERY_BENCHMARK=1`, so every request carries
-`x-jcode-discovery-benchmark: 1` and telemetry carries `benchmark_run: true`.
+`ARTERM_DISCOVERY_BENCHMARK=1`, so every request carries
+`x-arterm-discovery-benchmark: 1` and telemetry carries `benchmark_run: true`.
 Benchmark traffic must be excluded from sponsor, billing, and organic-usage
 reporting.
 
 ## Interpreting results
 
 The trigger policy lives entirely in the `discover_tools` schema and description.
-`jcode-base/src/prompt_tests.rs` asserts Discovery is never injected into the
+`arterm-base/src/prompt_tests.rs` asserts Discovery is never injected into the
 system prompt, so the tool description is the only lever. When recall is low and
 bypass is high, the fix belongs in that description, and this benchmark is the
 feedback loop for it. Record a baseline before changing wording:
@@ -236,7 +236,7 @@ had no purpose. Setup now lives only in the select response.
 local fake catalog, with no model credits and no live endpoint:
 
 ```bash
-python scripts/verify_discovery_select.py ./target/selfdev/jcode
+python scripts/verify_discovery_select.py ./target/selfdev/arterm
 ```
 
 That script also covers off-catalog selects. The endpoint signals "no such
@@ -258,7 +258,7 @@ finishing the comparison only needs the post-change arm, which halves the quota
 cost:
 
 ```bash
-JCODE_BIN=<after-bin> python scripts/benchmark_discovery_rate.py \
+ARTERM_BIN=<after-bin> python scripts/benchmark_discovery_rate.py \
   --provider gemini-api --model gemini-2.5-flash-lite --trials 3 \
   --case storage-user-uploads --case authentication-signin \
   --case observability-traces --case analytics-product-funnel \

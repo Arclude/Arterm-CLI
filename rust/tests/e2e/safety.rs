@@ -5,36 +5,36 @@
 /// Test safety system: action classification
 #[test]
 fn test_safety_classification() {
-    use jcode::safety::SafetySystem;
+    use arterm::safety::SafetySystem;
 
     let safety = SafetySystem::new();
 
     // Tier 1: auto-allowed
-    assert!(safety.classify("read") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("glob") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("grep") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("memory") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("todoread") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("todowrite") == jcode::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("read") == arterm::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("glob") == arterm::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("grep") == arterm::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("memory") == arterm::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("todoread") == arterm::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("todowrite") == arterm::safety::ActionTier::AutoAllowed);
 
     // Tier 2: requires permission
-    assert!(safety.classify("bash") == jcode::safety::ActionTier::RequiresPermission);
-    assert!(safety.classify("edit") == jcode::safety::ActionTier::RequiresPermission);
-    assert!(safety.classify("write") == jcode::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("bash") == arterm::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("edit") == arterm::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("write") == arterm::safety::ActionTier::RequiresPermission);
     assert!(
-        safety.classify("create_pull_request") == jcode::safety::ActionTier::RequiresPermission
+        safety.classify("create_pull_request") == arterm::safety::ActionTier::RequiresPermission
     );
-    assert!(safety.classify("send_email") == jcode::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("send_email") == arterm::safety::ActionTier::RequiresPermission);
 
     // Case insensitive
-    assert!(safety.classify("READ") == jcode::safety::ActionTier::AutoAllowed);
-    assert!(safety.classify("Bash") == jcode::safety::ActionTier::RequiresPermission);
+    assert!(safety.classify("READ") == arterm::safety::ActionTier::AutoAllowed);
+    assert!(safety.classify("Bash") == arterm::safety::ActionTier::RequiresPermission);
 }
 
 /// Test safety system: permission request queue + decision flow
 #[test]
 fn test_safety_permission_flow() {
-    use jcode::safety::{PermissionRequest, PermissionResult, SafetySystem, Urgency};
+    use arterm::safety::{PermissionRequest, PermissionResult, SafetySystem, Urgency};
 
     let safety = SafetySystem::new();
 
@@ -80,7 +80,7 @@ fn test_safety_permission_flow() {
 /// Test safety system: transcript saving
 #[test]
 fn test_safety_transcript() {
-    use jcode::safety::{AmbientTranscript, SafetySystem, TranscriptStatus};
+    use arterm::safety::{AmbientTranscript, SafetySystem, TranscriptStatus};
 
     let safety = SafetySystem::new();
 
@@ -107,7 +107,7 @@ fn test_safety_transcript() {
 /// Test safety system: summary generation
 #[test]
 fn test_safety_summary_generation() {
-    use jcode::safety::{ActionLog, ActionTier, SafetySystem};
+    use arterm::safety::{ActionLog, ActionTier, SafetySystem};
 
     let safety = SafetySystem::new();
 

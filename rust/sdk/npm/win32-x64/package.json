@@ -1,7 +1,7 @@
 {
-  "name": "@1jehuang/jcode-win32-x64",
+  "name": "@1jehuang/arterm-win32-x64",
   "version": "1.2.0",
-  "description": "Jcode runtime binary for win32 x64",
+  "description": "Arterm runtime binary for win32 x64",
   "license": "MIT",
   "os": [
     "win32"

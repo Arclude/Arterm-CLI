@@ -1,0 +1,116 @@
+[package]
+name = "arterm-tui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Presentation layer for arterm: the terminal UI (`tui`) and the offline replay
+# `video_export`, extracted out of the monolithic root `arterm` crate so they
+# compile as a separate rustc unit. This crate builds on top of the application
+# core (`arterm-app-core`) and re-exports it via `pub use arterm_app_core::*`, so
+# every existing `crate::<module>` path (e.g. `crate::config`, `crate::server`)
+# keeps resolving unchanged across the tui code that was moved here. The root
+# `arterm` crate (cli + bin) in turn re-exports this crate via
+# `pub use arterm_tui::*`.
+
+[lib]
+name = "arterm_tui"
+path = "src/lib.rs"
+
+[dependencies]
+# Application core (server, agent, provider, auth, session, tool, config, ...).
+# Re-exported via `pub use arterm_app_core::*` in lib.rs. default-features=false
+# so this crate (and ultimately the root crate) controls app-core's features.
+arterm-app-core = { path = "../arterm-app-core", default-features = false }
+
+# Pure math kernels for the idle animations (3D samplers, glyph chooser,
+# HSV->RGB). Pinned to opt-level = 3 in all profiles via workspace Cargo.toml so
+# the hot trig loops stay optimized even in debug/selfdev builds.
+arterm-tui-anim = { path = "../arterm-tui-anim" }
+
+# Async runtime
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+
+# Utilities
+anyhow = "1"
+libc = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+dirs = "5"
+similar = "2"
+tempfile = "3"
+open = "5"
+
+# OAuth / hashing helpers used by the login + account UI
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.9.3"
+hex = "0.4"
+url = "2"
+urlencoding = "2"
+
+# TUI
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+arboard = "3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+unicode-width = "0.2"
+
+# Presentation-layer workspace crates
+arterm-build-meta = { path = "../arterm-build-meta" }
+arterm-logging = { path = "../arterm-logging" }
+arterm-core = { path = "../arterm-core" }
+arterm-fuzzy = { path = "../arterm-fuzzy" }
+arterm-config-types = { path = "../arterm-config-types" }
+arterm-selfdev-types = { path = "../arterm-selfdev-types" }
+arterm-session-types = { path = "../arterm-session-types" }
+arterm-provider-core = { path = "../arterm-provider-core" }
+arterm-tui-markdown = { path = "../arterm-tui-markdown" }
+arterm-tui-messages = { path = "../arterm-tui-messages" }
+arterm-tui-core = { path = "../arterm-tui-core" }
+arterm-tui-mermaid = { path = "../arterm-tui-mermaid" }
+arterm-tui-account-picker = { path = "../arterm-tui-account-picker" }
+arterm-tui-render = { path = "../arterm-tui-render" }
+arterm-tui-visual-debug = { path = "../arterm-tui-visual-debug" }
+arterm-tui-session-picker = { path = "../arterm-tui-session-picker", features = ["serde"] }
+arterm-tui-style = { path = "../arterm-tui-style" }
+terminal-colorsaurus = "1.0"
+arterm-tui-permissions = { path = "../arterm-tui-permissions" }
+arterm-tui-tool-display = { path = "../arterm-tui-tool-display" }
+arterm-tui-usage-overlay = { path = "../arterm-tui-usage-overlay" }
+arterm-terminal-image = { path = "../arterm-terminal-image" }
+arterm-productivity-core = { path = "../arterm-productivity-core" }
+arterm-tui-workspace = { path = "../arterm-tui-workspace" }
+
+[features]
+default = ["pdf", "embeddings", "bedrock"]
+# Exposes bench-only debug helpers (e.g. debug_copy_selection_text_for_bench)
+# consumed by the dev `tui_bench` binary in the root crate.
+dev-bins = []
+# Forwarded to app-core (and onward to arterm-base) so the root crate's feature
+# set fully controls the optional stacks.
+jemalloc = ["arterm-app-core/jemalloc"]
+jemalloc-prof = ["arterm-app-core/jemalloc-prof"]
+embeddings = ["arterm-app-core/embeddings"]
+pdf = ["arterm-app-core/pdf"]
+bedrock = ["arterm-app-core/bedrock"]
+linux-compat-vendored-openssl = ["arterm-app-core/linux-compat-vendored-openssl"]
+mmdr-size-api = ["arterm-tui-mermaid/mmdr-size-api"]
+# Forwards the application core's `test-support` feature (and onward to
+# arterm-base) so downstream crates' test targets can reach the whole stack's
+# test helpers. Never enabled in normal (non-test) builds.
+test-support = ["arterm-app-core/test-support"]
+
+[dev-dependencies]
+# Enables the downstream test-support helpers for *this* crate's own test
+# target. Feature unification applies this only to test/bench/example builds.
+arterm-app-core = { path = "../arterm-app-core", default-features = false, features = ["test-support"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+global-hotkey = "0.7"

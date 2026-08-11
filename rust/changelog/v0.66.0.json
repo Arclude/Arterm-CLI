@@ -1,9 +1,9 @@
 {
   "version": "0.66.0",
   "date": "2026-08-03",
-  "title": "Build on jcode",
+  "title": "Build on arterm",
   "highlights": [
-    "A production-ready TypeScript SDK and Rust SDK can now launch isolated jcode agents or connect to a running instance",
+    "A production-ready TypeScript SDK and Rust SDK can now launch isolated arterm agents or connect to a running instance",
     "SDK clients can stream turns, request validated structured output, inspect models and providers, manage session retention, search project files, and subscribe to events",
     "The desktop app can resume stored sessions and paste clipboard images directly"
   ],

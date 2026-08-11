@@ -1,9 +1,9 @@
 /**
- * TypeScript SDK for the jcode harness API.
+ * TypeScript SDK for the arterm harness API.
  *
  * ```ts
- * import { JcodeClient } from "@1jehuang/jcode-sdk";
- * const client = await JcodeClient.connect({ clientName: "my-app/1.0" });
+ * import { ArtermClient } from "@1jehuang/arterm-sdk";
+ * const client = await ArtermClient.connect({ clientName: "my-app/1.0" });
  * const session = await client.createSession(process.cwd());
  * const turn = await client.run(session.session_id, "hello");
  * console.log(turn.text);
@@ -18,12 +18,12 @@ export { HarnessError } from "./errors.js";
 export {
   launchInstance,
   inheritCredentials,
-  userJcodeHome,
+  userArtermHome,
   userAppConfigDir,
 } from "./launch.js";
 export type { LaunchOptions, LaunchedInstance } from "./launch.js";
-export { bundledJcodeBinary, platformBinaryPackage } from "./binary.js";
-export { JcodeClient, unixSocketTransport } from "./client.js";
+export { bundledArtermBinary, platformBinaryPackage } from "./binary.js";
+export { ArtermClient, unixSocketTransport } from "./client.js";
 export type {
   ConnectOptions,
   FileContent,

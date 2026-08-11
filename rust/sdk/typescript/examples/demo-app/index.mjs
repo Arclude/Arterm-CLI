@@ -1,10 +1,10 @@
-import { JcodeClient } from "@1jehuang/jcode-sdk";
+import { ArtermClient } from "@1jehuang/arterm-sdk";
 
 const prompt = process.argv.slice(2).join(" ") || "Describe this directory in one sentence.";
 
-const client = await JcodeClient.launch({
+const client = await ArtermClient.launch({
   workingDir: process.cwd(),
-  binary: process.env.JCODE_BINARY,
+  binary: process.env.ARTERM_BINARY,
 });
 
 try {

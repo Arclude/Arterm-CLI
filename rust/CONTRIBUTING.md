@@ -1,4 +1,4 @@
-# Contributing to jcode
+# Contributing to arterm
 
 Thanks for contributing.
 

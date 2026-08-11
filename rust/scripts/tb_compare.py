@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate a jcode Terminal-Bench Harbor job dir and compare against the
+"""Aggregate a arterm Terminal-Bench Harbor job dir and compare against the
 Claude Code + Opus 4.8 baseline.
 
 Usage:
@@ -62,7 +62,7 @@ def main() -> int:
     results = collect_results(jobs_dir)
 
     rows = []
-    jcode_resolved = jcode_trials = 0
+    arterm_resolved = arterm_trials = 0
     regressions = []
     for task in sorted(set(baseline) | set(results)):
         rewards = results.get(task, [])
@@ -70,8 +70,8 @@ def main() -> int:
         passed = sum(1 for r in rewards if r >= 1.0)
         rate = (100.0 * passed / n) if n else None
         base = baseline.get(task)
-        jcode_resolved += passed
-        jcode_trials += n
+        arterm_resolved += passed
+        arterm_trials += n
         flag = ""
         if rate is not None and base is not None:
             if rate < base:
@@ -81,7 +81,7 @@ def main() -> int:
                 flag = "gain"
         rows.append((task, base, rate, passed, n, flag))
 
-    print(f"{'task':38} {'base%':>7} {'jcode%':>7} {'pass':>6} {'flag'}")
+    print(f"{'task':38} {'base%':>7} {'arterm%':>7} {'pass':>6} {'flag'}")
     print("-" * 75)
     for task, base, rate, passed, n, flag in rows:
         base_s = f"{base:.1f}" if base is not None else "-"
@@ -90,8 +90,8 @@ def main() -> int:
         print(f"{task:38} {base_s:>7} {rate_s:>7} {pass_s:>6} {flag}")
 
     print("-" * 75)
-    if jcode_trials:
-        print(f"jcode micro-avg: {jcode_resolved}/{jcode_trials} = {100*jcode_resolved/jcode_trials:.1f}%")
+    if arterm_trials:
+        print(f"arterm micro-avg: {arterm_resolved}/{arterm_trials} = {100*arterm_resolved/arterm_trials:.1f}%")
     base_resolved = sum(baseline.values())
     print(f"baseline macro-avg: {base_resolved/len(baseline):.1f}% (CC+Opus4.8)")
     if regressions:

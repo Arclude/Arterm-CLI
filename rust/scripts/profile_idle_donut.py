@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Profile a live, freshly spawned jcode TUI while the decorative idle animation
+Profile a live, freshly spawned arterm TUI while the decorative idle animation
 is running, and report where its CPU actually goes.
 
 Why this exists
@@ -47,7 +47,7 @@ from diagnose_idle_render_cost import (  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    default_bin = REPO_ROOT / "target" / "selfdev" / "jcode"
+    default_bin = REPO_ROOT / "target" / "selfdev" / "arterm"
     ap.add_argument("--binary", default=str(default_bin))
     ap.add_argument("--seconds", type=float, default=8.0)
     ap.add_argument("--freq", type=int, default=997)
@@ -60,35 +60,35 @@ def main() -> int:
         print(f"binary not found: {binary}")
         return 3
 
-    root = Path(os.environ.get("JCODE_SCRATCH_DIR") or tempfile.gettempdir())
-    root = Path(tempfile.mkdtemp(prefix="jcode-profile-donut-", dir=str(root)))
+    root = Path(os.environ.get("ARTERM_SCRATCH_DIR") or tempfile.gettempdir())
+    root = Path(tempfile.mkdtemp(prefix="arterm-profile-donut-", dir=str(root)))
     home, run = root / "home", root / "run"
     home.mkdir(parents=True)
     run.mkdir(parents=True)
 
     env = os.environ.copy()
-    env["JCODE_HOME"] = str(home)
-    env["JCODE_RUNTIME_DIR"] = str(run)
-    env["JCODE_SOCKET"] = str(run / "jcode.sock")
-    env["JCODE_NO_TELEMETRY"] = "1"
-    env["JCODE_DEBUG_CONTROL"] = "1"
-    env["JCODE_TEMP_SERVER"] = "1"
-    env["JCODE_SERVER_OWNER_PID"] = str(os.getpid())
-    env["JCODE_PERF_TIER"] = "full"
+    env["ARTERM_HOME"] = str(home)
+    env["ARTERM_RUNTIME_DIR"] = str(run)
+    env["ARTERM_SOCKET"] = str(run / "arterm.sock")
+    env["ARTERM_NO_TELEMETRY"] = "1"
+    env["ARTERM_DEBUG_CONTROL"] = "1"
+    env["ARTERM_TEMP_SERVER"] = "1"
+    env["ARTERM_SERVER_OWNER_PID"] = str(os.getpid())
+    env["ARTERM_PERF_TIER"] = "full"
     env.setdefault("ANTHROPIC_API_KEY", "sk-ant-profile-donut")
-    debug_sock = run / "jcode-debug.sock"
+    debug_sock = run / "arterm-debug.sock"
     cmd_path, resp_path = run / "client_cmd", run / "client_resp"
 
     print(f"== profiling idle donut ==\n  binary: {binary}")
     log_fh = (root / "server.log").open("wb")
     server = subprocess.Popen(
-        [binary, "serve", "--socket", env["JCODE_SOCKET"], "--debug-socket",
+        [binary, "serve", "--socket", env["ARTERM_SOCKET"], "--debug-socket",
          "--no-update", "--no-selfdev"],
         env=env, stdout=log_fh, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
 
     client: Client | None = None
     try:
-        wait_for_socket(Path(env["JCODE_SOCKET"]))
+        wait_for_socket(Path(env["ARTERM_SOCKET"]))
         wait_for_socket(debug_sock)
         session_id = dbg(debug_sock, f"create_session:{REPO_ROOT}").strip()
         if session_id.startswith("{"):

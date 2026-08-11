@@ -5,16 +5,16 @@
 # day, so build-pipeline changes are hill-climbable:
 #
 #   1. warm no-op        - rebuild with zero changes on the same commit
-#   2. leaf touch        - 1-line change in the root `jcode` bin crate
-#   3. tui touch         - 1-line change in jcode-tui (largest UI crate)
-#   4. core touch        - 1-line change in jcode-app-core (mid-stack crate)
-#   5. commit blast      - simulate HEAD moving (JCODE_BUILD_GIT_HASH change),
-#                          which reruns jcode-build-meta's build script and
+#   2. leaf touch        - 1-line change in the root `arterm` bin crate
+#   3. tui touch         - 1-line change in arterm-tui (largest UI crate)
+#   4. core touch        - 1-line change in arterm-app-core (mid-stack crate)
+#   5. commit blast      - simulate HEAD moving (ARTERM_BUILD_GIT_HASH change),
+#                          which reruns arterm-build-meta's build script and
 #                          recompiles every crate that depends on it
 #                          (base, app-core, tui, setup-hints, telemetry-core, root)
 #
 # Touches are reverted after each run. Requires a clean-enough tree that
-# `scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode` succeeds.
+# `scripts/dev_cargo.sh build --profile selfdev -p arterm --bin arterm` succeeds.
 #
 # Usage: scripts/bench_selfdev_build.sh [--skip-warmup]
 
@@ -23,7 +23,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-build_cmd=(scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode)
+build_cmd=(scripts/dev_cargo.sh build --profile selfdev -p arterm --bin arterm)
 
 run_build() {
     # Per-phase logs survive later phases, so a mid-benchmark failure (often a
@@ -83,22 +83,22 @@ touch_file "$leaf_file"
 run_build "leaf" || true
 revert_file "$leaf_file"
 
-tui_file="crates/jcode-tui/src/lib.rs"
+tui_file="crates/arterm-tui/src/lib.rs"
 echo "3. tui touch (${tui_file}):"
 touch_file "$tui_file"
 run_build "tui" || true
 revert_file "$tui_file"
 
-core_file="crates/jcode-app-core/src/lib.rs"
+core_file="crates/arterm-app-core/src/lib.rs"
 echo "4. core touch (${core_file}):"
 touch_file "$core_file"
 run_build "core" || true
 revert_file "$core_file"
 
-echo "5. commit blast radius (simulated HEAD move via JCODE_BUILD_GIT_HASH):"
+echo "5. commit blast radius (simulated HEAD move via ARTERM_BUILD_GIT_HASH):"
 fake_hash="bench$(date +%s | tail -c 4)"
 start=$(date +%s.%N)
-if JCODE_BUILD_GIT_HASH="$fake_hash" "${build_cmd[@]}" >/tmp/bench_selfdev_build_commit-blast.log 2>&1; then
+if ARTERM_BUILD_GIT_HASH="$fake_hash" "${build_cmd[@]}" >/tmp/bench_selfdev_build_commit-blast.log 2>&1; then
     end=$(date +%s.%N)
     echo "$end $start" | awk '{printf "  commit-blast: %.1fs\n", $1 - $2}'
 else
@@ -112,5 +112,5 @@ echo "done. Interpretation:"
 echo "  - no-op should be a few seconds (cargo fingerprinting + link check)."
 echo "  - leaf/tui/core touches show per-crate recompile + link cost."
 echo "  - commit-blast shows the cost every commit pays because"
-echo "    jcode-build-meta embeds GIT_HASH via env! and jcode-base/app-core/"
+echo "    arterm-build-meta embeds GIT_HASH via env! and arterm-base/app-core/"
 echo "    tui/setup-hints/telemetry-core all depend on it."

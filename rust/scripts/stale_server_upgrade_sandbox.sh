@@ -2,33 +2,33 @@
 # Live end-to-end sandbox for the "current client, stale older server" fix.
 #
 #   Server: the REAL released v0.14.6 binary (downloaded from GitHub).
-#   Client: the freshly built current binary (target/debug/jcode, has the fix).
+#   Client: the freshly built current binary (target/debug/arterm, has the fix).
 #   Field state: shared-server channel pinned to OLD (v0.14.6); stable -> NEW.
 #
-# It starts the real old daemon, then runs the NEW client's `jcode server reload`
+# It starts the real old daemon, then runs the NEW client's `arterm server reload`
 # (which repairs the stale shared-server channel, then forces a reload). PASS iff
 # the resulting daemon is running v0.22.x.
 #
 # Usage:
-#   cargo build -p jcode --bin jcode
+#   cargo build -p arterm --bin arterm
 #   scripts/stale_server_upgrade_sandbox.sh
 #
-# Linux x86_64 only (uses the published jcode-linux-x86_64 release asset).
+# Linux x86_64 only (uses the published arterm-linux-x86_64 release asset).
 set -uo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-NEW_BIN="${NEW_BIN:-$REPO_ROOT/target/debug/jcode}"
+NEW_BIN="${NEW_BIN:-$REPO_ROOT/target/debug/arterm}"
 OLD_VERSION="${OLD_VERSION:-v0.14.6}"
-OLD_DIR="${OLD_DIR:-/tmp/jcode-sandbox}"
-OLD_WRAP="$OLD_DIR/jcode-linux-x86_64"
+OLD_DIR="${OLD_DIR:-/tmp/arterm-sandbox}"
+OLD_WRAP="$OLD_DIR/arterm-linux-x86_64"
 
-[ -x "$NEW_BIN" ] || { echo "missing new client binary: $NEW_BIN (run: cargo build -p jcode --bin jcode)"; exit 2; }
+[ -x "$NEW_BIN" ] || { echo "missing new client binary: $NEW_BIN (run: cargo build -p arterm --bin arterm)"; exit 2; }
 
 # Fetch + extract the real old release binary if it is not already present.
 if [ ! -x "$OLD_WRAP" ]; then
   mkdir -p "$OLD_DIR"
-  url="$(curl -fsSL "https://api.github.com/repos/1jehuang/jcode/releases/tags/$OLD_VERSION" \
-        | grep -o 'https://[^"]*jcode-linux-x86_64.tar.gz' | head -1)"
+  url="$(curl -fsSL "https://api.github.com/repos/1jehuang/arterm/releases/tags/$OLD_VERSION" \
+        | grep -o 'https://[^"]*arterm-linux-x86_64.tar.gz' | head -1)"
   [ -n "$url" ] || { echo "could not resolve $OLD_VERSION linux asset URL"; exit 2; }
   echo "Downloading old server $OLD_VERSION ..."
   curl -fsSL "$url" -o "$OLD_DIR/old.tar.gz"
@@ -36,26 +36,26 @@ if [ ! -x "$OLD_WRAP" ]; then
 fi
 [ -x "$OLD_WRAP" ] || { echo "missing old binary $OLD_WRAP after download"; exit 2; }
 
-SANDBOX="$(mktemp -d /tmp/jcode-stale-sandbox.XXXXXX)"
-export JCODE_HOME="$SANDBOX/home"
-export JCODE_RUNTIME_DIR="$SANDBOX/runtime"
+SANDBOX="$(mktemp -d /tmp/arterm-stale-sandbox.XXXXXX)"
+export ARTERM_HOME="$SANDBOX/home"
+export ARTERM_RUNTIME_DIR="$SANDBOX/runtime"
 # Hard isolation: pin the socket explicitly so we can NEVER touch the real
-# global daemon at /run/user/<uid>/jcode.sock.
-export JCODE_SOCKET="$SANDBOX/runtime/jcode.sock"
+# global daemon at /run/user/<uid>/arterm.sock.
+export ARTERM_SOCKET="$SANDBOX/runtime/arterm.sock"
 # Make the new client's clean release version comparable (debug build is dirty).
-export JCODE_TEST_CLIENT_VERSION_OVERRIDE="v0.22.0 (sandbox)"
-mkdir -p "$JCODE_HOME" "$JCODE_RUNTIME_DIR"
+export ARTERM_TEST_CLIENT_VERSION_OVERRIDE="v0.22.0 (sandbox)"
+mkdir -p "$ARTERM_HOME" "$ARTERM_RUNTIME_DIR"
 
-BUILDS="$JCODE_HOME/builds"
+BUILDS="$ARTERM_HOME/builds"
 mkdir -p "$BUILDS/versions/0.14.6" "$BUILDS/versions/0.22.0" \
          "$BUILDS/shared-server" "$BUILDS/stable" "$BUILDS/current"
 
 log() { printf '\n=== %s ===\n' "$*"; }
 
 # --- Install the OLD binary (with bundled libs) as version 0.14.6 ----------
-cp "$OLD_DIR/jcode-linux-x86_64.bin" "$OLD_DIR/libssl.so.10" \
+cp "$OLD_DIR/arterm-linux-x86_64.bin" "$OLD_DIR/libssl.so.10" \
    "$OLD_DIR/libcrypto.so.10" "$BUILDS/versions/0.14.6/"
-cat > "$BUILDS/versions/0.14.6/jcode" <<'WRAP'
+cat > "$BUILDS/versions/0.14.6/arterm" <<'WRAP'
 #!/usr/bin/env sh
 set -eu
 real=$0
@@ -65,20 +65,20 @@ if command -v readlink >/dev/null 2>&1; then
 fi
 self_dir=$(CDPATH= cd -- "$(dirname -- "$real")" && pwd)
 export LD_LIBRARY_PATH="$self_dir:${LD_LIBRARY_PATH:-}"
-exec "$self_dir/jcode-linux-x86_64.bin" "$@"
+exec "$self_dir/arterm-linux-x86_64.bin" "$@"
 WRAP
-chmod +x "$BUILDS/versions/0.14.6/jcode"
+chmod +x "$BUILDS/versions/0.14.6/arterm"
 
 # --- Install the NEW binary as version 0.22.0 (newer mtime) ----------------
-cp "$NEW_BIN" "$BUILDS/versions/0.22.0/jcode"
-touch -d "+1 minute" "$BUILDS/versions/0.22.0/jcode"
+cp "$NEW_BIN" "$BUILDS/versions/0.22.0/arterm"
+touch -d "+1 minute" "$BUILDS/versions/0.22.0/arterm"
 
 # --- Field state: shared-server -> OLD, stable/current -> NEW --------------
-ln -sf "../versions/0.14.6/jcode" "$BUILDS/shared-server/jcode"
+ln -sf "../versions/0.14.6/arterm" "$BUILDS/shared-server/arterm"
 echo "0.14.6" > "$BUILDS/shared-server-version"
-ln -sf "../versions/0.22.0/jcode" "$BUILDS/stable/jcode"
+ln -sf "../versions/0.22.0/arterm" "$BUILDS/stable/arterm"
 echo "0.22.0" > "$BUILDS/stable-version"
-ln -sf "../versions/0.22.0/jcode" "$BUILDS/current/jcode"
+ln -sf "../versions/0.22.0/arterm" "$BUILDS/current/arterm"
 echo "0.22.0" > "$BUILDS/current-version"
 
 log "Initial channel state (the field bug: shared-server pinned to OLD)"
@@ -89,8 +89,8 @@ SERVER_PID=""
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
   "$NEW_BIN" --no-update server stop >/dev/null 2>&1 || true
-  pkill -f "$BUILDS/versions/0.14.6/jcode-linux-x86_64.bin" 2>/dev/null || true
-  pkill -f "$BUILDS/versions/0.22.0/jcode" 2>/dev/null || true
+  pkill -f "$BUILDS/versions/0.14.6/arterm-linux-x86_64.bin" 2>/dev/null || true
+  pkill -f "$BUILDS/versions/0.22.0/arterm" 2>/dev/null || true
   rm -rf "$SANDBOX"
 }
 trap cleanup EXIT
@@ -103,12 +103,12 @@ server_version_via_socket() {
 
 # --- 1) Start the REAL old v0.14.6 daemon ----------------------------------
 log "Starting OLD v0.14.6 daemon"
-"$BUILDS/shared-server/jcode" --no-update --provider antigravity serve \
+"$BUILDS/shared-server/arterm" --no-update --provider antigravity serve \
   >"$SANDBOX/server.log" 2>&1 &
 SERVER_PID=$!
 # Wait for the socket to appear.
 for _ in $(seq 1 40); do
-  [ -S "$JCODE_SOCKET" ] && break
+  [ -S "$ARTERM_SOCKET" ] && break
   sleep 0.25
 done
 sleep 1
@@ -117,14 +117,14 @@ echo "server.log tail:"; tail -8 "$SANDBOX/server.log" 2>/dev/null || true
 BEFORE="$(server_version_via_socket)"
 echo "server version BEFORE (via socket): ${BEFORE:-<none>}"
 
-# --- 2) New client: jcode server reload (repairs channel, then reloads) ----
-log "Running NEW client: jcode server reload"
+# --- 2) New client: arterm server reload (repairs channel, then reloads) ----
+log "Running NEW client: arterm server reload"
 "$NEW_BIN" --no-update server reload 2>&1 | sed 's/^/[server reload] /' || true
 echo "shared-server-version after repair: $(cat "$BUILDS/shared-server-version")"
 
 # Give the handoff a moment.
 for _ in $(seq 1 40); do
-  [ -S "$JCODE_SOCKET" ] && break
+  [ -S "$ARTERM_SOCKET" ] && break
   sleep 0.25
 done
 sleep 2

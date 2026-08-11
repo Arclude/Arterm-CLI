@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { JcodeClient, StructuredOutputError } from "../dist/index.js";
+import { ArtermClient, StructuredOutputError } from "../dist/index.js";
 import { startMockHarness } from "./mock-harness.ts";
 
 const schema = {
@@ -30,7 +30,7 @@ test("runStructured validates JSON Schema and returns parsed data", async () => 
       sendTurn(send, "s1", '```json\n{"summary":"done","count":2}\n```');
     },
   });
-  const client = await JcodeClient.connect({ socketPath: server.socketPath });
+  const client = await ArtermClient.connect({ socketPath: server.socketPath });
 
   const result = await client.runStructured<Summary>("s1", "Summarize the work", { schema });
 
@@ -55,7 +55,7 @@ test("runStructured sends a corrective retry after schema validation fails", asy
       sendTurn(send, "s1", responses[prompts.length - 1]);
     },
   });
-  const client = await JcodeClient.connect({ socketPath: server.socketPath });
+  const client = await ArtermClient.connect({ socketPath: server.socketPath });
 
   const result = await client.runStructured<Summary>("s1", "Return a summary", {
     schema,
@@ -85,7 +85,7 @@ test("runStructured rejects with validation details after bounded retries are ex
       sendTurn(send, "s1", "not json");
     },
   });
-  const client = await JcodeClient.connect({ socketPath: server.socketPath });
+  const client = await ArtermClient.connect({ socketPath: server.socketPath });
 
   await assert.rejects(
     () => client.runStructured<Summary>("s1", "Return a summary", { schema, maxRetries: 1 }),

@@ -11,7 +11,7 @@
     "Swarm cards use calmer status indicators, stable worker identities, cleaner layouts, and tighter placement beneath spawn calls",
     "Markdown and LaTeX rendering handles more notation forms and malformed input safely",
     "Usage displays show reset countdowns, clear stale values correctly, and hide billing details when account authentication is unavailable",
-    "Project links and website integrations now use jcode.sh"
+    "Project links and website integrations now use arterm.sh"
   ],
   "fixes": [
     "Remote server sessions initialize with the client's actual working directory",

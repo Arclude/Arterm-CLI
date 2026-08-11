@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""End-to-end check that a jcode gateway on another host is usable.
+"""End-to-end check that a arterm gateway on another host is usable.
 
 Verifies the full remote path: /health -> /pair -> WebSocket -> subscribe ->
 a real agent turn on the remote machine.
 
     # on the remote host
-    jcode pair
+    arterm pair
 
     # here
     python3 scripts/remote/remote_check.py --host <ip> --code 123456 \
@@ -18,7 +18,7 @@ import argparse, json, os, pathlib, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gateway_client import Gateway, health, pair
 
-TOKEN_DIR = pathlib.Path.home() / ".jcode" / "remote-tokens"
+TOKEN_DIR = pathlib.Path.home() / ".arterm" / "remote-tokens"
 
 
 def token_path(host, port):
@@ -30,7 +30,7 @@ def load_or_pair(host, port, code, device_id, device_name):
     if path.exists() and not code:
         return json.loads(path.read_text())["token"]
     if not code:
-        sys.exit(f"No cached token for {host}:{port}. Run `jcode pair` on the "
+        sys.exit(f"No cached token for {host}:{port}. Run `arterm pair` on the "
                  f"remote host and pass --code.")
     result = pair(host, port, code, device_id, device_name)
     TOKEN_DIR.mkdir(parents=True, exist_ok=True)
@@ -43,10 +43,10 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--host", required=True)
     p.add_argument("--port", type=int, default=7643)
-    p.add_argument("--code", help="pairing code from `jcode pair` on the remote host")
+    p.add_argument("--code", help="pairing code from `arterm pair` on the remote host")
     p.add_argument("--working-dir", required=True)
-    p.add_argument("--device-id", default="jcode-remote-check")
-    p.add_argument("--device-name", default="jcode remote check")
+    p.add_argument("--device-id", default="arterm-remote-check")
+    p.add_argument("--device-name", default="arterm remote check")
     p.add_argument("--prompt", default="Run a shell command that prints the OS "
                                        "name and current directory, then report the result.")
     p.add_argument("--timeout", type=float, default=150.0)
@@ -59,7 +59,7 @@ def main():
         if not ok:
             failures.append(label)
 
-    print(f"jcode remote check -> {args.host}:{args.port}\n")
+    print(f"arterm remote check -> {args.host}:{args.port}\n")
 
     info = health(args.host, args.port)
     check("reachable /health", info.get("status") == "ok", str(info))

@@ -1,0 +1,18 @@
+[package]
+name = "arterm-provider-env"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "arterm_provider_env"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+arterm-core = { path = "../arterm-core" }
+arterm-logging = { path = "../arterm-logging" }
+arterm-provider-metadata = { path = "../arterm-provider-metadata" }
+arterm-storage = { path = "../arterm-storage" }
+
+[dev-dependencies]
+tempfile = "3"

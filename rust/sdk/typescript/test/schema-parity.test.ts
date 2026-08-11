@@ -19,7 +19,7 @@ import {
 } from "../dist/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const rustCrate = path.resolve(here, "../../../crates/jcode-harness-api/src");
+const rustCrate = path.resolve(here, "../../../crates/arterm-harness-api/src");
 
 function snakeCase(variant: string): string {
   return variant.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
@@ -70,12 +70,12 @@ test("protocol major version matches the Rust constant", () => {
 
 test("socket path rules match the Rust resolver", async () => {
   const source = fs.readFileSync(path.join(rustCrate, "sockets.rs"), "utf8");
-  for (const key of ["JCODE_RUNTIME_DIR", "XDG_RUNTIME_DIR", "JCODE_API_SOCKET", "JCODE_SOCKET"]) {
+  for (const key of ["ARTERM_RUNTIME_DIR", "XDG_RUNTIME_DIR", "ARTERM_API_SOCKET", "ARTERM_SOCKET"]) {
     assert.ok(source.includes(key), `${key} missing from Rust resolver`);
   }
   const sdk = fs.readFileSync(path.resolve(here, "../src/sockets.ts"), "utf8");
-  for (const key of ["JCODE_RUNTIME_DIR", "XDG_RUNTIME_DIR", "JCODE_API_SOCKET", "JCODE_SOCKET"]) {
+  for (const key of ["ARTERM_RUNTIME_DIR", "XDG_RUNTIME_DIR", "ARTERM_API_SOCKET", "ARTERM_SOCKET"]) {
     assert.ok(sdk.includes(key), `${key} missing from SDK resolver`);
   }
-  assert.ok(source.includes("jcode-api.sock") && sdk.includes("jcode-api.sock"));
+  assert.ok(source.includes("arterm-api.sock") && sdk.includes("arterm-api.sock"));
 });

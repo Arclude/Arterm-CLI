@@ -3,7 +3,7 @@
   "date": "2026-07-19",
   "title": "GitHub triage, copyable math, and sturdier reloads",
   "highlights": [
-    "New built-in /triage command helps review and organize GitHub issues from a jcode session",
+    "New built-in /triage command helps review and organize GitHub issues from a arterm session",
     "Rendered LaTeX equations can now be copied as their original math source instead of opaque image markers"
   ],
   "improvements": [
@@ -16,6 +16,6 @@
     "Windows updates and server startup avoid launcher replacement and named-pipe probe stalls",
     "Terminal images choose a reliable protocol for each terminal instead of reusing an incompatible global choice",
     "Swarm clients drop cleared plans, omit long-finished members, bound durable plan graphs, and prune stale recovery state",
-    "Exited jcode client processes are reaped instead of accumulating in the background"
+    "Exited arterm client processes are reaped instead of accumulating in the background"
   ]
 }

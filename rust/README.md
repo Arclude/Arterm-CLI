@@ -1,26 +1,26 @@
 <div align="center">
 
-# jcode
+# arterm
 
-[![Latest Release](https://badgen.net/github/release/1jehuang/jcode?icon=github)](https://github.com/1jehuang/jcode/releases)
+[![Latest Release](https://badgen.net/github/release/1jehuang/arterm?icon=github)](https://github.com/1jehuang/jcode/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/1jehuang/jcode/releases)
-[![Last Commit](https://badgen.net/github/last-commit/1jehuang/jcode/master?icon=github)](https://github.com/1jehuang/jcode/commits/master)
-[![GitHub Stars](https://badgen.net/github/stars/1jehuang/jcode?icon=github)](https://github.com/1jehuang/jcode/stargazers)
+[![Last Commit](https://badgen.net/github/last-commit/1jehuang/arterm/master?icon=github)](https://github.com/1jehuang/jcode/commits/master)
+[![GitHub Stars](https://badgen.net/github/stars/1jehuang/arterm?icon=github)](https://github.com/1jehuang/jcode/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/nBe9vGyK9a)
 
 The most RAM efficient harness <br>
 The most intelligent harness
 
-<a href="https://trendshift.io/repositories/25042?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-25042" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25042" alt="1jehuang/jcode | Trendshift" width="250" height="55"></a>
+<a href="https://trendshift.io/repositories/25042?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-25042" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25042" alt="1jehuang/arterm | Trendshift" width="250" height="55"></a>
 
-<a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.mp4">
-  <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.webp" alt="jcode memory demonstration" width="800">
+<a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-memory-demo.mp4">
+  <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-memory-demo.webp" alt="arterm memory demonstration" width="800">
 </a>
 
 <br>
 
-[Website](https://jcode.sh) · [Docs](https://jcode.sh/docs) · [SDK](https://jcode.sh/sdk) · [Benchmarks](https://jcode.sh/bench) · [Features](#features) · [Install](#installation) · [Quick Start](#quick-start) · [Further Reading](#further-reading) · [Contributing](CONTRIBUTING.md)
+[Website](https://arterm.sh) · [Docs](https://arterm.sh/docs) · [SDK](https://arterm.sh/sdk) · [Benchmarks](https://arterm.sh/bench) · [Features](#features) · [Install](#installation) · [Quick Start](#quick-start) · [Further Reading](#further-reading) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -34,12 +34,12 @@ The most intelligent harness
 
 ```bash
 # macOS & Linux
-curl -fsSL https://jcode.sh/install | bash
+curl -fsSL https://arterm.sh/install | bash
 ```
 
 ```powershell
 # Windows 11 (PowerShell 5.1+)
-irm https://jcode.sh/install.ps1 | iex
+irm https://arterm.sh/install.ps1 | iex
 ```
 
 Need Homebrew, source builds, provider setup, or want an agent to set it up for you?
@@ -54,7 +54,7 @@ Need Homebrew, source builds, provider setup, or want an agent to set it up for 
 
 </div>
 
-jcode is built to be as performant and resource efficient as possible. Every metric is optimized to the bone, which is important for scaling multi-session workflows. Here we sample a few metrics to show the difference: RAM usage and boot up.
+arterm is built to be as performant and resource efficient as possible. Every metric is optimized to the bone, which is important for scaling multi-session workflows. Here we sample a few metrics to show the difference: RAM usage and boot up.
 
 ### RAM comparison
 
@@ -74,12 +74,12 @@ jcode is built to be as performant and resource efficient as possible. Every met
         </thead>
         <tbody>
           <tr>
-            <td><strong>jcode (local embedding off)</strong></td>
+            <td><strong>arterm (local embedding off)</strong></td>
             <td align="right"><strong>27.8 MB</strong></td>
             <td align="right">baseline</td>
           </tr>
           <tr>
-            <td><strong>jcode</strong></td>
+            <td><strong>arterm</strong></td>
             <td align="right"><strong>167.1 MB</strong></td>
             <td align="right"><strong>6.0× more RAM</strong></td>
           </tr>
@@ -134,12 +134,12 @@ jcode is built to be as performant and resource efficient as possible. Every met
         </thead>
         <tbody>
           <tr>
-            <td><strong>jcode (local embedding off)</strong></td>
+            <td><strong>arterm (local embedding off)</strong></td>
             <td align="right"><strong>117.0 MB</strong></td>
             <td align="right">baseline</td>
           </tr>
           <tr>
-            <td><strong>jcode</strong></td>
+            <td><strong>arterm</strong></td>
             <td align="right"><strong>260.8 MB</strong></td>
             <td align="right"><strong>2.2× more RAM</strong></td>
           </tr>
@@ -192,7 +192,7 @@ jcode is built to be as performant and resource efficient as possible. Every met
 
 | Tool | Time to first frame | Range | Comparison |
 |---|---:|---:|---:|
-| **jcode** | **14.0 ms** | 10.1–19.3 ms | baseline |
+| **arterm** | **14.0 ms** | 10.1–19.3 ms | baseline |
 | **Antigravity CLI** | **383.5 ms** | 363.1–415.4 ms | **27.4× slower** |
 | **pi** | **590.7 ms** | 369.6–934.8 ms | **42.2× slower** |
 | **Codex CLI** | **882.8 ms** | 742.3–1640.9 ms | **63.1× slower** |
@@ -211,7 +211,7 @@ Measured on this Linux machine across 10 interactive PTY launches.
 
 | Tool | Time to first input | Range | Comparison |
 |---|---:|---:|---:|
-| **jcode** | **48.7 ms** | 30.3–62.7 ms | baseline |
+| **arterm** | **48.7 ms** | 30.3–62.7 ms | baseline |
 | **Antigravity CLI** | **383.7 ms** | 363.4–415.7 ms | **7.9× slower** |
 | **pi** | **596.4 ms** | 373.9–955.2 ms | **12.2× slower** |
 | **Codex CLI** | **905.8 ms** | 760.1–1675.7 ms | **18.6× slower** |
@@ -230,8 +230,8 @@ Measured on this Linux machine across 10 interactive PTY launches. Antigravity C
 
 | Tool | Extra PSS per added session | Comparison |
 |---|---:|---:|
-| **jcode (local embedding off)** | **~9.9 MB** | baseline |
-| **jcode** | **~10.4 MB** | **1.1× more RAM** |
+| **arterm (local embedding off)** | **~9.9 MB** | baseline |
+| **arterm** | **~10.4 MB** | **1.1× more RAM** |
 | **pi** | **~76.5 MB** | **7.7× more RAM** |
 | **Codex CLI** | **~21.6 MB** | **2.2× more RAM** |
 | **OpenCode** | **~318.4 MB** | **32.2× more RAM** |
@@ -243,7 +243,7 @@ Measured on this Linux machine across 10 interactive PTY launches. Antigravity C
 </div>
 versions tested for this corrected memory rerun:
 
-- `jcode v0.9.1888-dev (be386f2)`
+- `arterm v0.9.1888-dev (be386f2)`
 - `pi 0.62.0`
 - `codex-cli 0.120.0`
 - `opencode 1.0.203`
@@ -254,11 +254,11 @@ versions tested for this corrected memory rerun:
 
 <div align="center">
 
-  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-performance-demo.mp4">
-    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-performance-demo.webp" alt="jcode performance demonstration" width="900">
+  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-performance-demo.mp4">
+    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-performance-demo.webp" alt="arterm performance demonstration" width="900">
   </a>
 
-  <p><em>jcode performance demonstration</em></p>
+  <p><em>arterm performance demonstration</em></p>
 
 </div>
 
@@ -267,7 +267,7 @@ versions tested for this corrected memory rerun:
 
 ## Memory (Agent memory)
 
-Jcode embeds each turn/response as a semantic vector. Every turn does queries a graph of memories to efficiently find related memory entries via a cosine similarity check. The embedding hits are fed into the conversation, or optionally uses a memory sideagent which verifies the memories are relevant, and potentially does more work for information retreival before injecting into the conversation. This results in a human like memory system which allows the agent to automatically recall relevant information to the conversation without actively calling memory tools or being a token burner. 
+Arterm embeds each turn/response as a semantic vector. Every turn does queries a graph of memories to efficiently find related memory entries via a cosine similarity check. The embedding hits are fed into the conversation, or optionally uses a memory sideagent which verifies the memories are relevant, and potentially does more work for information retreival before injecting into the conversation. This results in a human like memory system which allows the agent to automatically recall relevant information to the conversation without actively calling memory tools or being a token burner. 
 ot 
 To have memories which are retrieved, they must also be extracted and stored. Every so often (semantic drift, K turns since last extraction, session end, etc), memories are extracted via a memory sideagent, and put into the memory graph. 
 
@@ -277,11 +277,11 @@ Memories are automatically consolidated every so often via the ambient mode. Thi
 
 <div align="center">
 
-  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.mp4">
-    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.webp" alt="jcode memory demonstration" width="900">
+  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-memory-demo.mp4">
+    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-memory-demo.webp" alt="arterm memory demonstration" width="900">
   </a>
 
-  <p><em>jcode memory demonstration</em></p>
+  <p><em>arterm memory demonstration</em></p>
 
 </div>
 
@@ -291,20 +291,20 @@ Memories are automatically consolidated every so often via the ambient mode. Thi
 
 ## UI: Side panels, Diagrams, Info Widgets, rendering, scrolling, alignment
 
-The side panel is a place for auxiliary information. Tell your jcode agent to load a file into the side panel and see it update in real time, or tell your agent to write directly to the side panel, or use it as a diff viewer. The side panel (and chat) is able to render mermaid diagrams inline. 
+The side panel is a place for auxiliary information. Tell your arterm agent to load a file into the side panel and see it update in real time, or tell your agent to write directly to the side panel, or use it as a diff viewer. The side panel (and chat) is able to render mermaid diagrams inline. 
 <img width="2877" height="1762" alt="image" src="https://github.com/user-attachments/assets/6c7bec81-ef3f-434d-8a7b-d55f8a54e5cf" />
 
 To make this possible, I created a new mermaid rendering library to render diagrams 1800x faster. It has no browser or Typescript dependency. See https://github.com/1jehuang/mermaid-rs-renderer
 
 To show you important information without taking space away from the screen that could be used for responses, I developed info widgets. Info widgets will only ever take up the negative space on the screen to show you information, and will get out of the way if there isn't any. 
 
-Jcode can render at over a thousand fps. Your monitor will not have the refresh rate to show you, but this means you will not have silly flicker problems. 
+Arterm can render at over a thousand fps. Your monitor will not have the refresh rate to show you, but this means you will not have silly flicker problems. 
 
-The custom scrollback implementation of jcode allows it to do much more than a native scrollback. However, it is a terminal-level limitation that I cannot have smooth, partial line scrolling with a custom scrollback. To fix this, I made my own terminal. Handterm https://github.com/1jehuang/handterm implements a native scroll api, and also happens to be very efficient. This is a work in progress. Scrolling is still well implemented for normal terminals.
+The custom scrollback implementation of arterm allows it to do much more than a native scrollback. However, it is a terminal-level limitation that I cannot have smooth, partial line scrolling with a custom scrollback. To fix this, I made my own terminal. Handterm https://github.com/1jehuang/handterm implements a native scroll api, and also happens to be very efficient. This is a work in progress. Scrolling is still well implemented for normal terminals.
 
-Jcode is left-aligned by default. You can switch to centered mode with the `Alt+C` hotkey, with the `/alignment` command, or in the config.
+Arterm is left-aligned by default. You can switch to centered mode with the `Alt+C` hotkey, with the `/alignment` command, or in the config.
 
-To disable emoji globally in TUI and CLI output, set `emoji = false` under `[display]` in `~/.jcode/config.toml`, or launch with `JCODE_NO_EMOJI=1`. Jcode replaces emoji with compact ASCII markers while preserving other Unicode text.
+To disable emoji globally in TUI and CLI output, set `emoji = false` under `[display]` in `~/.arterm/config.toml`, or launch with `ARTERM_NO_EMOJI=1`. Arterm replaces emoji with compact ASCII markers while preserving other Unicode text.
 
 ---
 
@@ -315,10 +315,10 @@ Spawn two or more agents in the same repo, and they will automatically be manage
 <div align="center">
 
   <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/swarm-demo.mp4">
-    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-swarm-demonstration.webp" alt="jcode swarm demonstration" width="900">
+    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-swarm-demonstration.webp" alt="arterm swarm demonstration" width="900">
   </a>
 
-  <p><em>jcode swarm demonstration</em></p>
+  <p><em>arterm swarm demonstration</em></p>
 
 </div>
 
@@ -328,66 +328,66 @@ Agents are also able to spawn their own swarms autonomously. They have a swarm t
 
 ## OAuth and Providers
 
-jcode works with subscription-backed OAuth flows and many provider integrations, so you can use the models you already pay for and still fall back to direct API providers when needed.
+arterm works with subscription-backed OAuth flows and many provider integrations, so you can use the models you already pay for and still fall back to direct API providers when needed.
 
 ### Supported built-in login flows
 
-- **Claude** (`jcode login --provider claude`)
-- **OpenAI / ChatGPT / Codex** (`jcode login --provider openai`)
-- **Google Gemini** (`jcode login --provider gemini`)
-- **GitHub Copilot** (`jcode login --provider copilot`)
-- **Azure OpenAI** (`jcode login --provider azure`)
-- **Alibaba Cloud Coding Plan** (`jcode login --provider alibaba-coding-plan`)
-- **Fireworks** (`jcode login --provider fireworks`)
-- **MiniMax** (`jcode login --provider minimax`)
-- **Meta Model API / Muse** (`jcode login --provider meta-muse`)
-- **LM Studio** (`jcode login --provider lmstudio`)
-- **Ollama** (`jcode login --provider ollama`)
-- **Custom OpenAI-compatible endpoint** (`jcode login --provider openai-compatible`)
+- **Claude** (`arterm login --provider claude`)
+- **OpenAI / ChatGPT / Codex** (`arterm login --provider openai`)
+- **Google Gemini** (`arterm login --provider gemini`)
+- **GitHub Copilot** (`arterm login --provider copilot`)
+- **Azure OpenAI** (`arterm login --provider azure`)
+- **Alibaba Cloud Coding Plan** (`arterm login --provider alibaba-coding-plan`)
+- **Fireworks** (`arterm login --provider fireworks`)
+- **MiniMax** (`arterm login --provider minimax`)
+- **Meta Model API / Muse** (`arterm login --provider meta-muse`)
+- **LM Studio** (`arterm login --provider lmstudio`)
+- **Ollama** (`arterm login --provider ollama`)
+- **Custom OpenAI-compatible endpoint** (`arterm login --provider openai-compatible`)
 
-For custom OpenAI-compatible endpoints, jcode now prompts for the API base and supports local localhost servers without requiring an API key.
+For custom OpenAI-compatible endpoints, arterm now prompts for the API base and supports local localhost servers without requiring an API key.
 
 ### Config-file setup for self-hosted endpoints and MCP
 
-If you prefer to configure things by editing files instead of using the login UI, jcode supports both a custom OpenAI-compatible endpoint config and MCP config files.
+If you prefer to configure things by editing files instead of using the login UI, arterm supports both a custom OpenAI-compatible endpoint config and MCP config files.
 
 #### OpenAI-compatible providers
 
-Many hosted services speak the standard OpenAI `/v1/chat/completions` API. jcode talks to them through one shared OpenAI-compatible provider, so you can use almost any such endpoint without waiting for a dedicated integration.
+Many hosted services speak the standard OpenAI `/v1/chat/completions` API. arterm talks to them through one shared OpenAI-compatible provider, so you can use almost any such endpoint without waiting for a dedicated integration.
 
 There are two ways to set one up:
 
-- **Built-in named profiles** — jcode ships ready-made profiles for several popular OpenAI-compatible services. Log in by id and jcode fills in the base URL and key environment variable for you:
+- **Built-in named profiles** — arterm ships ready-made profiles for several popular OpenAI-compatible services. Log in by id and arterm fills in the base URL and key environment variable for you:
 
   ```bash
-  jcode login --provider <profile-id>
+  arterm login --provider <profile-id>
   # for example:
-  jcode login --provider openrouter
-  jcode login --provider deepseek
-  jcode login --provider opencode      # OpenCode Zen
-  jcode login --provider moonshotai
-  jcode login --provider meta-muse     # Meta Model API / Muse Spark
+  arterm login --provider openrouter
+  arterm login --provider deepseek
+  arterm login --provider opencode      # OpenCode Zen
+  arterm login --provider moonshotai
+  arterm login --provider meta-muse     # Meta Model API / Muse Spark
   ```
 
-  Built-in OpenAI-compatible profile ids include: `openrouter`, `deepseek`, `zai`, `kimi`, `moonshotai`, `meta-muse` (Meta Model API / Muse Spark), `opencode` (OpenCode Zen), `opencode-go`, `302ai`, `baseten`, `cortecs`, `huggingface`, `nebius`, `scaleway`, `stackit`, and `firmware`. Each profile only sets the endpoint and key variable; you still pick the model with `/model` (or `--model`). Run `jcode login` with no provider to see the interactive list.
+  Built-in OpenAI-compatible profile ids include: `openrouter`, `deepseek`, `zai`, `kimi`, `moonshotai`, `meta-muse` (Meta Model API / Muse Spark), `opencode` (OpenCode Zen), `opencode-go`, `302ai`, `baseten`, `cortecs`, `huggingface`, `nebius`, `scaleway`, `stackit`, and `firmware`. Each profile only sets the endpoint and key variable; you still pick the model with `/model` (or `--model`). Run `arterm login` with no provider to see the interactive list.
 
-- **Any other endpoint** — point jcode at an arbitrary OpenAI-compatible API (hosted or local) with `jcode login --provider openai-compatible` or the scriptable `jcode provider add` command described below.
+- **Any other endpoint** — point arterm at an arbitrary OpenAI-compatible API (hosted or local) with `arterm login --provider openai-compatible` or the scriptable `arterm provider add` command described below.
 
 Useful environment overrides for these endpoints:
 
-- `JCODE_STREAM_IDLE_TIMEOUT_SECS` — raise the base streaming idle timeout (default 180s) for slow reasoning models that think silently before emitting tokens. High reasoning efforts scale this automatically (high 2x, xhigh 3x, max 4x). Also settable as `[provider] stream_idle_timeout_secs` in `config.toml`.
-- Per-model `context_window` (alias `context_limit`) in a `[[providers.<name>.models]]` entry — set the context window when the endpoint has no usable `/v1/models` response, so jcode does not fall back to the generic 200k default.
+- `ARTERM_STREAM_IDLE_TIMEOUT_SECS` — raise the base streaming idle timeout (default 180s) for slow reasoning models that think silently before emitting tokens. High reasoning efforts scale this automatically (high 2x, xhigh 3x, max 4x). Also settable as `[provider] stream_idle_timeout_secs` in `config.toml`.
+- Per-model `context_window` (alias `context_limit`) in a `[[providers.<name>.models]]` entry — set the context window when the endpoint has no usable `/v1/models` response, so arterm does not fall back to the generic 200k default.
 - `extra_body` — inject non-standard top-level fields into every chat/completions request body for backends that require them. See [Extra request-body fields](#extra-request-body-fields-extra_body) below.
 
 For details on self-hosting, local runtimes, and the exact config file shape, see below.
 
 #### Self-hosted OpenAI-compatible endpoints, including vLLM
 
-For agents and scripts, the preferred path is the one-shot provider profile command. It writes a named profile to `~/.jcode/config.toml`, stores secrets in jcode's private app config directory when requested, and prints exact run/validation commands:
+For agents and scripts, the preferred path is the one-shot provider profile command. It writes a named profile to `~/.arterm/config.toml`, stores secrets in arterm's private app config directory when requested, and prints exact run/validation commands:
 
 ```bash
 # Secret-safe setup for a hosted OpenAI-compatible API.
-printf '%s' "$MY_API_KEY" | jcode provider add my-api \
+printf '%s' "$MY_API_KEY" | arterm provider add my-api \
   --base-url https://llm.example.com/v1 \
   --model my-model-id \
   --api-key-stdin \
@@ -395,16 +395,16 @@ printf '%s' "$MY_API_KEY" | jcode provider add my-api \
   --json
 
 # Smoke test the profile.
-jcode --provider-profile my-api auth-test --prompt 'Reply exactly JCODE_PROVIDER_SETUP_OK'
+arterm --provider-profile my-api auth-test --prompt 'Reply exactly ARTERM_PROVIDER_SETUP_OK'
 
 # Use it directly.
-jcode --provider-profile my-api run 'hello'
+arterm --provider-profile my-api run 'hello'
 ```
 
 For local servers that do not require auth:
 
 ```bash
-jcode provider add local-vllm \
+arterm provider add local-vllm \
   --base-url http://localhost:8000/v1 \
   --model Qwen/Qwen3-Coder-30B-A3B-Instruct \
   --no-api-key \
@@ -416,16 +416,16 @@ Built-in local profiles are available for the common desktop/local runtimes:
 ```bash
 # Ollama: start the local server and install a model first.
 ollama pull llama3.2
-jcode login --provider ollama
-jcode --provider ollama --model llama3.2 run 'hello'
+arterm login --provider ollama
+arterm --provider ollama --model llama3.2 run 'hello'
 
 # LM Studio: start the Local Server, load a chat model, then use the exact
 # model identifier shown by LM Studio or by curl http://localhost:1234/v1/models.
-jcode login --provider lmstudio
-jcode --provider lmstudio --model '<model-id>' run 'hello'
+arterm login --provider lmstudio
+arterm --provider lmstudio --model '<model-id>' run 'hello'
 ```
 
-Ollama and LM Studio both expose OpenAI-compatible `/v1/models` and `/v1/chat/completions` endpoints. jcode uses streaming chat completions, function/tool calling, and OpenAI-style image content for vision-capable local models. If a local server requires a token, enter it during `jcode login` or create a named profile with `--api-key-stdin`.
+Ollama and LM Studio both expose OpenAI-compatible `/v1/models` and `/v1/chat/completions` endpoints. arterm uses streaming chat completions, function/tool calling, and OpenAI-style image content for vision-capable local models. If a local server requires a token, enter it during `arterm login` or create a named profile with `--api-key-stdin`.
 
 Useful flags:
 
@@ -435,7 +435,7 @@ Useful flags:
 - `--overwrite`: replace an existing profile of the same name.
 - `--model-catalog`: use the endpoint's `/models` response in addition to configured models.
 
-The generated profile can also be edited manually in `~/.jcode/config.toml`:
+The generated profile can also be edited manually in `~/.arterm/config.toml`:
 
 ```toml
 [provider]
@@ -445,7 +445,7 @@ default_model = "my-model-id"
 [providers.my-api]
 type = "openai-compatible"
 base_url = "https://llm.example.com/v1"
-api_key_env = "JCODE_PROVIDER_MY_API_API_KEY"
+api_key_env = "ARTERM_PROVIDER_MY_API_API_KEY"
 env_file = "provider-my-api.env"
 default_model = "my-model-id"
 
@@ -456,7 +456,7 @@ context_window = 128000
 
 ##### Extra request-body fields (`extra_body`)
 
-Some OpenAI-compatible backends require non-standard top-level request fields. For example, NVIDIA NIM DeepSeek-V4 reasoning models (`deepseek-ai/deepseek-v4-flash`, `deepseek-ai/deepseek-v4-pro`) only enable thinking when the request includes `chat_template_kwargs`; without it they reply without reasoning (or, for some deployments, hang). jcode lets you inject arbitrary top-level fields two ways.
+Some OpenAI-compatible backends require non-standard top-level request fields. For example, NVIDIA NIM DeepSeek-V4 reasoning models (`deepseek-ai/deepseek-v4-flash`, `deepseek-ai/deepseek-v4-pro`) only enable thinking when the request includes `chat_template_kwargs`; without it they reply without reasoning (or, for some deployments, hang). arterm lets you inject arbitrary top-level fields two ways.
 
 1. Per named profile, via `extra_body` in `config.toml` (a TOML table merged verbatim into the JSON body):
 
@@ -472,32 +472,32 @@ Some OpenAI-compatible backends require non-standard top-level request fields. F
    reasoning_effort = "high"
    ```
 
-2. For built-in profiles (e.g. `nvidia-nim`) or any endpoint, via the `JCODE_OPENAI_EXTRA_BODY` environment variable (a JSON object string). It can live in the provider's env file (`~/.config/jcode/nvidia-nim.env`) next to the API key:
+2. For built-in profiles (e.g. `nvidia-nim`) or any endpoint, via the `ARTERM_OPENAI_EXTRA_BODY` environment variable (a JSON object string). It can live in the provider's env file (`~/.config/arterm/nvidia-nim.env`) next to the API key:
 
    ```bash
-   JCODE_OPENAI_EXTRA_BODY={"chat_template_kwargs":{"thinking":true,"reasoning_effort":"high"}}
+   ARTERM_OPENAI_EXTRA_BODY={"chat_template_kwargs":{"thinking":true,"reasoning_effort":"high"}}
    ```
 
-Keys from `extra_body` are merged last and override any jcode-generated body field with the same name (`JCODE_OPENAI_EXTRA_BODY` wins over the config `extra_body` on key collisions). Invalid values are logged and ignored rather than failing the request.
+Keys from `extra_body` are merged last and override any arterm-generated body field with the same name (`ARTERM_OPENAI_EXTRA_BODY` wins over the config `extra_body` on key collisions). Invalid values are logged and ignored rather than failing the request.
 
-The custom OpenAI-compatible provider reads overrides from environment variables or from an env file in jcode's app config directory. On Linux this is usually `~/.config/jcode/`, so the default file is usually:
+The custom OpenAI-compatible provider reads overrides from environment variables or from an env file in arterm's app config directory. On Linux this is usually `~/.config/arterm/`, so the default file is usually:
 
 ```text
-~/.config/jcode/openai-compatible.env
+~/.config/arterm/openai-compatible.env
 ```
 
 Example for a local or LAN vLLM server:
 
 ```bash
-JCODE_OPENAI_COMPAT_API_BASE=http://192.168.1.50:8000/v1
-JCODE_OPENAI_COMPAT_DEFAULT_MODEL=Qwen/Qwen3-Coder-30B-A3B-Instruct
+ARTERM_OPENAI_COMPAT_API_BASE=http://192.168.1.50:8000/v1
+ARTERM_OPENAI_COMPAT_DEFAULT_MODEL=Qwen/Qwen3-Coder-30B-A3B-Instruct
 # Optional if your server expects auth
 OPENAI_COMPAT_API_KEY=your-token-here
 ```
 
 Notes:
 
-- `jcode login --provider openai-compatible` can create or update this for you.
+- `arterm login --provider openai-compatible` can create or update this for you.
 - Plain `http://` is accepted for `localhost` and private LAN IPs. Public remote HTTP is still rejected.
 - HTTPS endpoints work as usual.
 
@@ -507,8 +507,8 @@ MCP config is separate from `config.toml`.
 
 Primary config files:
 
-- `~/.jcode/mcp.json` for global MCP servers
-- `.jcode/mcp.json` for project-local MCP servers
+- `~/.arterm/mcp.json` for global MCP servers
+- `.arterm/mcp.json` for project-local MCP servers
 
 Claude Code compatibility:
 
@@ -516,16 +516,16 @@ Claude Code compatibility:
 - `.mcp.json` at the repo root (Claude Code's project config)
 - `.claude/mcp.json` (legacy fallback)
 
-Claude Code config is read live on every load rather than copied into jcode's
+Claude Code config is read live on every load rather than copied into arterm's
 global config. Additions, edits, and deletions therefore take effect without
 leaving a stale snapshot (and inline environment values are not duplicated).
-For migration from Codex CLI, jcode still performs a one-time import from
-`~/.codex/config.toml` into `~/.jcode/mcp.json` when the latter does not exist.
-That imported file is then jcode-owned; later Codex changes are not synced
+For migration from Codex CLI, arterm still performs a one-time import from
+`~/.codex/config.toml` into `~/.arterm/mcp.json` when the latter does not exist.
+That imported file is then arterm-owned; later Codex changes are not synced
 automatically. Imported environment values are copied too and may contain
 secrets.
 
-Both the canonical `mcpServers` key and jcode's historical `servers` key are accepted. jcode currently supports stdio (command-based) servers only; HTTP/SSE entries (`"type": "http"`/`"sse"`) are recognized and skipped with a log line.
+Both the canonical `mcpServers` key and arterm's historical `servers` key are accepted. arterm currently supports stdio (command-based) servers only; HTTP/SSE entries (`"type": "http"`/`"sse"`) are recognized and skipped with a log line.
 
 Example MCP config:
 
@@ -542,34 +542,34 @@ Example MCP config:
 }
 ```
 
-For headless or SSH sessions, OAuth-style providers support `jcode login --provider <provider> --no-browser` (alias: `--headless`) so jcode prints the auth URL/QR and falls back to manual code or callback paste instead of trying to launch a local browser.
+For headless or SSH sessions, OAuth-style providers support `arterm login --provider <provider> --no-browser` (alias: `--headless`) so arterm prints the auth URL/QR and falls back to manual code or callback paste instead of trying to launch a local browser.
 
 For more scriptable remote flows, `claude`, `openai`, `gemini`, and `antigravity` also support a two-step pattern:
 
 ```bash
 # Step 1: print a resumable auth URL
-jcode login --provider openai --print-auth-url --json
+arterm login --provider openai --print-auth-url --json
 
 # Step 2: complete later with the callback URL or auth code
-jcode login --provider openai --callback-url 'http://localhost:1455/auth/callback?...'
-jcode login --provider gemini --auth-code '...'
+arterm login --provider openai --callback-url 'http://localhost:1455/auth/callback?...'
+arterm login --provider gemini --auth-code '...'
 ```
 
 Additional scriptable cases:
 
 ```bash
 # Copilot device flow: print URL + user code, then complete later
-jcode login --provider copilot --print-auth-url --json
-jcode login --provider copilot --complete
+arterm login --provider copilot --print-auth-url --json
+arterm login --provider copilot --complete
 
 # Gmail/Google OAuth after credentials are already configured
-jcode login --provider google --print-auth-url --google-access-tier readonly
-jcode login --provider google --callback-url 'http://127.0.0.1:8456?...'
+arterm login --provider google --print-auth-url --google-access-tier readonly
+arterm login --provider google --callback-url 'http://127.0.0.1:8456?...'
 ```
 
-Pending scriptable login state is stored under `~/.jcode/pending-login/`, automatically expires, and stale entries are cleaned up when new scriptable logins start or resume.
+Pending scriptable login state is stored under `~/.arterm/pending-login/`, automatically expires, and stale entries are cleaned up when new scriptable logins start or resume.
 
-For the built-in OpenAI login flow, jcode opens a local callback on
+For the built-in OpenAI login flow, arterm opens a local callback on
 `http://localhost:1455/auth/callback` by default.
 
 <img width="2877" height="1762" alt="Screenshot from 2026-04-02 14-28-51" src="https://github.com/user-attachments/assets/530684c0-9d12-4363-aa0e-1b39a0d4e1be" />
@@ -581,15 +581,15 @@ The above image is the first page of provider logins
 - **Aggregator / compatibility providers:** `openrouter`, `openai-compatible`
 - **Additional provider integrations:** `opencode`, `opencode-go`, `zai` / `kimi`, `302ai`, `baseten`, `cortecs`, `deepseek`, `firmware`, `huggingface`, `moonshotai`, `nebius`, `scaleway`, `stackit`, `groq`, `mistral`, `perplexity`, `togetherai`, `deepinfra`, `fireworks`, `minimax`, `xai`, `lmstudio`, `ollama`, `chutes`, `cerebras`, `cursor`, `antigravity`, `google`
 
-Jcode also supports easy multi-account switching. Ran out of tokens on your first ChatGPT Pro subscription? /account and quickly switch to your second. 
+Arterm also supports easy multi-account switching. Ran out of tokens on your first ChatGPT Pro subscription? /account and quickly switch to your second. 
 
 ---
 
 ## Customizability / Self-Dev
 
-Jcode is inventing a new form of customizability. One that doesn't limit you to what a plugin or extension can do. Tell your jcode agent to enter self dev mode, and it will start modifying its own source code. Jcode is optimized to iterate on itself. There is significant infrastructure around self developement, which allows it to edit, build, and test its own source code, then reload its own binary and continue work in your (potentially many) sessions, fully automatically. 
+Arterm is inventing a new form of customizability. One that doesn't limit you to what a plugin or extension can do. Tell your arterm agent to enter self dev mode, and it will start modifying its own source code. Arterm is optimized to iterate on itself. There is significant infrastructure around self developement, which allows it to edit, build, and test its own source code, then reload its own binary and continue work in your (potentially many) sessions, fully automatically. 
 
-It is reccomended that you use a frontier model for this. The jcode codebase is not a simple one, and weaker models can make subtle, breaking changes. GPT 5.5 or the latest available frontier model works well.
+It is reccomended that you use a frontier model for this. The arterm codebase is not a simple one, and weaker models can make subtle, breaking changes. GPT 5.5 or the latest available frontier model works well.
 
 <!-- Add self-dev demo thumbnail/video and fuller writeup here. -->
 
@@ -597,17 +597,17 @@ It is reccomended that you use a frontier model for this. The jcode codebase is 
 
 ## Misc.
 
-The devil is in the details. There are many undocumented optimizations and niceties that jcode implements. Some examples: 
+The devil is in the details. There are many undocumented optimizations and niceties that arterm implements. Some examples: 
 
 Anthropic's Claude cache goes cold after 5 minutes. If you initiate Claude after these 5 minutes, you have a cache miss, potentially costing you lots of tokens. The ui warns you when the cache went cold, and notfies you if there was an unexpected cache miss. 
 
-jcode comes with instructions on how to set up Firefox Agent Bridge. Ask you agent to set it up, and then you will have browser automation in jcode as well. 
+arterm comes with instructions on how to set up Firefox Agent Bridge. Ask you agent to set it up, and then you will have browser automation in arterm as well. 
 
-Agent grep is a grep tool I made for the jcode agent. It adds file strucuture information (ie the list of functions, their displacement, etc) to the grep return, so that the agent can infer more of what the file doesn without actually reading the file. It also implements a harness-level integration that adaptively truncates returns based on what the agent has already seen. This saves on context a lot. 
+Agent grep is a grep tool I made for the arterm agent. It adds file strucuture information (ie the list of functions, their displacement, etc) to the grep return, so that the agent can infer more of what the file doesn without actually reading the file. It also implements a harness-level integration that adaptively truncates returns based on what the agent has already seen. This saves on context a lot. 
 
 Inputs are by default interleaved with the working agent. It sends the input as soon as it safely can without breaking the KV cache. Submit with shift enter instead, and it will send a queue send, and wait for the agent to fully finish its turn before sending.
 
-Resume sessions from different harnesses. Claude code broke on you? Resume the session from jcode and continue where you left off. Session resume is supported for codex, claude code, opencode, and pi. 
+Resume sessions from different harnesses. Claude code broke on you? Resume the session from arterm and continue where you left off. Session resume is supported for codex, claude code, opencode, and pi. 
 
 <img width="2877" height="1762" alt="Screenshot from 2026-04-11 16-28-52" src="https://github.com/user-attachments/assets/c2b383cf-2531-4217-85ae-6a863354dc97" />
 image of /Resume for codex sessions
@@ -619,7 +619,7 @@ Skills are not all loaded on startup. The conversation is embedded as a semantic
 
 ## iOS Application / Native OpenClaw
 
-A native iOS application version of jcode is coming soon. This will allow you to work with jcode on your personal machine's environment from your phone, via Tailscale. Openclaw like features will be bundled with this iOS application. 
+A native iOS application version of arterm is coming soon. This will allow you to work with arterm on your personal machine's environment from your phone, via Tailscale. Openclaw like features will be bundled with this iOS application. 
 
 ---
 
@@ -641,32 +641,32 @@ Build speed improvements: An incremental debug cargo build with cache enabled ta
 
 ```bash
 # Launch the TUI
-jcode
+arterm
 
 # Run a single command non-interactively
-jcode run "say hello"
+arterm run "say hello"
 
 # Resume a previous session by memorable name
-jcode --resume fox
+arterm --resume fox
 
 # Run as a persistent background server, then attach more clients
-jcode serve
-jcode connect
+arterm serve
+arterm connect
 
 # Send voice input from your configured STT command
-jcode dictate
+arterm dictate
 ```
 
-jcode supports interactive TUI use, non-interactive runs, persistent server/client workflows,
+arterm supports interactive TUI use, non-interactive runs, persistent server/client workflows,
 and hotkey-friendly dictation without requiring a bundled speech-to-text stack.
 
 <div align="center">
 
   <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/workflow.mp4">
-    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-workflow-demonstration.webp" alt="jcode workflow demonstration" width="900">
+    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/arterm-workflow-demonstration.webp" alt="arterm workflow demonstration" width="900">
   </a>
 
-  <p><em>jcode workflow demonstration</em></p>
+  <p><em>arterm workflow demonstration</em></p>
 
 </div>
 
@@ -674,7 +674,7 @@ and hotkey-friendly dictation without requiring a bundled speech-to-text stack.
 
 ## Browser Automation
 
-jcode includes a first-class built-in `browser` tool for browser control inside agent sessions.
+arterm includes a first-class built-in `browser` tool for browser control inside agent sessions.
 
 Current built-in backend:
 - Firefox via Firefox Agent Bridge
@@ -700,8 +700,8 @@ Current built-in tool actions include:
 Quick setup:
 
 ```bash
-jcode browser status
-jcode browser setup
+arterm browser status
+arterm browser setup
 ```
 
 Once setup is complete, the model can use the built-in `browser` tool directly. The UI also summarizes browser tool calls compactly, for example opening a URL, clicking a selector, or typing into a field without echoing sensitive typed text.
@@ -715,10 +715,10 @@ Notes:
 
 ## Further Reading
 
-- [jcode.sh/docs](https://jcode.sh/docs) — install, providers, configuration, keybindings
-- [jcode.sh/swarm](https://jcode.sh/swarm) — many coding agents in one repository
-- [jcode.sh/sdk](https://jcode.sh/sdk) — TypeScript SDK: drive jcode sessions from your own program
-- [jcode.sh/bench](https://jcode.sh/bench) — benchmark methodology and results
+- [arterm.sh/docs](https://arterm.sh/docs) — install, providers, configuration, keybindings
+- [arterm.sh/swarm](https://arterm.sh/swarm) — many coding agents in one repository
+- [arterm.sh/sdk](https://arterm.sh/sdk) — TypeScript SDK: drive arterm sessions from your own program
+- [arterm.sh/bench](https://arterm.sh/bench) — benchmark methodology and results
 - [Ambient Mode / OpenClaw](docs/AMBIENT_MODE.md)
 - [Browser Provider Protocol](docs/BROWSER_PROVIDER_PROTOCOL.md)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE.md)
@@ -736,72 +736,72 @@ Notes:
 
 ### Setup
 
-If you want another agent to set up jcode for you, give it this prompt:
+If you want another agent to set up arterm for you, give it this prompt:
 
 ```text
-Set up jcode on this machine for me.
+Set up arterm on this machine for me.
 
-1. Detect the operating system, available package managers, and shell environment, then install jcode using the best matching command below instead of referring me somewhere else:
+1. Detect the operating system, available package managers, and shell environment, then install arterm using the best matching command below instead of referring me somewhere else:
 
    - macOS with Homebrew available:
-     brew tap 1jehuang/jcode
-     brew install jcode
+     brew tap 1jehuang/arterm
+     brew install arterm
 
    - macOS or Linux via install script:
-     curl -fsSL https://jcode.sh/install | bash
+     curl -fsSL https://arterm.sh/install | bash
 
    - Windows PowerShell:
-     irm https://jcode.sh/install.ps1 | iex
+     irm https://arterm.sh/install.ps1 | iex
 
    - From source if the above paths are not appropriate:
      git clone https://github.com/1jehuang/jcode.git
-     cd jcode
+     cd arterm
      cargo build --release
      scripts/install_release.sh
 
    - For local self-dev / refactor work on Linux x86_64, prefer:
-     scripts/dev_cargo.sh build --release -p jcode --bin jcode
+     scripts/dev_cargo.sh build --release -p arterm --bin arterm
      scripts/dev_cargo.sh --print-setup
      scripts/install_release.sh
 
-2. Verify that `jcode` is on my `PATH`.
-3. Launch `jcode` once in a new terminal window/session to confirm it starts successfully.
+2. Verify that `arterm` is on my `PATH`.
+3. Launch `arterm` once in a new terminal window/session to confirm it starts successfully.
 4. Before attempting any interactive login flow, assess which providers are already available non-interactively and prefer those first. Check existing local credentials, config files, CLI sessions, and environment variables such as:
-   - Claude: `~/.jcode/auth.json`, `~/.claude/.credentials.json`, `~/.local/share/opencode/auth.json`, `ANTHROPIC_API_KEY`
-   - OpenAI: `~/.jcode/openai-auth.json`, `~/.codex/auth.json`, `OPENAI_API_KEY`
-   - Gemini: `~/.jcode/gemini_oauth.json`, `~/.gemini/oauth_creds.json`
+   - Claude: `~/.arterm/auth.json`, `~/.claude/.credentials.json`, `~/.local/share/opencode/auth.json`, `ANTHROPIC_API_KEY`
+   - OpenAI: `~/.arterm/openai-auth.json`, `~/.codex/auth.json`, `OPENAI_API_KEY`
+   - Gemini: `~/.arterm/gemini_oauth.json`, `~/.gemini/oauth_creds.json`
    - GitHub Copilot: existing auth under `~/.config/github-copilot/`
-   - Azure OpenAI: `~/.config/jcode/azure-openai.env`, `AZURE_OPENAI_*`, or an existing `az login`
+   - Azure OpenAI: `~/.config/arterm/azure-openai.env`, `AZURE_OPENAI_*`, or an existing `az login`
    - OpenRouter: `OPENROUTER_API_KEY`
-   - Fireworks: `~/.config/jcode/fireworks.env`, `FIREWORKS_API_KEY`
-   - MiniMax: `~/.config/jcode/minimax.env`, `MINIMAX_API_KEY`
-   - NVIDIA NIM: `~/.config/jcode/nvidia-nim.env`, `NVIDIA_API_KEY`
-   - Alibaba Cloud Coding Plan: existing jcode config/env if present
-5. Prefer whichever provider is already configured and verify it with `jcode auth-test --all-configured` or a provider-specific auth test when appropriate.
+   - Fireworks: `~/.config/arterm/fireworks.env`, `FIREWORKS_API_KEY`
+   - MiniMax: `~/.config/arterm/minimax.env`, `MINIMAX_API_KEY`
+   - NVIDIA NIM: `~/.config/arterm/nvidia-nim.env`, `NVIDIA_API_KEY`
+   - Alibaba Cloud Coding Plan: existing arterm config/env if present
+5. Prefer whichever provider is already configured and verify it with `arterm auth-test --all-configured` or a provider-specific auth test when appropriate.
 6. Only if no usable provider is already configured, guide me through the minimal manual step needed:
-   - Claude: `jcode login --provider claude`
-   - GitHub Copilot: `jcode login --provider copilot`
-   - OpenAI: `jcode login --provider openai`
-   - Gemini: `jcode login --provider gemini`
-   - Azure OpenAI: `jcode login --provider azure`
-   - Fireworks: `jcode login --provider fireworks`
-   - MiniMax: `jcode login --provider minimax`
-   - NVIDIA NIM: `jcode login --provider nvidia-nim`
-   - Alibaba Cloud Coding Plan: `jcode login --provider alibaba-coding-plan`
+   - Claude: `arterm login --provider claude`
+   - GitHub Copilot: `arterm login --provider copilot`
+   - OpenAI: `arterm login --provider openai`
+   - Gemini: `arterm login --provider gemini`
+   - Azure OpenAI: `arterm login --provider azure`
+   - Fireworks: `arterm login --provider fireworks`
+   - MiniMax: `arterm login --provider minimax`
+   - NVIDIA NIM: `arterm login --provider nvidia-nim`
+   - Alibaba Cloud Coding Plan: `arterm login --provider alibaba-coding-plan`
    - OpenRouter: help me set `OPENROUTER_API_KEY`
    - Anthropic direct API: help me set `ANTHROPIC_API_KEY`
-7. After setup, run a simple smoke test with `jcode run "say hello"` and confirm it works.
-8. If I want browser automation, also check `jcode browser status`. If browser automation is not ready, run `jcode browser setup`, verify the built-in `browser` tool works, and explain any remaining manual step.
+7. After setup, run a simple smoke test with `arterm run "say hello"` and confirm it works.
+8. If I want browser automation, also check `arterm browser status`. If browser automation is not ready, run `arterm browser setup`, verify the built-in `browser` tool works, and explain any remaining manual step.
 9. Explain any manual step that still needs me, especially browser OAuth, device login, API key entry, or browser extension approval.
 ```
 
-This is intended to be a copy-paste bootstrap prompt for jcode itself or any other coding agent.
+This is intended to be a copy-paste bootstrap prompt for arterm itself or any other coding agent.
 
 ### Quick Install
 
 ```bash
 # macOS & Linux
-curl -fsSL https://jcode.sh/install | bash
+curl -fsSL https://arterm.sh/install | bash
 ```
 
 On Termux, install the glibc runtime and `patchelf` first so the installer can
@@ -810,12 +810,12 @@ launcher that avoids Termux's `LD_PRELOAD` shim:
 
 ```bash
 pkg install glibc patchelf
-curl -fsSL https://jcode.sh/install | bash
+curl -fsSL https://arterm.sh/install | bash
 ```
 
 ```powershell
 # Windows 11 x64 or ARM64 (PowerShell 5.1+)
-irm https://jcode.sh/install.ps1 | iex
+irm https://arterm.sh/install.ps1 | iex
 ```
 
 The Windows installer selects the correct architecture and verifies the download
@@ -831,22 +831,22 @@ is available with `-BuildFromSource` and requires Git, Rust, and Visual Studio
 ### macOS via Homebrew
 
 ```bash
-brew tap 1jehuang/jcode
-brew install jcode
+brew tap 1jehuang/arterm
+brew install arterm
 ```
 
 ### From Source (all platforms)
 
 ```bash
 git clone https://github.com/1jehuang/jcode.git
-cd jcode
+cd arterm
 cargo build --release
 ```
 
 For local self-dev / refactor work on Linux x86_64, prefer:
 
 ```bash
-scripts/dev_cargo.sh build --release -p jcode --bin jcode
+scripts/dev_cargo.sh build --release -p arterm --bin arterm
 scripts/dev_cargo.sh --print-setup
 ```
 
@@ -867,14 +867,14 @@ Removes installed binaries and the launcher but keeps your config, auth, and
 sessions so a clean reinstall picks up where you left off:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/uninstall.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/1jehuang/arterm/master/scripts/uninstall.sh | bash -s -- --yes
 ```
 
 For a full wipe of everything including config, auth, sessions, logs, and
 memory (useful for recovering from a broken install):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/uninstall.sh | bash -s -- --purge --yes
+curl -fsSL https://raw.githubusercontent.com/1jehuang/arterm/master/scripts/uninstall.sh | bash -s -- --purge --yes
 ```
 
 Add `--dry-run` to preview what would be removed without deleting anything.

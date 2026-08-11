@@ -1,0 +1,35 @@
+[package]
+name = "arterm-provider-openrouter-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "OpenRouter / OpenAI-compatible provider runtime (aggregator + direct profile endpoints) for arterm, kept downstream of arterm-base so provider edits do not rebuild the app spine"
+
+[lib]
+name = "arterm_provider_openrouter_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+futures = "0.3"
+# default-features = false: the top-level binary decides heavy optional base
+# features (embeddings/bedrock). Runtime crates must not re-enable them via
+# feature unification, or --no-default-features release targets (e.g. Windows
+# ARM64, which cannot build tract-linalg asm) break.
+arterm-base = { path = "../arterm-base", default-features = false }
+arterm-message-types = { path = "../arterm-message-types" }
+arterm-provider-core = { path = "../arterm-provider-core" }
+arterm-provider-openrouter = { path = "../arterm-provider-openrouter" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+bytes = "1"
+tokio = { version = "1", features = ["sync", "time", "rt"] }
+tokio-stream = "0.1"
+
+[dev-dependencies]
+# The migrated openrouter tests use arterm-base's test-env sandbox.
+arterm-base = { path = "../arterm-base", default-features = false, features = ["test-support"] }
+arterm-provider-metadata = { path = "../arterm-provider-metadata" }
+tempfile = "3"
+toml = "0.8"

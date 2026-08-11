@@ -4,7 +4,7 @@
   "highlights": [
     "Mermaid diagrams now render inline in chat like images, on by default, with aspect-aware sizing and cached re-rasterization on resize",
     "Swarm deep mode grows a live task graph with gate audits and renders it as a live mermaid plan diagram, plus a swarm dock widget with a live agent list",
-    "After provider guardrail refusals or terminal errors, jcode offers a one-keypress reroute to a fallback model instead of silently ending the turn"
+    "After provider guardrail refusals or terminal errors, arterm offers a one-keypress reroute to a fallback model instead of silently ending the turn"
   ],
   "improvements": [
     "Anthropic models gain a 'max' reasoning effort rung above xhigh",

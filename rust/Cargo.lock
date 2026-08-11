@@ -231,6 +231,1233 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "arterm"
+version = "0.75.0"
+dependencies = [
+ "anyhow",
+ "arterm-build-meta",
+ "arterm-harness-api-server",
+ "arterm-provider-anthropic-runtime",
+ "arterm-provider-antigravity-runtime",
+ "arterm-provider-claude-cli-runtime",
+ "arterm-provider-copilot-runtime",
+ "arterm-provider-core",
+ "arterm-provider-cursor-runtime",
+ "arterm-provider-doctor",
+ "arterm-provider-gemini-runtime",
+ "arterm-provider-openai-runtime",
+ "arterm-provider-openrouter-runtime",
+ "arterm-selfdev-types",
+ "arterm-tui",
+ "arterm-tui-session-picker",
+ "arterm-tui-style",
+ "async-stream",
+ "async-trait",
+ "block2 0.6.2",
+ "chrono",
+ "clap",
+ "crossterm",
+ "dirs",
+ "futures",
+ "global-hotkey",
+ "hex",
+ "libc",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-user-notifications 0.3.2",
+ "open",
+ "ratatui",
+ "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "toml",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "arterm-agent-runtime"
+version = "0.1.0"
+dependencies = [
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "arterm-ambient-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+]
+
+[[package]]
+name = "arterm-app-core"
+version = "0.1.0"
+dependencies = [
+ "agentgrep",
+ "anyhow",
+ "arterm-agent-runtime",
+ "arterm-ambient-types",
+ "arterm-base",
+ "arterm-build-meta",
+ "arterm-build-support",
+ "arterm-command-risk",
+ "arterm-core",
+ "arterm-import-core",
+ "arterm-message-types",
+ "arterm-notify-email",
+ "arterm-overnight-core",
+ "arterm-pdf",
+ "arterm-plan",
+ "arterm-provider-core",
+ "arterm-schema-dialect",
+ "arterm-selfdev-types",
+ "arterm-session-types",
+ "arterm-setup-hints",
+ "arterm-swarm-core",
+ "arterm-task-types",
+ "arterm-terminal-image",
+ "arterm-tool-core",
+ "arterm-tool-types",
+ "arterm-update-core",
+ "async-stream",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "core-graphics",
+ "crossterm",
+ "dirs",
+ "flate2",
+ "futures",
+ "glob",
+ "global-hotkey",
+ "libc",
+ "open",
+ "rand 0.9.3",
+ "ratatui",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "similar",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "unicode-width",
+ "url",
+ "urlencoding",
+ "uuid",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "arterm-auth-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "arterm-azure-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "azure_core",
+ "azure_identity",
+]
+
+[[package]]
+name = "arterm-background-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "arterm-base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-agent-runtime",
+ "arterm-auth-types",
+ "arterm-azure-auth",
+ "arterm-background-types",
+ "arterm-batch-types",
+ "arterm-build-meta",
+ "arterm-compaction-core",
+ "arterm-config-types",
+ "arterm-core",
+ "arterm-embedding",
+ "arterm-gateway-types",
+ "arterm-import-core",
+ "arterm-logging",
+ "arterm-memory-types",
+ "arterm-message-types",
+ "arterm-plan",
+ "arterm-protocol",
+ "arterm-provider-antigravity",
+ "arterm-provider-bedrock",
+ "arterm-provider-copilot",
+ "arterm-provider-core",
+ "arterm-provider-env",
+ "arterm-provider-gemini",
+ "arterm-provider-metadata",
+ "arterm-provider-openai",
+ "arterm-provider-openrouter",
+ "arterm-provider-openrouter-runtime",
+ "arterm-render-core",
+ "arterm-session-types",
+ "arterm-side-panel-types",
+ "arterm-storage",
+ "arterm-task-types",
+ "arterm-telemetry-core",
+ "arterm-terminal-image",
+ "arterm-terminal-launch",
+ "arterm-tool-core",
+ "arterm-tool-types",
+ "arterm-transport",
+ "arterm-usage-types",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "crossterm",
+ "dirs",
+ "futures",
+ "global-hotkey",
+ "hex",
+ "image",
+ "libc",
+ "open",
+ "proctitle",
+ "qrcode",
+ "rand 0.9.3",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "tikv-jemalloc-ctl",
+ "tikv-jemalloc-sys",
+ "tokio",
+ "tokio-tungstenite",
+ "toml",
+ "url",
+ "urlencoding",
+ "uuid",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "arterm-batch-types"
+version = "0.1.0"
+dependencies = [
+ "arterm-message-types",
+ "serde",
+]
+
+[[package]]
+name = "arterm-build-meta"
+version = "0.1.0"
+
+[[package]]
+name = "arterm-build-support"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-core",
+ "arterm-selfdev-types",
+ "arterm-storage",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "arterm-command-risk"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
+name = "arterm-compaction-core"
+version = "0.1.0"
+dependencies = [
+ "arterm-message-types",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-config-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "libc",
+ "rand 0.9.3",
+ "unicode-properties",
+ "unicode-segmentation",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "arterm-desktop2"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "arterm-build-meta",
+ "arterm-math",
+ "arterm-render-core",
+ "arterm-sdk",
+ "image",
+ "libc",
+ "libloading",
+ "parley",
+ "pollster",
+ "quote",
+ "serde_json",
+ "syn 2.0.117",
+ "syntect",
+ "unicode-width",
+ "vello",
+ "winit",
+]
+
+[[package]]
+name = "arterm-embedding"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest 0.12.28",
+ "tokenizers",
+ "tract-hir",
+ "tract-onnx",
+]
+
+[[package]]
+name = "arterm-fuzzy"
+version = "0.1.0"
+
+[[package]]
+name = "arterm-gateway-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "arterm-harness-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-harness-api-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-background-types",
+ "arterm-base",
+ "arterm-harness-api",
+ "arterm-transport",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "arterm-import-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
+name = "arterm-logging"
+version = "0.1.0"
+dependencies = [
+ "arterm-core",
+ "arterm-storage",
+ "chrono",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "arterm-math"
+version = "0.1.0"
+dependencies = [
+ "ttf-parser",
+]
+
+[[package]]
+name = "arterm-memory-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rand 0.9.3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-message-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-notify-email"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "imap",
+ "lettre",
+ "mail-parser",
+ "native-tls",
+ "pulldown-cmark",
+ "urlencoding",
+]
+
+[[package]]
+name = "arterm-overnight-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-pdf"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pdf-extract",
+]
+
+[[package]]
+name = "arterm-plan"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-productivity-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-storage",
+ "chrono",
+ "rayon",
+ "resvg 0.46.0",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "usvg 0.46.0",
+]
+
+[[package]]
+name = "arterm-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-batch-types",
+ "arterm-config-types",
+ "arterm-message-types",
+ "arterm-plan",
+ "arterm-provider-core",
+ "arterm-selfdev-types",
+ "arterm-session-types",
+ "arterm-side-panel-types",
+ "rand 0.9.3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-provider-anthropic"
+version = "0.1.0"
+dependencies = [
+ "arterm-logging",
+ "arterm-message-types",
+ "arterm-provider-core",
+ "arterm-schema-dialect",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-provider-anthropic-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-anthropic",
+ "arterm-provider-core",
+ "async-trait",
+ "chrono",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "uuid",
+]
+
+[[package]]
+name = "arterm-provider-antigravity"
+version = "0.1.0"
+dependencies = [
+ "arterm-provider-gemini",
+ "arterm-schema-dialect",
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-provider-antigravity-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-antigravity",
+ "arterm-provider-core",
+ "arterm-provider-gemini",
+ "arterm-schema-dialect",
+ "async-trait",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "uuid",
+]
+
+[[package]]
+name = "arterm-provider-bedrock"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-core",
+ "arterm-logging",
+ "arterm-message-types",
+ "arterm-provider-core",
+ "arterm-provider-env",
+ "arterm-storage",
+ "async-trait",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-bedrock",
+ "aws-sdk-bedrockruntime",
+ "aws-sdk-sts",
+ "aws-smithy-types",
+ "aws-types",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "arterm-provider-claude-cli-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-core",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "arterm-provider-copilot"
+version = "0.1.0"
+dependencies = [
+ "arterm-message-types",
+ "arterm-schema-dialect",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-provider-copilot-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-copilot",
+ "arterm-provider-core",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "futures",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "uuid",
+]
+
+[[package]]
+name = "arterm-provider-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-logging",
+ "arterm-message-types",
+ "arterm-schema-dialect",
+ "async-trait",
+ "futures",
+ "httpdate",
+ "rand 0.9.3",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
+
+[[package]]
+name = "arterm-provider-cursor-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-core",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "flate2",
+ "h2",
+ "http 1.4.0",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "uuid",
+ "webpki-roots",
+]
+
+[[package]]
+name = "arterm-provider-doctor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-provider-anthropic-runtime",
+ "arterm-provider-antigravity-runtime",
+ "arterm-provider-copilot-runtime",
+ "arterm-provider-cursor-runtime",
+ "arterm-provider-gemini-runtime",
+ "arterm-provider-metadata",
+ "arterm-provider-openai-runtime",
+ "arterm-provider-openrouter-runtime",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "arterm-provider-env"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-core",
+ "arterm-logging",
+ "arterm-provider-metadata",
+ "arterm-storage",
+ "tempfile",
+]
+
+[[package]]
+name = "arterm-provider-gemini"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-message-types",
+ "arterm-schema-dialect",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-provider-gemini-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-anthropic",
+ "arterm-provider-antigravity",
+ "arterm-provider-core",
+ "arterm-provider-gemini",
+ "arterm-provider-openai",
+ "arterm-provider-openrouter",
+ "arterm-schema-dialect",
+ "async-trait",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "uuid",
+]
+
+[[package]]
+name = "arterm-provider-metadata"
+version = "0.1.0"
+dependencies = [
+ "url",
+]
+
+[[package]]
+name = "arterm-provider-openai"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-core",
+ "arterm-logging",
+ "arterm-message-types",
+ "arterm-provider-core",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "arterm-provider-openai-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-core",
+ "arterm-provider-openai",
+ "arterm-schema-dialect",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "futures",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "arterm-provider-openrouter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-core",
+ "arterm-logging",
+ "arterm-message-types",
+ "arterm-schema-dialect",
+ "bytes",
+ "dirs",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-provider-openrouter-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-message-types",
+ "arterm-provider-core",
+ "arterm-provider-metadata",
+ "arterm-provider-openrouter",
+ "async-trait",
+ "bytes",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "toml",
+]
+
+[[package]]
+name = "arterm-render-core"
+version = "0.1.0"
+dependencies = [
+ "pulldown-cmark",
+ "serde",
+ "unicode-width",
+]
+
+[[package]]
+name = "arterm-schema-dialect"
+version = "0.1.0"
+dependencies = [
+ "arterm-schema-dialect",
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "arterm-sdk"
+version = "0.1.0"
+dependencies = [
+ "arterm-harness-api",
+ "jsonschema",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "arterm-selfdev-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+]
+
+[[package]]
+name = "arterm-session-types"
+version = "0.1.0"
+dependencies = [
+ "arterm-message-types",
+ "chrono",
+ "memchr",
+ "serde",
+]
+
+[[package]]
+name = "arterm-setup-hints"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-build-meta",
+ "arterm-config-types",
+ "arterm-core",
+ "arterm-logging",
+ "arterm-storage",
+ "arterm-terminal-launch",
+ "dirs",
+ "global-hotkey",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "arterm-side-panel-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "arterm-storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-core",
+ "dirs",
+ "libc",
+ "rand 0.9.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "arterm-swarm-core"
+version = "0.1.0"
+dependencies = [
+ "arterm-plan",
+ "serde",
+]
+
+[[package]]
+name = "arterm-task-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-telemetry-core"
+version = "0.1.0"
+dependencies = [
+ "arterm-build-meta",
+ "arterm-core",
+ "arterm-logging",
+ "arterm-provider-core",
+ "arterm-selfdev-types",
+ "arterm-storage",
+ "arterm-usage-types",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
+name = "arterm-terminal-image"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "crossterm",
+]
+
+[[package]]
+name = "arterm-terminal-launch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+]
+
+[[package]]
+name = "arterm-tool-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-agent-runtime",
+ "arterm-message-types",
+ "arterm-tool-types",
+ "async-trait",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "arterm-tool-types"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-transport"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "sha2 0.10.9",
+ "tokio",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "arterm-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "arterm-app-core",
+ "arterm-build-meta",
+ "arterm-config-types",
+ "arterm-core",
+ "arterm-fuzzy",
+ "arterm-logging",
+ "arterm-productivity-core",
+ "arterm-provider-core",
+ "arterm-selfdev-types",
+ "arterm-session-types",
+ "arterm-terminal-image",
+ "arterm-tui-account-picker",
+ "arterm-tui-anim",
+ "arterm-tui-core",
+ "arterm-tui-markdown",
+ "arterm-tui-mermaid",
+ "arterm-tui-messages",
+ "arterm-tui-permissions",
+ "arterm-tui-render",
+ "arterm-tui-session-picker",
+ "arterm-tui-style",
+ "arterm-tui-tool-display",
+ "arterm-tui-usage-overlay",
+ "arterm-tui-visual-debug",
+ "arterm-tui-workspace",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "crossterm",
+ "dirs",
+ "futures",
+ "global-hotkey",
+ "hex",
+ "image",
+ "libc",
+ "open",
+ "rand 0.9.3",
+ "ratatui",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "similar",
+ "tempfile",
+ "terminal-colorsaurus",
+ "tokio",
+ "unicode-width",
+ "url",
+ "urlencoding",
+]
+
+[[package]]
+name = "arterm-tui-account-picker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-tui-anim"
+version = "0.1.0"
+
+[[package]]
+name = "arterm-tui-core"
+version = "0.1.0"
+dependencies = [
+ "arterm-memory-types",
+ "crossterm",
+ "serde",
+]
+
+[[package]]
+name = "arterm-tui-markdown"
+version = "0.1.0"
+dependencies = [
+ "arterm-render-core",
+ "arterm-tui-mermaid",
+ "arterm-tui-workspace",
+ "dirs",
+ "image",
+ "mdwright-latex",
+ "pulldown-cmark",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "syntect",
+ "tempfile",
+ "unicode-width",
+ "wait-timeout",
+]
+
+[[package]]
+name = "arterm-tui-mermaid"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-plan",
+ "arterm-tui-workspace",
+ "base64 0.22.1",
+ "crossterm",
+ "dirs",
+ "image",
+ "mermaid-rs-renderer",
+ "ratatui",
+ "ratatui-image",
+ "resvg 0.46.0",
+ "serde",
+ "serde_json",
+ "usvg 0.46.0",
+]
+
+[[package]]
+name = "arterm-tui-messages"
+version = "0.1.0"
+dependencies = [
+ "arterm-config-types",
+ "arterm-message-types",
+ "arterm-session-types",
+ "arterm-tui-markdown",
+ "ratatui",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-tui-permissions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-base",
+ "arterm-core",
+ "arterm-tui-style",
+ "chrono",
+ "crossterm",
+ "ratatui",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-tui-render"
+version = "0.1.0"
+dependencies = [
+ "arterm-tui-style",
+ "chrono",
+ "ratatui",
+ "unicode-width",
+]
+
+[[package]]
+name = "arterm-tui-session-picker"
+version = "0.1.0"
+dependencies = [
+ "arterm-message-types",
+ "arterm-session-types",
+ "chrono",
+ "serde",
+]
+
+[[package]]
+name = "arterm-tui-style"
+version = "0.1.0"
+dependencies = [
+ "arterm-logging",
+ "ratatui",
+]
+
+[[package]]
+name = "arterm-tui-tool-display"
+version = "0.1.0"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
+name = "arterm-tui-usage-overlay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arterm-usage-types",
+ "chrono",
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-tui-visual-debug"
+version = "0.1.0"
+dependencies = [
+ "arterm-logging",
+ "dirs",
+ "ratatui",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arterm-tui-workspace"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
+]
+
+[[package]]
+name = "arterm-update-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "arterm-usage-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "as-raw-xcb-connection"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3308,1233 +4535,6 @@ name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
-
-[[package]]
-name = "jcode"
-version = "0.75.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "async-trait",
- "block2 0.6.2",
- "chrono",
- "clap",
- "crossterm",
- "dirs",
- "futures",
- "global-hotkey",
- "hex",
- "jcode-build-meta",
- "jcode-harness-api-server",
- "jcode-provider-anthropic-runtime",
- "jcode-provider-antigravity-runtime",
- "jcode-provider-claude-cli-runtime",
- "jcode-provider-copilot-runtime",
- "jcode-provider-core",
- "jcode-provider-cursor-runtime",
- "jcode-provider-doctor",
- "jcode-provider-gemini-runtime",
- "jcode-provider-openai-runtime",
- "jcode-provider-openrouter-runtime",
- "jcode-selfdev-types",
- "jcode-tui",
- "jcode-tui-session-picker",
- "jcode-tui-style",
- "libc",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "objc2-user-notifications 0.3.2",
- "open",
- "ratatui",
- "reqwest 0.12.28",
- "rustls",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tikv-jemallocator",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite",
- "toml",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "jcode-agent-runtime"
-version = "0.1.0"
-dependencies = [
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "jcode-ambient-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
-]
-
-[[package]]
-name = "jcode-app-core"
-version = "0.1.0"
-dependencies = [
- "agentgrep",
- "anyhow",
- "async-stream",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "core-graphics",
- "crossterm",
- "dirs",
- "flate2",
- "futures",
- "glob",
- "global-hotkey",
- "jcode-agent-runtime",
- "jcode-ambient-types",
- "jcode-base",
- "jcode-build-meta",
- "jcode-build-support",
- "jcode-command-risk",
- "jcode-core",
- "jcode-import-core",
- "jcode-message-types",
- "jcode-notify-email",
- "jcode-overnight-core",
- "jcode-pdf",
- "jcode-plan",
- "jcode-provider-core",
- "jcode-schema-dialect",
- "jcode-selfdev-types",
- "jcode-session-types",
- "jcode-setup-hints",
- "jcode-swarm-core",
- "jcode-task-types",
- "jcode-terminal-image",
- "jcode-tool-core",
- "jcode-tool-types",
- "jcode-update-core",
- "libc",
- "open",
- "rand 0.9.3",
- "ratatui",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "similar",
- "tar",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "unicode-width",
- "url",
- "urlencoding",
- "uuid",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "jcode-auth-types"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "jcode-azure-auth"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "azure_core",
- "azure_identity",
-]
-
-[[package]]
-name = "jcode-background-types"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "jcode-base"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "crossterm",
- "dirs",
- "futures",
- "global-hotkey",
- "hex",
- "image",
- "jcode-agent-runtime",
- "jcode-auth-types",
- "jcode-azure-auth",
- "jcode-background-types",
- "jcode-batch-types",
- "jcode-build-meta",
- "jcode-compaction-core",
- "jcode-config-types",
- "jcode-core",
- "jcode-embedding",
- "jcode-gateway-types",
- "jcode-import-core",
- "jcode-logging",
- "jcode-memory-types",
- "jcode-message-types",
- "jcode-plan",
- "jcode-protocol",
- "jcode-provider-antigravity",
- "jcode-provider-bedrock",
- "jcode-provider-copilot",
- "jcode-provider-core",
- "jcode-provider-env",
- "jcode-provider-gemini",
- "jcode-provider-metadata",
- "jcode-provider-openai",
- "jcode-provider-openrouter",
- "jcode-provider-openrouter-runtime",
- "jcode-render-core",
- "jcode-session-types",
- "jcode-side-panel-types",
- "jcode-storage",
- "jcode-task-types",
- "jcode-telemetry-core",
- "jcode-terminal-image",
- "jcode-terminal-launch",
- "jcode-tool-core",
- "jcode-tool-types",
- "jcode-transport",
- "jcode-usage-types",
- "libc",
- "open",
- "proctitle",
- "qrcode",
- "rand 0.9.3",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2 0.10.9",
- "tempfile",
- "tikv-jemalloc-ctl",
- "tikv-jemalloc-sys",
- "tokio",
- "tokio-tungstenite",
- "toml",
- "url",
- "urlencoding",
- "uuid",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "jcode-batch-types"
-version = "0.1.0"
-dependencies = [
- "jcode-message-types",
- "serde",
-]
-
-[[package]]
-name = "jcode-build-meta"
-version = "0.1.0"
-
-[[package]]
-name = "jcode-build-support"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "jcode-core",
- "jcode-selfdev-types",
- "jcode-storage",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "jcode-command-risk"
-version = "0.1.0"
-dependencies = [
- "tempfile",
-]
-
-[[package]]
-name = "jcode-compaction-core"
-version = "0.1.0"
-dependencies = [
- "jcode-message-types",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-config-types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "libc",
- "rand 0.9.3",
- "unicode-properties",
- "unicode-segmentation",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "jcode-desktop2"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arboard",
- "image",
- "jcode-build-meta",
- "jcode-math",
- "jcode-render-core",
- "jcode-sdk",
- "libc",
- "libloading",
- "parley",
- "pollster",
- "quote",
- "serde_json",
- "syn 2.0.117",
- "syntect",
- "unicode-width",
- "vello",
- "winit",
-]
-
-[[package]]
-name = "jcode-embedding"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "reqwest 0.12.28",
- "tokenizers",
- "tract-hir",
- "tract-onnx",
-]
-
-[[package]]
-name = "jcode-fuzzy"
-version = "0.1.0"
-
-[[package]]
-name = "jcode-gateway-types"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "jcode-harness-api"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-harness-api-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "jcode-background-types",
- "jcode-base",
- "jcode-harness-api",
- "jcode-transport",
- "libc",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "jcode-import-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "hex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
-]
-
-[[package]]
-name = "jcode-logging"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "jcode-core",
- "jcode-storage",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "jcode-math"
-version = "0.1.0"
-dependencies = [
- "ttf-parser",
-]
-
-[[package]]
-name = "jcode-memory-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rand 0.9.3",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-message-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-notify-email"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "imap",
- "lettre",
- "mail-parser",
- "native-tls",
- "pulldown-cmark",
- "urlencoding",
-]
-
-[[package]]
-name = "jcode-overnight-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-pdf"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "pdf-extract",
-]
-
-[[package]]
-name = "jcode-plan"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-productivity-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "jcode-storage",
- "rayon",
- "resvg 0.46.0",
- "serde",
- "serde_json",
- "tempfile",
- "usvg 0.46.0",
-]
-
-[[package]]
-name = "jcode-protocol"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "jcode-batch-types",
- "jcode-config-types",
- "jcode-message-types",
- "jcode-plan",
- "jcode-provider-core",
- "jcode-selfdev-types",
- "jcode-session-types",
- "jcode-side-panel-types",
- "rand 0.9.3",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-provider-anthropic"
-version = "0.1.0"
-dependencies = [
- "jcode-logging",
- "jcode-message-types",
- "jcode-provider-core",
- "jcode-schema-dialect",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-provider-anthropic-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "futures",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-anthropic",
- "jcode-provider-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "uuid",
-]
-
-[[package]]
-name = "jcode-provider-antigravity"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "jcode-provider-gemini",
- "jcode-schema-dialect",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-provider-antigravity-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-antigravity",
- "jcode-provider-core",
- "jcode-provider-gemini",
- "jcode-schema-dialect",
- "reqwest 0.12.28",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "uuid",
-]
-
-[[package]]
-name = "jcode-provider-bedrock"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "aws-config",
- "aws-credential-types",
- "aws-sdk-bedrock",
- "aws-sdk-bedrockruntime",
- "aws-sdk-sts",
- "aws-smithy-types",
- "aws-types",
- "base64 0.22.1",
- "chrono",
- "futures",
- "jcode-core",
- "jcode-logging",
- "jcode-message-types",
- "jcode-provider-core",
- "jcode-provider-env",
- "jcode-storage",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
-name = "jcode-provider-claude-cli-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-core",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
-name = "jcode-provider-copilot"
-version = "0.1.0"
-dependencies = [
- "jcode-message-types",
- "jcode-schema-dialect",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-provider-copilot-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "dirs",
- "futures",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-copilot",
- "jcode-provider-core",
- "reqwest 0.12.28",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "uuid",
-]
-
-[[package]]
-name = "jcode-provider-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "httpdate",
- "jcode-logging",
- "jcode-message-types",
- "jcode-schema-dialect",
- "rand 0.9.3",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
-]
-
-[[package]]
-name = "jcode-provider-cursor-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "flate2",
- "h2",
- "http 1.4.0",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-rustls",
- "tokio-stream",
- "uuid",
- "webpki-roots",
-]
-
-[[package]]
-name = "jcode-provider-doctor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "jcode-base",
- "jcode-provider-anthropic-runtime",
- "jcode-provider-antigravity-runtime",
- "jcode-provider-copilot-runtime",
- "jcode-provider-cursor-runtime",
- "jcode-provider-gemini-runtime",
- "jcode-provider-metadata",
- "jcode-provider-openai-runtime",
- "jcode-provider-openrouter-runtime",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "jcode-provider-env"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "jcode-core",
- "jcode-logging",
- "jcode-provider-metadata",
- "jcode-storage",
- "tempfile",
-]
-
-[[package]]
-name = "jcode-provider-gemini"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "jcode-message-types",
- "jcode-schema-dialect",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-provider-gemini-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-anthropic",
- "jcode-provider-antigravity",
- "jcode-provider-core",
- "jcode-provider-gemini",
- "jcode-provider-openai",
- "jcode-provider-openrouter",
- "jcode-schema-dialect",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "uuid",
-]
-
-[[package]]
-name = "jcode-provider-metadata"
-version = "0.1.0"
-dependencies = [
- "url",
-]
-
-[[package]]
-name = "jcode-provider-openai"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "bytes",
- "futures",
- "jcode-core",
- "jcode-logging",
- "jcode-message-types",
- "jcode-provider-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "jcode-provider-openai-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "dirs",
- "futures",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-core",
- "jcode-provider-openai",
- "jcode-schema-dialect",
- "reqwest 0.12.28",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite",
-]
-
-[[package]]
-name = "jcode-provider-openrouter"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "dirs",
- "futures",
- "jcode-core",
- "jcode-logging",
- "jcode-message-types",
- "jcode-schema-dialect",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-provider-openrouter-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "futures",
- "jcode-base",
- "jcode-message-types",
- "jcode-provider-core",
- "jcode-provider-metadata",
- "jcode-provider-openrouter",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "toml",
-]
-
-[[package]]
-name = "jcode-render-core"
-version = "0.1.0"
-dependencies = [
- "pulldown-cmark",
- "serde",
- "unicode-width",
-]
-
-[[package]]
-name = "jcode-schema-dialect"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "jcode-schema-dialect",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "jcode-sdk"
-version = "0.1.0"
-dependencies = [
- "jcode-harness-api",
- "jsonschema",
- "libc",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "jcode-selfdev-types"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "serde",
-]
-
-[[package]]
-name = "jcode-session-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "jcode-message-types",
- "memchr",
- "serde",
-]
-
-[[package]]
-name = "jcode-setup-hints"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "global-hotkey",
- "jcode-build-meta",
- "jcode-config-types",
- "jcode-core",
- "jcode-logging",
- "jcode-storage",
- "jcode-terminal-launch",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "jcode-side-panel-types"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "jcode-storage"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "jcode-core",
- "libc",
- "rand 0.9.3",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "jcode-swarm-core"
-version = "0.1.0"
-dependencies = [
- "jcode-plan",
- "serde",
-]
-
-[[package]]
-name = "jcode-task-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-telemetry-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "jcode-build-meta",
- "jcode-core",
- "jcode-logging",
- "jcode-provider-core",
- "jcode-selfdev-types",
- "jcode-storage",
- "jcode-usage-types",
- "reqwest 0.12.28",
- "serde_json",
- "tempfile",
- "tokio",
- "uuid",
- "walkdir",
-]
-
-[[package]]
-name = "jcode-terminal-image"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "crossterm",
-]
-
-[[package]]
-name = "jcode-terminal-launch"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
-]
-
-[[package]]
-name = "jcode-tool-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "jcode-agent-runtime",
- "jcode-message-types",
- "jcode-tool-types",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "jcode-tool-types"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "jcode-transport"
-version = "0.1.0"
-dependencies = [
- "hex",
- "sha2 0.10.9",
- "tokio",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "jcode-tui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arboard",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "crossterm",
- "dirs",
- "futures",
- "global-hotkey",
- "hex",
- "image",
- "jcode-app-core",
- "jcode-build-meta",
- "jcode-config-types",
- "jcode-core",
- "jcode-fuzzy",
- "jcode-logging",
- "jcode-productivity-core",
- "jcode-provider-core",
- "jcode-selfdev-types",
- "jcode-session-types",
- "jcode-terminal-image",
- "jcode-tui-account-picker",
- "jcode-tui-anim",
- "jcode-tui-core",
- "jcode-tui-markdown",
- "jcode-tui-mermaid",
- "jcode-tui-messages",
- "jcode-tui-permissions",
- "jcode-tui-render",
- "jcode-tui-session-picker",
- "jcode-tui-style",
- "jcode-tui-tool-display",
- "jcode-tui-usage-overlay",
- "jcode-tui-visual-debug",
- "jcode-tui-workspace",
- "libc",
- "open",
- "rand 0.9.3",
- "ratatui",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "similar",
- "tempfile",
- "terminal-colorsaurus",
- "tokio",
- "unicode-width",
- "url",
- "urlencoding",
-]
-
-[[package]]
-name = "jcode-tui-account-picker"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossterm",
- "ratatui",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-tui-anim"
-version = "0.1.0"
-
-[[package]]
-name = "jcode-tui-core"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "jcode-memory-types",
- "serde",
-]
-
-[[package]]
-name = "jcode-tui-markdown"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "image",
- "jcode-render-core",
- "jcode-tui-mermaid",
- "jcode-tui-workspace",
- "mdwright-latex",
- "pulldown-cmark",
- "ratatui",
- "serde",
- "serde_json",
- "syntect",
- "tempfile",
- "unicode-width",
- "wait-timeout",
-]
-
-[[package]]
-name = "jcode-tui-mermaid"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "crossterm",
- "dirs",
- "image",
- "jcode-plan",
- "jcode-tui-workspace",
- "mermaid-rs-renderer",
- "ratatui",
- "ratatui-image",
- "resvg 0.46.0",
- "serde",
- "serde_json",
- "usvg 0.46.0",
-]
-
-[[package]]
-name = "jcode-tui-messages"
-version = "0.1.0"
-dependencies = [
- "jcode-config-types",
- "jcode-message-types",
- "jcode-session-types",
- "jcode-tui-markdown",
- "ratatui",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-tui-permissions"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "jcode-base",
- "jcode-core",
- "jcode-tui-style",
- "ratatui",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-tui-render"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "jcode-tui-style",
- "ratatui",
- "unicode-width",
-]
-
-[[package]]
-name = "jcode-tui-session-picker"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "jcode-message-types",
- "jcode-session-types",
- "serde",
-]
-
-[[package]]
-name = "jcode-tui-style"
-version = "0.1.0"
-dependencies = [
- "jcode-logging",
- "ratatui",
-]
-
-[[package]]
-name = "jcode-tui-tool-display"
-version = "0.1.0"
-dependencies = [
- "unicode-width",
-]
-
-[[package]]
-name = "jcode-tui-usage-overlay"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "jcode-usage-types",
- "ratatui",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-tui-visual-debug"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "jcode-logging",
- "ratatui",
- "regex",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jcode-tui-workspace"
-version = "0.1.0"
-dependencies = [
- "ratatui",
-]
-
-[[package]]
-name = "jcode-update-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "jcode-usage-types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "jni"

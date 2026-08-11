@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generate a human-readable release notes body for a jcode release (issue #435).
+# Generate a human-readable release notes body for a arterm release (issue #435).
 #
 # Usage:
 #   scripts/generate_release_notes.sh <tag> [previous-tag]
@@ -33,7 +33,7 @@ repo_slug() {
         echo "${BASH_REMATCH[1]%.git}"
         return
     fi
-    echo "1jehuang/jcode"
+    echo "1jehuang/arterm"
 }
 
 REPO="$(repo_slug)"

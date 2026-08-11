@@ -1,0 +1,9 @@
+[package]
+name = "arterm-tui-style"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+arterm-logging = { path = "../arterm-logging" }
+ratatui = "0.30"

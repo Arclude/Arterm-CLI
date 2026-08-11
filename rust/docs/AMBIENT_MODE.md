@@ -146,7 +146,7 @@ sequenceDiagram
 
 ## Ambient Agent Tools
 
-The ambient agent has access to a subset of jcode tools plus ambient-specific tools.
+The ambient agent has access to a subset of arterm tools plus ambient-specific tools.
 
 ### `end_ambient_cycle` (required)
 
@@ -156,7 +156,7 @@ Every ambient cycle **must** end with this tool call. The system uses the summar
 // Tool: end_ambient_cycle
 {
     "summary": "Merged 3 duplicate memories, pruned 2 stale facts,
-                extracted memories from crashed session jcode-red-fox-1234",
+                extracted memories from crashed session arterm-red-fox-1234",
     "memories_modified": 8,
     "compactions": 2,
     "proactive_work": null,
@@ -252,7 +252,7 @@ If you are not done, continue what you were doing.
 The ambient agent's system prompt is built dynamically each cycle with real data. The prompt gives the agent information to reason with, not rigid instructions for how to think.
 
 ```
-You are the ambient agent for jcode. You operate autonomously without
+You are the ambient agent for arterm. You operate autonomously without
 user prompting. Your job is to maintain and improve the user's
 development environment.
 
@@ -808,7 +808,7 @@ work_branch_prefix = "ambient/"
 ## Storage
 
 ```
-~/.jcode/ambient/
+~/.arterm/ambient/
 ├── state.json              # Current ambient state (status, last run, etc.)
 ├── queue.json              # Scheduled queue (persistent across restarts)
 ├── usage.json              # Usage history for adaptive calculation
@@ -860,7 +860,7 @@ When ambient starts after an unexpected shutdown:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Starting: jcode starts
+    [*] --> Starting: arterm starts
     Starting --> CheckLastRun: ambient enabled?
 
     CheckLastRun --> NormalCycle: last run recent
@@ -897,7 +897,7 @@ First time ambient runs, there's no usage history, no patterns, no feedback memo
 Some projects may need different ambient behavior (e.g. sensitive work projects, personal repos with different preferences):
 
 ```toml
-# In project-level .jcode/config.toml
+# In project-level .arterm/config.toml
 [ambient]
 # Disable ambient entirely for this project
 enabled = false

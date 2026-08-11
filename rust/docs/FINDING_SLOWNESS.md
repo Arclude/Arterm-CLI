@@ -11,7 +11,7 @@ elsewhere.
 
 ## The lever: a pure render function over an enumerable state space
 
-`jcode-desktop2`'s `build_scene` is a pure function of `Model`. `states::NODES`
+`arterm-desktop2`'s `build_scene` is a pure function of `Model`. `states::NODES`
 already enumerates the app's visual states, because the same list drives
 offscreen capture for visual review.
 
@@ -20,8 +20,8 @@ in a running window. It is a function you can *evaluate*, over a known space,
 with no window, no compositor, no GPU, and no clock:
 
 ```
-jcode-desktop2 --profile-states            # ranked table
-jcode-desktop2 --profile-states 2000       # with a custom warm budget, in us
+arterm-desktop2 --profile-states            # ranked table
+arterm-desktop2 --profile-states 2000       # with a custom warm budget, in us
 ```
 
 The command exits non-zero only for problems that are real regardless of the
@@ -31,7 +31,7 @@ wall clock, so an unoptimised build or a machine busy compiling something else
 will flag healthy states, and a tool that cries wolf gets ignored. When rows
 say SLOW but relayout is `0/n`, read the relayout column and move on.
 
-The measurement lives in `crates/jcode-desktop2/src/profile.rs`, and runs as a
+The measurement lives in `crates/arterm-desktop2/src/profile.rs`, and runs as a
 gate in `scripts/check_guardrails.sh` and in CI.
 
 ## Measure work, not just time
@@ -83,7 +83,7 @@ to catch and watch it fail.
 For desktop2 that is a one-line change: make the cache always miss.
 
 ```rust
-// crates/jcode-desktop2/src/paint.rs, in TranscriptCache::lay_out
+// crates/arterm-desktop2/src/paint.rs, in TranscriptCache::lay_out
 let reusable = false && self.keys.get(index).is_some_and(...);
 ```
 
@@ -102,7 +102,7 @@ The pattern generalizes to any renderer with these two properties:
 If both hold, add a sweep, add heavy nodes, gate on a work counter rather than
 only on time, and prove it by breaking something.
 
-The jcode TUI satisfies both (it has headless golden-render tests and mature
+The arterm TUI satisfies both (it has headless golden-render tests and mature
 render caches in `ui_messages_cache.rs`), so the same harness would transfer.
 It has not been done, because the TUI's caches are not currently carrying this
 class of bug; the note is here so the option is on the shelf rather than

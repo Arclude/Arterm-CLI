@@ -2,16 +2,16 @@
 
 Run:  python3 scripts/fuzz/niri_insert_point_fuzz.py <seed> <count>
 
-Emits niri-valid configs to ~/.jcode/scratch/fuzz719/valid_inputs.json. Feed
+Emits niri-valid configs to ~/.arterm/scratch/fuzz719/valid_inputs.json. Feed
 that to the committed corpus in
-crates/jcode-setup-hints/src/linux_niri_fuzz_corpus.txt to widen coverage.
+crates/arterm-setup-hints/src/linux_niri_fuzz_corpus.txt to widen coverage.
 
-Differential fuzz: does jcode's insert-point scan agree with real niri?
+Differential fuzz: does arterm's insert-point scan agree with real niri?
 
 Generates random-but-valid niri configs from KDL constructs that stress the
 brace-depth scanner (block comments, line comments, strings, raw strings,
 nested nodes), asks real `niri validate` whether the ORIGINAL is valid, then
-asks it again after jcode splices its managed block in.
+asks it again after arterm splices its managed block in.
 
 Any config that niri accepts before but rejects after is a bug in the scan.
 This replaces "test the cases I thought of" with "let niri be the oracle".
@@ -26,7 +26,7 @@ OPEN, CLOSE, NL, Q, HASH, BS = chr(123), chr(125), chr(10), chr(34), chr(35), ch
 BC_O, BC_C = '/' + '*', '*' + '/'
 LC = '/' + '/'
 
-WORK = pathlib.Path.home() / '.jcode' / 'scratch' / 'fuzz719'
+WORK = pathlib.Path.home() / '.arterm' / 'scratch' / 'fuzz719'
 WORK.mkdir(parents=True, exist_ok=True)
 
 

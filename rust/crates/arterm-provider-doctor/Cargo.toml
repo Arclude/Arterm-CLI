@@ -1,0 +1,42 @@
+[package]
+name = "arterm-provider-doctor"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Provider diagnostics that sit downstream of arterm-base: the strict
+# `arterm provider-doctor` end-to-end runner (provider_e2e), the live provider
+# probes it drives, and the auth-lifecycle contract driver. Split out of
+# arterm-base so edits to the doctor cluster no longer rebuild the
+# base -> app-core -> tui spine, and base compiles faster with lower peak
+# memory.
+
+[lib]
+name = "arterm_provider_doctor"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+
+# default-features = false: the doctor only needs base's always-on surface
+# (auth, provider runtimes, provider_catalog, live_tests). Feature unification
+# in the root binary re-enables embeddings/bedrock there.
+arterm-base = { path = "../arterm-base", default-features = false }
+arterm-provider-gemini-runtime = { path = "../arterm-provider-gemini-runtime" }
+arterm-provider-anthropic-runtime = { path = "../arterm-provider-anthropic-runtime" }
+arterm-provider-openai-runtime = { path = "../arterm-provider-openai-runtime" }
+arterm-provider-openrouter-runtime = { path = "../arterm-provider-openrouter-runtime" }
+arterm-provider-cursor-runtime = { path = "../arterm-provider-cursor-runtime" }
+arterm-provider-antigravity-runtime = { path = "../arterm-provider-antigravity-runtime" }
+arterm-provider-copilot-runtime = { path = "../arterm-provider-copilot-runtime" }
+
+[dev-dependencies]
+# The auth-lifecycle driver tests run inside arterm-base's auth test sandbox.
+arterm-base = { path = "../arterm-base", default-features = false, features = ["test-support"] }
+arterm-provider-metadata = { path = "../arterm-provider-metadata" }
+tokio = { version = "1", features = ["macros", "rt"] }

@@ -3,20 +3,20 @@
  *
  * `launch()` promises an instance that cannot see the user's work. That is a
  * property of the bridge's session-record lookups, not of the SDK, and it was
- * broken: `peek_session` read `~/.jcode/sessions` directly, so an "isolated"
- * instance returned the real transcripts of the jcode the user runs
+ * broken: `peek_session` read `~/.arterm/sessions` directly, so an "isolated"
+ * instance returned the real transcripts of the arterm the user runs
  * interactively.
  *
- * Usage: node test/live-isolation.mjs [path-to-jcode-binary]
+ * Usage: node test/live-isolation.mjs [path-to-arterm-binary]
  */
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { JcodeClient, userJcodeHome } from "../dist/index.js";
+import { ArtermClient, userArtermHome } from "../dist/index.js";
 
-const binary = process.argv[2] ?? "jcode";
+const binary = process.argv[2] ?? "arterm";
 const failures = [];
 async function step(name, fn) {
   try {
@@ -28,14 +28,14 @@ async function step(name, fn) {
   }
 }
 
-const client = await JcodeClient.launch({
+const client = await ArtermClient.launch({
   binary,
   workingDir: process.cwd(),
   startupTimeoutMs: 60_000,
 });
 
 await step("an instance cannot read the user's session transcripts", async () => {
-  const dir = path.join(userJcodeHome(), "sessions");
+  const dir = path.join(userArtermHome(), "sessions");
   if (!fs.existsSync(dir)) {
     console.log("     (no user sessions on this machine; skipping)");
     return;

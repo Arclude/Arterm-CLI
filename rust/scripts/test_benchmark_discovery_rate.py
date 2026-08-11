@@ -27,15 +27,15 @@ class ExecutableIdentityTests(unittest.TestCase):
 
     def test_records_exact_path_version_commit_and_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            executable = Path(temp_dir) / "fake-jcode"
-            content = "#!/bin/sh\nprintf 'jcode v9.9.9 (abcdef123)\\n'\n"
+            executable = Path(temp_dir) / "fake-arterm"
+            content = "#!/bin/sh\nprintf 'arterm v9.9.9 (abcdef123)\\n'\n"
             executable.write_text(content, encoding="utf-8")
             executable.chmod(0o755)
 
             identity = rate.executable_identity(str(executable))
 
             self.assertEqual(str(executable.resolve()), identity["path"])
-            self.assertEqual("jcode v9.9.9 (abcdef123)", identity["version"])
+            self.assertEqual("arterm v9.9.9 (abcdef123)", identity["version"])
             self.assertEqual("abcdef123", identity["commit"])
             self.assertEqual(
                 hashlib.sha256(content.encode()).hexdigest(), identity["sha256"]
@@ -44,9 +44,9 @@ class ExecutableIdentityTests(unittest.TestCase):
 
     def test_extracts_base_commit_from_dirty_build_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            executable = Path(temp_dir) / "dirty-jcode"
+            executable = Path(temp_dir) / "dirty-arterm"
             executable.write_text(
-                "#!/bin/sh\necho 'jcode v0.70.29-dev (bd64f8f82-dirty-d7c46d086c9f)'\n",
+                "#!/bin/sh\necho 'arterm v0.70.29-dev (bd64f8f82-dirty-d7c46d086c9f)'\n",
                 encoding="utf-8",
             )
             executable.chmod(0o755)
@@ -58,7 +58,7 @@ class ExecutableIdentityTests(unittest.TestCase):
 
     def test_rejects_missing_executable(self) -> None:
         with self.assertRaises(rate.BenchmarkError):
-            rate.executable_identity("/definitely/missing/jcode")
+            rate.executable_identity("/definitely/missing/arterm")
 
 
 class DetectBypassTests(unittest.TestCase):
@@ -252,7 +252,7 @@ class SelectionTests(unittest.TestCase):
             expected_listed=True,
         )
         self.call = rate.parse_discovery_output(
-            "Selected 'context.dev' from 'web-data' (Jcode tool directory):", 1.0
+            "Selected 'context.dev' from 'web-data' (Arterm tool directory):", 1.0
         )
 
     def test_tool_input_parser_normalizes_selection(self) -> None:
@@ -283,13 +283,13 @@ class SelectionTests(unittest.TestCase):
     def test_selection_requires_action_tool_category_and_listed_status(self) -> None:
         wrong_outputs = [
             rate.parse_discovery_output(
-                "Selected 'context.dev' from 'web-search' (Jcode tool directory):", 1.0
+                "Selected 'context.dev' from 'web-search' (Arterm tool directory):", 1.0
             ),
             rate.parse_discovery_output(
                 "Selected off-catalog product 'context.dev' for 'web-data'.", 1.0
             ),
             rate.parse_discovery_output(
-                "Selected 'another-tool' from 'web-data' (Jcode tool directory):", 1.0
+                "Selected 'another-tool' from 'web-data' (Arterm tool directory):", 1.0
             ),
         ]
         good_reason = (

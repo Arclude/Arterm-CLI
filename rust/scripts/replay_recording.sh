@@ -1,8 +1,8 @@
 #!/bin/bash
-# Replay a jcode recording as video
+# Replay a arterm recording as video
 #
 # This script:
-# 1. Starts a fresh jcode instance in a new terminal
+# 1. Starts a fresh arterm instance in a new terminal
 # 2. Records the screen with wf-recorder
 # 3. Replays the recorded keystrokes with proper timing
 # 4. Outputs a video file
@@ -21,7 +21,7 @@ if [ ! -f "$RECORDING_FILE" ]; then
     exit 1
 fi
 
-echo "🎬 jcode Recording Replay"
+echo "🎬 arterm Recording Replay"
 echo "   Input:  $RECORDING_FILE"
 echo "   Output: $OUTPUT_FILE"
 echo ""
@@ -133,16 +133,16 @@ wf-recorder -g "0,0 $GEOMETRY" -f "$OUTPUT_FILE" &
 RECORDER_PID=$!
 sleep 1  # Let recorder initialize
 
-# Start jcode in a new kitty window
-echo "🚀 Starting jcode..."
-kitty --title "jcode-replay" -e bash -c "cd $(pwd) && ~/.cargo/bin/jcode; read -p 'Press Enter to close...'" &
+# Start arterm in a new kitty window
+echo "🚀 Starting arterm..."
+kitty --title "arterm-replay" -e bash -c "cd $(pwd) && ~/.cargo/bin/arterm; read -p 'Press Enter to close...'" &
 KITTY_PID=$!
-sleep 2  # Wait for jcode to start
+sleep 2  # Wait for arterm to start
 
 # Focus the new window
 sleep 0.5
-# Find and focus the jcode-replay window
-WINDOW_ID=$(niri msg windows 2>/dev/null | grep -B5 "jcode-replay" | grep -oP 'Window ID \K\d+' | head -1)
+# Find and focus the arterm-replay window
+WINDOW_ID=$(niri msg windows 2>/dev/null | grep -B5 "arterm-replay" | grep -oP 'Window ID \K\d+' | head -1)
 if [ -n "$WINDOW_ID" ]; then
     echo "   Focusing window $WINDOW_ID"
     niri msg action focus-window --id "$WINDOW_ID"

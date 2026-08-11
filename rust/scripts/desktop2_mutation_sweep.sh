@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mutation sweep for jcode-desktop2.
+# Mutation sweep for arterm-desktop2.
 #
 # A test suite is only worth its claims if it fails when the code is wrong.
 # This applies a list of targeted mutations (each a plausible, realistic bug),
@@ -11,7 +11,7 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
-crate=crates/jcode-desktop2
+crate=crates/arterm-desktop2
 backup="$(mktemp -d)"
 cp -r "$crate/src" "$backup/src"
 restore() { rm -rf "$crate/src"; cp -r "$backup/src" "$crate/src"; }
@@ -44,9 +44,9 @@ PYEOF
     fi
 
     local failures=0
-    if cargo test --profile selfdev -p jcode-desktop2 --quiet >/dev/null 2>&1; then
+    if cargo test --profile selfdev -p arterm-desktop2 --quiet >/dev/null 2>&1; then
         if [ "$gpu" -eq 1 ]; then
-            if ! cargo test --profile selfdev -p jcode-desktop2 --quiet -- --ignored \
+            if ! cargo test --profile selfdev -p arterm-desktop2 --quiet -- --ignored \
                 >/dev/null 2>&1; then
                 failures=1
             fi

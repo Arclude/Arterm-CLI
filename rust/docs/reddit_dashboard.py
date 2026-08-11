@@ -80,9 +80,9 @@ day_data = {
 
 # ======================== FIGURE ========================
 fig = plt.figure(figsize=(24, 36))
-fig.suptitle('jcode Reddit Strategy Dashboard', fontsize=28, fontweight='bold',
+fig.suptitle('arterm Reddit Strategy Dashboard', fontsize=28, fontweight='bold',
              color='#58a6ff', y=0.985)
-fig.text(0.5, 0.979, 'Complete analysis of 15 subreddits for promoting jcode (Rust AI coding agent CLI)  |  All times Pacific',
+fig.text(0.5, 0.979, 'Complete analysis of 15 subreddits for promoting arterm (Rust AI coding agent CLI)  |  All times Pacific',
          ha='center', fontsize=13, color='#8b949e')
 
 gs = GridSpec(6, 2, figure=fig, hspace=0.32, wspace=0.28,
@@ -305,6 +305,6 @@ for key, cell in table.get_celld().items():
 
 ax7.set_title('COMPLETE POSTING STRATEGY', fontsize=18, fontweight='bold', pad=20, color='#58a6ff')
 
-plt.savefig('/tmp/jcode_reddit_dashboard.png', dpi=150, bbox_inches='tight',
+plt.savefig('/tmp/arterm_reddit_dashboard.png', dpi=150, bbox_inches='tight',
             facecolor='#0d1117', edgecolor='none')
-print("Saved to /tmp/jcode_reddit_dashboard.png")
+print("Saved to /tmp/arterm_reddit_dashboard.png")

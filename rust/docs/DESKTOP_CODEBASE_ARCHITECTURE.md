@@ -1,11 +1,11 @@
 # Desktop Codebase Architecture from the Existing TUI
 
-> Historical: this document describes the removed legacy `crates/jcode-desktop` app. The current desktop app is `crates/jcode-desktop2`.
+> Historical: this document describes the removed legacy `crates/arterm-desktop` app. The current desktop app is `crates/arterm-desktop2`.
 
 Status: Proposed
 Updated: 2026-04-25
 
-This document translates the current Jcode TUI architecture into a concrete codebase plan for a future custom desktop app.
+This document translates the current Arterm TUI architecture into a concrete codebase plan for a future custom desktop app.
 
 The desktop app is expected to have roughly the same product capabilities as the TUI, but it should not be a direct port of the TUI implementation. The TUI is terminal/cell-oriented and has accumulated a large amount of terminal-specific rendering, input, layout, scrolling, and cache logic. The desktop app should reuse the runtime/protocol/session concepts and some presentation models, but it should have a separate custom UI and rendering architecture.
 
@@ -85,7 +85,7 @@ The desktop should not import `ratatui::Line`, terminal-width wrapping, global r
 The desktop should instead use this split:
 
 ```text
-Jcode server/runtime/protocol
+Arterm server/runtime/protocol
   -> client-core reducer and view model
     -> desktop product views
       -> custom UI tree/layout
@@ -155,30 +155,30 @@ The exact crate names can change, but the dependency direction should not.
 
 ```text
 crates/
-  jcode-protocol/             # eventually extracted from src/protocol.rs
-  jcode-client-core/          # surface-independent client state/reducers/view models
-  jcode-desktop-ui/           # custom UI tree, layout, input routing, style tokens
-  jcode-desktop-renderer/     # wgpu renderer, display list, glyph/image atlases
-  jcode-desktop-platform/     # winit/AppKit/Linux shell abstraction, menus, clipboard
-  jcode-desktop/              # product app: windows, panels, protocol client, composition
+  arterm-protocol/             # eventually extracted from src/protocol.rs
+  arterm-client-core/          # surface-independent client state/reducers/view models
+  arterm-desktop-ui/           # custom UI tree, layout, input routing, style tokens
+  arterm-desktop-renderer/     # wgpu renderer, display list, glyph/image atlases
+  arterm-desktop-platform/     # winit/AppKit/Linux shell abstraction, menus, clipboard
+  arterm-desktop/              # product app: windows, panels, protocol client, composition
 ```
 
-Initial implementation may keep some of these as modules inside `crates/jcode-desktop` to reduce early friction, but the boundaries should be designed as if they were separate crates.
+Initial implementation may keep some of these as modules inside `crates/arterm-desktop` to reduce early friction, but the boundaries should be designed as if they were separate crates.
 
 ## Dependency direction
 
 Allowed dependency flow:
 
 ```text
-jcode-desktop
-  -> jcode-desktop-platform
-  -> jcode-desktop-renderer
-  -> jcode-desktop-ui
-  -> jcode-client-core
-  -> jcode-protocol
+arterm-desktop
+  -> arterm-desktop-platform
+  -> arterm-desktop-renderer
+  -> arterm-desktop-ui
+  -> arterm-client-core
+  -> arterm-protocol
 ```
 
-`jcode-client-core` must not depend on:
+`arterm-client-core` must not depend on:
 
 - `wgpu`
 - `winit`
@@ -188,18 +188,18 @@ jcode-desktop
 - `crossterm`
 - terminal markdown rendering
 
-`jcode-desktop-ui` should not depend on the Jcode server runtime. It can depend on client-core view models and generic UI types.
+`arterm-desktop-ui` should not depend on the Arterm server runtime. It can depend on client-core view models and generic UI types.
 
-`jcode-desktop-renderer` should not know what a Jcode session is. It renders display lists, text runs, images, clips, and primitives.
+`arterm-desktop-renderer` should not know what a Arterm session is. It renders display lists, text runs, images, clips, and primitives.
 
-## `jcode-protocol`
+## `arterm-protocol`
 
 The existing `src/protocol.rs` is already the natural starting point.
 
 Long-term, extract it into a crate so both TUI and desktop consume the same wire types:
 
 ```text
-crates/jcode-protocol/src/lib.rs
+crates/arterm-protocol/src/lib.rs
   Request
   ServerEvent
   HistoryMessage
@@ -223,7 +223,7 @@ Desktop-specific protocol needs may include:
 
 Avoid making a second unrelated desktop protocol unless the existing protocol becomes a blocker.
 
-## `jcode-client-core`
+## `arterm-client-core`
 
 This is the most important shared layer.
 
@@ -232,7 +232,7 @@ It should own behavior and state that are independent of the terminal and indepe
 Suggested modules:
 
 ```text
-jcode-client-core/
+arterm-client-core/
   src/
     lib.rs
     app_model.rs
@@ -406,12 +406,12 @@ Do not use terminal wrapped lines as the desktop source of truth.
 
 ## Desktop product module layout
 
-`jcode-desktop` should be product composition, not renderer internals.
+`arterm-desktop` should be product composition, not renderer internals.
 
 Suggested modules:
 
 ```text
-crates/jcode-desktop/src/
+crates/arterm-desktop/src/
   main.rs
   app.rs                    # top-level DesktopApp orchestration
   config.rs
@@ -442,10 +442,10 @@ crates/jcode-desktop/src/
 
 ## Custom UI crate layout
 
-`jcode-desktop-ui` is the framework-like internal layer, but it is product-owned and small.
+`arterm-desktop-ui` is the framework-like internal layer, but it is product-owned and small.
 
 ```text
-crates/jcode-desktop-ui/src/
+crates/arterm-desktop-ui/src/
   lib.rs
   id.rs
   geometry.rs
@@ -497,10 +497,10 @@ But product views should mostly build specialized surfaces rather than generic w
 
 ## Renderer crate layout
 
-`jcode-desktop-renderer` should know nothing about Jcode.
+`arterm-desktop-renderer` should know nothing about Arterm.
 
 ```text
-crates/jcode-desktop-renderer/src/
+crates/arterm-desktop-renderer/src/
   lib.rs
   gpu.rs
   surface.rs
@@ -544,7 +544,7 @@ The renderer should be testable with deterministic display lists and should supp
 Start with `winit`, but avoid spreading `winit` types through the product.
 
 ```text
-crates/jcode-desktop-platform/src/
+crates/arterm-desktop-platform/src/
   lib.rs
   event.rs
   window.rs
@@ -632,7 +632,7 @@ Avoid depending on `src/tui`.
 
 Use the existing server protocol:
 
-- connect to `jcode serve`
+- connect to `arterm serve`
 - subscribe/resume session
 - receive `ServerEvent`
 - send `Request::Message`, `Request::Cancel`, etc.
@@ -641,7 +641,7 @@ Implement a desktop protocol reducer that mirrors the important behavior in `src
 
 ### Phase 3: extract client-core
 
-Once the desktop reducer shape is clear, extract shared pieces from TUI and desktop into `jcode-client-core`:
+Once the desktop reducer shape is clear, extract shared pieces from TUI and desktop into `arterm-client-core`:
 
 - transcript block model
 - server event reducer
@@ -651,7 +651,7 @@ Once the desktop reducer shape is clear, extract shared pieces from TUI and desk
 - session list model
 - permission model
 
-At that point the TUI can gradually become another presentation of `jcode-client-core`, but it does not have to be converted all at once.
+At that point the TUI can gradually become another presentation of `arterm-client-core`, but it does not have to be converted all at once.
 
 ### Phase 4: feature parity
 
@@ -674,7 +674,7 @@ The TUI still supports local mode and remote/server mode. The desktop should sta
 
 Recommended desktop rule:
 
-> Desktop always connects to a local Jcode server/daemon. It does not embed the agent runtime in-process.
+> Desktop always connects to a local Arterm server/daemon. It does not embed the agent runtime in-process.
 
 Reasons:
 
@@ -764,14 +764,14 @@ Avoid depending on GPU tests for basic correctness. Most UI behavior should be v
 Start by adding desktop code without touching the TUI too much:
 
 ```text
-crates/jcode-desktop-ui       # pure-ish UI/layout model
-crates/jcode-desktop-renderer # wgpu display-list renderer
-crates/jcode-desktop          # fake-data app shell
+crates/arterm-desktop-ui       # pure-ish UI/layout model
+crates/arterm-desktop-renderer # wgpu display-list renderer
+crates/arterm-desktop          # fake-data app shell
 ```
 
 Then connect to the server protocol.
 
-Only after the desktop reducer/view model shape is proven should shared `jcode-client-core` extraction begin. This avoids prematurely extracting the wrong abstraction from the current TUI.
+Only after the desktop reducer/view model shape is proven should shared `arterm-client-core` extraction begin. This avoids prematurely extracting the wrong abstraction from the current TUI.
 
 ## Summary decision
 

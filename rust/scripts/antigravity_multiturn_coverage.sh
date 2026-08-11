@@ -21,7 +21,7 @@
 # Exit status is non-zero when any model fails, so this is usable as a gate.
 set -uo pipefail
 
-JC=${JC:-./target/selfdev/jcode}
+JC=${JC:-./target/selfdev/arterm}
 TURN_TIMEOUT=${TURN_TIMEOUT:-120}
 MODELS_OVERRIDE=${MODELS:-}
 
@@ -100,7 +100,7 @@ total=${#MODELS[@]}
 i=0
 for m in "${MODELS[@]}"; do
   i=$((i + 1))
-  echo "JCODE_PROGRESS {\"current\":$i,\"total\":$total,\"unit\":\"models\",\"message\":\"$m\"}" >&2
+  echo "ARTERM_PROGRESS {\"current\":$i,\"total\":$total,\"unit\":\"models\",\"message\":\"$m\"}" >&2
 
   t1=- t2=- t3=- t4=- note="" session=""
 

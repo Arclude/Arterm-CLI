@@ -1,43 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Publishable Terminal-Bench 2.1 campaign for jcode + Opus 4.8 (native Anthropic
+# Publishable Terminal-Bench 2.1 campaign for arterm + Opus 4.8 (native Anthropic
 # API). Runs with effectively-uncapped agent execution time so no task is lost
 # to an agent timeout, while keeping verifier/build timeouts at their default
 # (deterministic grading). Captures full provenance for publication.
 #
 # Env knobs:
-#   JCODE_TB_JOBS_DIR   output dir (default /tmp/jcode-tb21-pub)
-#   JCODE_TB_K          attempts per task (default 1)
-#   JCODE_TB_NCONC      concurrent containers (default 3)
-#   JCODE_TB_AGENT_MULT agent-timeout multiplier (default 1000 ~ uncapped)
+#   ARTERM_TB_JOBS_DIR   output dir (default /tmp/arterm-tb21-pub)
+#   ARTERM_TB_K          attempts per task (default 1)
+#   ARTERM_TB_NCONC      concurrent containers (default 3)
+#   ARTERM_TB_AGENT_MULT agent-timeout multiplier (default 1000 ~ uncapped)
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 
-JOBS_DIR=${JCODE_TB_JOBS_DIR:-/tmp/jcode-tb21-pub}
-K=${JCODE_TB_K:-1}
-NCONC=${JCODE_TB_NCONC:-3}
-AGENT_MULT=${JCODE_TB_AGENT_MULT:-1000}
-JOB_NAME=${JCODE_TB_JOB_NAME:-tb21-opus48-uncapped-k${K}}
-TB_PATH=${JCODE_TB_PATH:-/tmp/terminal-bench-2.1}
-MODEL=${JCODE_TB_MODEL:-anthropic-api/claude-opus-4-8}
+JOBS_DIR=${ARTERM_TB_JOBS_DIR:-/tmp/arterm-tb21-pub}
+K=${ARTERM_TB_K:-1}
+NCONC=${ARTERM_TB_NCONC:-3}
+AGENT_MULT=${ARTERM_TB_AGENT_MULT:-1000}
+JOB_NAME=${ARTERM_TB_JOB_NAME:-tb21-opus48-uncapped-k${K}}
+TB_PATH=${ARTERM_TB_PATH:-/tmp/terminal-bench-2.1}
+MODEL=${ARTERM_TB_MODEL:-anthropic-api/claude-opus-4-8}
 
 mkdir -p "$JOBS_DIR"
 
 # Provenance manifest.
 {
-  echo "# jcode Terminal-Bench 2.1 publishable run"
+  echo "# arterm Terminal-Bench 2.1 publishable run"
   echo "timestamp_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "git_commit: $(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "git_describe: $(git -C "$REPO_ROOT" describe --tags --always --dirty 2>/dev/null || echo unknown)"
-  echo "jcode_binary: ${JCODE_HARBOR_BINARY:-/tmp/jcode-compat-dist/jcode-linux-x86_64.bin}"
-  echo "jcode_version: $(/tmp/jcode-compat-dist/jcode-linux-x86_64.bin --no-update --no-selfdev version 2>/dev/null | head -1 || echo unknown)"
+  echo "arterm_binary: ${ARTERM_HARBOR_BINARY:-/tmp/arterm-compat-dist/arterm-linux-x86_64.bin}"
+  echo "arterm_version: $(/tmp/arterm-compat-dist/arterm-linux-x86_64.bin --no-update --no-selfdev version 2>/dev/null | head -1 || echo unknown)"
   echo "harbor_version: $(harbor --version 2>/dev/null | head -1 || echo unknown)"
   echo "dataset: terminal-bench/terminal-bench-2-1 (local: $TB_PATH)"
   echo "n_tasks: $(ls "$TB_PATH" | wc -l)"
   echo "model: $MODEL"
-  echo "reasoning_effort: ${JCODE_ANTHROPIC_REASONING_EFFORT:-high}"
+  echo "reasoning_effort: ${ARTERM_ANTHROPIC_REASONING_EFFORT:-high}"
   echo "k_attempts: $K"
   echo "n_concurrent: $NCONC"
   echo "agent_timeout_multiplier: $AGENT_MULT"

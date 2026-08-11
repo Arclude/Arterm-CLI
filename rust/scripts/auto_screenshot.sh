@@ -1,5 +1,5 @@
 #!/bin/bash
-# Autonomous screenshot capture for jcode documentation
+# Autonomous screenshot capture for arterm documentation
 # Uses niri window management + screenshot capabilities
 #
 # Usage: ./auto_screenshot.sh <window_id> <output_name> [setup_command]

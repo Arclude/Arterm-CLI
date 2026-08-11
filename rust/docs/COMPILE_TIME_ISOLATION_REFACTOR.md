@@ -14,29 +14,29 @@ The workspace already has many crates, but the critical path is dominated by a s
 
 ```mermaid
 graph LR
-    base["jcode-base\n~100k+ LOC"] --> appcore["jcode-app-core\n~100k LOC"]
-    appcore --> tui["jcode-tui\n~100k+ LOC"]
-    tui --> rootlib["jcode lib"]
-    rootlib --> bin["jcode bin"]
+    base["arterm-base\n~100k+ LOC"] --> appcore["arterm-app-core\n~100k LOC"]
+    appcore --> tui["arterm-tui\n~100k+ LOC"]
+    tui --> rootlib["arterm lib"]
+    rootlib --> bin["arterm bin"]
     small["50+ smaller crates"] -. mostly parallel .-> base
 ```
 
 From the last available Cargo timing report parsed with `scripts/compile_time_probe.sh --skip-build`:
 
 - Cargo timing wall: **16.00s**
-- Known jcode serial stack span: **14.72s**
-- Known jcode serial stack summed unit time: **17.36s**
-- Known jcode serial stack frontend time: **11.99s**
+- Known arterm serial stack span: **14.72s**
+- Known arterm serial stack summed unit time: **17.36s**
+- Known arterm serial stack frontend time: **11.99s**
 
 Slowest units from that timing report:
 
 | Unit | Total | Frontend | Codegen |
 |---|---:|---:|---:|
-| `jcode-app-core` | 4.73s | 3.82s | 0.91s |
-| `jcode-base` | 4.34s | 3.63s | 0.71s |
-| `jcode-tui` | 4.18s | 3.14s | 1.04s |
-| `jcode` bin | 2.34s | n/a | n/a |
-| `jcode` lib | 1.77s | 1.40s | 0.37s |
+| `arterm-app-core` | 4.73s | 3.82s | 0.91s |
+| `arterm-base` | 4.34s | 3.63s | 0.71s |
+| `arterm-tui` | 4.18s | 3.14s | 1.04s |
+| `arterm` bin | 2.34s | n/a | n/a |
+| `arterm` lib | 1.77s | 1.40s | 0.37s |
 
 This means the main bottleneck is rustc front-end serialization in a few mega-crates, not linker choice or third-party cold compile.
 
@@ -46,15 +46,15 @@ Use the focused timing probe for each phase:
 
 ```bash
 scripts/compile_time_probe.sh --json target/compile-time-probe.json
-scripts/compile_time_probe.sh --touch crates/jcode-tui/src/tui/app/input.rs
-scripts/compile_time_probe.sh --touch crates/jcode-app-core/src/server.rs
-scripts/compile_time_probe.sh --touch crates/jcode-base/src/provider/mod.rs
+scripts/compile_time_probe.sh --touch crates/arterm-tui/src/tui/app/input.rs
+scripts/compile_time_probe.sh --touch crates/arterm-app-core/src/server.rs
+scripts/compile_time_probe.sh --touch crates/arterm-base/src/provider/mod.rs
 ```
 
 For broader repeated measurements, continue using:
 
 ```bash
-scripts/bench_compile.sh selfdev-jcode --runs 3 --touch <path> --json
+scripts/bench_compile.sh selfdev-arterm --runs 3 --touch <path> --json
 scripts/bench_selfdev_checkpoints.sh --skip-cold --touch <path> --runs 1
 ```
 
@@ -62,7 +62,7 @@ Track at least:
 
 1. Full-feature selfdev build wall time.
 2. Cargo timing wall time.
-3. `jcode-base -> jcode-app-core -> jcode-tui -> jcode lib -> jcode bin` stack span.
+3. `arterm-base -> arterm-app-core -> arterm-tui -> arterm lib -> arterm bin` stack span.
 4. Sum of frontend time in the serial stack.
 5. Incremental rebuild after touching representative high-churn files.
 6. Static report drift from `scripts/compile_isolation_report.py`: LOC, inline tests, `async_trait`, and target-state dependency advisories.
@@ -71,27 +71,27 @@ Track at least:
 
 ```mermaid
 graph TD
-    bin["jcode binary\ntiny composition root"] --> cli["jcode-cli"]
-    bin --> tui["jcode-tui"]
-    bin --> server["jcode-server"]
+    bin["arterm binary\ntiny composition root"] --> cli["arterm-cli"]
+    bin --> tui["arterm-tui"]
+    bin --> server["arterm-server"]
     bin --> providers["provider leaf crates"]
     bin --> tools["tool leaf crates"]
 
-    cli --> api["jcode-client-api / app-api"]
+    cli --> api["arterm-client-api / app-api"]
     tui --> api
     server --> api
 
     api --> protocol["protocol + view models"]
     protocol --> types["small stable type crates"]
 
-    server --> agent["jcode-agent"]
-    server --> registry["jcode-tool-registry"]
-    server --> auth["jcode-auth-core"]
-    server --> session["jcode-session-core"]
-    server --> memory["jcode-memory-core"]
+    server --> agent["arterm-agent"]
+    server --> registry["arterm-tool-registry"]
+    server --> auth["arterm-auth-core"]
+    server --> session["arterm-session-core"]
+    server --> memory["arterm-memory-core"]
 
-    providers --> provider_core["jcode-provider-core"]
-    tools --> tool_core["jcode-tool-core"]
+    providers --> provider_core["arterm-provider-core"]
+    tools --> tool_core["arterm-tool-core"]
 ```
 
 Rules:
@@ -126,34 +126,34 @@ Split the three long-pole crates into sibling domain crates. Priority is widenin
 
 Likely first splits:
 
-- From `jcode-base`:
-  - `jcode-auth-core`
-  - `jcode-session-core`
-  - `jcode-memory-core`
+- From `arterm-base`:
+  - `arterm-auth-core`
+  - `arterm-session-core`
+  - `arterm-memory-core`
   - provider implementation crates, especially Bedrock/AWS as a leaf
-- From `jcode-app-core`:
-  - `jcode-server`
-  - `jcode-agent`
-  - `jcode-tool-registry`
+- From `arterm-app-core`:
+  - `arterm-server`
+  - `arterm-agent`
+  - `arterm-tool-registry`
   - service crates for background/swarm/update/selfdev as needed
-- From `jcode-tui`:
-  - `jcode-client-api` / view-model boundary first
+- From `arterm-tui`:
+  - `arterm-client-api` / view-model boundary first
   - then move reusable client-side state logic out of the terminal rendering crate only when it creates a real parallel unit
 
 Success criteria:
 
 - Touching common TUI code no longer recompiles app-core/provider/server implementation crates.
 - Touching a provider implementation no longer recompiles TUI or broad base code.
-- Cargo timing shows multiple medium-sized Jcode crates running in parallel instead of one 4-deep mega-crate ladder.
+- Cargo timing shows multiple medium-sized Arterm crates running in parallel instead of one 4-deep mega-crate ladder.
 
 ### Phase 2: kill glob re-export ladders
 
 Current compatibility layering preserves the old monolith shape:
 
 ```rust
-pub use jcode_base::*;
-pub use jcode_app_core::*;
-pub use jcode_tui::*;
+pub use arterm_base::*;
+pub use arterm_app_core::*;
+pub use arterm_tui::*;
 ```
 
 Migration approach:
@@ -210,7 +210,7 @@ Before committing a phase:
 scripts/compile_time_probe.sh --skip-build
 scripts/compile_isolation_report.py
 scripts/check_dependency_boundaries.py
-cargo check --profile selfdev -p jcode --bin jcode
+cargo check --profile selfdev -p arterm --bin arterm
 ```
 
 For code-moving phases, also run the relevant targeted tests for the moved domain, plus one full selfdev build through the coordinated selfdev path when practical:

@@ -7,7 +7,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-crate=crates/jcode-desktop2
+crate=crates/arterm-desktop2
 status=0
 
 fail() {
@@ -83,11 +83,11 @@ then
 fi
 
 echo "== fast invariants (geometry, typography, theme)"
-cargo test --profile selfdev -p jcode-desktop2 --quiet || status=1
+cargo test --profile selfdev -p arterm-desktop2 --quiet || status=1
 
 if [ "${1:-}" = "--gpu" ]; then
   echo "== pixel-level visual invariants"
-  cargo test --profile selfdev -p jcode-desktop2 --quiet -- --ignored || status=1
+  cargo test --profile selfdev -p arterm-desktop2 --quiet -- --ignored || status=1
 fi
 
 if [ "$status" -eq 0 ]; then

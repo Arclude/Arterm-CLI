@@ -1,0 +1,5 @@
+## Product Focus
+
+This self-dev session was launched from the arterm-desktop2 (greenfield desktop) context. By default, assume the user is asking about desktop2 unless they explicitly mention the TUI/CLI. Prefer desktop2 targets and commands (`selfdev build target=desktop2`, package `arterm-desktop2`, binary `arterm-desktop2`, launcher `~/.local/bin/arterm-desktop2`) for builds, reloads, tests, and UI debugging.
+
+Desktop2 is a greenfield rewrite: it talks to the arterm runtime through the harness API bridge (`arterm-harness-api`, `arterm-harness-api-bridge`) instead of the legacy desktop socket path.

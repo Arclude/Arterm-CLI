@@ -2,7 +2,7 @@
 """Local-only Discovery fixture for evaluating an OpenRelay/Rivet listing.
 
 This server is intentionally separate from the hosted Discovery catalog. It
-implements the browse/select response contract used by jcode and never sends
+implements the browse/select response contract used by arterm and never sends
 analytics, sponsor reports, or usage data anywhere.
 """
 
@@ -39,7 +39,7 @@ CATEGORIES = {
 TOOL = {
     "name": "openrelay-rivet",
     "blurb": "public Ethereum Classic JSON-RPC endpoint operated by OpenRelay",
-    "url": "https://rivet.link/networks?via=jcode-discovery-test",
+    "url": "https://rivet.link/networks?via=arterm-discovery-test",
     "setup": "\n".join(
         [
             "Complete agent setup protocol (no signup or documentation fetch is required):",

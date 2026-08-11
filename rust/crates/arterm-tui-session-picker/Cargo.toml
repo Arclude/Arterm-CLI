@@ -1,0 +1,15 @@
+[package]
+name = "arterm-tui-session-picker"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+arterm-message-types = { path = "../arterm-message-types" }
+arterm-session-types = { path = "../arterm-session-types" }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]

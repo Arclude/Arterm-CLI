@@ -4,19 +4,19 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
-bin=${JCODE_AUTH_MATRIX_BIN:-}
-out_dir=${JCODE_AUTH_MATRIX_OUT:-"$repo_root/target/auth-test-reports"}
-prompt=${JCODE_AUTH_MATRIX_PROMPT:-"Reply with exactly AUTH_TEST_OK and nothing else. Do not call tools."}
-providers=${JCODE_AUTH_MATRIX_PROVIDERS:-"claude copilot openrouter deepseek zai alibaba-coding-plan openai-compatible"}
-mode=${JCODE_AUTH_MATRIX_MODE:-configured}
-keep_going=${JCODE_AUTH_MATRIX_KEEP_GOING:-1}
-per_command_timeout=${JCODE_AUTH_MATRIX_TIMEOUT:-90}
+bin=${ARTERM_AUTH_MATRIX_BIN:-}
+out_dir=${ARTERM_AUTH_MATRIX_OUT:-"$repo_root/target/auth-test-reports"}
+prompt=${ARTERM_AUTH_MATRIX_PROMPT:-"Reply with exactly AUTH_TEST_OK and nothing else. Do not call tools."}
+providers=${ARTERM_AUTH_MATRIX_PROVIDERS:-"claude copilot openrouter deepseek zai alibaba-coding-plan openai-compatible"}
+mode=${ARTERM_AUTH_MATRIX_MODE:-configured}
+keep_going=${ARTERM_AUTH_MATRIX_KEEP_GOING:-1}
+per_command_timeout=${ARTERM_AUTH_MATRIX_TIMEOUT:-90}
 
 usage() {
   cat <<'EOF'
 Usage: scripts/auth_regression_matrix.sh [options]
 
-Runs jcode auth-test across the auth/provider matrix and writes one JSON report per provider.
+Runs arterm auth-test across the auth/provider matrix and writes one JSON report per provider.
 By default it only tests providers that are configured enough for auth-test to run.
 
 Options:
@@ -24,7 +24,7 @@ Options:
   --configured          Test only configured providers (default)
   --provider NAME       Test one provider. Can be repeated.
   --out DIR             Report directory (default: target/auth-test-reports)
-  --bin PATH            jcode binary to run (default: cargo run --bin jcode --)
+  --bin PATH            arterm binary to run (default: cargo run --bin arterm --)
   --login               Run login before validation for each provider
   --no-smoke            Skip runtime model smoke
   --no-tool-smoke       Skip tool-enabled runtime smoke
@@ -34,20 +34,20 @@ Options:
   -h, --help            Show this help
 
 Environment equivalents:
-  JCODE_AUTH_MATRIX_BIN=/path/to/jcode
-  JCODE_AUTH_MATRIX_OUT=target/auth-test-reports
-  JCODE_AUTH_MATRIX_PROVIDERS="claude deepseek zai"
-  JCODE_AUTH_MATRIX_MODE=configured|all
-  JCODE_AUTH_MATRIX_LOGIN=1
-  JCODE_AUTH_MATRIX_NO_SMOKE=1
-  JCODE_AUTH_MATRIX_NO_TOOL_SMOKE=1
-  JCODE_AUTH_MATRIX_KEEP_GOING=0
-  JCODE_AUTH_MATRIX_TIMEOUT=90
+  ARTERM_AUTH_MATRIX_BIN=/path/to/arterm
+  ARTERM_AUTH_MATRIX_OUT=target/auth-test-reports
+  ARTERM_AUTH_MATRIX_PROVIDERS="claude deepseek zai"
+  ARTERM_AUTH_MATRIX_MODE=configured|all
+  ARTERM_AUTH_MATRIX_LOGIN=1
+  ARTERM_AUTH_MATRIX_NO_SMOKE=1
+  ARTERM_AUTH_MATRIX_NO_TOOL_SMOKE=1
+  ARTERM_AUTH_MATRIX_KEEP_GOING=0
+  ARTERM_AUTH_MATRIX_TIMEOUT=90
 
 Examples:
   scripts/auth_regression_matrix.sh --configured --no-smoke
   scripts/auth_regression_matrix.sh --provider deepseek --provider zai
-  JCODE_AUTH_MATRIX_BIN=target/selfdev/jcode scripts/auth_regression_matrix.sh --all
+  ARTERM_AUTH_MATRIX_BIN=target/selfdev/arterm scripts/auth_regression_matrix.sh --all
 EOF
 }
 
@@ -116,13 +116,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "${JCODE_AUTH_MATRIX_LOGIN:-0}" == "1" ]]; then
+if [[ "${ARTERM_AUTH_MATRIX_LOGIN:-0}" == "1" ]]; then
   extra_args+=(--login)
 fi
-if [[ "${JCODE_AUTH_MATRIX_NO_SMOKE:-0}" == "1" ]]; then
+if [[ "${ARTERM_AUTH_MATRIX_NO_SMOKE:-0}" == "1" ]]; then
   extra_args+=(--no-smoke)
 fi
-if [[ "${JCODE_AUTH_MATRIX_NO_TOOL_SMOKE:-0}" == "1" ]]; then
+if [[ "${ARTERM_AUTH_MATRIX_NO_TOOL_SMOKE:-0}" == "1" ]]; then
   extra_args+=(--no-tool-smoke)
 fi
 
@@ -133,11 +133,11 @@ fi
 
 mkdir -p "$out_dir"
 
-run_jcode() {
+run_arterm() {
   if [[ -n "$bin" ]]; then
     timeout "$per_command_timeout" "$bin" "$@"
   else
-    timeout "$per_command_timeout" cargo run --quiet --bin jcode -- "$@"
+    timeout "$per_command_timeout" cargo run --quiet --bin arterm -- "$@"
   fi
 }
 
@@ -145,11 +145,11 @@ configured_json="$out_dir/configured-providers.json"
 if [[ "$mode" == "configured" ]]; then
   echo "Discovering configured providers..."
   rm -f "$configured_json"
-  if ! run_jcode auth-test --all-configured --no-smoke --no-tool-smoke --json --output "$configured_json" >/tmp/jcode-auth-matrix-discovery.out 2>/tmp/jcode-auth-matrix-discovery.err; then
+  if ! run_arterm auth-test --all-configured --no-smoke --no-tool-smoke --json --output "$configured_json" >/tmp/arterm-auth-matrix-discovery.out 2>/tmp/arterm-auth-matrix-discovery.err; then
     if [[ -s "$configured_json" ]]; then
       echo "note: configured-provider discovery reported non-ready providers; continuing with per-provider classification" >&2
     else
-      cat /tmp/jcode-auth-matrix-discovery.err >&2 || true
+      cat /tmp/arterm-auth-matrix-discovery.err >&2 || true
       echo "warning: configured-provider discovery failed; continuing with explicit matrix and skipping only obvious unconfigured failures" >&2
     fi
   fi
@@ -184,7 +184,7 @@ for provider in "${selected[@]}"; do
 
   echo "=== auth-test: $provider ==="
   set +e
-  run_jcode "${args[@]}" >"$log" 2>&1
+  run_arterm "${args[@]}" >"$log" 2>&1
   status=$?
   set -e
 

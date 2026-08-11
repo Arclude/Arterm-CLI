@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import benchmark_attribution as ba  # noqa: E402
 
-MARKER = "via=jcode-discovery"
+MARKER = "via=arterm-discovery"
 
 
 def sponsor(**overrides):

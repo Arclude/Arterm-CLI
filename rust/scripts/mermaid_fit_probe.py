@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe Jcode pinned Mermaid fit planning for screenshot repros.
+"""Probe Arterm pinned Mermaid fit planning for screenshot repros.
 
 This intentionally mirrors the geometry math in src/tui/ui_diagram_pane.rs so a
 bad crop can be reproduced without compiling the whole Rust test binary.

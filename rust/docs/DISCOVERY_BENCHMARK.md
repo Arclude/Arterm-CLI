@@ -1,7 +1,7 @@
 # Discovery trigger benchmark
 
 `scripts/benchmark_discovery.py` measures whether ordinary user requests cause
-Jcode to browse the expected sponsored-discovery category and receive a specific
+Arterm to browse the expected sponsored-discovery category and receive a specific
 tool in the listing. It also supports no-Discovery controls that fail if the
 agent browses the catalog for a task that does not require an external service.
 
@@ -31,7 +31,7 @@ python scripts/benchmark_discovery.py --case agentmail
 python scripts/benchmark_discovery.py --case context-dev-website-enrichment
 ```
 
-The default uses Jcode's normal toolset so Discovery competes with built-in
+The default uses Arterm's normal toolset so Discovery competes with built-in
 browser, shell, web, and integration capabilities. This is the representative
 generalization score. Use `--discovery-only` for a focused smoke test that
 measures category and listing selection without competing tools:
@@ -99,16 +99,16 @@ cannot be hidden by a later clean attempt.
 
 ## Benchmark traffic marking
 
-The runner uses a dedicated Jcode server with:
+The runner uses a dedicated Arterm server with:
 
 ```text
-JCODE_DISCOVERY_BENCHMARK=1
+ARTERM_DISCOVERY_BENCHMARK=1
 ```
 
 Every Discovery request from that server carries:
 
 ```text
-x-jcode-discovery-benchmark: 1
+x-arterm-discovery-benchmark: 1
 ```
 
 Discovery telemetry carries:

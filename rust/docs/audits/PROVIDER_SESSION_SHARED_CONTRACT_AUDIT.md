@@ -2,7 +2,7 @@
 
 Status: 2026-04-16 audit note
 
-This document audits the current provider, session, and shared-contract seams in the jcode workspace and recommends the next **realistic** crate moves that improve modularity without creating high-churn dependency cycles.
+This document audits the current provider, session, and shared-contract seams in the arterm workspace and recommends the next **realistic** crate moves that improve modularity without creating high-churn dependency cycles.
 
 It is intentionally conservative. The goal is to identify boundaries that are both:
 
@@ -22,9 +22,9 @@ The next clean workspace moves are **not** a full `Provider` trait extraction an
 
 The best next steps are:
 
-1. **Add a small `jcode-shared-contracts` crate** for the serde-only protocol/session overlap types that already act like shared contracts.
-2. **After that, add a narrow `jcode-session-contracts` crate** for session metadata/replay/view structs that are widely reused but do not need the full `Session` runtime.
-3. **If we want one more provider-side move before a larger provider refactor, extract the pure provider identity/selection layer** into `jcode-provider-core` or a small `jcode-provider-selection` crate.
+1. **Add a small `arterm-shared-contracts` crate** for the serde-only protocol/session overlap types that already act like shared contracts.
+2. **After that, add a narrow `arterm-session-contracts` crate** for session metadata/replay/view structs that are widely reused but do not need the full `Session` runtime.
+3. **If we want one more provider-side move before a larger provider refactor, extract the pure provider identity/selection layer** into `arterm-provider-core` or a small `arterm-provider-selection` crate.
 
 The main things to avoid for now:
 
@@ -39,19 +39,19 @@ Those look tempting, but today they would mostly convert existing high-churn cou
 
 Already landed and directionally good:
 
-- `crates/jcode-provider-metadata`
-- `crates/jcode-provider-core`
-- `crates/jcode-provider-openrouter`
-- `crates/jcode-provider-gemini`
+- `crates/arterm-provider-metadata`
+- `crates/arterm-provider-core`
+- `crates/arterm-provider-openrouter`
+- `crates/arterm-provider-gemini`
 
 A useful property of the current extracted crates is that they are still **leaf-like support crates**.
 
 Current local workspace dependency picture for those crates:
 
-- `jcode-provider-core`: no local workspace deps
-- `jcode-provider-metadata`: no local workspace deps
-- `jcode-provider-openrouter`: no local workspace deps
-- `jcode-provider-gemini`: no local workspace deps
+- `arterm-provider-core`: no local workspace deps
+- `arterm-provider-metadata`: no local workspace deps
+- `arterm-provider-openrouter`: no local workspace deps
+- `arterm-provider-gemini`: no local workspace deps
 
 That is the right pattern to preserve. The next crate moves should keep producing small, leaf-ish crates instead of creating new central hubs that everything recompiles through.
 
@@ -106,10 +106,10 @@ The key architectural smell is that some types that are effectively **shared con
 
 The existing provider crate moves were well chosen:
 
-- `jcode-provider-metadata` holds stable login/profile catalog data
-- `jcode-provider-core` holds route/cost/shared HTTP client/core value types
-- `jcode-provider-openrouter` holds OpenRouter-specific catalog/cache/ranking/model-spec support
-- `jcode-provider-gemini` holds Gemini Code Assist schema/types/support helpers
+- `arterm-provider-metadata` holds stable login/profile catalog data
+- `arterm-provider-core` holds route/cost/shared HTTP client/core value types
+- `arterm-provider-openrouter` holds OpenRouter-specific catalog/cache/ranking/model-spec support
+- `arterm-provider-gemini` holds Gemini Code Assist schema/types/support helpers
 
 These are all relatively pure support surfaces.
 
@@ -153,8 +153,8 @@ Most realistic provider-side move after the current support crates:
 
 Target:
 
-- either a new `crates/jcode-provider-selection`
-- or a small `provider_identity` / `selection` module inside `jcode-provider-core`
+- either a new `crates/arterm-provider-selection`
+- or a small `provider_identity` / `selection` module inside `arterm-provider-core`
 
 Why this is realistic:
 
@@ -194,7 +194,7 @@ So the next move should be a **session-contract slice**, not a full session crat
 
 ### Best realistic session move
 
-### Option B: narrow `jcode-session-contracts`
+### Option B: narrow `arterm-session-contracts`
 
 After shared contracts are extracted first, move the session types that are:
 
@@ -250,7 +250,7 @@ These are used across server, tool, TUI, replay, and session persistence flows, 
 
 ### Best overall next move
 
-### Option C: add `jcode-shared-contracts`
+### Option C: add `arterm-shared-contracts`
 
 Recommended contents for the first pass:
 
@@ -283,7 +283,7 @@ Minimal dependency goal:
 
 ### Phase 1
 
-Create `crates/jcode-shared-contracts`.
+Create `crates/arterm-shared-contracts`.
 
 Expected immediate moves:
 
@@ -298,9 +298,9 @@ Keep in main crate for now:
 
 ### Phase 2
 
-Create `crates/jcode-session-contracts`.
+Create `crates/arterm-session-contracts`.
 
-Do this only after Phase 1, so session replay types can point at `jcode_shared_contracts::*` instead of `crate::protocol::*` or `crate::plan::*`.
+Do this only after Phase 1, so session replay types can point at `arterm_shared_contracts::*` instead of `crate::protocol::*` or `crate::plan::*`.
 
 ### Phase 3
 
@@ -361,11 +361,11 @@ That order avoids creating crates that need to point back into the main crate fo
 
 ## Recommended concrete next actions
 
-1. Add `crates/jcode-shared-contracts` with serde-only types from `plan.rs` and the small protocol/session overlap set.
+1. Add `crates/arterm-shared-contracts` with serde-only types from `plan.rs` and the small protocol/session overlap set.
 2. Update `session.rs`, `protocol.rs`, server, tool, replay, and TUI imports to point at that crate.
 3. Re-measure touched-file compile times for:
    - `src/session.rs`
    - `src/protocol.rs`
    - `src/provider/mod.rs`
-4. If the new seam stays clean, follow with a narrow `jcode-session-contracts` extraction.
+4. If the new seam stays clean, follow with a narrow `arterm-session-contracts` extraction.
 5. Revisit provider trait extraction only after message/runtime/provider-execution seams are thinner.

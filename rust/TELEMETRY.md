@@ -1,6 +1,6 @@
-# jcode Telemetry
+# arterm Telemetry
 
-jcode collects **anonymous, minimal usage statistics** to help understand how many people use jcode, what providers/models are popular, whether onboarding works, which feature families are used, how often sessions succeed, and whether performance/regressions are improving. This data helps prioritize development. **We do not collect your prompts, your code, or your conversation transcripts.**
+arterm collects **anonymous, minimal usage statistics** to help understand how many people use arterm, what providers/models are popular, whether onboarding works, which feature families are used, how often sessions succeed, and whether performance/regressions are improving. This data helps prioritize development. **We do not collect your prompts, your code, or your conversation transcripts.**
 
 Recent telemetry additions also include: coarse onboarding steps, explicit thumbs-up / thumbs-down feedback, build-channel / dev-mode cleanup flags, session/workflow/tool-category summaries, coarse project language buckets, retention helpers like active days in the last 7 / 30 days, workflow cadence fields for session timing and multi-sessioning, privacy-safe per-turn timing/outcome metrics, schema v5 agent-time / autonomy / pain-attribution metrics, and numeric-only todo progress aggregates.
 
@@ -12,7 +12,7 @@ Recent telemetry additions also include: coarse onboarding steps, explicit thumb
 |-------|---------|----------|
 | `id` | `a1b2c3d4-...` | Random UUID, not tied to your identity |
 | `event` | `"install"` | Event type |
-| `version` | `"0.6.0"` | jcode version |
+| `version` | `"0.6.0"` | arterm version |
 | `os` | `"linux"` | Operating system |
 | `arch` | `"x86_64"` | CPU architecture |
 
@@ -22,8 +22,8 @@ Recent telemetry additions also include: coarse onboarding steps, explicit thumb
 |-------|---------|----------|
 | `id` | `a1b2c3d4-...` | Same random UUID |
 | `event` | `"upgrade"` | Event type |
-| `version` | `"0.9.1"` | Current jcode version |
-| `from_version` | `"0.8.1"` | Previously recorded jcode version |
+| `version` | `"0.9.1"` | Current arterm version |
+| `from_version` | `"0.8.1"` | Previously recorded arterm version |
 | `os` / `arch` | `"linux"` / `"x86_64"` | Environment breakdown |
 
 ### Auth Success Event
@@ -58,7 +58,7 @@ Recent telemetry additions also include: coarse onboarding steps, explicit thumb
 ### Sponsored Discovery Event
 
 One event is sent after each `discover_tools` attempt. A random per-request ID
-is also sent to the discovery API as the `x-jcode-discovery-request-id` header,
+is also sent to the discovery API as the `x-arterm-discovery-request-id` header,
 allowing client reliability telemetry to be correlated with server request logs
 without exposing prompts or a persistent telemetry identifier to that service.
 
@@ -84,12 +84,12 @@ paths, and tool setup instructions are **not** included in telemetry. The
 backend rejects unknown phase, outcome, and failure labels rather than storing
 arbitrary strings.
 
-The benchmark runner sets `JCODE_DISCOVERY_BENCHMARK=1`. Discovery requests then
-carry `x-jcode-discovery-benchmark: 1`, and the corresponding telemetry event has
+The benchmark runner sets `ARTERM_DISCOVERY_BENCHMARK=1`. Discovery requests then
+carry `x-arterm-discovery-benchmark: 1`, and the corresponding telemetry event has
 `benchmark_run: true`.
 
 When telemetry is enabled, discovery API requests also carry
-`x-jcode-session-correlation-id`. It is a fresh random UUID for the current
+`x-arterm-session-correlation-id`. It is a fresh random UUID for the current
 runtime session, is not derived from the persistent telemetry ID, and is never
 reused across sessions. The same UUID appears on the numeric-only Todo Session
 event below. When telemetry is disabled, this header is omitted.
@@ -110,9 +110,9 @@ are absent, so the event is joinable to discovery requests from that session but
 not to an install, account, or another session.
 
 That join is not yet possible in practice. The discovery service stores its rows
-in the `jcode-subscriptions` D1 while this event lands in `jcode-telemetry`, and
+in the `arterm-subscriptions` D1 while this event lands in `arterm-telemetry`, and
 nothing on the receiving side reads
-`x-jcode-session-correlation-id` yet, so the header is currently sent and
+`x-arterm-session-correlation-id` yet, so the header is currently sent and
 discarded. The correlation design is what makes the join possible later; it does
 not by itself make the number available.
 
@@ -141,7 +141,7 @@ file paths, code, prompts, item IDs, and per-item rows are **never sent**.
 |-------|---------|----------|
 | `id` | `a1b2c3d4-...` | Same random UUID |
 | `event` | `"session_start"` | Event type |
-| `version` | `"0.6.0"` | jcode version |
+| `version` | `"0.6.0"` | arterm version |
 | `os` | `"linux"` | Operating system |
 | `arch` | `"x86_64"` | CPU architecture |
 | `provider_start` | `"OpenAI"` | Provider when session started |
@@ -160,7 +160,7 @@ file paths, code, prompts, item IDs, and per-item rows are **never sent**.
 |-------|---------|----------|
 | `id` | `a1b2c3d4-...` | Same random UUID |
 | `event` | `"session_end"` / `"session_crash"` | Event type |
-| `version` | `"0.6.0"` | jcode version |
+| `version` | `"0.6.0"` | arterm version |
 | `os` | `"linux"` | Operating system |
 | `arch` | `"x86_64"` | CPU architecture |
 | `provider_start` | `"OpenAI"` | Provider when session started |
@@ -294,7 +294,7 @@ Most events also carry a few coarse quality / cleanup fields:
 ### Coarse Geography (added by the receiving worker, not the client)
 
 The telemetry worker records a single **2-letter country code**, resolved by
-Cloudflare at the edge from the connection (`request.cf.country`). jcode itself
+Cloudflare at the edge from the connection (`request.cf.country`). arterm itself
 never collects, computes, or sends location data, and the value cannot be set or
 spoofed by the client.
 
@@ -307,11 +307,11 @@ code, and timezone are never read or stored. It is stored as a per-day
 aggregate (`country_daily` counts) plus a `last_country` column on the daily
 active-user rollup. Unknown (`XX`) and Tor (`T1`) codes are discarded.
 
-The UUID is randomly generated on first run and stored at `~/.jcode/telemetry_id`. It is not derived from your machine, username, email, or any identifiable information.
+The UUID is randomly generated on first run and stored at `~/.arterm/telemetry_id`. It is not derived from your machine, username, email, or any identifiable information.
 
 ## How We Use and Share Data
 
-Telemetry is used to operate, debug, secure, and improve jcode, and for product and
+Telemetry is used to operate, debug, secure, and improve arterm, and for product and
 retention analytics. We may publish or share **aggregate** statistics (for example
 install counts, OS/provider distribution, version adoption) and we share data with the
 infrastructure providers needed to run the pipeline, currently Cloudflare.
@@ -325,15 +325,15 @@ telemetry to account identity.
 
 ## How It Works
 
-1. On first launch, jcode generates a random UUID and sends an `install` event
-2. When a session begins, jcode sends a `session_start` event
-3. When a session ends normally, jcode sends a `session_end` event with coarse session metrics
-4. When auth succeeds, jcode sends a coarse `auth_success` event for activation-funnel analysis
-5. When jcode detects a version change, it sends an `upgrade` event
-6. On best-effort crash/signal handling, jcode sends a `session_crash` event
-7. jcode may also send one-off onboarding milestone events and explicit feedback events when triggered
+1. On first launch, arterm generates a random UUID and sends an `install` event
+2. When a session begins, arterm sends a `session_start` event
+3. When a session ends normally, arterm sends a `session_end` event with coarse session metrics
+4. When auth succeeds, arterm sends a coarse `auth_success` event for activation-funnel analysis
+5. When arterm detects a version change, it sends an `upgrade` event
+6. On best-effort crash/signal handling, arterm sends a `session_crash` event
+7. arterm may also send one-off onboarding milestone events and explicit feedback events when triggered
 8. Requests are fire-and-forget HTTP POSTs that don't block normal usage (install/session shutdown have short bounded blocking timeouts)
-9. If a request fails (offline, firewall, etc.), jcode silently continues - no retries, no queuing
+9. If a request fails (offline, firewall, etc.), arterm silently continues - no retries, no queuing
 
 The telemetry endpoint is a Cloudflare Worker that stores events in a D1 database. The source code for the worker is in [`telemetry-worker/`](./telemetry-worker/).
 
@@ -353,13 +353,13 @@ Any of these methods will disable telemetry completely:
 
 ```bash
 # Option 1: Environment variable
-export JCODE_NO_TELEMETRY=1
+export ARTERM_NO_TELEMETRY=1
 
 # Option 2: Standard DO_NOT_TRACK (https://consoledonottrack.com/)
 export DO_NOT_TRACK=1
 
 # Option 3: File-based opt-out
-touch ~/.jcode/no_telemetry
+touch ~/.arterm/no_telemetry
 ```
 
 When opted out, zero network requests are made. The telemetry module short-circuits immediately.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dump the rendered screen of a freshly spawned jcode client through a real
+Dump the rendered screen of a freshly spawned arterm client through a real
 terminal emulator, and report which rows change over time.
 
 This answers a question the counters cannot: on the fresh-spawn screen, is the
@@ -30,7 +30,7 @@ import repro_slash_flicker as flick  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--binary",
-                    default=str(REPO_ROOT / "target" / "selfdev" / "jcode"))
+                    default=str(REPO_ROOT / "target" / "selfdev" / "arterm"))
     ap.add_argument("--rows", type=int, default=48)
     ap.add_argument("--cols", type=int, default=160)
     ap.add_argument("--watch-s", type=float, default=2.0)
@@ -39,33 +39,33 @@ def main() -> int:
 
     flick.ROWS, flick.COLS = args.rows, args.cols
     binary = str(Path(args.binary).resolve())
-    scratch = Path(os.environ.get("JCODE_SCRATCH_DIR") or tempfile.gettempdir())
-    root = Path(tempfile.mkdtemp(prefix="jcode-screendump-", dir=str(scratch)))
+    scratch = Path(os.environ.get("ARTERM_SCRATCH_DIR") or tempfile.gettempdir())
+    root = Path(tempfile.mkdtemp(prefix="arterm-screendump-", dir=str(scratch)))
     home, run = root / "home", root / "run"
     home.mkdir(parents=True)
     run.mkdir(parents=True)
 
     env = os.environ.copy()
     env.update({
-        "JCODE_HOME": str(home), "JCODE_RUNTIME_DIR": str(run),
-        "JCODE_SOCKET": str(run / "jcode.sock"), "JCODE_NO_TELEMETRY": "1",
-        "JCODE_DEBUG_CONTROL": "1", "JCODE_TEMP_SERVER": "1",
-        "JCODE_SERVER_OWNER_PID": str(os.getpid()), "JCODE_PERF_TIER": "full",
-        "JCODE_THEME": "dark",
+        "ARTERM_HOME": str(home), "ARTERM_RUNTIME_DIR": str(run),
+        "ARTERM_SOCKET": str(run / "arterm.sock"), "ARTERM_NO_TELEMETRY": "1",
+        "ARTERM_DEBUG_CONTROL": "1", "ARTERM_TEMP_SERVER": "1",
+        "ARTERM_SERVER_OWNER_PID": str(os.getpid()), "ARTERM_PERF_TIER": "full",
+        "ARTERM_THEME": "dark",
     })
     env.setdefault("ANTHROPIC_API_KEY", "sk-ant-screendump")
-    debug_sock = run / "jcode-debug.sock"
+    debug_sock = run / "arterm-debug.sock"
     cmd_path, resp_path = run / "client_cmd", run / "client_resp"
 
     log_fh = (root / "server.log").open("wb")
     server = subprocess.Popen(
-        [binary, "serve", "--socket", env["JCODE_SOCKET"], "--debug-socket",
+        [binary, "serve", "--socket", env["ARTERM_SOCKET"], "--debug-socket",
          "--no-update", "--no-selfdev"],
         env=env, stdout=log_fh, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
 
     client = None
     try:
-        flick.wait_for_socket(Path(env["JCODE_SOCKET"]))
+        flick.wait_for_socket(Path(env["ARTERM_SOCKET"]))
         flick.wait_for_socket(debug_sock)
         sid = flick.dbg(debug_sock, f"create_session:{REPO_ROOT}").strip()
         if sid.startswith("{"):

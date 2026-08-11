@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-jcode Stress Test: Spawn 40 sessions via debug socket, measure performance.
+arterm Stress Test: Spawn 40 sessions via debug socket, measure performance.
 
 Tests:
   1. Session creation throughput
@@ -20,8 +20,8 @@ import subprocess
 import signal
 
 NUM_INSTANCES = int(sys.argv[1]) if len(sys.argv) > 1 else 40
-MAIN_SOCK = f"/run/user/{os.getuid()}/jcode.sock"
-DEBUG_SOCK = f"/run/user/{os.getuid()}/jcode-debug.sock"
+MAIN_SOCK = f"/run/user/{os.getuid()}/arterm.sock"
+DEBUG_SOCK = f"/run/user/{os.getuid()}/arterm-debug.sock"
 
 class Colors:
     BOLD = "\033[1m"
@@ -58,23 +58,23 @@ def debug_cmd(cmd, timeout=10):
         sock.close()
 
 def get_server_pid():
-    """Get the jcode server PID."""
+    """Get the arterm server PID."""
     try:
         result = subprocess.run(
-            ["lsof", "-U", "-a", "-c", "jcode"],
+            ["lsof", "-U", "-a", "-c", "arterm"],
             capture_output=True, text=True, timeout=5
         )
         for line in result.stdout.splitlines():
-            if "jcode.sock" in line and "LISTEN" in line:
+            if "arterm.sock" in line and "LISTEN" in line:
                 parts = line.split()
                 return int(parts[1])
     except:
         pass
     
-    # Fallback: find the oldest jcode process (likely the server)
+    # Fallback: find the oldest arterm process (likely the server)
     try:
         result = subprocess.run(
-            ["pgrep", "-o", "jcode"], capture_output=True, text=True, timeout=5
+            ["pgrep", "-o", "arterm"], capture_output=True, text=True, timeout=5
         )
         if result.stdout.strip():
             return int(result.stdout.strip().splitlines()[0])
@@ -130,19 +130,19 @@ def print_stat(label, value):
 # MAIN
 # ============================================================
 
-print_header(f"jcode Stress Test: {NUM_INSTANCES} sessions")
+print_header(f"arterm Stress Test: {NUM_INSTANCES} sessions")
 
 # --- Pre-flight ---
 print_section("Pre-flight checks")
 
 if not os.path.exists(MAIN_SOCK):
     print_err(f"No server socket at {MAIN_SOCK}")
-    print("  Start a server with: jcode serve &")
+    print("  Start a server with: arterm serve &")
     sys.exit(1)
 
 if not os.path.exists(DEBUG_SOCK):
     print_err(f"No debug socket at {DEBUG_SOCK}")
-    print("  Enable with: touch ~/.jcode/debug_control")
+    print("  Enable with: touch ~/.arterm/debug_control")
     sys.exit(1)
 
 # Test connectivity
@@ -164,13 +164,13 @@ else:
 print_section("Baseline measurements")
 
 baseline = proc_stat(server_pid) if server_pid else {}
-baseline_procs = int(subprocess.run(["pgrep", "-c", "jcode"], capture_output=True, text=True).stdout.strip() or "0")
+baseline_procs = int(subprocess.run(["pgrep", "-c", "arterm"], capture_output=True, text=True).stdout.strip() or "0")
 
 print_stat("Server RSS", fmt_kb(baseline.get("rss_kb", 0)))
 print_stat("Server VMS", fmt_kb(baseline.get("vms_kb", 0)))
 print_stat("Server FDs", baseline.get("fds", "?"))
 print_stat("Server threads", baseline.get("threads", "?"))
-print_stat("Total jcode procs", baseline_procs)
+print_stat("Total arterm procs", baseline_procs)
 
 # List existing sessions
 sessions_resp = debug_cmd("sessions")
@@ -191,7 +191,7 @@ per_session_stats = []
 
 for i in range(1, NUM_INSTANCES + 1):
     t0 = time.monotonic()
-    resp = debug_cmd(f"create_session:/tmp/jcode-stress-{i}", timeout=30)
+    resp = debug_cmd(f"create_session:/tmp/arterm-stress-{i}", timeout=30)
     t1 = time.monotonic()
     elapsed_ms = (t1 - t0) * 1000
     create_times.append(elapsed_ms)
@@ -278,13 +278,13 @@ if message_times:
 print_section("Phase 4: Peak resource usage")
 
 peak = proc_stat(server_pid) if server_pid else {}
-peak_procs = int(subprocess.run(["pgrep", "-c", "jcode"], capture_output=True, text=True).stdout.strip() or "0")
+peak_procs = int(subprocess.run(["pgrep", "-c", "arterm"], capture_output=True, text=True).stdout.strip() or "0")
 
 print_stat("Server RSS", fmt_kb(peak.get("rss_kb", 0)))
 print_stat("Server VMS", fmt_kb(peak.get("vms_kb", 0)))
 print_stat("Server FDs", peak.get("fds", "?"))
 print_stat("Server threads", peak.get("threads", "?"))
-print_stat("Total jcode procs", peak_procs)
+print_stat("Total arterm procs", peak_procs)
 print_stat("RSS per session (approx)", fmt_kb(
     max(0, (peak.get("rss_kb", 0) - baseline.get("rss_kb", 0))) // max(1, len(created_sessions))
 ))
@@ -325,7 +325,7 @@ print_section("Phase 6: Resource recovery (waiting 10s for cleanup)")
 time.sleep(10)
 
 final = proc_stat(server_pid) if server_pid else {}
-final_procs = int(subprocess.run(["pgrep", "-c", "jcode"], capture_output=True, text=True).stdout.strip() or "0")
+final_procs = int(subprocess.run(["pgrep", "-c", "arterm"], capture_output=True, text=True).stdout.strip() or "0")
 
 # Final socket test
 t0 = time.monotonic()

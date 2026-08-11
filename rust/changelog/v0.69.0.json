@@ -8,7 +8,7 @@
     "macOS turn notifications now use a dedicated broker for more reliable delivery and session focus"
   ],
   "improvements": [
-    "You can replace jcode's base system prompt with .jcode/system-prompt.md",
+    "You can replace arterm's base system prompt with .arterm/system-prompt.md",
     "Composer Up and Down navigation now follows visually wrapped rows",
     "Keybinding changes take effect on the next keystroke without restarting",
     "Config file edits now explain what changed and whether a restart is required",

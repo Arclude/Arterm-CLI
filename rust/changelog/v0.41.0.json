@@ -12,7 +12,7 @@
     "Explicit swarm spawns now require short labels so parallel agents are easier to identify"
   ],
   "fixes": [
-    "Anthropic API connections now honor their selected route and accept Jcode tools whose schemas previously used unsupported top-level combinators",
+    "Anthropic API connections now honor their selected route and accept Arterm tools whose schemas previously used unsupported top-level combinators",
     "Side-panel Mermaid diagrams no longer render duplicate images",
     "Long inline image labels stay within one row instead of disrupting transcript layout"
   ]

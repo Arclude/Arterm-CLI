@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run jcode's CI-style test suites with timing and timeout reporting.
+"""Run arterm's CI-style test suites with timing and timeout reporting.
 
 This is intentionally split the same way as `.github/workflows/ci.yml` instead of
 using one monolithic `cargo test --workspace --all-targets`, which is harder to
@@ -98,7 +98,7 @@ def selected_suites(names: list[str]) -> list[Suite]:
 def progress(message: str, **extra: object) -> None:
     payload = {"kind": "indeterminate", "message": message}
     payload.update(extra)
-    print("JCODE_PROGRESS " + json.dumps(payload), flush=True)
+    print("ARTERM_PROGRESS " + json.dumps(payload), flush=True)
 
 
 def run_suite(suite: Suite, timeout_scale: float, *, parallel: bool) -> tuple[int, float]:

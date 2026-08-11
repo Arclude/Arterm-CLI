@@ -9,7 +9,7 @@
 // authentication then fails, so it returns a TLS `bad_record_mac` fatal alert,
 // which the client surfaces as: "received fatal alert: BadRecordMac".
 //
-// We then wrap that error exactly like jcode's anthropic provider does
+// We then wrap that error exactly like arterm's anthropic provider does
 // (`.context("Failed to send request to Anthropic API")`) and show how the
 // cause is masked from `to_string()` but visible via the error source chain.
 
@@ -22,8 +22,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
 fn classify(error_str: &str) -> bool {
-    // VERBATIM copy of jcode's shared is_transient_transport_error
-    // (crates/jcode-base/src/provider/routing.rs @ v0.24.0).
+    // VERBATIM copy of arterm's shared is_transient_transport_error
+    // (crates/arterm-base/src/provider/routing.rs @ v0.24.0).
     let lower = error_str.to_ascii_lowercase();
     lower.contains("connection reset")
         || lower.contains("connection closed")
@@ -172,7 +172,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // ---- 4. Client (mirrors jcode's reqwest+rustls config) ----
+    // ---- 4. Client (mirrors arterm's reqwest+rustls config) ----
     let mut roots = rustls::RootCertStore::empty();
     roots.add(cert_der)?;
     let client = reqwest::Client::builder()

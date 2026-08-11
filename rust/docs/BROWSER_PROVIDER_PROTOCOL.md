@@ -1,12 +1,12 @@
 # Browser Provider Protocol
 
 Status: draft
-Owner: jcode
-Audience: jcode core, browser bridge authors, adapter authors
+Owner: arterm
+Audience: arterm core, browser bridge authors, adapter authors
 
 ## Why this exists
 
-jcode should expose a single first-class `browser` tool while remaining compatible with multiple browser automation backends:
+arterm should expose a single first-class `browser` tool while remaining compatible with multiple browser automation backends:
 
 - Firefox Agent Bridge
 - Chrome Agent Bridge
@@ -15,11 +15,11 @@ jcode should expose a single first-class `browser` tool while remaining compatib
 - Safari automation adapters
 - other third-party browser control systems
 
-The protocol in this document defines the **normalized contract** between jcode and a browser provider.
+The protocol in this document defines the **normalized contract** between arterm and a browser provider.
 
 This is intentionally **not** a demand that every bridge speak exactly the same native command language. Instead:
 
-- jcode defines a **core semantic layer** it can rely on
+- arterm defines a **core semantic layer** it can rely on
 - providers declare the capabilities and commands they support
 - providers may expose **provider-specific commands** beyond the core
 - adapters can translate a provider's native model into this protocol
@@ -30,14 +30,14 @@ That gives us both consistency and room for bridge-specific power features.
 
 ## Design goals
 
-1. **One first-class tool in jcode**
+1. **One first-class tool in arterm**
    - The model should use a single `browser` tool.
 
 2. **Multiple provider implementations**
    - Firefox, Chrome, Safari, Edge, WebDriver, and other systems should fit.
 
 3. **Capability negotiation**
-   - jcode should know what each provider can and cannot do.
+   - arterm should know what each provider can and cannot do.
 
 4. **Extensibility without fragmentation**
    - We need a standard core, but providers must have room for browser-specific features.
@@ -61,11 +61,11 @@ That gives us both consistency and room for bridge-specific power features.
 
 ## Terminology
 
-- **browser tool**: the user/model-facing jcode tool.
+- **browser tool**: the user/model-facing arterm tool.
 - **provider**: a backend implementation that satisfies this protocol.
 - **bridge**: an external browser integration such as Firefox Agent Bridge.
 - **adapter**: glue code that translates a bridge's native API into this protocol.
-- **browser session**: the provider's isolated session or attachment scope for a jcode session.
+- **browser session**: the provider's isolated session or attachment scope for a arterm session.
 - **page**: a tab, target, or browsing surface under a session.
 - **element ref**: an opaque provider-issued handle for an actionable element.
 
@@ -123,7 +123,7 @@ This protocol defines **message semantics**, not one required wire format.
 
 Supported implementation styles may include:
 
-- direct Rust trait calls inside jcode
+- direct Rust trait calls inside arterm
 - stdio JSON request/response
 - local socket RPC
 - wrapped remote API
@@ -286,20 +286,20 @@ Suggested enums:
 
 ## Session model
 
-jcode should not care whether a provider uses tabs, contexts, profiles, or remote targets internally.
+arterm should not care whether a provider uses tabs, contexts, profiles, or remote targets internally.
 It only needs a stable handle it can reuse.
 
 ### `session.ensure`
 
-Creates or reuses a browser session for a jcode session.
+Creates or reuses a browser session for a arterm session.
 
 Request:
 
 ```json
 {
-  "client_session_id": "jcode_session_123",
+  "client_session_id": "arterm_session_123",
   "browser_preference": "auto",
-  "isolation": "per_jcode_session",
+  "isolation": "per_arterm_session",
   "attach": "prefer",
   "persist": true,
   "metadata": {
@@ -317,7 +317,7 @@ Response:
   "browser_family": "firefox",
   "browser_label": "Firefox",
   "attached_to_existing_browser": true,
-  "isolation": "per_jcode_session",
+  "isolation": "per_arterm_session",
   "default_page_id": "page_1"
 }
 ```
@@ -342,13 +342,13 @@ Examples:
 - `element_ref`
 - `download_id`
 
-jcode must not assume identifier shape or encode browser semantics into them.
+arterm must not assume identifier shape or encode browser semantics into them.
 
 ---
 
 ## Normalized core methods
 
-These are the semantics jcode can rely on.
+These are the semantics arterm can rely on.
 
 ### `page.open`
 
@@ -405,7 +405,7 @@ Providers may use different internal representations, but `page.snapshot` should
 ```json
 {
   "snapshot": {
-    "format": "jcode.page_snapshot.v1",
+    "format": "arterm.page_snapshot.v1",
     "root": {
       "node_id": "n1",
       "role": "document",
@@ -603,13 +603,13 @@ Every custom method should appear in `provider.describe.capabilities.custom_meth
 - optional `input_schema`
 - optional `output_schema`
 
-### Rule 3: jcode core should only rely on normalized methods by default
+### Rule 3: arterm core should only rely on normalized methods by default
 
 The main `browser` tool should prefer the standard core and optional normalized methods.
 Provider-specific methods should only be used when:
 
 - the user explicitly asks for them
-- a jcode-side adapter knows how to use them safely
+- a arterm-side adapter knows how to use them safely
 - or a future advanced/debug mode is enabled
 
 ### Rule 4: provider-native passthrough is allowed, but should be explicit
@@ -644,7 +644,7 @@ Concrete callable operations:
 
 ### Features
 
-Semantics or qualities that influence jcode behavior:
+Semantics or qualities that influence arterm behavior:
 
 - `element_refs`
 - `a11y_snapshot`
@@ -782,9 +782,9 @@ A future conformance suite should verify at least:
 
 ---
 
-## Recommended jcode integration policy
+## Recommended arterm integration policy
 
-The jcode `browser` tool should:
+The arterm `browser` tool should:
 
 1. prefer normalized core methods
 2. choose a provider based on user preference, availability, and capability quality
@@ -801,7 +801,7 @@ These are intentionally left open for the next iteration.
 1. Should screenshots always be inline, or can providers return file/image handles?
 2. Should event streaming be required for advanced integrations?
 3. How much of raw HTML/DOM should be normalized versus returned as provider data?
-4. Should `page.snapshot` support multiple named formats beyond `jcode.page_snapshot.v1`?
+4. Should `page.snapshot` support multiple named formats beyond `arterm.page_snapshot.v1`?
 5. Should provider-specific methods be invokable through the same `browser` tool or only via debug mode?
 6. Should setup/install flows themselves be standardized beyond status and diagnostics?
 

@@ -208,8 +208,8 @@ ensure_release_draft() {
 
 if [[ "$MODE" == "prepare-fast" ]]; then
     echo "▸ Refreshing the warm selfdev Linux build before the version bump..."
-    JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode
-    source_bin="target/selfdev/jcode"
+    ARTERM_REMOTE_CARGO=0 scripts/dev_cargo.sh build --profile selfdev -p arterm --bin arterm
+    source_bin="target/selfdev/arterm"
     [[ -x "$source_bin" ]] || { echo "Error: selfdev binary not found: $source_bin" >&2; exit 1; }
     prepared_marker="target/selfdev/fast-release-prepared"
     {
@@ -226,10 +226,10 @@ fi
 
 if [[ "$MODE" == "prepare-fast-macos" ]]; then
     echo "▸ Refreshing the macOS arm64 build before the version bump..."
-    JCODE_RELEASE_BUILD=1 JCODE_BUILD_SEMVER="$VERSION_NUM" \
+    ARTERM_RELEASE_BUILD=1 ARTERM_BUILD_SEMVER="$VERSION_NUM" \
         CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" \
-        cargo build --release --target aarch64-apple-darwin --bin jcode
-    source_bin="target/aarch64-apple-darwin/release/jcode"
+        cargo build --release --target aarch64-apple-darwin --bin arterm
+    source_bin="target/aarch64-apple-darwin/release/arterm"
     [[ -x "$source_bin" ]] || { echo "Error: macOS binary not found: $source_bin" >&2; exit 1; }
     file "$source_bin" | grep -q 'Mach-O 64-bit' || { echo "Error: bad macOS binary" >&2; exit 1; }
     prepared_marker="target/aarch64-apple-darwin/release/fast-macos-release-prepared"
@@ -263,7 +263,7 @@ fi
 if [[ "$MODE" == "fast-local" ]]; then
     echo "▸ Validating the prepared selfdev Linux build..."
     build_start=$(date +%s)
-    source_bin="target/selfdev/jcode"
+    source_bin="target/selfdev/arterm"
     [[ -x "$source_bin" ]] || { echo "Error: selfdev binary not found: $source_bin" >&2; exit 1; }
     prepared_marker="target/selfdev/fast-release-prepared"
     [[ -f "$prepared_marker" ]] || {
@@ -284,7 +284,7 @@ if [[ "$MODE" == "fast-local" ]]; then
     }
     actual_sha256="$(sha256sum "$source_bin" | cut -d' ' -f1)"
     [[ "$prepared_sha256" == "$actual_sha256" ]] || {
-        echo "Error: target/selfdev/jcode changed after fast-release preparation." >&2
+        echo "Error: target/selfdev/arterm changed after fast-release preparation." >&2
         exit 1
     }
     unexpected_release_files="$(git diff-tree --no-commit-id --name-only -r HEAD | grep -Ev '^(Cargo\.toml|Cargo\.lock|changelog/)' || true)"
@@ -294,29 +294,29 @@ if [[ "$MODE" == "fast-local" ]]; then
         exit 1
     }
 
-    cp "$source_bin" "$DIST/jcode-linux-x86_64.bin"
-    strip --strip-unneeded "$DIST/jcode-linux-x86_64.bin"
-    chmod +x "$DIST/jcode-linux-x86_64.bin"
-    cat > "$DIST/jcode-linux-x86_64" <<WRAPPER
+    cp "$source_bin" "$DIST/arterm-linux-x86_64.bin"
+    strip --strip-unneeded "$DIST/arterm-linux-x86_64.bin"
+    chmod +x "$DIST/arterm-linux-x86_64.bin"
+    cat > "$DIST/arterm-linux-x86_64" <<WRAPPER
 #!/usr/bin/env sh
 set -eu
-export JCODE_RUNTIME_RELEASE_SEMVER="$VERSION_NUM"
-export JCODE_RUNTIME_RELEASE_GIT_HASH="$(git rev-parse --short HEAD)"
-export JCODE_RUNTIME_RELEASE_GIT_DATE="$(git log -1 --format=%ci)"
-export JCODE_RUNTIME_RELEASE_GIT_TAG="$VERSION"
+export ARTERM_RUNTIME_RELEASE_SEMVER="$VERSION_NUM"
+export ARTERM_RUNTIME_RELEASE_GIT_HASH="$(git rev-parse --short HEAD)"
+export ARTERM_RUNTIME_RELEASE_GIT_DATE="$(git log -1 --format=%ci)"
+export ARTERM_RUNTIME_RELEASE_GIT_TAG="$VERSION"
 self_dir=\$(CDPATH= cd -- "\$(dirname -- "\$0")" && pwd)
-exec "\$self_dir/jcode-linux-x86_64.bin" "\$@"
+exec "\$self_dir/arterm-linux-x86_64.bin" "\$@"
 WRAPPER
-    chmod +x "$DIST/jcode-linux-x86_64"
-    file "$DIST/jcode-linux-x86_64.bin" | grep -q 'ELF 64-bit' || { echo "Error: bad Linux binary" >&2; exit 1; }
-    version_output="$("$DIST/jcode-linux-x86_64" --version)"
+    chmod +x "$DIST/arterm-linux-x86_64"
+    file "$DIST/arterm-linux-x86_64.bin" | grep -q 'ELF 64-bit' || { echo "Error: bad Linux binary" >&2; exit 1; }
+    version_output="$("$DIST/arterm-linux-x86_64" --version)"
     printf '%s\n' "$version_output" | grep -Fq "v$VERSION_NUM" || {
         echo "Error: fast binary reports the wrong version: $version_output" >&2
         exit 1
     }
-    (cd "$DIST" && tar -cf - jcode-linux-x86_64 jcode-linux-x86_64.bin | gzip -1 > jcode-linux-x86_64.tar.gz)
-    (cd "$DIST" && sha256sum jcode-linux-x86_64.tar.gz > SHA256SUMS)
-    echo "  ✅ Linux artifact ready ($(( $(date +%s) - build_start ))s validation/package, $(du -h "$DIST/jcode-linux-x86_64.tar.gz" | cut -f1))"
+    (cd "$DIST" && tar -cf - arterm-linux-x86_64 arterm-linux-x86_64.bin | gzip -1 > arterm-linux-x86_64.tar.gz)
+    (cd "$DIST" && sha256sum arterm-linux-x86_64.tar.gz > SHA256SUMS)
+    echo "  ✅ Linux artifact ready ($(( $(date +%s) - build_start ))s validation/package, $(du -h "$DIST/arterm-linux-x86_64.tar.gz" | cut -f1))"
 
     if $DRY_RUN; then
         echo ""
@@ -329,7 +329,7 @@ WRAPPER
     echo "▸ Publishing immediate Linux release..."
     ensure_release_draft
     gh release upload "$VERSION" \
-        "$DIST/jcode-linux-x86_64.tar.gz" \
+        "$DIST/arterm-linux-x86_64.tar.gz" \
         "$DIST/SHA256SUMS" \
         --clobber
     gh release edit "$VERSION" --draft=false --latest
@@ -345,7 +345,7 @@ fi
 
 if [[ "$MODE" == "fast-macos-local" ]]; then
     echo "▸ Validating the prepared macOS arm64 build..."
-    source_bin="target/aarch64-apple-darwin/release/jcode"
+    source_bin="target/aarch64-apple-darwin/release/arterm"
     prepared_marker="target/aarch64-apple-darwin/release/fast-macos-release-prepared"
     [[ -x "$source_bin" ]] || { echo "Error: macOS binary not found: $source_bin" >&2; exit 1; }
     [[ -f "$prepared_marker" ]] || {
@@ -364,11 +364,11 @@ if [[ "$MODE" == "fast-macos-local" ]]; then
         printf '%s\n' "$unexpected_release_files" >&2
         exit 1
     }
-    cp "$source_bin" "$DIST/jcode-macos-aarch64"
-    chmod +x "$DIST/jcode-macos-aarch64"
-    file "$DIST/jcode-macos-aarch64" | grep -q 'Mach-O 64-bit' || { echo "Error: bad macOS binary" >&2; exit 1; }
-    (cd "$DIST" && tar czf jcode-macos-aarch64.tar.gz jcode-macos-aarch64)
-    (cd "$DIST" && sha256sum jcode-macos-aarch64.tar.gz > SHA256SUMS)
+    cp "$source_bin" "$DIST/arterm-macos-aarch64"
+    chmod +x "$DIST/arterm-macos-aarch64"
+    file "$DIST/arterm-macos-aarch64" | grep -q 'Mach-O 64-bit' || { echo "Error: bad macOS binary" >&2; exit 1; }
+    (cd "$DIST" && tar czf arterm-macos-aarch64.tar.gz arterm-macos-aarch64)
+    (cd "$DIST" && sha256sum arterm-macos-aarch64.tar.gz > SHA256SUMS)
 
     if $DRY_RUN; then
         echo "Fast macOS dry run complete in $(elapsed)s. Artifacts in: $DIST"
@@ -378,7 +378,7 @@ if [[ "$MODE" == "fast-macos-local" ]]; then
     tag_and_push
     echo "▸ Publishing immediate macOS arm64 release..."
     ensure_release_draft
-    gh release upload "$VERSION" "$DIST/jcode-macos-aarch64.tar.gz" "$DIST/SHA256SUMS" --clobber
+    gh release upload "$VERSION" "$DIST/arterm-macos-aarch64.tar.gz" "$DIST/SHA256SUMS" --clobber
     gh release edit "$VERSION" --draft=false --latest
     echo ""
     echo "=== Fast macOS release published in $(elapsed)s ==="
@@ -390,17 +390,17 @@ fi
 # Standard local distribution build: Linux + macOS in parallel.
 echo "▸ Building Linux x86_64 + macOS aarch64 in parallel..."
 (
-    JCODE_RELEASE_BUILD=1 JCODE_BUILD_SEMVER="$VERSION_NUM" scripts/build_linux_compat.sh "$DIST" >/dev/null
+    ARTERM_RELEASE_BUILD=1 ARTERM_BUILD_SEMVER="$VERSION_NUM" scripts/build_linux_compat.sh "$DIST" >/dev/null
     echo "  ✅ Linux done ($(elapsed)s)"
 ) &
 LINUX_PID=$!
 (
-    JCODE_RELEASE_BUILD=1 JCODE_BUILD_SEMVER="$VERSION_NUM" \
+    ARTERM_RELEASE_BUILD=1 ARTERM_BUILD_SEMVER="$VERSION_NUM" \
         CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" \
-        cargo build --release --target aarch64-apple-darwin --bin jcode 2>/dev/null
-    cp target/aarch64-apple-darwin/release/jcode "$DIST/jcode-macos-aarch64"
-    chmod +x "$DIST/jcode-macos-aarch64"
-    (cd "$DIST" && tar czf jcode-macos-aarch64.tar.gz jcode-macos-aarch64)
+        cargo build --release --target aarch64-apple-darwin --bin arterm 2>/dev/null
+    cp target/aarch64-apple-darwin/release/arterm "$DIST/arterm-macos-aarch64"
+    chmod +x "$DIST/arterm-macos-aarch64"
+    (cd "$DIST" && tar czf arterm-macos-aarch64.tar.gz arterm-macos-aarch64)
     echo "  ✅ macOS done ($(elapsed)s)"
 ) &
 MACOS_PID=$!
@@ -410,9 +410,9 @@ wait $MACOS_PID || { echo "Error: macOS build failed"; exit 1; }
 echo ""
 echo "Build time: $(elapsed)s"
 ls -lh "$DIST"/*.tar.gz
-file "$DIST/jcode-linux-x86_64.bin" | grep -q 'ELF 64-bit' || { echo "Error: bad Linux binary"; exit 1; }
-head -1 "$DIST/jcode-linux-x86_64" | grep -q '^#!/' || { echo "Error: bad Linux wrapper"; exit 1; }
-file "$DIST/jcode-macos-aarch64" | grep -q 'Mach-O 64-bit' || { echo "Error: bad macOS binary"; exit 1; }
+file "$DIST/arterm-linux-x86_64.bin" | grep -q 'ELF 64-bit' || { echo "Error: bad Linux binary"; exit 1; }
+head -1 "$DIST/arterm-linux-x86_64" | grep -q '^#!/' || { echo "Error: bad Linux wrapper"; exit 1; }
+file "$DIST/arterm-macos-aarch64" | grep -q 'Mach-O 64-bit' || { echo "Error: bad macOS binary"; exit 1; }
 
 if $DRY_RUN; then
     echo ""
@@ -426,8 +426,8 @@ tag_and_push
 echo "▸ Staging GitHub draft release..."
 ensure_release_draft
 gh release upload "$VERSION" \
-    "$DIST/jcode-linux-x86_64.tar.gz" \
-    "$DIST/jcode-macos-aarch64.tar.gz" \
+    "$DIST/arterm-linux-x86_64.tar.gz" \
+    "$DIST/arterm-macos-aarch64.tar.gz" \
     --clobber
 
 echo ""

@@ -26,7 +26,7 @@ export interface MockServer {
 }
 
 export async function startMockHarness(options: MockOptions = {}): Promise<MockServer> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jcode-sdk-test-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arterm-sdk-test-"));
   const socketPath = path.join(dir, "api.sock");
   const clients = new Set<net.Socket>();
 

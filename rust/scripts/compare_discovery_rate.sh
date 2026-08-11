@@ -26,8 +26,8 @@ CASES=(
 run() {
   local binary="$1" out="$2"
   echo "=== $out ($binary)"
-  JCODE_BIN="$binary" python scripts/benchmark_discovery_rate.py \
-    --provider "${PROVIDER:-jcode}" --model "$MODEL" --timeout 150 --trials "$TRIALS" \
+  ARTERM_BIN="$binary" python scripts/benchmark_discovery_rate.py \
+    --provider "${PROVIDER:-arterm}" --model "$MODEL" --timeout 150 --trials "$TRIALS" \
     "${CASES[@]}" --output "target/discovery-rate/$out.json" || true
 }
 

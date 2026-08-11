@@ -3,7 +3,7 @@
 # and is delivered to the focused terminal.
 #
 # This is the other half of the proof: scripts/repro_expand_edit_shortcut.py
-# proves jcode's handler reacts to the real Alt+Shift+E bytes; this script
+# proves arterm's handler reacts to the real Alt+Shift+E bytes; this script
 # proves the compositor actually lets those bytes reach the terminal.
 #
 # Method:
@@ -15,7 +15,7 @@
 #   4. Read back what the terminal received.
 #
 # PASS  = the capture window receives an 'e' key event (CSI-u 101;... or ESC e/E)
-#         => niri forwarded the key; jcode would see it.
+#         => niri forwarded the key; arterm would see it.
 # FAIL  = capture window receives nothing AND semantic-organize.sh fired
 #         => niri still grabbing the key.
 set -uo pipefail
@@ -107,7 +107,7 @@ rm -f "$OUT"
 echo
 if echo "$HEX" | grep -qiE "1b5b313031|1b65|1b45"; then
   echo "✅ PASS: niri forwarded Alt+Shift+E to the focused terminal."
-  echo "   (terminal received an 'e' key event; jcode will see it.)"
+  echo "   (terminal received an 'e' key event; arterm will see it.)"
   exit 0
 else
   echo "❌ FAIL: focused terminal received no 'e' key event."

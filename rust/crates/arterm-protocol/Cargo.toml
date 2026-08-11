@@ -1,0 +1,21 @@
+[package]
+name = "arterm-protocol"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+arterm-batch-types = { path = "../arterm-batch-types" }
+arterm-config-types = { path = "../arterm-config-types" }
+arterm-message-types = { path = "../arterm-message-types" }
+arterm-plan = { path = "../arterm-plan" }
+arterm-provider-core = { path = "../arterm-provider-core" }
+arterm-selfdev-types = { path = "../arterm-selfdev-types" }
+arterm-session-types = { path = "../arterm-session-types" }
+arterm-side-panel-types = { path = "../arterm-side-panel-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+anyhow = "1"
+rand = "0.9"

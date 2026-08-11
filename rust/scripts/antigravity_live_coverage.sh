@@ -4,7 +4,7 @@
 # (two bash calls, exercises thought_signature replay) -> expect both outputs.
 set -uo pipefail
 
-JC=./target/selfdev/jcode
+JC=./target/selfdev/arterm
 CHAT_PROMPT='Reply with exactly: SMOKE_OK'
 TOOL_PROMPT="Run 'echo aa11' with bash, then in a SECOND separate bash call run 'echo bb22', then report both outputs."
 CHAT_TIMEOUT=90
@@ -37,7 +37,7 @@ total=${#MODELS[@]}
 i=0
 for m in "${MODELS[@]}"; do
   i=$((i+1))
-  echo "JCODE_PROGRESS {\"current\":$i,\"total\":$total,\"unit\":\"models\",\"message\":\"$m\"}" >&2
+  echo "ARTERM_PROGRESS {\"current\":$i,\"total\":$total,\"unit\":\"models\",\"message\":\"$m\"}" >&2
 
   # --- chat smoke ---
   chat_out=$(timeout "$CHAT_TIMEOUT" "$JC" run --provider antigravity -m "$m" --no-update --no-selfdev "$CHAT_PROMPT" 2>&1)

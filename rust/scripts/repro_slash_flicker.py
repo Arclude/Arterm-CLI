@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Reproduce the "slash command menu flickers in a freshly spawned jcode" bug.
+Reproduce the "slash command menu flickers in a freshly spawned arterm" bug.
 
 Why this exists
 ---------------
@@ -239,12 +239,12 @@ def launch(binary: str, env: dict, session_id: str,
     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ,
                 struct.pack("HHHH", ROWS, COLS, 0, 0))
     cenv = dict(env)
-    cenv["JCODE_DEBUG_CMD_PATH"] = str(cmd_path)
-    cenv["JCODE_DEBUG_RESPONSE_PATH"] = str(resp_path)
+    cenv["ARTERM_DEBUG_CMD_PATH"] = str(cmd_path)
+    cenv["ARTERM_DEBUG_RESPONSE_PATH"] = str(resp_path)
     cenv["TERM"] = "xterm-256color"
     proc = subprocess.Popen(
         [binary, "--no-update", "--no-selfdev",
-         "--socket", env["JCODE_SOCKET"], "--resume", session_id],
+         "--socket", env["ARTERM_SOCKET"], "--resume", session_id],
         stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
         env=cenv, preexec_fn=os.setsid,
     )
@@ -341,9 +341,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    default_bin = REPO_ROOT / "target" / "selfdev" / "jcode"
+    default_bin = REPO_ROOT / "target" / "selfdev" / "arterm"
     if not default_bin.exists():
-        default_bin = Path.home() / ".jcode" / "builds" / "current" / "jcode"
+        default_bin = Path.home() / ".arterm" / "builds" / "current" / "arterm"
     ap.add_argument("--binary", default=str(default_bin))
     ap.add_argument("--json", action="store_true")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -357,44 +357,44 @@ def main() -> int:
         print(f"binary not found: {binary}")
         return 3
 
-    root = Path(tempfile.mkdtemp(prefix="jcode-slash-flicker-"))
+    root = Path(tempfile.mkdtemp(prefix="arterm-slash-flicker-"))
     home, run = root / "home", root / "run"
     home.mkdir(parents=True)
     run.mkdir(parents=True)
 
     env = os.environ.copy()
-    env["JCODE_HOME"] = str(home)
-    env["JCODE_RUNTIME_DIR"] = str(run)
-    env["JCODE_SOCKET"] = str(run / "jcode.sock")
-    env["JCODE_NO_TELEMETRY"] = "1"
-    env["JCODE_DEBUG_CONTROL"] = "1"
-    env["JCODE_TEMP_SERVER"] = "1"
-    env["JCODE_SERVER_OWNER_PID"] = str(os.getpid())
+    env["ARTERM_HOME"] = str(home)
+    env["ARTERM_RUNTIME_DIR"] = str(run)
+    env["ARTERM_SOCKET"] = str(run / "arterm.sock")
+    env["ARTERM_NO_TELEMETRY"] = "1"
+    env["ARTERM_DEBUG_CONTROL"] = "1"
+    env["ARTERM_TEMP_SERVER"] = "1"
+    env["ARTERM_SERVER_OWNER_PID"] = str(os.getpid())
     # The donut only runs in the Full performance tier. A busy build machine
     # would otherwise silently drop to Reduced and hide the bug.
-    env.setdefault("JCODE_PERF_TIER", "full")
+    env.setdefault("ARTERM_PERF_TIER", "full")
     # Pin the theme so the client never issues an OSC 11 background query.
     # The client consumes that reply from stdin itself; a harness that also
     # answers it races the client and the leftover bytes get decoded as
     # composer keystrokes (observed as `]11;rgb:...` text in the input line),
     # which silently invalidates every measurement taken afterwards.
-    env["JCODE_THEME"] = "dark"
+    env["ARTERM_THEME"] = "dark"
     if args.no_idle_animation:
-        env["JCODE_IDLE_ANIMATION"] = "false"
+        env["ARTERM_IDLE_ANIMATION"] = "false"
     if not env.get("ANTHROPIC_API_KEY"):
         env["ANTHROPIC_API_KEY"] = "sk-ant-repro-slash-flicker"
-    debug_sock = run / "jcode-debug.sock"
+    debug_sock = run / "arterm-debug.sock"
     cmd_path, resp_path = run / "client_cmd", run / "client_resp"
 
     if not args.json:
-        print("== jcode slash-menu flicker repro ==")
+        print("== arterm slash-menu flicker repro ==")
         print(f"  binary : {binary}")
         print(f"  donut  : {'off' if args.no_idle_animation else 'on'}")
 
     server_log = root / "server.log"
     log_fh = server_log.open("wb")
     server = subprocess.Popen(
-        [binary, "serve", "--socket", env["JCODE_SOCKET"], "--debug-socket",
+        [binary, "serve", "--socket", env["ARTERM_SOCKET"], "--debug-socket",
          "--no-update", "--no-selfdev"],
         env=env, stdout=log_fh, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
 
@@ -403,7 +403,7 @@ def main() -> int:
                     "idle_animation": not args.no_idle_animation}
     try:
         try:
-            wait_for_socket(Path(env["JCODE_SOCKET"]))
+            wait_for_socket(Path(env["ARTERM_SOCKET"]))
             wait_for_socket(debug_sock)
         except RuntimeError:
             print("server never bound its sockets; log tail:")

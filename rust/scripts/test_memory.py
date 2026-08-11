@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Comprehensive memory system test for jcode.
+Comprehensive memory system test for arterm.
 
 Tests all memory features with both Claude and OpenAI providers via the debug socket.
 
 Usage:
-    # With existing server (uses /run/user/1000/jcode-debug.sock)
+    # With existing server (uses /run/user/1000/arterm-debug.sock)
     ./scripts/test_memory.py
 
     # Start fresh server for testing
@@ -209,7 +209,7 @@ def run_tests(client, providers):
     return results
 
 def main():
-    parser = argparse.ArgumentParser(description='Test jcode memory system')
+    parser = argparse.ArgumentParser(description='Test arterm memory system')
     parser.add_argument('--fresh', action='store_true', help='Start fresh server for testing')
     parser.add_argument('--provider', choices=['claude', 'openai'], help='Test specific provider only')
     parser.add_argument('--socket', help='Custom debug socket path')
@@ -220,7 +220,7 @@ def main():
     proc = None
     if args.fresh:
         log_section("Starting fresh test server...")
-        test_socket = '/tmp/jcode-memory-test.sock'
+        test_socket = '/tmp/arterm-memory-test.sock'
         debug_socket = test_socket.replace('.sock', '-debug.sock')
 
         for s in [test_socket, debug_socket]:
@@ -228,11 +228,11 @@ def main():
                 os.remove(s)
 
         env = os.environ.copy()
-        env['JCODE_DEBUG_CONTROL'] = '1'
-        env['JCODE_SOCKET'] = test_socket
+        env['ARTERM_DEBUG_CONTROL'] = '1'
+        env['ARTERM_SOCKET'] = test_socket
 
         proc = subprocess.Popen(
-            ['jcode', 'serve'],
+            ['arterm', 'serve'],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -250,10 +250,10 @@ def main():
         log_pass(f"Server started (PID {proc.pid})")
         socket_path = debug_socket
     else:
-        socket_path = args.socket or '/run/user/1000/jcode-debug.sock'
+        socket_path = args.socket or '/run/user/1000/arterm-debug.sock'
         if not os.path.exists(socket_path):
             log_fail(f"Debug socket not found: {socket_path}")
-            log("Use --fresh to start a test server, or ensure jcode is running")
+            log("Use --fresh to start a test server, or ensure arterm is running")
             sys.exit(1)
 
     client = DebugSocketClient(socket_path)

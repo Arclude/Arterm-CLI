@@ -1,11 +1,11 @@
 # Provider Doctor
 
-`jcode provider-doctor` is a user-facing diagnostic that answers one question:
+`arterm provider-doctor` is a user-facing diagnostic that answers one question:
 
 > Why isn't my provider/model (or the model picker) working?
 
 It walks the same strict end-to-end checkpoints that the live coverage ledger
-tracks (`jcode provider-test-coverage`), but as an interactive command you can run
+tracks (`arterm provider-test-coverage`), but as an interactive command you can run
 yourself, with clear pass/fail output and a "what to try next" hint on the first
 failure.
 
@@ -15,17 +15,17 @@ comtegra, deepseek, groq, openrouter, and other `openai-compatible` profiles).
 ## Quick start
 
 ```bash
-# Validate jcode's own wiring for a provider, no API key, no spend:
-jcode provider-doctor cerebras --tier offline
+# Validate arterm's own wiring for a provider, no API key, no spend:
+arterm provider-doctor cerebras --tier offline
 
 # Validate the key + live model catalog (needs a key, negligible spend):
-jcode provider-doctor cerebras --tier catalog
+arterm provider-doctor cerebras --tier catalog
 
 # Full readiness, including real chat, streaming, and tool calls (spends balance):
-jcode provider-doctor cerebras --tier full
+arterm provider-doctor cerebras --tier full
 
 # Pin a specific model and emit JSON for scripting/CI:
-jcode provider-doctor cerebras --model gpt-oss-120b --tier full --json
+arterm provider-doctor cerebras --model gpt-oss-120b --tier full --json
 ```
 
 The model defaults to the provider's default model (or the first live catalog
@@ -38,7 +38,7 @@ constraints, so you can debug cheaply and escalate only when needed.
 
 | Tier | Needs key? | Spends balance? | What it adds | Catches |
 | --- | --- | --- | --- | --- |
-| `offline` | no | no | jcode-side wiring against a synthetic catalog | catalog reload, picker rendering, fallback labeling, and model-switch routing bugs for this provider |
+| `offline` | no | no | arterm-side wiring against a synthetic catalog | catalog reload, picker rendering, fallback labeling, and model-switch routing bugs for this provider |
 | `catalog` (default) | yes | ~none | live `GET /models` | bad/missing key, dead endpoint, model not in the live catalog |
 | `full` | yes | yes | non-streaming chat, streaming, tool-call loop | the model actually chats, streams, and supports tool-calling |
 
@@ -62,7 +62,7 @@ when all of them pass on the `full` tier.
 9. `tool_call_parse` - the model emitted a parseable tool call (full tier)
 10. `tool_execution_loop` - the tool-call loop ran (full tier)
 11. `tool_result_followup` - the tool result was fed back (full tier)
-12. `real_jcode_tool_smoke` - an end-to-end tool smoke passed (full tier)
+12. `real_arterm_tool_smoke` - an end-to-end tool smoke passed (full tier)
 
 (Checkpoints 1-2 plus the auth-lifecycle stages are pre-flight; 7-12 are the
 API-dependent ones gated behind `--tier full`.)
@@ -115,7 +115,7 @@ Spend this run: 3 billable API calls, 554 tokens (289 in + 265 out), cost not re
 `has_token_data`, `reported_cost_usd`).
 
 This spend is **persisted** into the coverage ledger alongside the run, so
-`jcode provider-test-coverage` shows a cumulative "Recorded spend" footer
+`arterm provider-test-coverage` shows a cumulative "Recorded spend" footer
 summing the latest run per pair. That gives you a durable, at-a-glance answer to
 "how much has exercising this coverage cost me so far?"
 
@@ -123,13 +123,13 @@ summing the latest run per pair. That gives you a durable, at-a-glance answer to
 
 1. **"My picker is broken / shows the wrong models."**
    Run `--tier offline`. If `picker_live_models`, `picker_fallback_labeling`, or
-   `model_switch_route` fail, it's a jcode-side routing bug for that provider:
+   `model_switch_route` fail, it's a arterm-side routing bug for that provider:
    capture the output and file an issue.
 
 2. **"It won't connect / says auth failed."**
    Run `--tier catalog`. If `auth_credential_loaded` or
    `model_catalog_live_endpoint` fail, the key/endpoint is the problem. Run
-   `jcode login --provider <provider>`.
+   `arterm login --provider <provider>`.
 
 3. **"It connects but the model behaves badly."**
    Run `--tier full`. If `non_streaming_chat_completion` /
@@ -141,10 +141,10 @@ summing the latest run per pair. That gives you a durable, at-a-glance answer to
 Every doctor run records a live-verification event into the coverage ledger,
 tagged with the tier (`doctor_tier`). A `full`-tier pass that clears all 11
 strict checkpoints flips the pair to strict ("READY") in
-`jcode provider-test-coverage`. Lighter tiers record the API-dependent
+`arterm provider-test-coverage`. Lighter tiers record the API-dependent
 checkpoints as skipped, so they never over-credit a pair.
 
-`jcode provider-test-coverage` renders the same 11 checkpoints as an 11-stage
+`arterm provider-test-coverage` renders the same 11 checkpoints as an 11-stage
 pipeline. Each observed pair gets one compact line: a status token (`READY`, or
 `N/11` = how many stages it cleared) followed by `provider / model`, and then,
 for any pair that is not yet READY, the first blocker plus the exact
@@ -156,7 +156,7 @@ Each line ends with a freshness note, e.g.:
 
 ```
   READY  cerebras / gpt-oss-120b   last tested 9 minutes ago (2026-05-30) by developer (dev build)
-  6/11   nvidia-nim / gemma-4-31b  failed at `streaming reply`; run `jcode provider-doctor nvidia-nim --model gemma-4-31b --tier full`; last tested 2 days ago ...
+  6/11   nvidia-nim / gemma-4-31b  failed at `streaming reply`; run `arterm provider-doctor nvidia-nim --model gemma-4-31b --tier full`; last tested 2 days ago ...
 ```
 
 - **how long ago** the most recent run was, in plain English plus the absolute

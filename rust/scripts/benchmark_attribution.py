@@ -2,7 +2,7 @@
 """Attribution benchmark for sponsored Discovery listings.
 
 For every sponsor in the catalog, this suite verifies that a signup or
-install performed by an agent on the user's behalf is attributable to jcode.
+install performed by an agent on the user's behalf is attributable to arterm.
 Most signups happen from a CLI-driven agent flow, so the checks focus on
 whether the catalog data itself carries a working attribution mechanism:
 
@@ -22,7 +22,7 @@ whether the catalog data itself carries a working attribution mechanism:
                              2xx/3xx response and the marker survives
                              redirects, so the referral cookie can be set.
 
-`cli_flow_attributable` is the primary check: nearly all jcode-driven signups
+`cli_flow_attributable` is the primary check: nearly all arterm-driven signups
 happen inside an agent CLI flow, so a sponsor whose attribution only works for
 a human clicking a browser link is effectively unattributed for us. It is
 weighted (see CRITICAL_CHECK_WEIGHT) in the 0-100 score, reported as an
@@ -43,8 +43,8 @@ verify referral URLs on the public web:
 
     python scripts/benchmark_attribution.py --live --live-web
 
-Live requests carry x-jcode-discovery-benchmark: 1 via
-JCODE_DISCOVERY_BENCHMARK=1 semantics: this runner calls the discovery HTTP
+Live requests carry x-arterm-discovery-benchmark: 1 via
+ARTERM_DISCOVERY_BENCHMARK=1 semantics: this runner calls the discovery HTTP
 API directly and always sends the benchmark header itself.
 """
 
@@ -65,8 +65,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPONSORS = REPO_ROOT / "scripts" / "attribution_benchmark_sponsors.json"
 DEFAULT_OUTPUT = REPO_ROOT / "target" / "attribution-benchmark" / "latest.json"
-DEFAULT_ENDPOINT = "https://api.jcode.sh/v1/discovery"
-BENCHMARK_HEADER = "x-jcode-discovery-benchmark"
+DEFAULT_ENDPOINT = "https://api.arterm.sh/v1/discovery"
+BENCHMARK_HEADER = "x-arterm-discovery-benchmark"
 
 # The check that decides whether agent-driven (CLI) signups are credited to us.
 CRITICAL_CHECK = "cli_flow_attributable"
@@ -200,7 +200,7 @@ def load_catalog_entries(path: Path) -> dict[str, dict[str, Any]]:
 
 def http_get(url: str, timeout: float, benchmark: bool = False) -> tuple[int, str, str]:
     """Return (status, final_url, body_prefix)."""
-    request = urllib.request.Request(url, headers={"User-Agent": "jcode-attribution-benchmark"})
+    request = urllib.request.Request(url, headers={"User-Agent": "arterm-attribution-benchmark"})
     if benchmark:
         request.add_header(BENCHMARK_HEADER, "1")
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -213,7 +213,7 @@ def fetch_live_entry(endpoint: str, sponsor: dict[str, Any], timeout: float) -> 
         "q": f"attribution benchmark validation for {sponsor['category'].replace('-', ' ')} listings",
         "reason": (
             "Automated attribution benchmark verifying that sponsor listing and setup data "
-            "preserve the jcode referral marker. No account will be created."
+            "preserve the arterm referral marker. No account will be created."
         ),
     }
     browse_url = f"{endpoint}?{urllib.parse.urlencode(base)}"
@@ -411,11 +411,11 @@ def main() -> int:
     # CLI attribution is the headline result: state it explicitly every run.
     print()
     print(f"CLI-flow attribution ({CRITICAL_CHECK}) is the primary signal: "
-          "agent CLI signups are how jcode actually drives acquisition.")
+          "agent CLI signups are how arterm actually drives acquisition.")
     for r in reports:
         print(f"  {r.tool:<14} {r.cli_verdict:<14} {r.cli_detail}")
     attributed = len(reports) - len(not_attributed) - len(unknown_attribution)
-    print(f"  => {attributed}/{len(reports)} sponsors credit agent-driven CLI signups to jcode"
+    print(f"  => {attributed}/{len(reports)} sponsors credit agent-driven CLI signups to arterm"
           + (f"; {len(unknown_attribution)} unknown" if unknown_attribution else ""))
 
     if not_attributed:

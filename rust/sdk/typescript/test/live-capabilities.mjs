@@ -8,7 +8,7 @@
  * looks fine in a unit test and silently no-ops in production.
  */
 
-import { JcodeClient, HarnessError } from "../dist/index.js";
+import { ArtermClient, HarnessError } from "../dist/index.js";
 
 const failures = [];
 async function step(name, fn) {
@@ -21,7 +21,7 @@ async function step(name, fn) {
   }
 }
 
-const client = await JcodeClient.connect({
+const client = await ArtermClient.connect({
   clientName: "sdk-capabilities-e2e/0.1",
   requestTimeoutMs: 60_000,
 });
@@ -155,7 +155,7 @@ await step("compact is scheduled, or explains why it was refused", async () => {
 });
 
 await step("these requests need an attached session", async () => {
-  const other = await JcodeClient.connect({
+  const other = await ArtermClient.connect({
     clientName: "sdk-capabilities-unattached/0.1",
     requestTimeoutMs: 20_000,
   });

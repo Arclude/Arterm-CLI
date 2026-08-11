@@ -1,5 +1,5 @@
 /**
- * End-to-end check for `JcodeClient.launch()`: a private instance.
+ * End-to-end check for `ArtermClient.launch()`: a private instance.
  *
  * The isolation claim is the whole point of `launch()`, and it is exactly the
  * kind of claim that is easy to assert and hard to actually hold. So this
@@ -7,15 +7,15 @@
  * cannot see the user's sessions, it inherits credentials well enough to reach
  * a model, and it leaves nothing behind.
  *
- * Usage: node test/live-launch.mjs [path-to-jcode-binary]
+ * Usage: node test/live-launch.mjs [path-to-arterm-binary]
  */
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { JcodeClient, userJcodeHome } from "../dist/index.js";
+import { ArtermClient, userArtermHome } from "../dist/index.js";
 
-const binary = process.argv[2] ?? "jcode";
+const binary = process.argv[2] ?? "arterm";
 const failures = [];
 async function step(name, fn) {
   try {
@@ -29,7 +29,7 @@ async function step(name, fn) {
 
 console.log(`launching a private instance with ${binary}`);
 const started = Date.now();
-const client = await JcodeClient.launch({
+const client = await ArtermClient.launch({
   binary,
   workingDir: process.cwd(),
   startupTimeoutMs: 60_000,
@@ -43,7 +43,7 @@ await step("a fresh instance starts with no sessions", async () => {
 });
 
 await step("the instance home is separate from the user's", () => {
-  assert.notEqual(home, userJcodeHome());
+  assert.notEqual(home, userArtermHome());
   assert.ok(fs.existsSync(home), "instance home should exist while running");
 });
 
@@ -62,8 +62,8 @@ await step("the instance can reach a model", async () => {
   // CI and developer machines often retain a stale default provider alongside
   // another valid login. Let the validation choose a known-good route so this
   // tests inherited credentials rather than unrelated historical selection.
-  if (process.env.JCODE_SDK_TEST_MODEL) {
-    await client.setModel(session.session_id, process.env.JCODE_SDK_TEST_MODEL);
+  if (process.env.ARTERM_SDK_TEST_MODEL) {
+    await client.setModel(session.session_id, process.env.ARTERM_SDK_TEST_MODEL);
   }
   const turn = await client.run(session.session_id, "Reply with exactly: ISOLATED", {
     autoApprove: true,
@@ -94,39 +94,39 @@ await step("close() stops the instance and removes its home", async () => {
   );
 });
 
-// A launched instance must never be visible to the user's own jcode. Check
+// A launched instance must never be visible to the user's own arterm. Check
 // from the other side: connect to the shared socket, if one exists, and
 // confirm the instance's session is not there.
-await step("the user's jcode never saw the instance", async () => {
+await step("the user's arterm never saw the instance", async () => {
   let shared;
   try {
-    shared = await JcodeClient.connect({ clientName: "launch-isolation-check/1.0" });
+    shared = await ArtermClient.connect({ clientName: "launch-isolation-check/1.0" });
   } catch {
-    console.log("     (no user jcode running; skipping)");
+    console.log("     (no user arterm running; skipping)");
     return;
   }
   const sessions = await shared.listSessions();
   await shared.close();
   assert.ok(
     !sessions.some((session) => session.working_dir === home),
-    "a launched instance's sessions leaked into the user's jcode",
+    "a launched instance's sessions leaked into the user's arterm",
   );
 });
 
 // A consumer whose process dies without calling close() must not leave the
 // instance daemon running. The daemon calls setsid(), so it survives anything
-// aimed at the process that started it: a server embedding jcode would
+// aimed at the process that started it: a server embedding arterm would
 // otherwise accumulate one daemon per restart, each holding a temp directory
 // and a model connection open indefinitely.
 await step("an exit without close() does not leak the daemon", async () => {
   const { execFileSync, execSync } = await import("node:child_process");
   const countDaemons = () =>
-    Number(execSync("pgrep -cf 'jcode --provider auto serve' || true", { encoding: "utf8" }).trim());
+    Number(execSync("pgrep -cf 'arterm --provider auto serve' || true", { encoding: "utf8" }).trim());
 
   const before = countDaemons();
   const script = `
-    import { JcodeClient } from ${JSON.stringify(new URL("../dist/index.js", import.meta.url).href)};
-    const client = await JcodeClient.launch({
+    import { ArtermClient } from ${JSON.stringify(new URL("../dist/index.js", import.meta.url).href)};
+    const client = await ArtermClient.launch({
       binary: ${JSON.stringify(binary)},
       workingDir: process.cwd(),
       startupTimeoutMs: 60000,

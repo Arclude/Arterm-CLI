@@ -5,7 +5,7 @@
   "highlights": [
     "Tool schemas now adapt to each provider automatically and recover from newly reported schema incompatibilities",
     "Managed cloud activation is now the default remote setup flow",
-    "The TypeScript SDK now bundles platform-specific jcode runtimes for easier installation"
+    "The TypeScript SDK now bundles platform-specific arterm runtimes for easier installation"
   ],
   "improvements": [
     "Integration discovery can record intentional off-catalog selections",

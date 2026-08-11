@@ -113,9 +113,9 @@ jobs:
       - name: Run Windows lifecycle e2e tests
         shell: pwsh
         env:
-          JCODE_E2E_ARTIFACT_DIR: ${{ runner.temp }}/jcode-windows-e2e-logs
+          ARTERM_E2E_ARTIFACT_DIR: ${{ runner.temp }}/arterm-windows-e2e-logs
         run: |
-          New-Item -ItemType Directory -Force -Path $env:JCODE_E2E_ARTIFACT_DIR | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:ARTERM_E2E_ARTIFACT_DIR | Out-Null
           $tests = @(
             'windows_lifecycle::windows_binary_server_accepts_clients_and_debug_cli',
             'windows_lifecycle::windows_binary_server_rebinds_named_pipe_after_exit'
@@ -132,13 +132,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-smoke-e2e-diagnostics-x64
-          path: ${{ runner.temp }}/jcode-windows-e2e-logs
+          path: ${{ runner.temp }}/arterm-windows-e2e-logs
           if-no-files-found: ignore
 
       - name: Verify built binary launches
         shell: pwsh
         run: |
-          & "target/x86_64-pc-windows-msvc/release/jcode.exe" --version
+          & "target/x86_64-pc-windows-msvc/release/arterm.exe" --version
           if ($LASTEXITCODE -ne 0) {
             throw 'Built Windows binary failed to run --version'
           }
@@ -147,7 +147,7 @@ jobs:
         shell: pwsh
         run: |
           & ./.github/scripts/verify_windows_install.ps1 `
-            -ArtifactExePath 'target/x86_64-pc-windows-msvc/release/jcode.exe'
+            -ArtifactExePath 'target/x86_64-pc-windows-msvc/release/arterm.exe'
 
   smoke-arm64:
     name: Windows Smoke (ARM64)
@@ -190,7 +190,7 @@ jobs:
       - name: Verify built binary launches
         shell: pwsh
         run: |
-          & "target/aarch64-pc-windows-msvc/release/jcode.exe" --version
+          & "target/aarch64-pc-windows-msvc/release/arterm.exe" --version
           if ($LASTEXITCODE -ne 0) {
             throw 'Built Windows ARM64 binary failed to run --version'
           }
@@ -199,4 +199,4 @@ jobs:
         shell: pwsh
         run: |
           & ./.github/scripts/verify_windows_install.ps1 `
-            -ArtifactExePath 'target/aarch64-pc-windows-msvc/release/jcode.exe'
+            -ArtifactExePath 'target/aarch64-pc-windows-msvc/release/arterm.exe'

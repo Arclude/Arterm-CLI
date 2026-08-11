@@ -42,7 +42,7 @@ Every task declares exactly one `kind`.
 
 ### `gap`
 
-A request that cannot be completed without an external service that Jcode does
+A request that cannot be completed without an external service that Arterm does
 not ship, where no credential or existing configuration is present. The correct
 agent behaviour is to browse the relevant category.
 
@@ -50,7 +50,7 @@ Scored: did a `discover_tools` browse occur, and was `category` correct.
 
 ### `control`
 
-A request fully inside Jcode's own capabilities: code, tests, docs, git, local
+A request fully inside Arterm's own capabilities: code, tests, docs, git, local
 tooling. No external service is required at any point. The correct agent
 behaviour is to never call `discover_tools`.
 
@@ -97,7 +97,7 @@ Field semantics:
   revisions, so renaming an id destroys its history. Retire a task by deleting
   it, never by repurposing its id.
 - **`expected_category`** must be a member of `DISCOVERY_CATEGORIES` in
-  `crates/jcode-base/src/sponsors.rs`. Exactly one category is expected; if a
+  `crates/arterm-base/src/sponsors.rs`. Exactly one category is expected; if a
   prompt plausibly maps to two, it is ambiguous and fails rule 3.4.
 - **`gap_rationale`** is mandatory prose stating *why* the capability cannot be
   satisfied in-harness. It is the reviewable artifact that stops a `near-miss`
@@ -189,7 +189,7 @@ Reported metrics:
   browse, and `suggest` calls with no preceding browse.
 
 Every run records the model, effort, provider route, tool mode, the exact
-system-prompt and schema hash, jcode git SHA, and the live catalog snapshot, so
+system-prompt and schema hash, arterm git SHA, and the live catalog snapshot, so
 a score is only ever compared against a run with the same model and route.
 
 ## 5. Runner requirements
@@ -199,15 +199,15 @@ browse as `elicited`. It records the listing size for context but never gates on
 it. This is the single most important difference from
 `benchmark_discovery.py`.
 
-**5.2 Benchmark marking.** The runner sets `JCODE_DISCOVERY_BENCHMARK=1`, so
-requests carry `x-jcode-discovery-benchmark: 1` and land in D1 with
+**5.2 Benchmark marking.** The runner sets `ARTERM_DISCOVERY_BENCHMARK=1`, so
+requests carry `x-arterm-discovery-benchmark: 1` and land in D1 with
 `benchmark_run = 1`. All production discovery analysis filters
 `benchmark_run = 0`; an eval that pollutes the demand signal is worse than no
 eval.
 
 **5.3 Environment isolation.** Each attempt runs in a fresh `workspace` fixture
 with a scrubbed environment: no provider API keys beyond the model route itself,
-no user `~/.jcode/config.toml`, `[sponsors] enabled = true` written explicitly
+no user `~/.arterm/config.toml`, `[sponsors] enabled = true` written explicitly
 so a frozen opt-out cannot silently zero the whole suite.
 
 **5.4 Stop at the browse.** The attempt is killed as soon as the first

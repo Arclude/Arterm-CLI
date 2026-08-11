@@ -6,9 +6,9 @@ Add a single native tool, **`computer`**, that lets the agent observe and contro
 the macOS GUI — screenshots, the accessibility (AX) tree, mouse/keyboard input,
 window/app management, and clipboard — through one `action`-dispatched interface.
 
-This mirrors the existing **`browser`** tool (`crates/jcode-app-core/src/tool/browser.rs`):
+This mirrors the existing **`browser`** tool (`crates/arterm-app-core/src/tool/browser.rs`):
 one registered tool, an `action: String` that selects a sub-operation, with optional
-typed params. It gives jcode a closed control loop (*see screen → decide → act*)
+typed params. It gives arterm a closed control loop (*see screen → decide → act*)
 without depending on a browser or external automation tooling.
 
 ## Motivation
@@ -24,14 +24,14 @@ without depending on a browser or external automation tooling.
 ## Architecture
 
 ```
-crates/jcode-macos-control/        (new) cfg(target_os = "macos") platform crate
+crates/arterm-macos-control/        (new) cfg(target_os = "macos") platform crate
   └─ AX (accessibility-sys), CGEvent (core-graphics),
      CoreFoundation (core-foundation), screenshots (ScreenCaptureKit / CGDisplay),
      app/window control (objc2 + objc2-app-kit), clipboard (objc2 NSPasteboard)
 
-crates/jcode-app-core/src/tool/computer.rs   (new) ComputerTool
-  └─ thin dispatch layer: parse input -> call jcode-macos-control -> ToolOutput
-  └─ registered in crates/jcode-app-core/src/tool/mod.rs base_tools()
+crates/arterm-app-core/src/tool/computer.rs   (new) ComputerTool
+  └─ thin dispatch layer: parse input -> call arterm-macos-control -> ToolOutput
+  └─ registered in crates/arterm-app-core/src/tool/mod.rs base_tools()
 ```
 
 - All native APIs are reached through existing Rust bindings (`objc2`,
@@ -59,7 +59,7 @@ boundary), and it is required for input injection. Best achievable flow, exposed
 the `request_permissions` action:
 
 1. `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])` — shows the
-   system dialog *and auto-adds jcode to the Accessibility list* (toggled off).
+   system dialog *and auto-adds arterm to the Accessibility list* (toggled off).
 2. Deep-link to the exact pane:
    `open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"`.
 3. Poll `AXIsProcessTrusted()` until granted, then report ready.
@@ -133,7 +133,7 @@ Computer use is high-blast-radius, so:
 
 ## Implementation plan
 
-1. `jcode-macos-control` crate: permissions, screenshot, AX read, AX action,
+1. `arterm-macos-control` crate: permissions, screenshot, AX read, AX action,
    CGEvent input, window/app control, clipboard. Unit-test the pure parts
    (input parsing, chord parsing, tree serialization).
 2. `ComputerTool` in `tool/computer.rs`: input struct + `action` dispatch +

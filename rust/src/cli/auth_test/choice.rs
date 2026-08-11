@@ -40,7 +40,7 @@ pub(crate) async fn auth_test_choice_plan(
     }
 
     Ok(AuthTestChoicePlan::Skip(format!(
-        "Skipped: {} local endpoint reported no models. Re-run `jcode auth-test --provider {} --model <local-model>` or set a default model first.",
+        "Skipped: {} local endpoint reported no models. Re-run `arterm auth-test --provider {} --model <local-model>` or set a default model first.",
         resolved.display_name,
         choice.as_arg_value()
     )))
@@ -52,7 +52,7 @@ pub(crate) fn tool_smoke_skip_detail_for_choice(
 ) -> Option<String> {
     if matches!(choice, super::provider_init::ProviderChoice::Cursor) {
         return Some(
-            "Skipped: the Cursor native agent transport is text-only in jcode (it does not expose \
+            "Skipped: the Cursor native agent transport is text-only in arterm (it does not expose \
              tool calls over agent.v1.AgentService/Run). Basic provider smoke still validates chat."
                 .to_string(),
         );
@@ -97,7 +97,7 @@ fn effective_openai_compatible_auth_test_model(
         .filter(|model| !model.is_empty())
         .map(ToString::to_string)
         .or_else(|| {
-            std::env::var("JCODE_OPENROUTER_MODEL")
+            std::env::var("ARTERM_OPENROUTER_MODEL")
                 .ok()
                 .map(|model| model.trim().to_string())
                 .filter(|model| !model.is_empty())
@@ -305,7 +305,7 @@ async fn run_provider_tool_smoke_for_choice(
         validate_auth_test_tool_smoke_transcript(&agent.messages()[transcript_start..], &output)
             .with_context(|| {
                 format!(
-                    "{} tool-enabled smoke prompt did not complete a valid real Jcode tool loop",
+                    "{} tool-enabled smoke prompt did not complete a valid real Arterm tool loop",
                     choice.as_arg_value()
                 )
             })?;
@@ -483,7 +483,7 @@ pub(crate) fn auth_test_error_is_retryable(err: &anyhow::Error) -> bool {
 /// class of confusion about which target a result actually described.
 fn auth_test_report_label(report: &AuthTestProviderReport) -> String {
     if report.provider == "openai-compatible"
-        && let Ok(profile) = std::env::var("JCODE_NAMED_PROVIDER_PROFILE")
+        && let Ok(profile) = std::env::var("ARTERM_NAMED_PROVIDER_PROFILE")
         && !profile.trim().is_empty()
     {
         return format!("{} (openai-compatible profile)", profile.trim());
@@ -535,9 +535,9 @@ mod report_label_tests {
     #[test]
     fn named_profile_is_named_in_the_report_header() {
         let _guard = crate::storage::lock_test_env();
-        let saved = std::env::var("JCODE_NAMED_PROVIDER_PROFILE").ok();
+        let saved = std::env::var("ARTERM_NAMED_PROVIDER_PROFILE").ok();
 
-        crate::env::set_var("JCODE_NAMED_PROVIDER_PROFILE", "company-gateway");
+        crate::env::set_var("ARTERM_NAMED_PROVIDER_PROFILE", "company-gateway");
         let label = auth_test_report_label(&report("openai-compatible"));
         assert!(
             label.contains("company-gateway"),
@@ -547,7 +547,7 @@ mod report_label_tests {
         // A builtin provider must be unaffected even while a profile is set.
         assert_eq!(auth_test_report_label(&report("deepseek")), "deepseek");
 
-        crate::env::remove_var("JCODE_NAMED_PROVIDER_PROFILE");
+        crate::env::remove_var("ARTERM_NAMED_PROVIDER_PROFILE");
         assert_eq!(
             auth_test_report_label(&report("openai-compatible")),
             "openai-compatible",
@@ -555,8 +555,8 @@ mod report_label_tests {
         );
 
         match saved {
-            Some(value) => crate::env::set_var("JCODE_NAMED_PROVIDER_PROFILE", value),
-            None => crate::env::remove_var("JCODE_NAMED_PROVIDER_PROFILE"),
+            Some(value) => crate::env::set_var("ARTERM_NAMED_PROVIDER_PROFILE", value),
+            None => crate::env::remove_var("ARTERM_NAMED_PROVIDER_PROFILE"),
         }
     }
 }

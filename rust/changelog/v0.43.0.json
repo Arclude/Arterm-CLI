@@ -15,6 +15,6 @@
   "fixes": [
     "Images with mismatched format labels are corrected before sending so providers no longer reject valid image payloads",
     "Idle TUI sessions release retained heap memory more effectively",
-    "Jcode login directs users to the correct pricing path"
+    "Arterm login directs users to the correct pricing path"
   ]
 }

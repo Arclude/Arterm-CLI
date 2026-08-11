@@ -79,7 +79,7 @@ def niri_windows(title_fragment: str, pid_filter: int | None = None) -> tuple[Wi
 
 
 def activation_markers(windows: tuple[Window, ...]) -> dict[int, str | None]:
-    root = Path.home() / ".jcode" / "selfdev" / "desktop2-instances"
+    root = Path.home() / ".arterm" / "selfdev" / "desktop2-instances"
     markers = {}
     for window in windows:
         try:
@@ -93,7 +93,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--title",
-        default="jcode desktop2",
+        default="arterm desktop2",
         help="case-insensitive title fragment identifying desktop2 windows",
     )
     parser.add_argument("--poll-ms", type=float, default=20.0)

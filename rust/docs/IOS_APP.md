@@ -1,4 +1,4 @@
-# jcode iOS App
+# arterm iOS App
 
 > Status: v2 rebuild. Pure Swift. This replaces the earlier prototype and the
 > Rust-mobile-core/simulator direction, both removed in the `ios-app-restart`
@@ -6,7 +6,7 @@
 
 ## Product definition
 
-A native iOS remote control for jcode servers running on your own machines.
+A native iOS remote control for arterm servers running on your own machines.
 The phone renders conversations and drives sessions; all heavy lifting (LLM
 calls, tools, git, files, MCP) stays on the server. Reachability is assumed to
 be Tailscale (or LAN); the app never talks to LLM providers directly.
@@ -32,7 +32,7 @@ work, and a parallel simulator to stay honest. Instead:
 ```
 ios/
   Package.swift              SPM package, builds on macOS + iOS
-  Sources/JCodeKit/          platform-free client core (no UIKit)
+  Sources/ArtermKit/          platform-free client core (no UIKit)
     Gateway.swift            endpoints: /health, /pair, /ws
     Pairing.swift            pairing code -> auth token
     Wire.swift               Request/ServerEvent codecs (NDJSON over WS)
@@ -40,19 +40,19 @@ ios/
     Connection.swift         actor: connect/auth/reconnect, AsyncStream<ServerEvent>
     SessionReducer.swift     pure state machine: events -> transcript/app state
     CredentialStore.swift    Keychain-backed server credentials (protocol + impl)
-  Sources/JCodeMobile/       SwiftUI app shell (iOS only)
-    JCodeMobileApp.swift     entry
+  Sources/ArtermMobile/       SwiftUI app shell (iOS only)
+    ArtermMobileApp.swift     entry
     AppModel.swift           @Observable glue: Connection + Reducer -> views
     Views/                   Pairing, Chat, Transcript, Sessions, Settings
     QRScannerView.swift      camera pairing
     Theme.swift              colors/typography tokens
-  Tests/JCodeKitTests/       swift test on macOS: codec fixtures, reducer, pairing
+  Tests/ArtermKitTests/       swift test on macOS: codec fixtures, reducer, pairing
   project.yml                XcodeGen spec for the app target
 ```
 
 Rules:
 
-- `JCodeKit` never imports UIKit/SwiftUI. It must compile for macOS so the
+- `ArtermKit` never imports UIKit/SwiftUI. It must compile for macOS so the
   whole behavior layer is testable headlessly by agents on this machine.
 - Views contain no protocol or state-transition logic. `AppModel` only
   forwards actions and publishes reducer output.
@@ -64,14 +64,14 @@ Rules:
 
 Server side (already shipped, unchanged):
 
-- `jcode pair` CLI generates a 6-digit code (5 min TTL) and QR with
-  `jcode://pair?host=H&port=P&code=C`.
+- `arterm pair` CLI generates a 6-digit code (5 min TTL) and QR with
+  `arterm://pair?host=H&port=P&code=C`.
 - `POST http://host:7643/pair` with `{code, device_id, device_name}` returns
   `{token, server_name, server_version}`. Token is stored hashed server-side.
 - `GET /health` for reachability checks.
 - `ws://host:7643/ws?token=...` upgrades to a WebSocket carrying the same
   newline-delimited JSON protocol as Unix-socket TUI clients
-  (`crates/jcode-protocol/src/wire.rs`, `#[serde(tag = "type")]`).
+  (`crates/arterm-protocol/src/wire.rs`, `#[serde(tag = "type")]`).
 
 Client v1 requests: `subscribe`, `message`, `cancel`, `soft_interrupt`,
 `ping`, `get_history`, `resume_session`, `set_model`, `rename_session`,

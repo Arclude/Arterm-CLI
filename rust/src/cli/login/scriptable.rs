@@ -188,7 +188,7 @@ pub(super) async fn start_scriptable_login(
         }
         LoginProviderTarget::Google => {
             let creds = auth::google::load_credentials().context(
-                "Google/Gmail scriptable auth requires saved OAuth credentials first. Run `jcode login --provider google` once or save google credentials manually.",
+                "Google/Gmail scriptable auth requires saved OAuth credentials first. Run `arterm login --provider google` once or save google credentials manually.",
             )?;
             let tier = options
                 .google_access_tier
@@ -348,7 +348,7 @@ pub(super) async fn complete_scriptable_claude_login(
             status: "authenticated",
             provider: provider_id.to_string(),
             account_label: Some(account_label.clone()),
-            credentials_path: Some(auth::claude::jcode_path()?.display().to_string()),
+            credentials_path: Some(auth::claude::arterm_path()?.display().to_string()),
             email: profile_email.clone(),
         },
     )?;
@@ -357,7 +357,7 @@ pub(super) async fn complete_scriptable_claude_login(
         eprintln!(
             "Account '{}' stored at {}",
             account_label,
-            auth::claude::jcode_path()?.display()
+            auth::claude::arterm_path()?.display()
         );
         if let Some(email) = profile_email {
             eprintln!("Profile email: {}", email);
@@ -400,7 +400,7 @@ pub(super) async fn complete_scriptable_openai_login(
     auth::oauth::save_openai_tokens_for_account(&tokens, &account_label)?;
     clear_pending_login(&pending_path);
     crate::telemetry::record_auth_success(provider_id, "oauth");
-    let credentials_path = crate::storage::jcode_dir()?.join("openai-auth.json");
+    let credentials_path = crate::storage::arterm_dir()?.join("openai-auth.json");
     emit_scriptable_auth_success(
         options.json,
         ScriptableAuthSuccess {
@@ -543,7 +543,7 @@ pub(super) async fn complete_scriptable_google_login(
         }
     };
     let creds = auth::google::load_credentials().context(
-        "Google/Gmail completion requires saved OAuth credentials first. Run `jcode login --provider google` once or save google credentials manually.",
+        "Google/Gmail completion requires saved OAuth credentials first. Run `arterm login --provider google` once or save google credentials manually.",
     )?;
     let tokens = auth::google::exchange_callback_input(
         &creds,
@@ -617,13 +617,13 @@ pub(super) async fn complete_scriptable_copilot_login(
 }
 
 pub(super) fn pending_login_path(key: &str) -> Result<PathBuf> {
-    Ok(crate::storage::jcode_dir()?
+    Ok(crate::storage::arterm_dir()?
         .join("pending-login")
         .join(format!("{key}.json")))
 }
 
 pub(super) fn pending_login_dir() -> Result<PathBuf> {
-    Ok(crate::storage::jcode_dir()?.join("pending-login"))
+    Ok(crate::storage::arterm_dir()?.join("pending-login"))
 }
 
 pub(super) fn require_scriptable_input(
@@ -635,7 +635,7 @@ pub(super) fn require_scriptable_input(
 pub(super) fn load_pending_login(path: &PathBuf, provider: &str) -> Result<PendingScriptableLogin> {
     if !path.exists() {
         anyhow::bail!(
-            "No pending {} login state found. Run `jcode login --provider {} --print-auth-url` first.",
+            "No pending {} login state found. Run `arterm login --provider {} --print-auth-url` first.",
             provider,
             provider
         );
@@ -652,7 +652,7 @@ pub(super) fn load_pending_login(path: &PathBuf, provider: &str) -> Result<Pendi
         if record.expires_at_ms <= current_time_ms() {
             clear_pending_login(path);
             anyhow::bail!(
-                "Pending {} login state expired. Run `jcode login --provider {} --print-auth-url` again.",
+                "Pending {} login state expired. Run `arterm login --provider {} --print-auth-url` again.",
                 provider,
                 provider
             );
@@ -764,14 +764,14 @@ pub(super) fn scriptable_resume_command(provider: &str, input_kind: &str) -> Str
     match input_kind {
         "callback_url" => {
             format!(
-                "jcode login --provider {} --callback-url '<url-or-query>'",
+                "arterm login --provider {} --callback-url '<url-or-query>'",
                 provider
             )
         }
-        "auth_code" => format!("jcode login --provider {} --auth-code '<code>'", provider),
-        "complete" => format!("jcode login --provider {} --complete", provider),
+        "auth_code" => format!("arterm login --provider {} --auth-code '<code>'", provider),
+        "complete" => format!("arterm login --provider {} --complete", provider),
         _ => format!(
-            "jcode login --provider {} --callback-url '<url>'  # or --auth-code '<code>'",
+            "arterm login --provider {} --callback-url '<url>'  # or --auth-code '<code>'",
             provider
         ),
     }

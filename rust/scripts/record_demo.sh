@@ -1,11 +1,11 @@
 #!/bin/bash
-# jcode demo recording orchestrator
+# arterm demo recording orchestrator
 # Usage: ./scripts/record_demo.sh <demo_name> <prompt>
 #
 # This script:
-# 1. Opens a fresh jcode in a new kitty window
+# 1. Opens a fresh arterm in a new kitty window
 # 2. Starts wf-recorder on that window
-# 3. Sends the prompt to jcode
+# 3. Sends the prompt to arterm
 # 4. Waits for completion, then stops recording
 
 set -euo pipefail
@@ -14,29 +14,29 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 DEMO_NAME="${1:?Usage: record_demo.sh <name> <prompt>}"
 PROMPT="${2:?Usage: record_demo.sh <name> <prompt>}"
-DEMO_DIR="/tmp/jcode-demo/$DEMO_NAME"
+DEMO_DIR="/tmp/arterm-demo/$DEMO_NAME"
 OUTPUT_DIR="$repo_root/assets/demos"
 SOCK=$(ls /tmp/kitty.sock* 2>/dev/null | head -1)
 
 mkdir -p "$DEMO_DIR" "$OUTPUT_DIR"
 
-echo "=== jcode Demo Recorder ==="
+echo "=== arterm Demo Recorder ==="
 echo "Demo: $DEMO_NAME"
 echo "Prompt: $PROMPT"
 echo "Working dir: $DEMO_DIR"
 echo ""
 
-# Step 1: Launch jcode in a new kitty OS window
-echo "[1/5] Launching jcode..."
+# Step 1: Launch arterm in a new kitty OS window
+echo "[1/5] Launching arterm..."
 kitten @ --to unix:$SOCK launch --type=os-window \
     --cwd "$DEMO_DIR" \
-    --title "jcode-demo-$DEMO_NAME" \
-    "$repo_root/target/release/jcode"
+    --title "arterm-demo-$DEMO_NAME" \
+    "$repo_root/target/release/arterm"
 
-sleep 3  # Let jcode fully start
+sleep 3  # Let arterm fully start
 
 # Step 2: Find the window
-DEMO_WIN_ID=$(niri msg windows 2>/dev/null | grep -B5 "jcode-demo-$DEMO_NAME" | grep "Window ID" | awk '{print $3}' | tr -d ':')
+DEMO_WIN_ID=$(niri msg windows 2>/dev/null | grep -B5 "arterm-demo-$DEMO_NAME" | grep "Window ID" | awk '{print $3}' | tr -d ':')
 if [ -z "$DEMO_WIN_ID" ]; then
     echo "ERROR: Could not find demo window"
     exit 1
@@ -54,7 +54,7 @@ wf-recorder -f "$RECORDING_FILE" &
 RECORDER_PID=$!
 sleep 1
 
-# Step 4: Type the prompt into jcode
+# Step 4: Type the prompt into arterm
 echo "[4/5] Sending prompt..."
 # Find the kitty window id
 KITTY_WIN_ID=$(kitten @ --to unix:$SOCK ls 2>/dev/null | python3 -c "
@@ -63,7 +63,7 @@ data = json.load(sys.stdin)
 for os_win in data:
     for tab in os_win.get('tabs', []):
         for win in tab.get('windows', []):
-            if 'jcode-demo-$DEMO_NAME' in win.get('title', ''):
+            if 'arterm-demo-$DEMO_NAME' in win.get('title', ''):
                 print(win['id'])
                 sys.exit(0)
 ")
@@ -76,16 +76,16 @@ if [ -n "$KITTY_WIN_ID" ]; then
     kitten @ --to unix:$SOCK send-text --match "id:$KITTY_WIN_ID" $'\r'
 else
     echo "WARNING: Could not find kitty window, trying by title match..."
-    kitten @ --to unix:$SOCK send-text --match "title:jcode-demo-$DEMO_NAME" "$PROMPT"
+    kitten @ --to unix:$SOCK send-text --match "title:arterm-demo-$DEMO_NAME" "$PROMPT"
     sleep 0.5
-    kitten @ --to unix:$SOCK send-text --match "title:jcode-demo-$DEMO_NAME" $'\r'
+    kitten @ --to unix:$SOCK send-text --match "title:arterm-demo-$DEMO_NAME" $'\r'
 fi
 
 echo "Prompt sent. Waiting for completion..."
 echo "(Press Ctrl+C to stop recording early, or wait for auto-detection)"
 
 # Step 5: Wait and then stop recording
-# Poll for completion - check if jcode is still processing
+# Poll for completion - check if arterm is still processing
 # Simple approach: wait for a fixed time or manual Ctrl+C
 trap 'echo "Stopping..."; kill $RECORDER_PID 2>/dev/null; wait $RECORDER_PID 2>/dev/null; echo "Recording saved: $RECORDING_FILE"' INT
 

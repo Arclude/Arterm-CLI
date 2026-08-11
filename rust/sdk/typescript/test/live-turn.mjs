@@ -7,9 +7,9 @@
  */
 
 import assert from "node:assert/strict";
-import { JcodeClient } from "../dist/index.js";
+import { ArtermClient } from "../dist/index.js";
 
-const client = await JcodeClient.connect({
+const client = await ArtermClient.connect({
   clientName: "sdk-e2e/0.1",
   requestTimeoutMs: 30_000,
 });

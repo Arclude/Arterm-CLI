@@ -1,11 +1,11 @@
-# Jcode Server Memory Incident Runbook
+# Arterm Server Memory Incident Runbook
 
 Status: active operational runbook
 Updated: 2026-07-14
 
 This runbook answers two questions:
 
-1. What is using the jcode server's memory?
+1. What is using the arterm server's memory?
 2. What is the safest next action for that specific cause?
 
 The goal is not to react to every high RSS value. The goal is to distinguish live application state, allocator retention, and non-heap mappings before changing or stopping anything.
@@ -15,7 +15,7 @@ The goal is not to react to every high RSS value. The goal is to distinguish liv
 Run:
 
 ```bash
-jcode debug 'server:memory-incident'
+arterm debug 'server:memory-incident'
 ```
 
 This is the first command during an incident. It is intentionally lightweight. It does not lock or serialize every Agent transcript, so it remains useful when thousands of sessions are resident.
@@ -37,7 +37,7 @@ Preserve the JSON output in the incident notes before changing state.
 Runtime memory logging is enabled by default and writes daily JSONL files under:
 
 ```text
-~/.jcode/logs/memory/
+~/.arterm/logs/memory/
 ```
 
 Analyze the latest server process lifetime:
@@ -60,7 +60,7 @@ Prefer `--instance` for postmortems. It preserves one coherent process lifetime 
 For machine-readable output:
 
 ```bash
-python scripts/analyze_runtime_memory_log.py --days 1 --json > /tmp/jcode-memory-analysis.json
+python scripts/analyze_runtime_memory_log.py --days 1 --json > /tmp/arterm-memory-analysis.json
 ```
 
 ## Severity thresholds
@@ -89,7 +89,7 @@ Evidence:
 Actions:
 
 1. Pause or cap the producer creating sessions.
-2. Run `jcode debug 'swarm:list'` and inspect the largest live swarm.
+2. Run `arterm debug 'swarm:list'` and inspect the largest live swarm.
 3. From the owning coordinator, use `swarm list` and `swarm cleanup` to remove workers it no longer needs.
 4. Do not destroy sessions blindly. Confirm that active work is disposable first.
 5. Re-run `server:memory-incident`. Require live sessions, allocator live bytes, and PSS to fall together.
@@ -108,9 +108,9 @@ Evidence:
 Actions:
 
 ```bash
-jcode debug 'server:memory-incident' > /tmp/before.json
-jcode debug 'allocator:purge'
-jcode debug 'server:memory-incident' > /tmp/after.json
+arterm debug 'server:memory-incident' > /tmp/before.json
+arterm debug 'allocator:purge'
+arterm debug 'server:memory-incident' > /tmp/after.json
 ```
 
 A large PSS drop confirms allocator retention. If it repeatedly regrows, inspect allocation churn and allocator decay rather than raising memory budgets.
@@ -124,7 +124,7 @@ Evidence:
 
 Actions:
 
-1. Run `jcode debug 'server:memory'` for the full attribution walk.
+1. Run `arterm debug 'server:memory'` for the full attribution walk.
 2. Inspect provider cache, tool results, large blobs, and payload text.
 3. Compact, summarize, truncate, or move large artifacts out of line.
 4. Add or tighten a hard cap before accepting a larger steady state.
@@ -144,8 +144,8 @@ Actions:
 3. If ownership is still unclear, use a `jemalloc-prof` build:
 
 ```bash
-jcode debug 'allocator:profile:on'
-jcode debug 'allocator:profile:dump /tmp/jcode-server.heap'
+arterm debug 'allocator:profile:on'
+arterm debug 'allocator:profile:dump /tmp/arterm-server.heap'
 ```
 
 The normal system-allocator build cannot produce allocation-stack profiles. Do not claim heap ownership from RSS alone.

@@ -1,24 +1,24 @@
-# Terminal-Bench 2.0 with jcode
+# Terminal-Bench 2.0 with arterm
 
-This document describes the cleanest currently-working path for running jcode on Terminal-Bench 2.0 through Harbor.
+This document describes the cleanest currently-working path for running arterm on Terminal-Bench 2.0 through Harbor.
 
 ## What is in the repo
 
-- `scripts/jcode_harbor_agent.py`
-  - Harbor custom agent adapter for jcode
+- `scripts/arterm_harbor_agent.py`
+  - Harbor custom agent adapter for arterm
 - `scripts/run_terminal_bench_harbor.sh`
-  - helper that wires Harbor to the adapter and a Linux-compatible jcode binary
+  - helper that wires Harbor to the adapter and a Linux-compatible arterm binary
 - `scripts/run_terminal_bench_campaign.py`
   - sequential campaign runner that preserves small batches in a stitchable layout
 - `scripts/build_linux_compat.sh`
-  - builds a Linux jcode artifact against an older glibc baseline for TB-style containers
+  - builds a Linux arterm artifact against an older glibc baseline for TB-style containers
 
 ## Why the compat binary matters
 
 Many Terminal-Bench task containers use an older glibc than a locally-built host binary. The Harbor adapter should use a Linux binary produced by:
 
 ```bash
-scripts/build_linux_compat.sh /tmp/jcode-compat-dist
+scripts/build_linux_compat.sh /tmp/arterm-compat-dist
 ```
 
 The helper script will build it for you automatically if it is missing.
@@ -27,7 +27,7 @@ The helper script will build it for you automatically if it is missing.
 
 The current adapter is designed for:
 
-- OpenAI OAuth auth file at `~/.jcode/openai-auth.json`
+- OpenAI OAuth auth file at `~/.arterm/openai-auth.json`
 - `gpt-5.4`
 - high reasoning effort
 - priority service tier
@@ -42,7 +42,7 @@ Example:
 
 ```bash
 python scripts/run_terminal_bench_campaign.py \
-  --campaign-dir ~/tb2-jcode-campaign \
+  --campaign-dir ~/tb2-arterm-campaign \
   --task regex-log \
   --task largest-eigenval \
   --task cancel-async-tasks
@@ -67,7 +67,7 @@ scripts/run_terminal_bench_harbor.sh \
   --include-task-name regex-log \
   --n-tasks 1 \
   --n-concurrent 1 \
-  --jobs-dir /tmp/jcode-tb2 \
+  --jobs-dir /tmp/arterm-tb2 \
   --job-name regex-log-pilot \
   --yes
 ```
@@ -80,33 +80,33 @@ scripts/run_terminal_bench_harbor.sh \
   --include-task-name regex-log \
   --n-tasks 1 \
   --n-concurrent 1 \
-  --jobs-dir /tmp/jcode-tb2 \
+  --jobs-dir /tmp/arterm-tb2 \
   --job-name regex-log-pilot \
   --yes
 ```
 
 ## Useful environment variables
 
-- `JCODE_HARBOR_BINARY`
-  - path to the Linux-compatible jcode binary to upload into the task container
-- `JCODE_HARBOR_BINARY_DIR`
+- `ARTERM_HARBOR_BINARY`
+  - path to the Linux-compatible arterm binary to upload into the task container
+- `ARTERM_HARBOR_BINARY_DIR`
   - output directory used when auto-building the compat binary
-- `JCODE_HARBOR_OPENAI_AUTH`
+- `ARTERM_HARBOR_OPENAI_AUTH`
   - path to the OpenAI OAuth file
-- `JCODE_HARBOR_CA_BUNDLE`
+- `ARTERM_HARBOR_CA_BUNDLE`
   - optional host CA bundle path to upload into the task container
-- `JCODE_TB_MODEL`
+- `ARTERM_TB_MODEL`
   - Harbor model string, default `openai/gpt-5.4`
-- `JCODE_TB_PATH`
+- `ARTERM_TB_PATH`
   - default local Terminal-Bench path, default `/tmp/terminal-bench-2`
-- `JCODE_OPENAI_REASONING_EFFORT`
+- `ARTERM_OPENAI_REASONING_EFFORT`
   - default `high`
-- `JCODE_OPENAI_SERVICE_TIER`
+- `ARTERM_OPENAI_SERVICE_TIER`
   - default `priority`
 
 ## Notes on fairness and state isolation
 
-The adapter gives each trial a fresh in-container jcode home directory under `/tmp/jcode-home`, so memories and auth state are isolated per trial container.
+The adapter gives each trial a fresh in-container arterm home directory under `/tmp/arterm-home`, so memories and auth state are isolated per trial container.
 
 ## Current validation status
 

@@ -138,7 +138,7 @@ class DiscoveryBenchmarkTests(unittest.TestCase):
         Both vocabularies must parse so pre-rename baselines stay comparable
         with post-rename runs."""
         listing = benchmark.parse_discovery_output(
-            "Available integrations in 'payments' (Jcode tool directory):\n\n- agentcard: cards\n",
+            "Available integrations in 'payments' (Arterm tool directory):\n\n- agentcard: cards\n",
             1.0,
         )
         self.assertEqual(listing.category, "payments")
@@ -152,7 +152,7 @@ class DiscoveryBenchmarkTests(unittest.TestCase):
         self.assertEqual(empty.outcome, "empty")
 
         selection = benchmark.parse_discovery_output(
-            "Set up 'agentmail' from 'email-messaging' (Jcode tool directory):", 1.0
+            "Set up 'agentmail' from 'email-messaging' (Arterm tool directory):", 1.0
         )
         self.assertEqual(selection.category, "email-messaging")
         self.assertEqual(selection.tools, ["agentmail"])
@@ -161,8 +161,8 @@ class DiscoveryBenchmarkTests(unittest.TestCase):
 
     def test_parse_current_catalog_selection_receipt(self):
         call = benchmark.parse_discovery_output(
-            "Selected 'context.dev' from 'web-data' (Jcode tool directory; the choice "
-            "must be based only on fit; details: https://jcode.sh/discovery-tools):\n\n"
+            "Selected 'context.dev' from 'web-data' (Arterm tool directory; the choice "
+            "must be based only on fit; details: https://arterm.sh/discovery-tools):\n\n"
             "context.dev: structured extraction",
             1.25,
         )
@@ -174,7 +174,7 @@ class DiscoveryBenchmarkTests(unittest.TestCase):
     def test_parse_off_catalog_selection_receipt(self):
         call = benchmark.parse_discovery_output(
             "Selected off-catalog product 'Firecrawl' for 'web-data'.\n\n"
-            "Selection recorded as demand data. Jcode does not list or partner with this product.",
+            "Selection recorded as demand data. Arterm does not list or partner with this product.",
             2.5,
         )
         self.assertEqual(call.category, "web-data")
@@ -193,7 +193,7 @@ class DiscoveryBenchmarkTests(unittest.TestCase):
 
     def test_parse_selection_tracks_but_does_not_count_direct_selection(self):
         call = benchmark.parse_discovery_output(
-            "Selected 'agentmail' from 'email-messaging' (Jcode tool directory):", 1.5
+            "Selected 'agentmail' from 'email-messaging' (Arterm tool directory):", 1.5
         )
         self.assertEqual(call.category, "email-messaging")
         self.assertEqual(call.tools, ["agentmail"])

@@ -1,0 +1,18 @@
+[package]
+name = "arterm-build-support"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+arterm-core = { path = "../arterm-core" }
+arterm-selfdev-types = { path = "../arterm-selfdev-types" }
+arterm-storage = { path = "../arterm-storage" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+
+[dev-dependencies]
+tempfile = "3"

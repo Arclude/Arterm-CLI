@@ -1,6 +1,6 @@
 # Account Contract Conformance Tests and Test Vectors
 
-Executable conformance design for the jcode subscription account contract:
+Executable conformance design for the arterm subscription account contract:
 device login, browser approval/denial, account state (`/v1/me`), checkout,
 billing portal, webhook ordering, revocation, and mixed-version compatibility.
 
@@ -10,7 +10,7 @@ vectors, the harnesses that execute them on each side, and who owns what.
 
 ## Grounding (current code)
 
-- Device flow client and wire contract: `src/cli/login/jcode_device.rs:1-225`
+- Device flow client and wire contract: `src/cli/login/arterm_device.rs:1-225`
   - `POST {auth_base}/v1/auth/device {"email"}` ->
     `{device_code, verify_url, expires_in (default 900), interval (default 5)}`
   - `POST {auth_base}/v1/auth/token {"device_code"}` ->
@@ -19,29 +19,29 @@ vectors, the harnesses that execute them on each side, and who owns what.
     pending, error codes `authorization_pending|pending`, `slow_down`,
     `expired_token|expired|expired_device_code`, `access_denied|denied`,
     and `404`/`410` treated as expired.
-- Poll loop timing: `src/cli/login/jcode_device.rs:230-264`
+- Poll loop timing: `src/cli/login/arterm_device.rs:230-264`
   (`interval.max(1)`, deadline from `expires_in`, `slow_down` adds 5s).
-- Credential persistence: `src/cli/login/jcode_device.rs:268-304`
-  (`JCODE_API_KEY`, `JCODE_ACCOUNT_ID`, `JCODE_ACCOUNT_EMAIL`, `JCODE_TIER`
-  into the jcode-subscription env file).
-- Account state client: `crates/jcode-base/src/subscription_api.rs`
+- Credential persistence: `src/cli/login/arterm_device.rs:268-304`
+  (`ARTERM_API_KEY`, `ARTERM_ACCOUNT_ID`, `ARTERM_ACCOUNT_EMAIL`, `ARTERM_TIER`
+  into the arterm-subscription env file).
+- Account state client: `crates/arterm-base/src/subscription_api.rs`
   (`GET /v1/me` -> `SubscriptionMe`, 5s timeout, persists cached tier;
   unknown/absent tier gates like Plus:
-  `crates/jcode-base/src/subscription_catalog.rs:193-204`).
+  `crates/arterm-base/src/subscription_catalog.rs:193-204`).
 - Existing executable harness to extend: scripted local HTTP server in
-  `src/cli/login/jcode_device/tests.rs:7-46` plus state-machine tests
+  `src/cli/login/arterm_device/tests.rs:7-46` plus state-machine tests
   (`poll_state_machine_*`, `poll_for_api_key_*`).
 - Auth failure classification for negative-path assertions:
-  `crates/jcode-base/src/auth/login_diagnostics.rs`.
+  `crates/arterm-base/src/auth/login_diagnostics.rs`.
 
 ## Repository ownership
 
 | Concern | Owner repo | Harness |
 |---|---|---|
-| Client poll state machine, persistence, `/v1/me` parsing, tier gating | jcode (this repo) | Rust unit/integration tests against scripted HTTP server |
-| Shared wire test vectors (JSON fixtures) | jcode, mirrored into solosystems-backend by version tag | `tests/fixtures/account-contract/` (proposed) |
+| Client poll state machine, persistence, `/v1/me` parsing, tier gating | arterm (this repo) | Rust unit/integration tests against scripted HTTP server |
+| Shared wire test vectors (JSON fixtures) | arterm, mirrored into solosystems-backend by version tag | `tests/fixtures/account-contract/` (proposed) |
 | Email delivery, approval/denial web page, checkout session creation, Stripe webhooks, key revocation, `/v1/me` truth | solosystems-backend (private) | Backend integration tests replaying the same fixtures against real handlers |
-| End-to-end smoke (live staging) | solosystems-backend CI, opt-in job in jcode CI gated on staging creds | `jcode login jcode` scriptable flow against staging `JCODE_API_BASE` |
+| End-to-end smoke (live staging) | solosystems-backend CI, opt-in job in arterm CI gated on staging creds | `arterm login arterm` scriptable flow against staging `ARTERM_API_BASE` |
 
 Rule: a fixture change is a contract change. Fixtures are versioned
 (`schema_version` field per vector file); both repos pin the fixture set and a
@@ -107,7 +107,7 @@ Client cannot test the web page; the backend must have executable tests for:
 ## 4. Checkout and portal
 
 Checkout/portal are web-only today; the client hands off at
-`JCODE_PRICING_URL` (`src/cli/login/jcode_device.rs:355-367`). Conformance:
+`ARTERM_PRICING_URL` (`src/cli/login/arterm_device.rs:355-367`). Conformance:
 
 - CK-01 (backend) creating a checkout session for a signed-in device links the
   resulting subscription to the same `account_id` the device login returned.
@@ -118,7 +118,7 @@ Checkout/portal are web-only today; the client hands off at
 - CK-04 (backend) portal cancel flows set `status:"canceled"` while keeping
   the key valid until period end; client vector ME-05 covers rendering.
 - CK-05 (client) tier==none/empty after login prints the pricing prompt
-  (`login_jcode_device_flow` tail) — snapshot test on stderr text.
+  (`login_arterm_device_flow` tail) — snapshot test on stderr text.
 
 ## 5. Webhook ordering (backend-owned)
 
@@ -142,11 +142,11 @@ the reachable final states so the client test matrix stays closed.
 - RV-01 (backend) portal/admin revocation invalidates the API key: model API
   and `/v1/me` return 401 within a bounded lag (assert <= 60s in staging).
 - RV-02 (client) 401 from the model API classifies as an auth failure with a
-  recovery hint pointing at `/login jcode`
-  (`crates/jcode-base/src/auth/login_diagnostics.rs`).
+  recovery hint pointing at `/login arterm`
+  (`crates/arterm-base/src/auth/login_diagnostics.rs`).
 - RV-03 (client) revoked key must not silently fall back to another provider
   without surfacing the auth failure (account failover tests in
-  `crates/jcode-base/src/provider/account_failover.rs`).
+  `crates/arterm-base/src/provider/account_failover.rs`).
 - RV-04 (backend) re-login after revocation issues a NEW key; old key stays
   dead (no resurrection).
 
@@ -206,7 +206,7 @@ body preserved (DL-11) rather than being misclassified as pending.
 
 1. Add `tests/fixtures/account-contract/v1/` with the DL/ME vectors above and
    a manifest; port `spawn_scripted_http_server` into a shared test util.
-2. Convert existing `jcode_device/tests.rs` cases to load from the manifest,
+2. Convert existing `arterm_device/tests.rs` cases to load from the manifest,
    keeping current assertions (no behavior change).
 3. Add the client-side gaps found while writing this spec: SN-03, SN-04,
    SN-06, SN-07, CR-01/02/06, ME-03 cache-preservation.

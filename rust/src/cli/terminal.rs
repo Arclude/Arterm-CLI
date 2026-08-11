@@ -10,8 +10,8 @@ pub struct TuiRuntimeState {
     focus_change: bool,
 }
 
-const INHERITED_MODES_ENV: &str = "JCODE_TUI_INHERITED_MODES";
-const INHERITED_THEME_ENV: &str = "JCODE_TUI_INHERITED_THEME";
+const INHERITED_MODES_ENV: &str = "ARTERM_TUI_INHERITED_MODES";
+const INHERITED_THEME_ENV: &str = "ARTERM_TUI_INHERITED_THEME";
 
 // Crossterm's Windows implementation enables Win32 console mouse input but does
 // not emit the VT mouse-tracking modes. Windows Terminal and other ConPTY hosts
@@ -253,7 +253,7 @@ pub fn show_crash_resume_hint() {
 /// Pure so the wording is testable: the lines are printed to stderr outside the
 /// TUI, where nothing asserts on them, and the bug in issue #690 was purely
 /// about wording (the single-session form never mentioned that bare
-/// `jcode --resume` opens a searchable picker, so it read as "memorize this ID
+/// `arterm --resume` opens a searchable picker, so it read as "memorize this ID
 /// or lose the session").
 fn crash_resume_hint_lines(
     crashed: &[(String, String)],
@@ -269,12 +269,12 @@ fn crash_resume_hint_lines(
     if crashed.len() == 1 {
         vec![
             format!(
-                "{yellow}💥 Session {bold}{session_label}{reset}{yellow} crashed. Resume with:{reset}  jcode --resume {id}"
+                "{yellow}💥 Session {bold}{session_label}{reset}{yellow} crashed. Resume with:{reset}  arterm --resume {id}"
             ),
             // Always mention the picker. Showing only the ID form reads as
             // "write this down or lose the session", when bare
-            // `jcode --resume` opens a searchable list (issue #690).
-            format!("{yellow}   Or browse all:{reset} jcode --resume"),
+            // `arterm --resume` opens a searchable list (issue #690).
+            format!("{yellow}   Or browse all:{reset} arterm --resume"),
         ]
     } else {
         vec![
@@ -282,8 +282,8 @@ fn crash_resume_hint_lines(
                 "{yellow}💥 {} sessions crashed recently. Most recent: {bold}{session_label}{reset}",
                 crashed.len()
             ),
-            format!("{yellow}   Resume with:{reset}  jcode --resume {id}"),
-            format!("{yellow}   List all:{reset}     jcode --resume"),
+            format!("{yellow}   Resume with:{reset}  arterm --resume {id}"),
+            format!("{yellow}   List all:{reset}     arterm --resume"),
         ]
     }
 }
@@ -309,13 +309,13 @@ mod crash_resume_hint_tests {
         let joined = lines.join("\n");
 
         assert!(
-            joined.contains("jcode --resume ses_koala_123"),
+            joined.contains("arterm --resume ses_koala_123"),
             "the direct resume command must still be offered: {joined}"
         );
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("Or browse all: jcode --resume")),
+                .any(|line| line.contains("Or browse all: arterm --resume")),
             "the picker form (bare --resume) must be mentioned too: {joined}"
         );
     }
@@ -334,14 +334,14 @@ mod crash_resume_hint_tests {
         let joined = lines.join("\n");
 
         assert!(joined.contains("2 sessions crashed"), "{joined}");
-        assert!(joined.contains("jcode --resume ses_koala_123"), "{joined}");
+        assert!(joined.contains("arterm --resume ses_koala_123"), "{joined}");
         assert!(joined.contains("List all:"), "{joined}");
     }
 }
 
 fn init_tui_terminal(inherited_terminal: bool) -> Result<ratatui::DefaultTerminal> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        anyhow::bail!("jcode TUI requires an interactive terminal (stdin/stdout must be a TTY)");
+        anyhow::bail!("arterm TUI requires an interactive terminal (stdin/stdout must be a TTY)");
     }
     if inherited_terminal {
         init_tui_terminal_resume()
@@ -356,13 +356,13 @@ fn init_tui_terminal(inherited_terminal: bool) -> Result<ratatui::DefaultTermina
 }
 
 pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)> {
-    let is_resuming = std::env::var_os("JCODE_RESUMING").is_some();
+    let is_resuming = std::env::var_os("ARTERM_RESUMING").is_some();
     let inherited_theme = std::env::var(INHERITED_THEME_ENV).ok();
     let inherited_modes_raw = std::env::var(INHERITED_MODES_ENV).ok();
     let inherited_modes = inherited_modes_raw
         .as_deref()
         .and_then(InheritedTerminalModes::decode);
-    // JCODE_RESUMING describes the session lifecycle, but only a valid modes
+    // ARTERM_RESUMING describes the session lifecycle, but only a valid modes
     // handoff proves the previous process deliberately left the terminal live
     // across exec. A restart used to restore the terminal before exec while the
     // new process still took the resume path, leaving it on the primary screen
@@ -377,13 +377,13 @@ pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)>
         crate::tui::theme_detect::init_theme_mode();
     }
     let terminal = init_tui_terminal(inherited_terminal)?;
-    crate::tui::mermaid::install_jcode_mermaid_hooks();
-    crate::tui::markdown::install_jcode_markdown_hooks();
+    crate::tui::mermaid::install_arterm_mermaid_hooks();
+    crate::tui::markdown::install_arterm_markdown_hooks();
     crate::tui::mermaid::init_picker();
 
     let perf_policy = crate::perf::tui_policy();
     // These private handoff values apply only to this exec boundary. Avoid
-    // leaking them into tools or unrelated child jcode processes.
+    // leaking them into tools or unrelated child arterm processes.
     crate::env::remove_var(INHERITED_MODES_ENV);
     crate::env::remove_var(INHERITED_THEME_ENV);
 
@@ -496,7 +496,7 @@ fn cleanup_tui_runtime(state: &TuiRuntimeState, restore_terminal: bool) {
         if state.keyboard_enhanced {
             tui::disable_keyboard_enhancement();
         }
-        jcode_tui_style::restore_terminal_quietly();
+        arterm_tui_style::restore_terminal_quietly();
     }
 }
 
@@ -546,7 +546,7 @@ fn write_session_resume_hint(mut writer: impl Write, session_id: &str) -> io::Re
         "\x1b[33mSession \x1b[1m{}\x1b[0m\x1b[33m - to resume:\x1b[0m",
         session_name
     )?;
-    writeln!(writer, "  jcode --resume {}", session_id)?;
+    writeln!(writer, "  arterm --resume {}", session_id)?;
     writeln!(writer)?;
     Ok(())
 }
@@ -793,7 +793,7 @@ mod tests {
             let mut output = Vec::new();
             write_session_resume_hint(&mut output, &session_id).unwrap();
             let output = String::from_utf8(output).unwrap();
-            let expected_cmd = format!("jcode --resume {}", session_id);
+            let expected_cmd = format!("arterm --resume {}", session_id);
             assert!(output.contains(&expected_cmd));
             assert!(output.contains("to resume"));
             assert!(!session_id.is_empty());

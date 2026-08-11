@@ -71,17 +71,17 @@ jobs:
             # Debian/Ubuntu containers used by many TB tasks.
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            artifact: jcode-linux-x86_64
+            artifact: arterm-linux-x86_64
             compat_container: true
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            artifact: jcode-linux-aarch64
+            artifact: arterm-linux-aarch64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: jcode-macos-aarch64
+            artifact: arterm-macos-aarch64
           - os: macos-15-intel
             target: x86_64-apple-darwin
-            artifact: jcode-macos-x86_64
+            artifact: arterm-macos-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -154,23 +154,23 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
         env:
-          JCODE_RELEASE_BUILD: "1"
-          JCODE_BUILD_SEMVER: ${{ github.ref_name }}
+          ARTERM_RELEASE_BUILD: "1"
+          ARTERM_BUILD_SEMVER: ${{ github.ref_name }}
 
       - name: Build portable Linux x86_64 release binary
         if: matrix.compat_container == true
         shell: bash
         run: scripts/build_linux_compat.sh dist
         env:
-          JCODE_RELEASE_BUILD: "1"
-          JCODE_BUILD_SEMVER: ${{ github.ref_name }}
-          JCODE_COMPAT_ARTIFACT: ${{ matrix.artifact }}
+          ARTERM_RELEASE_BUILD: "1"
+          ARTERM_BUILD_SEMVER: ${{ github.ref_name }}
+          ARTERM_COMPAT_ARTIFACT: ${{ matrix.artifact }}
 
       - name: Package binary
         if: matrix.compat_container != true
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/jcode dist/${{ matrix.artifact }}
+          cp target/${{ matrix.target }}/release/arterm dist/${{ matrix.artifact }}
           chmod +x dist/${{ matrix.artifact }}
           cd dist && tar czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
 
@@ -206,11 +206,11 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: jcode-windows-x86_64
+            artifact: arterm-windows-x86_64
             unsigned_artifact: windows-unsigned-x86_64
           - os: windows-11-arm
             target: aarch64-pc-windows-msvc
-            artifact: jcode-windows-aarch64
+            artifact: arterm-windows-aarch64
             unsigned_artifact: windows-unsigned-aarch64
             cargo_args: "--no-default-features --features pdf"
 
@@ -263,13 +263,13 @@ jobs:
 
           & cargo @cargoArgs
         env:
-          JCODE_RELEASE_BUILD: "1"
-          JCODE_BUILD_SEMVER: ${{ github.ref_name }}
+          ARTERM_RELEASE_BUILD: "1"
+          ARTERM_BUILD_SEMVER: ${{ github.ref_name }}
 
       - name: Verify built Windows binary launches
         shell: pwsh
         run: |
-          & "target/${{ matrix.target }}/release/jcode.exe" --version
+          & "target/${{ matrix.target }}/release/arterm.exe" --version
           if ($LASTEXITCODE -ne 0) {
             throw "Built Windows binary failed to run --version"
           }
@@ -278,14 +278,14 @@ jobs:
         shell: pwsh
         run: |
           & ./.github/scripts/verify_windows_install.ps1 `
-            -ArtifactExePath "target/${{ matrix.target }}/release/jcode.exe" `
+            -ArtifactExePath "target/${{ matrix.target }}/release/arterm.exe" `
             -Version "${{ github.ref_name }}"
 
       - name: Stage unsigned binary for signing
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/jcode.exe" "dist/${{ matrix.artifact }}.exe"
+          Copy-Item "target/${{ matrix.target }}/release/arterm.exe" "dist/${{ matrix.artifact }}.exe"
 
       - name: Upload unsigned binary for signing
         uses: actions/upload-artifact@v4
@@ -379,8 +379,8 @@ jobs:
           signing-account-name: ${{ vars.WINDOWS_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_PROFILE }}
           files: |
-            ${{ github.workspace }}\artifacts\windows-unsigned-x86_64\jcode-windows-x86_64.exe
-            ${{ github.workspace }}\artifacts\windows-unsigned-aarch64\jcode-windows-aarch64.exe
+            ${{ github.workspace }}\artifacts\windows-unsigned-x86_64\arterm-windows-x86_64.exe
+            ${{ github.workspace }}\artifacts\windows-unsigned-aarch64\arterm-windows-aarch64.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
@@ -390,8 +390,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $assets = @(
-            @{ Name = 'jcode-windows-x86_64'; Path = 'artifacts/windows-unsigned-x86_64/jcode-windows-x86_64.exe' },
-            @{ Name = 'jcode-windows-aarch64'; Path = 'artifacts/windows-unsigned-aarch64/jcode-windows-aarch64.exe' }
+            @{ Name = 'arterm-windows-x86_64'; Path = 'artifacts/windows-unsigned-x86_64/arterm-windows-x86_64.exe' },
+            @{ Name = 'arterm-windows-aarch64'; Path = 'artifacts/windows-unsigned-aarch64/arterm-windows-aarch64.exe' }
           )
 
           foreach ($asset in $assets) {
@@ -412,18 +412,18 @@ jobs:
       - name: Upload final Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: jcode-windows-x86_64
+          name: arterm-windows-x86_64
           path: |
-            dist/jcode-windows-x86_64.exe
-            dist/jcode-windows-x86_64.tar.gz
+            dist/arterm-windows-x86_64.exe
+            dist/arterm-windows-x86_64.tar.gz
 
       - name: Upload final Windows ARM64 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: jcode-windows-aarch64
+          name: arterm-windows-aarch64
           path: |
-            dist/jcode-windows-aarch64.exe
-            dist/jcode-windows-aarch64.tar.gz
+            dist/arterm-windows-aarch64.exe
+            dist/arterm-windows-aarch64.tar.gz
 
       - name: Publish Windows assets to release
         shell: pwsh
@@ -431,7 +431,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release upload "${env:GITHUB_REF_NAME}" dist/jcode-windows-x86_64.exe dist/jcode-windows-x86_64.tar.gz dist/jcode-windows-aarch64.exe dist/jcode-windows-aarch64.tar.gz --clobber
+          gh release upload "${env:GITHUB_REF_NAME}" dist/arterm-windows-x86_64.exe dist/arterm-windows-x86_64.tar.gz dist/arterm-windows-aarch64.exe dist/arterm-windows-aarch64.tar.gz --clobber
 
   build-freebsd:
     name: Build (x86_64-unknown-freebsd)
@@ -472,34 +472,34 @@ jobs:
             export CARGO_TERM_COLOR=always
             # CARGO_BUILD_JOBS keeps memory in check; aws-lc-sys is memory hungry.
             export CARGO_BUILD_JOBS=3
-            export JCODE_RELEASE_BUILD=1
-            export JCODE_BUILD_SEMVER="${{ github.ref_name }}"
+            export ARTERM_RELEASE_BUILD=1
+            export ARTERM_BUILD_SEMVER="${{ github.ref_name }}"
 
-            echo "::group::cargo build (jcode binary)"
-            cargo build --locked --release -p jcode --bin jcode
+            echo "::group::cargo build (arterm binary)"
+            cargo build --locked --release -p arterm --bin arterm
             echo "::endgroup::"
 
             echo "::group::Verify binary launches"
-            ./target/release/jcode --version
+            ./target/release/arterm --version
             echo "::endgroup::"
 
             mkdir -p dist
-            cp target/release/jcode dist/jcode-freebsd-x86_64
-            chmod +x dist/jcode-freebsd-x86_64
-            cd dist && tar czf jcode-freebsd-x86_64.tar.gz jcode-freebsd-x86_64
+            cp target/release/arterm dist/arterm-freebsd-x86_64
+            chmod +x dist/arterm-freebsd-x86_64
+            cd dist && tar czf arterm-freebsd-x86_64.tar.gz arterm-freebsd-x86_64
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jcode-freebsd-x86_64
-          path: dist/jcode-freebsd-x86_64.tar.gz
+          name: arterm-freebsd-x86_64
+          path: dist/arterm-freebsd-x86_64.tar.gz
 
       - name: Publish asset to release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" "dist/jcode-freebsd-x86_64.tar.gz" --clobber
+          gh release upload "${GITHUB_REF_NAME}" "dist/arterm-freebsd-x86_64.tar.gz" --clobber
 
   release:
     name: Finalize release
@@ -521,22 +521,22 @@ jobs:
         continue-on-error: true
         with:
           path: artifacts
-          pattern: jcode-*
+          pattern: arterm-*
 
       - name: Validate complete platform asset set
         shell: bash
         run: |
           set -euo pipefail
           expected=(
-            artifacts/jcode-linux-x86_64/jcode-linux-x86_64.tar.gz
-            artifacts/jcode-linux-aarch64/jcode-linux-aarch64.tar.gz
-            artifacts/jcode-macos-aarch64/jcode-macos-aarch64.tar.gz
-            artifacts/jcode-macos-x86_64/jcode-macos-x86_64.tar.gz
-            artifacts/jcode-windows-x86_64/jcode-windows-x86_64.exe
-            artifacts/jcode-windows-x86_64/jcode-windows-x86_64.tar.gz
-            artifacts/jcode-windows-aarch64/jcode-windows-aarch64.exe
-            artifacts/jcode-windows-aarch64/jcode-windows-aarch64.tar.gz
-            artifacts/jcode-freebsd-x86_64/jcode-freebsd-x86_64.tar.gz
+            artifacts/arterm-linux-x86_64/arterm-linux-x86_64.tar.gz
+            artifacts/arterm-linux-aarch64/arterm-linux-aarch64.tar.gz
+            artifacts/arterm-macos-aarch64/arterm-macos-aarch64.tar.gz
+            artifacts/arterm-macos-x86_64/arterm-macos-x86_64.tar.gz
+            artifacts/arterm-windows-x86_64/arterm-windows-x86_64.exe
+            artifacts/arterm-windows-x86_64/arterm-windows-x86_64.tar.gz
+            artifacts/arterm-windows-aarch64/arterm-windows-aarch64.exe
+            artifacts/arterm-windows-aarch64/arterm-windows-aarch64.tar.gz
+            artifacts/arterm-freebsd-x86_64/arterm-freebsd-x86_64.tar.gz
           )
 
           missing=()
@@ -577,13 +577,13 @@ jobs:
             if [ -f "$1" ]; then printf true; else printf false; fi
           }
 
-          linux_x86_64=$(available artifacts/jcode-linux-x86_64/jcode-linux-x86_64.tar.gz)
-          linux_aarch64=$(available artifacts/jcode-linux-aarch64/jcode-linux-aarch64.tar.gz)
-          macos_aarch64=$(available artifacts/jcode-macos-aarch64/jcode-macos-aarch64.tar.gz)
-          macos_x86_64=$(available artifacts/jcode-macos-x86_64/jcode-macos-x86_64.tar.gz)
-          windows_x86_64=$(available artifacts/jcode-windows-x86_64/jcode-windows-x86_64.exe)
-          windows_aarch64=$(available artifacts/jcode-windows-aarch64/jcode-windows-aarch64.exe)
-          freebsd_x86_64=$(available artifacts/jcode-freebsd-x86_64/jcode-freebsd-x86_64.tar.gz)
+          linux_x86_64=$(available artifacts/arterm-linux-x86_64/arterm-linux-x86_64.tar.gz)
+          linux_aarch64=$(available artifacts/arterm-linux-aarch64/arterm-linux-aarch64.tar.gz)
+          macos_aarch64=$(available artifacts/arterm-macos-aarch64/arterm-macos-aarch64.tar.gz)
+          macos_x86_64=$(available artifacts/arterm-macos-x86_64/arterm-macos-x86_64.tar.gz)
+          windows_x86_64=$(available artifacts/arterm-windows-x86_64/arterm-windows-x86_64.exe)
+          windows_aarch64=$(available artifacts/arterm-windows-aarch64/arterm-windows-aarch64.exe)
+          freebsd_x86_64=$(available artifacts/arterm-freebsd-x86_64/arterm-freebsd-x86_64.tar.gz)
 
           homebrew_ready=false
           aur_ready=false
@@ -661,8 +661,8 @@ jobs:
 
           path = Path("release_notes.md")
           body = path.read_text(encoding="utf-8")
-          start = "<!-- jcode-platform-availability:start -->"
-          end = "<!-- jcode-platform-availability:end -->"
+          start = "<!-- arterm-platform-availability:start -->"
+          end = "<!-- arterm-platform-availability:end -->"
           body = re.sub(
               rf"\n?{re.escape(start)}.*?{re.escape(end)}\n?",
               "\n",
@@ -720,20 +720,20 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           VERSION_NUM="${VERSION#v}"
 
-          LINUX_SHA=$(sha256sum artifacts/jcode-linux-x86_64/jcode-linux-x86_64.tar.gz | cut -d' ' -f1)
-          LINUX_ARM_SHA=$(sha256sum artifacts/jcode-linux-aarch64/jcode-linux-aarch64.tar.gz | cut -d' ' -f1)
-          MACOS_ARM_SHA=$(sha256sum artifacts/jcode-macos-aarch64/jcode-macos-aarch64.tar.gz | cut -d' ' -f1)
-          MACOS_INTEL_SHA=$(sha256sum artifacts/jcode-macos-x86_64/jcode-macos-x86_64.tar.gz | cut -d' ' -f1)
+          LINUX_SHA=$(sha256sum artifacts/arterm-linux-x86_64/arterm-linux-x86_64.tar.gz | cut -d' ' -f1)
+          LINUX_ARM_SHA=$(sha256sum artifacts/arterm-linux-aarch64/arterm-linux-aarch64.tar.gz | cut -d' ' -f1)
+          MACOS_ARM_SHA=$(sha256sum artifacts/arterm-macos-aarch64/arterm-macos-aarch64.tar.gz | cut -d' ' -f1)
+          MACOS_INTEL_SHA=$(sha256sum artifacts/arterm-macos-x86_64/arterm-macos-x86_64.tar.gz | cut -d' ' -f1)
 
           mkdir -p ~/.ssh
           echo "$HOMEBREW_DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
 
-          git clone git@github.com:1jehuang/homebrew-jcode.git /tmp/homebrew-jcode
+          git clone git@github.com:1jehuang/homebrew-arterm.git /tmp/homebrew-arterm
 
-          cat > /tmp/homebrew-jcode/Formula/jcode.rb << FORMULA
-          class Jcode < Formula
+          cat > /tmp/homebrew-arterm/Formula/arterm.rb << FORMULA
+          class Arterm < Formula
             desc "AI coding agent powered by Claude and ChatGPT"
             homepage "https://github.com/1jehuang/jcode"
             version "${VERSION_NUM}"
@@ -741,61 +741,61 @@ jobs:
 
             on_macos do
               on_arm do
-                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/jcode-macos-aarch64.tar.gz"
+                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-macos-aarch64.tar.gz"
                 sha256 "${MACOS_ARM_SHA}"
 
                 def install
-                  bin.install "jcode-macos-aarch64" => "jcode"
+                  bin.install "arterm-macos-aarch64" => "arterm"
                 end
               end
 
               on_intel do
-                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/jcode-macos-x86_64.tar.gz"
+                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-macos-x86_64.tar.gz"
                 sha256 "${MACOS_INTEL_SHA}"
 
                 def install
-                  bin.install "jcode-macos-x86_64" => "jcode"
+                  bin.install "arterm-macos-x86_64" => "arterm"
                 end
               end
             end
 
             on_linux do
               on_intel do
-                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/jcode-linux-x86_64.tar.gz"
+                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-linux-x86_64.tar.gz"
                 sha256 "${LINUX_SHA}"
 
                 def install
-                  libexec.install "jcode-linux-x86_64", "jcode-linux-x86_64.bin"
+                  libexec.install "arterm-linux-x86_64", "arterm-linux-x86_64.bin"
                   libexec.install Dir["libssl.so*"], Dir["libcrypto.so*"] unless Dir["libssl.so*", "libcrypto.so*"].empty?
-                  (bin/"jcode").write <<~SH
+                  (bin/"arterm").write <<~SH
                     #!/bin/sh
-                    exec "#{libexec}/jcode-linux-x86_64" "\$@"
+                    exec "#{libexec}/arterm-linux-x86_64" "\$@"
                   SH
                 end
               end
 
               on_arm do
-                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/jcode-linux-aarch64.tar.gz"
+                url "https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-linux-aarch64.tar.gz"
                 sha256 "${LINUX_ARM_SHA}"
 
                 def install
-                  bin.install "jcode-linux-aarch64" => "jcode"
+                  bin.install "arterm-linux-aarch64" => "arterm"
                 end
               end
             end
 
             test do
-              assert_match "jcode", shell_output("#{bin}/jcode --version")
+              assert_match "arterm", shell_output("#{bin}/arterm --version")
             end
           end
           FORMULA
 
-          sed -i 's/^          //' /tmp/homebrew-jcode/Formula/jcode.rb
+          sed -i 's/^          //' /tmp/homebrew-arterm/Formula/arterm.rb
 
-          cd /tmp/homebrew-jcode
-          git config user.name "jcode-release-bot"
-          git config user.email "release@jcode.dev"
-          git add Formula/jcode.rb
+          cd /tmp/homebrew-arterm
+          git config user.name "arterm-release-bot"
+          git config user.email "release@arterm.dev"
+          git add Formula/arterm.rb
           git commit -m "Update to ${VERSION}" || echo "No changes"
           git push
 
@@ -826,8 +826,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           VERSION_NUM="${VERSION#v}"
 
-          LINUX_SHA=$(sha256sum artifacts/jcode-linux-x86_64/jcode-linux-x86_64.tar.gz | cut -d' ' -f1)
-          LINUX_URL="https://github.com/1jehuang/jcode/releases/download/${VERSION}/jcode-linux-x86_64.tar.gz"
+          LINUX_SHA=$(sha256sum artifacts/arterm-linux-x86_64/arterm-linux-x86_64.tar.gz | cut -d' ' -f1)
+          LINUX_URL="https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-linux-x86_64.tar.gz"
 
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
@@ -839,35 +839,35 @@ jobs:
 
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur_key -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=10 -o ConnectionAttempts=3"
 
-          retry 3 5 bash -lc 'rm -rf /tmp/jcode-aur && git clone --depth 1 ssh://aur@aur.archlinux.org/jcode-bin.git /tmp/jcode-aur'
-          cd /tmp/jcode-aur
-          git remote set-url origin ssh://aur@aur.archlinux.org/jcode-bin.git
+          retry 3 5 bash -lc 'rm -rf /tmp/arterm-aur && git clone --depth 1 ssh://aur@aur.archlinux.org/arterm-bin.git /tmp/arterm-aur'
+          cd /tmp/arterm-aur
+          git remote set-url origin ssh://aur@aur.archlinux.org/arterm-bin.git
 
           cat > PKGBUILD << 'PKGBUILD_END'
           # Maintainer: Jeremy Huang <jeremyhuang55555@gmail.com>
-          pkgname=jcode-bin
+          pkgname=arterm-bin
           pkgver=VERSION_PLACEHOLDER
           pkgrel=1
           pkgdesc="AI coding agent powered by Claude and ChatGPT"
           arch=('x86_64')
           url="https://github.com/1jehuang/jcode"
           license=('MIT')
-          provides=('jcode')
-          conflicts=('jcode')
+          provides=('arterm')
+          conflicts=('arterm')
           source=("URL_PLACEHOLDER")
           sha256sums=('SHA_PLACEHOLDER')
 
           package() {
-              install -Dm755 "${srcdir}/jcode-linux-x86_64" "${pkgdir}/usr/lib/jcode/jcode-linux-x86_64"
-              install -Dm755 "${srcdir}/jcode-linux-x86_64.bin" "${pkgdir}/usr/lib/jcode/jcode-linux-x86_64.bin"
+              install -Dm755 "${srcdir}/arterm-linux-x86_64" "${pkgdir}/usr/lib/arterm/arterm-linux-x86_64"
+              install -Dm755 "${srcdir}/arterm-linux-x86_64.bin" "${pkgdir}/usr/lib/arterm/arterm-linux-x86_64.bin"
               if compgen -G "${srcdir}/libssl.so*" >/dev/null; then
-                  install -Dm644 "${srcdir}"/libssl.so* "${pkgdir}/usr/lib/jcode/"
+                  install -Dm644 "${srcdir}"/libssl.so* "${pkgdir}/usr/lib/arterm/"
               fi
               if compgen -G "${srcdir}/libcrypto.so*" >/dev/null; then
-                  install -Dm644 "${srcdir}"/libcrypto.so* "${pkgdir}/usr/lib/jcode/"
+                  install -Dm644 "${srcdir}"/libcrypto.so* "${pkgdir}/usr/lib/arterm/"
               fi
               mkdir -p "${pkgdir}/usr/bin"
-              ln -s /usr/lib/jcode/jcode-linux-x86_64 "${pkgdir}/usr/bin/jcode"
+              ln -s /usr/lib/arterm/arterm-linux-x86_64 "${pkgdir}/usr/bin/arterm"
           }
           PKGBUILD_END
 
@@ -877,18 +877,18 @@ jobs:
           sed -i 's/^          //' PKGBUILD
 
           # Generate .SRCINFO without makepkg (AUR uses tab indentation)
-          printf 'pkgbase = jcode-bin\n' > .SRCINFO
+          printf 'pkgbase = arterm-bin\n' > .SRCINFO
           printf '\tpkgdesc = AI coding agent powered by Claude and ChatGPT\n' >> .SRCINFO
           printf '\tpkgver = %s\n' "${VERSION_NUM}" >> .SRCINFO
           printf '\tpkgrel = 1\n' >> .SRCINFO
           printf '\turl = https://github.com/1jehuang/jcode\n' >> .SRCINFO
           printf '\tarch = x86_64\n' >> .SRCINFO
           printf '\tlicense = MIT\n' >> .SRCINFO
-          printf '\tprovides = jcode\n' >> .SRCINFO
-          printf '\tconflicts = jcode\n' >> .SRCINFO
+          printf '\tprovides = arterm\n' >> .SRCINFO
+          printf '\tconflicts = arterm\n' >> .SRCINFO
           printf '\tsource = %s\n' "${LINUX_URL}" >> .SRCINFO
           printf '\tsha256sums = %s\n' "${LINUX_SHA}" >> .SRCINFO
-          printf '\npkgname = jcode-bin\n' >> .SRCINFO
+          printf '\npkgname = arterm-bin\n' >> .SRCINFO
 
           git config user.name "Jeremy Huang"
           git config user.email "jeremyhuang55555@gmail.com"
@@ -906,7 +906,7 @@ jobs:
           gh issue list --label "$label" --state open --json number --jq '.[].number' | while read -r issue; do
             [ -n "$issue" ] || continue
             gh issue close "$issue" \
-              --comment "Released in [${GITHUB_REF_NAME}](https://github.com/${repo}/releases/tag/${GITHUB_REF_NAME}). Run \`jcode update\` to get it." \
+              --comment "Released in [${GITHUB_REF_NAME}](https://github.com/${repo}/releases/tag/${GITHUB_REF_NAME}). Run \`arterm update\` to get it." \
               --reason completed
             gh issue edit "$issue" --remove-label "$label" || true
           done

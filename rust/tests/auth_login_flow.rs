@@ -1,11 +1,11 @@
 use anyhow::Result;
-use jcode::auth::{AuthState, AuthStatus};
-use jcode::provider::Provider;
-use jcode::provider_catalog::{
+use arterm::auth::{AuthState, AuthStatus};
+use arterm::provider::Provider;
+use arterm::provider_catalog::{
     OPENAI_COMPAT_LOGIN_PROVIDER, login_providers, openai_compatible_profiles,
 };
-use jcode::tui::login_picker::{LoginPicker, LoginPickerItem, LoginPickerSummary};
-use jcode_provider_openrouter_runtime::OpenRouterProvider;
+use arterm::tui::login_picker::{LoginPicker, LoginPickerItem, LoginPickerSummary};
+use arterm_provider_openrouter_runtime::OpenRouterProvider;
 use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 use std::collections::HashSet;
 use std::io::{Read, Write};
@@ -28,23 +28,23 @@ fn tracked_env_vars() -> Vec<String> {
         "HOME",
         "APPDATA",
         "XDG_CONFIG_HOME",
-        "JCODE_HOME",
+        "ARTERM_HOME",
         "NO_PROXY",
         "no_proxy",
-        "JCODE_OPENROUTER_API_BASE",
-        "JCODE_OPENROUTER_API_KEY_NAME",
-        "JCODE_OPENROUTER_ENV_FILE",
-        "JCODE_OPENROUTER_CACHE_NAMESPACE",
-        "JCODE_OPENROUTER_PROVIDER_FEATURES",
-        "JCODE_OPENROUTER_ALLOW_NO_AUTH",
-        "JCODE_OPENROUTER_MODEL_CATALOG",
-        "JCODE_OPENROUTER_MODEL",
-        "JCODE_OPENROUTER_STATIC_MODELS",
-        "JCODE_OPENROUTER_AUTH_HEADER",
-        "JCODE_OPENROUTER_AUTH_HEADER_NAME",
-        "JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER",
-        "JCODE_OPENROUTER_PROVIDER",
-        "JCODE_OPENROUTER_NO_FALLBACK",
+        "ARTERM_OPENROUTER_API_BASE",
+        "ARTERM_OPENROUTER_API_KEY_NAME",
+        "ARTERM_OPENROUTER_ENV_FILE",
+        "ARTERM_OPENROUTER_CACHE_NAMESPACE",
+        "ARTERM_OPENROUTER_PROVIDER_FEATURES",
+        "ARTERM_OPENROUTER_ALLOW_NO_AUTH",
+        "ARTERM_OPENROUTER_MODEL_CATALOG",
+        "ARTERM_OPENROUTER_MODEL",
+        "ARTERM_OPENROUTER_STATIC_MODELS",
+        "ARTERM_OPENROUTER_AUTH_HEADER",
+        "ARTERM_OPENROUTER_AUTH_HEADER_NAME",
+        "ARTERM_OPENROUTER_DYNAMIC_BEARER_PROVIDER",
+        "ARTERM_OPENROUTER_PROVIDER",
+        "ARTERM_OPENROUTER_NO_FALLBACK",
         "OPENROUTER_API_KEY",
         "AUTH_FLOW_TEST_KEY",
     ]
@@ -71,7 +71,7 @@ impl TestEnv {
     fn new() -> Result<Self> {
         let lock = lock_env();
         let temp = tempfile::Builder::new()
-            .prefix("jcode-auth-flow-")
+            .prefix("arterm-auth-flow-")
             .tempdir()?;
         let saved = tracked_env_vars()
             .into_iter()
@@ -82,15 +82,15 @@ impl TestEnv {
             .collect::<Vec<_>>();
 
         for (key, _) in &saved {
-            jcode::env::remove_var(key);
+            arterm::env::remove_var(key);
         }
 
-        jcode::env::set_var("HOME", temp.path());
-        jcode::env::set_var("XDG_CONFIG_HOME", temp.path().join("config"));
-        jcode::env::set_var("APPDATA", temp.path().join("AppData").join("Roaming"));
-        jcode::env::set_var("JCODE_HOME", temp.path().join("jcode-home"));
-        jcode::env::set_var("NO_PROXY", "127.0.0.1,localhost");
-        jcode::env::set_var("no_proxy", "127.0.0.1,localhost");
+        arterm::env::set_var("HOME", temp.path());
+        arterm::env::set_var("XDG_CONFIG_HOME", temp.path().join("config"));
+        arterm::env::set_var("APPDATA", temp.path().join("AppData").join("Roaming"));
+        arterm::env::set_var("ARTERM_HOME", temp.path().join("arterm-home"));
+        arterm::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+        arterm::env::set_var("no_proxy", "127.0.0.1,localhost");
         AuthStatus::invalidate_cache();
 
         Ok(Self {
@@ -108,21 +108,21 @@ impl TestEnv {
         allow_no_auth: bool,
     ) {
         let _ = self.temp.path();
-        jcode::env::set_var("JCODE_OPENROUTER_API_BASE", api_base);
-        jcode::env::set_var("JCODE_OPENROUTER_API_KEY_NAME", "AUTH_FLOW_TEST_KEY");
-        jcode::env::set_var("JCODE_OPENROUTER_ENV_FILE", "auth-flow-test.env");
-        jcode::env::set_var("JCODE_OPENROUTER_CACHE_NAMESPACE", cache_namespace);
-        jcode::env::set_var("JCODE_OPENROUTER_PROVIDER_FEATURES", "0");
-        jcode::env::set_var("JCODE_OPENROUTER_MODEL_CATALOG", "1");
+        arterm::env::set_var("ARTERM_OPENROUTER_API_BASE", api_base);
+        arterm::env::set_var("ARTERM_OPENROUTER_API_KEY_NAME", "AUTH_FLOW_TEST_KEY");
+        arterm::env::set_var("ARTERM_OPENROUTER_ENV_FILE", "auth-flow-test.env");
+        arterm::env::set_var("ARTERM_OPENROUTER_CACHE_NAMESPACE", cache_namespace);
+        arterm::env::set_var("ARTERM_OPENROUTER_PROVIDER_FEATURES", "0");
+        arterm::env::set_var("ARTERM_OPENROUTER_MODEL_CATALOG", "1");
         if let Some(key) = key {
-            jcode::env::set_var("AUTH_FLOW_TEST_KEY", key);
+            arterm::env::set_var("AUTH_FLOW_TEST_KEY", key);
         } else {
-            jcode::env::remove_var("AUTH_FLOW_TEST_KEY");
+            arterm::env::remove_var("AUTH_FLOW_TEST_KEY");
         }
         if allow_no_auth {
-            jcode::env::set_var("JCODE_OPENROUTER_ALLOW_NO_AUTH", "1");
+            arterm::env::set_var("ARTERM_OPENROUTER_ALLOW_NO_AUTH", "1");
         } else {
-            jcode::env::remove_var("JCODE_OPENROUTER_ALLOW_NO_AUTH");
+            arterm::env::remove_var("ARTERM_OPENROUTER_ALLOW_NO_AUTH");
         }
         AuthStatus::invalidate_cache();
     }
@@ -133,9 +133,9 @@ impl Drop for TestEnv {
         AuthStatus::invalidate_cache();
         for (key, value) in &self.saved {
             if let Some(value) = value {
-                jcode::env::set_var(key, value);
+                arterm::env::set_var(key, value);
             } else {
-                jcode::env::remove_var(key);
+                arterm::env::remove_var(key);
             }
         }
         AuthStatus::invalidate_cache();
@@ -320,8 +320,8 @@ fn live_models_contract_supports_api_key_header_mode() -> Result<()> {
         Some("sk-header-contract"),
         false,
     );
-    jcode::env::set_var("JCODE_OPENROUTER_AUTH_HEADER", "api-key");
-    jcode::env::set_var("JCODE_OPENROUTER_AUTH_HEADER_NAME", "x-api-key");
+    arterm::env::set_var("ARTERM_OPENROUTER_AUTH_HEADER", "api-key");
+    arterm::env::set_var("ARTERM_OPENROUTER_AUTH_HEADER_NAME", "x-api-key");
 
     let provider = OpenRouterProvider::new()?;
     let models = run_current_thread(provider.fetch_models())?;
@@ -390,7 +390,7 @@ fn model_picker_cache_miss_schedules_single_background_refresh_and_updates_route
         None,
         true,
     );
-    jcode::env::set_var("JCODE_OPENROUTER_MODEL", "background-race-selected-model");
+    arterm::env::set_var("ARTERM_OPENROUTER_MODEL", "background-race-selected-model");
 
     let provider = OpenRouterProvider::new()?;
     run_current_thread(async {
@@ -463,9 +463,9 @@ fn live_model_catalog_failure_keeps_static_and_selected_model_picker_fallbacks()
         Some("sk-catalog-failure"),
         false,
     );
-    jcode::env::set_var("JCODE_OPENROUTER_MODEL", "selected-fallback-model");
-    jcode::env::set_var(
-        "JCODE_OPENROUTER_STATIC_MODELS",
+    arterm::env::set_var("ARTERM_OPENROUTER_MODEL", "selected-fallback-model");
+    arterm::env::set_var(
+        "ARTERM_OPENROUTER_STATIC_MODELS",
         "selected-fallback-model\nstatic-fallback-model",
     );
 

@@ -4,7 +4,7 @@
   "title": "Better ACP controls and focused session workflows",
   "highlights": [
     "ACP clients can switch models and reasoning effort, list available models, and use model control slash commands",
-    "Jcode can search version-matched documentation bundled with the installed build",
+    "Arterm can search version-matched documentation bundled with the installed build",
     "The session picker can filter sessions to the current working directory"
   ],
   "improvements": [

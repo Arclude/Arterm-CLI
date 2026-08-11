@@ -3,16 +3,16 @@
 #
 # Usage:
 #   source "$(dirname "$0")/lib/configure_path.sh"
-#   jcode_configure_path "/path/to/install/dir"
+#   arterm_configure_path "/path/to/install/dir"
 #
 # This is intentionally POSIX-friendly and side-effect free until you call
-# jcode_configure_path. It is kept in sync with the inline copy in install.sh,
+# arterm_configure_path. It is kept in sync with the inline copy in install.sh,
 # which must stay self-contained because it is run via `curl ... | bash`.
 
 # Configure PATH for bash, zsh and fish.
-#   jcode_configure_path <install-dir> [report-fn]
+#   arterm_configure_path <install-dir> [report-fn]
 # report-fn (optional) is called with a human-readable summary string.
-jcode_configure_path() {
+arterm_configure_path() {
   _jcp_install_dir="$1"
   _jcp_report="${2:-}"
   _jcp_path_line="export PATH=\"$_jcp_install_dir:\$PATH\""
@@ -33,7 +33,7 @@ jcode_configure_path() {
       mkdir -p "$(dirname "$_rc")"
     fi
     if ! grep -qF "$_jcp_install_dir" "$_rc" 2>/dev/null; then
-      printf '\n# Added by jcode installer\n%s\n' "$_jcp_path_line" >> "$_rc"
+      printf '\n# Added by arterm installer\n%s\n' "$_jcp_path_line" >> "$_rc"
       _jcp_added="$_jcp_added $_rc"
     fi
   }
@@ -48,7 +48,7 @@ jcode_configure_path() {
     fi
     if ! grep -qF "$_jcp_install_dir" "$_rc" 2>/dev/null; then
       {
-        printf '\n# Added by jcode installer\n'
+        printf '\n# Added by arterm installer\n'
         printf 'if not contains "%s" $PATH\n' "$_jcp_install_dir"
         printf '    set -gx PATH "%s" $PATH\n' "$_jcp_install_dir"
         printf 'end\n'

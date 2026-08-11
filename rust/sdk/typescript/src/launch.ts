@@ -1,14 +1,14 @@
 /**
- * Launching a private jcode instance.
+ * Launching a private arterm instance.
  *
- * `JcodeClient.connect()` attaches to whatever jcode is already running on the
- * machine, which is right for a tool that automates *your* jcode (an editor
+ * `ArtermClient.connect()` attaches to whatever arterm is already running on the
+ * machine, which is right for a tool that automates *your* arterm (an editor
  * plugin, a dashboard) and wrong for everything else. An application embedding
- * jcode as an agent engine wants its own instance: its own sessions, its own
+ * arterm as an agent engine wants its own instance: its own sessions, its own
  * state, and no way to disturb the user's live work by accident.
  *
  * `launch()` gives it one. It starts a private daemon and bridge under a
- * dedicated `JCODE_HOME` and runtime directory, and shuts them down on
+ * dedicated `ARTERM_HOME` and runtime directory, and shuts them down on
  * `close()`.
  */
 
@@ -17,14 +17,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { HarnessError } from "./errors.js";
-import { bundledJcodeBinary, platformBinaryPackage } from "./binary.js";
+import { bundledArtermBinary, platformBinaryPackage } from "./binary.js";
 
 /**
- * Files inherited from the user's jcode home when logins are inherited.
+ * Files inherited from the user's arterm home when logins are inherited.
  *
  * Deliberately *not* included: `auth-refresh-state.json` and
  * `auth-validation.json`, which are derived records of past auth failures.
- * Copying them imports another jcode's bad day, and a stale
+ * Copying them imports another arterm's bad day, and a stale
  * `rejected_refresh_fingerprint` makes a fresh instance refuse to even attempt
  * a refresh with credentials that work.
  */
@@ -51,29 +51,29 @@ const CREDENTIAL_FILES = [
 const SHARED_FILES = new Set(CREDENTIAL_FILES.filter((name) => name !== "config.toml"));
 
 /**
- * Where jcode looks for *other* tools' credentials, relative to `$HOME`.
+ * Where arterm looks for *other* tools' credentials, relative to `$HOME`.
  *
- * jcode can log in by reusing an existing CLI's OAuth store, so a large share
- * of real users have no usable `~/.jcode/auth.json` at all: the working
+ * arterm can log in by reusing an existing CLI's OAuth store, so a large share
+ * of real users have no usable `~/.arterm/auth.json` at all: the working
  * credentials live in files under `~/.claude/` or
  * `~/.config/github-copilot/`. Under
- * `JCODE_HOME` these lookups are sandboxed to `$JCODE_HOME/external/`, so an
+ * `ARTERM_HOME` these lookups are sandboxed to `$ARTERM_HOME/external/`, so an
  * instance that inherits only `auth.json` silently has no credentials and
  * fails on the first turn. Linking the recognized credential files makes
  * inheritance mean what it says without exposing either directory wholesale.
  */
 /**
- * jcode's own config directory, relative to the platform config root.
+ * arterm's own config directory, relative to the platform config root.
  *
  * `app_config_dir()` is where provider env files live (`anthropic.env`,
- * `n.env` for the jcode subscription), and `JCODE_HOME` redirects it to
- * `$JCODE_HOME/config/jcode`. It is easy to miss because it is not under
- * `~/.jcode` at all, and missing it is not a subtle failure: on a machine
- * whose working credential is a jcode subscription, `auth.json` holds only a
+ * `n.env` for the arterm subscription), and `ARTERM_HOME` redirects it to
+ * `$ARTERM_HOME/config/arterm`. It is easy to miss because it is not under
+ * `~/.arterm` at all, and missing it is not a subtle failure: on a machine
+ * whose working credential is a arterm subscription, `auth.json` holds only a
  * stale OAuth token, so the instance inherits exactly the credential that does
  * not work and none of the ones that do.
  */
-const APP_CONFIG_DIRNAME = "jcode";
+const APP_CONFIG_DIRNAME = "arterm";
 
 const EXTERNAL_CREDENTIAL_FILES = [
   ".claude/.credentials.json",
@@ -156,7 +156,7 @@ export interface LaunchOptions {
    * Defaults to a fresh temporary directory that is removed on `close()`.
    * Pass a stable path to keep sessions across runs.
    */
-  jcodeHome?: string;
+  artermHome?: string;
   /** Working directory for sessions created in this instance. */
   workingDir?: string;
   /**
@@ -168,7 +168,7 @@ export interface LaunchOptions {
    * supply credentials yourself.
    */
   inheritLogins?: boolean;
-  /** Path to the jcode binary. Defaults to the npm-bundled runtime, then `jcode` on PATH. */
+  /** Path to the arterm binary. Defaults to the npm-bundled runtime, then `arterm` on PATH. */
   binary?: string;
   /** Extra environment variables for the instance. */
   env?: Record<string, string>;
@@ -186,24 +186,24 @@ export interface LaunchOptions {
   cleanupTimeoutMs?: number;
 }
 
-/** A running private jcode instance. */
+/** A running private arterm instance. */
 export interface LaunchedInstance {
   /** API socket path to connect to. */
   socketPath: string;
-  /** The instance's `JCODE_HOME`. */
-  jcodeHome: string;
+  /** The instance's `ARTERM_HOME`. */
+  artermHome: string;
   /** The bridge process. */
   process: ChildProcess;
   /** Stop the instance and clean up anything it created. */
   shutdown(): Promise<void>;
 }
 
-/** Resolve the user's real jcode home, ignoring any instance override. */
-export function userJcodeHome(): string {
-  return process.env.JCODE_HOME ?? path.join(os.homedir(), ".jcode");
+/** Resolve the user's real arterm home, ignoring any instance override. */
+export function userArtermHome(): string {
+  return process.env.ARTERM_HOME ?? path.join(os.homedir(), ".arterm");
 }
 
-/** The user's jcode config directory, mirroring `storage::app_config_dir`. */
+/** The user's arterm config directory, mirroring `storage::app_config_dir`. */
 export function userAppConfigDir(): string {
   if (process.platform === "darwin") {
     return path.join(os.homedir(), "Library", "Application Support", APP_CONFIG_DIRNAME);
@@ -241,7 +241,7 @@ export function inheritCredentials(fromHome: string, toHome: string): string[] {
   ) {
     throw new HarnessError(
       "invalid_instance_home",
-      "instance home must be different from the user's jcode home",
+      "instance home must be different from the user's arterm home",
     );
   }
 
@@ -251,7 +251,7 @@ export function inheritCredentials(fromHome: string, toHome: string): string[] {
     if (!fs.existsSync(source)) continue;
     const destination = path.join(toHome, name);
     if (SHARED_FILES.has(name)) {
-      // A reused `jcodeHome` already has these links, and symlinkSync throws
+      // A reused `artermHome` already has these links, and symlinkSync throws
       // EEXIST rather than replacing. Relinking also repoints a stale link
       // from an older run, so replace rather than skip.
       linkCredentialFile(source, toHome, name);
@@ -262,8 +262,8 @@ export function inheritCredentials(fromHome: string, toHome: string): string[] {
     inherited.push(name);
   }
 
-  // jcode's provider env files live in its platform config directory, which
-  // `JCODE_HOME` moves to `$JCODE_HOME/config/jcode`. Link only the env files:
+  // arterm's provider env files live in its platform config directory, which
+  // `ARTERM_HOME` moves to `$ARTERM_HOME/config/arterm`. Link only the env files:
   // caches and usage data are not credentials and must stay instance-private.
   // Most importantly, never link the directory itself. A buggy recursive
   // cleanup can descend through a directory link and delete the user's files;
@@ -281,8 +281,8 @@ export function inheritCredentials(fromHome: string, toHome: string): string[] {
     // No app config directory is a normal fresh-install state.
   }
 
-  // Other CLIs' credential stores, which jcode reads directly and which
-  // `JCODE_HOME` redirects to `$JCODE_HOME/external/`. Share only the exact
+  // Other CLIs' credential stores, which arterm reads directly and which
+  // `ARTERM_HOME` redirects to `$ARTERM_HOME/external/`. Share only the exact
   // credential files. Linking whole directories would also expose transcripts,
   // configuration, and anything those tools add in the future.
   for (const relative of EXTERNAL_CREDENTIAL_FILES) {
@@ -322,15 +322,15 @@ export function inheritCredentials(fromHome: string, toHome: string): string[] {
  * Pid of the daemon serving an instance, read from its own server registry.
  *
  * Synchronous on purpose: the only caller is a process "exit" handler, which
- * cannot await, so shelling out to the CLI is not available. jcode records
- * every server in `$JCODE_HOME/servers.json` keyed by socket path, and an
+ * cannot await, so shelling out to the CLI is not available. arterm records
+ * every server in `$ARTERM_HOME/servers.json` keyed by socket path, and an
  * instance's registry lists only that instance's daemon, so this can never
  * resolve to the server the user is running themselves.
  */
-function readDaemonPidSync(jcodeHome: string, runtimeDir: string): number | undefined {
+function readDaemonPidSync(artermHome: string, runtimeDir: string): number | undefined {
   let raw: string;
   try {
-    raw = fs.readFileSync(path.join(jcodeHome, "servers.json"), "utf8");
+    raw = fs.readFileSync(path.join(artermHome, "servers.json"), "utf8");
   } catch {
     return undefined;
   }
@@ -340,7 +340,7 @@ function readDaemonPidSync(jcodeHome: string, runtimeDir: string): number | unde
   } catch {
     return undefined;
   }
-  const socket = path.join(runtimeDir, "jcode.sock");
+  const socket = path.join(runtimeDir, "arterm.sock");
   for (const entry of Object.values(registry)) {
     if (entry?.socket === socket && typeof entry.pid === "number" && entry.pid > 1) {
       return entry.pid;
@@ -351,13 +351,13 @@ function readDaemonPidSync(jcodeHome: string, runtimeDir: string): number | unde
 
 /** Wait briefly for a newly started daemon to publish its registry entry. */
 async function waitForDaemonPid(
-  jcodeHome: string,
+  artermHome: string,
   runtimeDir: string,
   timeoutMs = 2000,
 ): Promise<number | undefined> {
   const deadline = Date.now() + timeoutMs;
   do {
-    const pid = readDaemonPidSync(jcodeHome, runtimeDir);
+    const pid = readDaemonPidSync(artermHome, runtimeDir);
     if (pid !== undefined) return pid;
     await new Promise((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < deadline);
@@ -365,31 +365,31 @@ async function waitForDaemonPid(
 }
 
 export async function waitForDaemonPidForTest(
-  jcodeHome: string,
+  artermHome: string,
   runtimeDir: string,
   timeoutMs?: number,
 ): Promise<number | undefined> {
-  return waitForDaemonPid(jcodeHome, runtimeDir, timeoutMs);
+  return waitForDaemonPid(artermHome, runtimeDir, timeoutMs);
 }
 
 /**
  * Stop an instance's daemon and wait for it to actually be gone.
  *
  * The pid comes from the instance's own `servers.json` rather than from
- * `jcode server stop`: spawning a second jcode binary to read a pid out of a
+ * `arterm server stop`: spawning a second arterm binary to read a pid out of a
  * JSON file costs five seconds of process startup, and `close()` blocking that
  * long makes the SDK feel broken. The registry is scoped to this instance's
  * socket path, so this can never signal the server the user is running.
  */
 async function stopInstanceDaemon(
   _binary: string,
-  jcodeHome: string,
+  artermHome: string,
   runtimeDir: string,
 ): Promise<void> {
   // The API socket can become connectable just before the daemon writes its
   // servers.json entry. close() may therefore run during this small startup
   // window, so do not silently give up after a single registry read.
-  const pid = await waitForDaemonPid(jcodeHome, runtimeDir);
+  const pid = await waitForDaemonPid(artermHome, runtimeDir);
   if (pid === undefined) return;
 
   const signal = (sig: NodeJS.Signals) => {
@@ -463,7 +463,7 @@ function removeInstanceHome(home: string): void {
   const tempRoot = path.resolve(os.tmpdir());
   if (
     path.dirname(resolvedHome) !== tempRoot ||
-    !path.basename(resolvedHome).startsWith("jcode-sdk-instance-")
+    !path.basename(resolvedHome).startsWith("arterm-sdk-instance-")
   ) {
     return;
   }
@@ -502,32 +502,32 @@ function removeInstanceHome(home: string): void {
 }
 
 /**
- * Start a private jcode instance and return once its API socket is accepting
+ * Start a private arterm instance and return once its API socket is accepting
  * connections.
  */
 export async function launchInstance(options: LaunchOptions = {}): Promise<LaunchedInstance> {
-  const binary = options.binary ?? bundledJcodeBinary() ?? "jcode";
-  const ephemeral = options.jcodeHome === undefined;
-  const jcodeHome =
-    options.jcodeHome ??
-    fs.mkdtempSync(path.join(os.tmpdir(), "jcode-sdk-instance-"));
-  fs.mkdirSync(jcodeHome, { recursive: true, mode: 0o700 });
+  const binary = options.binary ?? bundledArtermBinary() ?? "arterm";
+  const ephemeral = options.artermHome === undefined;
+  const artermHome =
+    options.artermHome ??
+    fs.mkdtempSync(path.join(os.tmpdir(), "arterm-sdk-instance-"));
+  fs.mkdirSync(artermHome, { recursive: true, mode: 0o700 });
 
   // The runtime directory holds the sockets. Keeping it inside the instance
   // home is what makes the instance private: the daemon binds its socket
   // there rather than in the shared $XDG_RUNTIME_DIR, so a launched instance
-  // and the user's own jcode cannot collide or find each other.
-  const runtimeDir = path.join(jcodeHome, "run");
+  // and the user's own arterm cannot collide or find each other.
+  const runtimeDir = path.join(artermHome, "run");
   fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  const socketPath = path.join(runtimeDir, "jcode-api.sock");
+  const socketPath = path.join(runtimeDir, "arterm-api.sock");
 
-  // A reused `jcodeHome` still holds the previous run's socket files. The
+  // A reused `artermHome` still holds the previous run's socket files. The
   // startup loop waits for the API socket to *appear*, so a leftover one makes
   // launch() return immediately against a socket nothing is listening on, and
   // the first request fails with ECONNREFUSED. Clearing them is safe: a live
   // instance on this home would mean two daemons sharing one state directory,
   // which is already unsupported.
-  for (const stale of ["jcode-api.sock", "jcode.sock", "jcode-debug.sock", "jcode.sock.hash"]) {
+  for (const stale of ["arterm-api.sock", "arterm.sock", "arterm-debug.sock", "arterm.sock.hash"]) {
     try {
       fs.unlinkSync(path.join(runtimeDir, stale));
     } catch {
@@ -536,7 +536,7 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
   }
 
   if (options.inheritLogins ?? true) {
-    inheritCredentials(userJcodeHome(), jcodeHome);
+    inheritCredentials(userArtermHome(), artermHome);
   }
 
   const child = spawn(
@@ -546,10 +546,10 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
       cwd: options.workingDir ?? process.cwd(),
       env: {
         ...process.env,
-        JCODE_HOME: jcodeHome,
-        JCODE_RUNTIME_DIR: runtimeDir,
-        JCODE_API_SOCKET: socketPath,
-        JCODE_SOCKET: path.join(runtimeDir, "jcode.sock"),
+        ARTERM_HOME: artermHome,
+        ARTERM_RUNTIME_DIR: runtimeDir,
+        ARTERM_API_SOCKET: socketPath,
+        ARTERM_SOCKET: path.join(runtimeDir, "arterm.sock"),
         ...options.env,
       },
       stdio: ["ignore", "ignore", options.inheritStderr ? "inherit" : "pipe"],
@@ -569,11 +569,11 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
     exited = { code, signal };
   });
 
-  // A spawn failure (jcode not installed, which is the most likely first-run
+  // A spawn failure (arterm not installed, which is the most likely first-run
   // problem) emits "error" on the child. Node treats an unlistened "error" as
   // a fatal throw from deep inside child_process, so without this the caller
   // cannot catch it at all: their process dies with a raw ENOENT stack instead
-  // of being told to install jcode.
+  // of being told to install arterm.
   let spawnError: NodeJS.ErrnoException | undefined;
   child.once("error", (error: NodeJS.ErrnoException) => {
     spawnError = error;
@@ -587,7 +587,7 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
     // to talk to a daemon that does not exist, and the instance home would be
     // left behind by the very error path that is supposed to clean it up.
     if (spawnError) {
-      if (ephemeral) removeInstanceHome(jcodeHome);
+      if (ephemeral) removeInstanceHome(artermHome);
       return;
     }
 
@@ -600,7 +600,7 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
     // daemon starts shutting down, so doing this after the bridge dies races
     // a window where `server stop` reports "no running server found" and the
     // daemon is simply leaked.
-    await stopInstanceDaemon(binary, jcodeHome, runtimeDir);
+    await stopInstanceDaemon(binary, artermHome, runtimeDir);
 
     if (exited === undefined) {
       child.kill("SIGTERM");
@@ -628,24 +628,24 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
       // outlast a slow flush.
       const deadline = Date.now() + (options.cleanupTimeoutMs ?? 30_000);
       while (Date.now() < deadline) {
-        removeInstanceHome(jcodeHome);
+        removeInstanceHome(artermHome);
         await new Promise((resolve) => setTimeout(resolve, 250));
-        if (fs.existsSync(jcodeHome)) continue;
+        if (fs.existsSync(artermHome)) continue;
         await new Promise((resolve) => setTimeout(resolve, 750));
-        if (!fs.existsSync(jcodeHome)) return;
+        if (!fs.existsSync(artermHome)) return;
       }
       // Out of time. A leaked temp directory is a much smaller problem than a
       // close() that never returns, but it should not be silent.
-      if (fs.existsSync(jcodeHome)) {
+      if (fs.existsSync(artermHome)) {
         process.emitWarning(
-          `jcode instance home was still being written to and could not be removed: ${jcodeHome}`,
+          `arterm instance home was still being written to and could not be removed: ${artermHome}`,
         );
       }
     }
   };
 
   // A consumer who crashes, or simply forgets close(), would otherwise leave
-  // the daemon running forever: a server embedding jcode would accumulate one
+  // the daemon running forever: a server embedding arterm would accumulate one
   // instance per restart, each holding a temp directory and a model
   // connection. Node runs "exit" handlers on a normal exit and after an
   // uncaught exception, which covers everything short of SIGKILL.
@@ -658,7 +658,7 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
     // The daemon calls setsid(), so it leads its own session and no signal
     // aimed at the bridge can reach it. Killing the bridge alone is exactly
     // the leak this handler exists to prevent.
-    const pid = readDaemonPidSync(jcodeHome, runtimeDir);
+    const pid = readDaemonPidSync(artermHome, runtimeDir);
     if (pid !== undefined) {
       // SIGKILL, not SIGTERM: an exit handler cannot await, so there is no
       // chance to wait for a graceful shutdown, and a SIGTERM'd daemon would
@@ -681,7 +681,7 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
     // unbounded growth in a different resource.
     if (ephemeral) {
       try {
-        removeInstanceHome(jcodeHome);
+        removeInstanceHome(artermHome);
       } catch {
         // Best-effort: an exit handler must not throw.
       }
@@ -697,13 +697,13 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
       const binaryName = binary;
       const platformPackage = platformBinaryPackage();
       throw new HarnessError(
-        "jcode_not_found",
+        "arterm_not_found",
         spawnError.code === "ENOENT"
-          ? `could not run \`${binaryName}\`: jcode is not installed, or not on PATH. ` +
+          ? `could not run \`${binaryName}\`: arterm is not installed, or not on PATH. ` +
             (platformPackage
               ? `The bundled runtime package (${platformPackage}) is missing. Reinstall without ` +
-                "--omit=optional, install jcode from https://jcode.sh, or pass `binary` with its full path."
-              : "Install jcode from https://jcode.sh, or pass `binary` with its full path.")
+                "--omit=optional, install arterm from https://arterm.sh, or pass `binary` with its full path."
+              : "Install arterm from https://arterm.sh, or pass `binary` with its full path.")
           : `could not run \`${binaryName}\`: ${spawnError.message}`,
       );
     }
@@ -712,14 +712,14 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
       await shutdown();
       throw new HarnessError(
         "startup_failed",
-        `jcode exited during startup (code ${exited.code}, signal ${exited.signal})` +
+        `arterm exited during startup (code ${exited.code}, signal ${exited.signal})` +
           (stderr ? `:\n${stderr.trim()}` : ""),
       );
     }
     if (fs.existsSync(socketPath)) {
       return {
         socketPath,
-        jcodeHome,
+        artermHome,
         process: child,
         shutdown: async () => {
           process.removeListener("exit", reapOnExit);
@@ -734,7 +734,7 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
   await shutdown();
   throw new HarnessError(
     "startup_timeout",
-    `jcode did not create its API socket at ${socketPath} within the startup timeout` +
+    `arterm did not create its API socket at ${socketPath} within the startup timeout` +
       (stderr ? `:\n${stderr.trim()}` : ""),
   );
 }

@@ -3,7 +3,7 @@
   "date": "2026-07-09",
   "title": "Cursor provider restored, active sessions manager, and cross-desktop launch hotkeys",
   "highlights": [
-    "The Cursor provider works again: jcode now talks to Cursor's current agent service directly instead of a decommissioned endpoint that failed with \"Update Required\" errors",
+    "The Cursor provider works again: arterm now talks to Cursor's current agent service directly instead of a decommissioned endpoint that failed with \"Update Required\" errors",
     "New active sessions manager (/active, or Left on an empty prompt when enabled) shows your live sessions with 'working'/'ready' badges so you can see which ones need attention"
   ],
   "improvements": [

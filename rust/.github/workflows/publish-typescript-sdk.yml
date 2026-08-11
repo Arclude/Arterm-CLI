@@ -3,8 +3,8 @@ name: Publish TypeScript SDK
 on:
   workflow_dispatch:
     inputs:
-      jcode_release_tag:
-        description: Released jcode tag whose binaries should be bundled
+      arterm_release_tag:
+        description: Released arterm tag whose binaries should be bundled
         required: true
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish @1jehuang/jcode-sdk
+    name: Publish @1jehuang/arterm-sdk
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,7 +37,7 @@ jobs:
 
       - name: Enforce Rust and TypeScript SDK surface parity
         working-directory: ${{ github.workspace }}
-        run: cargo test -p jcode-sdk parity -- --nocapture
+        run: cargo test -p arterm-sdk parity -- --nocapture
 
       - name: Install dependencies
         run: npm ci
@@ -45,19 +45,19 @@ jobs:
       - name: Validate SDK
         run: npm run check
 
-      - name: Download released jcode runtimes
+      - name: Download released arterm runtimes
         working-directory: ${{ github.workspace }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p sdk-runtime-assets
-          gh release download "${{ inputs.jcode_release_tag }}" --dir sdk-runtime-assets \
-            --pattern 'jcode-linux-x86_64.tar.gz' \
-            --pattern 'jcode-linux-aarch64.tar.gz' \
-            --pattern 'jcode-macos-x86_64.tar.gz' \
-            --pattern 'jcode-macos-aarch64.tar.gz' \
-            --pattern 'jcode-windows-x86_64.tar.gz' \
-            --pattern 'jcode-windows-aarch64.tar.gz'
+          gh release download "${{ inputs.arterm_release_tag }}" --dir sdk-runtime-assets \
+            --pattern 'arterm-linux-x86_64.tar.gz' \
+            --pattern 'arterm-linux-aarch64.tar.gz' \
+            --pattern 'arterm-macos-x86_64.tar.gz' \
+            --pattern 'arterm-macos-aarch64.tar.gz' \
+            --pattern 'arterm-windows-x86_64.tar.gz' \
+            --pattern 'arterm-windows-aarch64.tar.gz'
 
       - name: Prepare platform packages
         working-directory: ${{ github.workspace }}

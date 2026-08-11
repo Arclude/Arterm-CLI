@@ -1,6 +1,6 @@
-# jcode Docs
+# arterm Docs
 
-Reference documentation for the jcode codebase.
+Reference documentation for the arterm codebase.
 
 ## Layout
 

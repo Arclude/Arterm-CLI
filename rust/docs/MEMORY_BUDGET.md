@@ -3,10 +3,10 @@
 Status: active guardrail
 Updated: 2026-04-18
 
-This document defines the current memory regression budget for jcode.
+This document defines the current memory regression budget for arterm.
 
 For live server triage and cause-specific remediation, see
-[Jcode Server Memory Incident Runbook](./MEMORY_INCIDENT_RUNBOOK.md).
+[Arterm Server Memory Incident Runbook](./MEMORY_INCIDENT_RUNBOOK.md).
 
 The goal is not to freeze memory usage forever. The goal is to make memory changes:
 - measurable

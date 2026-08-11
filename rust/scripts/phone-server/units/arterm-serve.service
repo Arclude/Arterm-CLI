@@ -1,0 +1,16 @@
+[Unit]
+Description=arterm server with WebSocket gateway
+After=network.target
+
+[Service]
+Environment=PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ARTERM_BEDROCK_ENABLE=1
+Environment=AWS_REGION=us-east-1
+Environment=ARTERM_BEDROCK_MODEL=us.anthropic.claude-opus-4-6-v1
+ExecStartPre=/bin/rm -f /run/user/1000/arterm-daemon.lock /run/user/1000/arterm.sock /run/user/1000/arterm.sock.hash /run/user/1000/arterm-debug.sock
+ExecStart=/home/ec2-user/.local/bin/arterm --provider bedrock serve
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

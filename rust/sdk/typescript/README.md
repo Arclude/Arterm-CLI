@@ -1,19 +1,19 @@
-# @1jehuang/jcode-sdk
+# @1jehuang/arterm-sdk
 
-TypeScript SDK for the **jcode harness API** (protocol v1) — the stable,
-versioned boundary between the jcode agent runtime and any client.
+TypeScript SDK for the **arterm harness API** (protocol v1) — the stable,
+versioned boundary between the arterm agent runtime and any client.
 
-It mirrors `crates/jcode-harness-api` and talks NDJSON over the harness API
+It mirrors `crates/arterm-harness-api` and talks NDJSON over the harness API
 Unix socket. Schema drift is guarded from both sides: a Rust test fails if a
 variant is added without mirroring it here, and a Node test fails if the tag
 sets diverge.
 
-Full documentation: **[jcode.sh/sdk](https://jcode.sh/sdk)**
+Full documentation: **[arterm.sh/sdk](https://arterm.sh/sdk)**
 
 ## Install
 
 ```bash
-npm install @1jehuang/jcode-sdk
+npm install @1jehuang/arterm-sdk
 ```
 
 From a source checkout:
@@ -26,10 +26,10 @@ npm run build
 
 ## Requirements
 
-Node 20 or newer. The SDK installs the correct jcode runtime for supported
+Node 20 or newer. The SDK installs the correct arterm runtime for supported
 macOS, Linux, and Windows architectures as an optional platform package, so a
-separate jcode installation is not normally required. If optional dependencies
-are disabled, `launch()` falls back to `jcode` on `PATH`; `binary` can also
+separate arterm installation is not normally required. If optional dependencies
+are disabled, `launch()` falls back to `arterm` on `PATH`; `binary` can also
 select a specific executable.
 
 macOS and Linux are exercised end to end in CI. Windows builds and is wired up
@@ -40,29 +40,29 @@ treat it as untested rather than unsupported and please report what breaks.
 `launch()` needs nothing else: it starts its own daemon and bridge. `connect()`
 needs a bridge already running, which the user starts once and leaves running.
 The bridge ships in the runtime package, so no Rust toolchain is needed. To use
-`connect()` with the user's global jcode, start its bridge:
+`connect()` with the user's global arterm, start its bridge:
 
 ```bash
-jcode api-bridge
+arterm api-bridge
 ```
 
-It starts the jcode server if one is not already up, then exposes the API
-socket (`$XDG_RUNTIME_DIR/jcode-api.sock`) and translates onto the internal
+It starts the arterm server if one is not already up, then exposes the API
+socket (`$XDG_RUNTIME_DIR/arterm-api.sock`) and translates onto the internal
 daemon socket. The socket is owner-only, matching the daemon socket it fronts.
 
-Use `--api-socket <path>` to listen elsewhere, and set `JCODE_API_SOCKET` to
+Use `--api-socket <path>` to listen elsewhere, and set `ARTERM_API_SOCKET` to
 the same path in your client. (The global `--socket` selects the *internal
 daemon* socket, which is a different thing.)
 
-## Two ways to use jcode
+## Two ways to use arterm
 
-**Embed jcode as an agent engine** (`launch`). Starts a private instance with
-its own state, sessions, and sockets. It cannot see or disturb the jcode the
+**Embed arterm as an agent engine** (`launch`). Starts a private instance with
+its own state, sessions, and sockets. It cannot see or disturb the arterm the
 user runs in their terminal, and `close()` shuts it down. This is the default
 for applications.
 
 ```ts
-const client = await JcodeClient.launch({ workingDir: process.cwd() });
+const client = await ArtermClient.launch({ workingDir: process.cwd() });
 const session = await client.createSession();
 console.log((await client.run(session.session_id, "hello")).text);
 await client.close();  // stops the instance
@@ -70,7 +70,7 @@ await client.close();  // stops the instance
 
 Provider logins are inherited from the user by default, since an instance with
 no credentials cannot reach a model. Pass `inheritLogins: false` to start empty
-and supply your own. Pass `jcodeHome` to keep sessions across runs instead of
+and supply your own. Pass `artermHome` to keep sessions across runs instead of
 using a temporary directory.
 
 Inheritance shares only recognized credential **files**, never whole config or
@@ -81,23 +81,23 @@ restricted to SDK-created temp paths. The launched process still runs as the
 current OS user and can spend those accounts' quota, so disable inheritance
 when running untrusted application code (`inheritLogins: false`).
 
-**Automate the user's own jcode** (`connect`). Attaches to the jcode already
+**Automate the user's own arterm** (`connect`). Attaches to the arterm already
 running on the machine, sharing its live sessions. This is what an editor
 plugin or a status dashboard wants. Anything it does is visible in the user's
-terminal, and it needs a bridge already running (`jcode api-bridge`).
+terminal, and it needs a bridge already running (`arterm api-bridge`).
 
 ## Quick start
 
-Swap `launch` for `connect` to drive the user's own jcode instead of a private
+Swap `launch` for `connect` to drive the user's own arterm instead of a private
 instance; everything after that line is identical.
 
 A complete runnable application is available in
 [`examples/demo-app`](https://github.com/1jehuang/jcode/tree/master/sdk/typescript/examples/demo-app).
 
 ```ts
-import { JcodeClient } from "@1jehuang/jcode-sdk";
+import { ArtermClient } from "@1jehuang/arterm-sdk";
 
-const client = await JcodeClient.launch({ workingDir: process.cwd() });
+const client = await ArtermClient.launch({ workingDir: process.cwd() });
 
 const session = await client.createSession(process.cwd());
 const turn = await client.run(session.session_id, "What files are in src/?", {
@@ -203,8 +203,8 @@ discovery pass only.
 
 | Method | Purpose |
 | --- | --- |
-| `JcodeClient.launch(options)` | Start a private instance and connect to it |
-| `JcodeClient.connect(options)` | Attach to the jcode already running on this machine |
+| `ArtermClient.launch(options)` | Start a private instance and connect to it |
+| `ArtermClient.connect(options)` | Attach to the arterm already running on this machine |
 | `listSessions({ includeArchived? })` | Every persisted session, optionally including archived sessions |
 | `archiveSession(id)` / `restoreSession(id)` | Reversibly hide or restore a session |
 | `setRetentionPolicy(days?)` | Auto-archive inactive sessions, or disable retention |
@@ -257,7 +257,7 @@ union that would go stale.
 `getRuntimeInfo(id)` adds the active provider/model, every available model route,
 the negotiated protocol version, advertised capability strings, and a live ping.
 API-key provisioning accepts the supported provider aliases, normalizes Gemini
-aliases to `gemini`, supports the jcode subscription key, writes owner-only files
+aliases to `gemini`, supports the arterm subscription key, writes owner-only files
 atomically, and asks the daemon to reload credentials. OAuth tokens are not part
 of this API.
 
@@ -312,15 +312,15 @@ up for you:
 | Option | Effect |
 | --- | --- |
 | `workingDir` | Working directory for sessions. Defaults to `process.cwd()`. |
-| `jcodeHome` | Keep state at a fixed path across runs. Defaults to a temporary directory that is removed on `close()`. See the note below. |
+| `artermHome` | Keep state at a fixed path across runs. Defaults to a temporary directory that is removed on `close()`. See the note below. |
 | `inheritLogins` | Inherit the user's provider logins. Defaults to `true`. |
-| `binary` | Path to the jcode binary. Defaults to `jcode` on `PATH`. |
+| `binary` | Path to the arterm binary. Defaults to `arterm` on `PATH`. |
 | `env` | Extra environment variables for the instance. |
 | `startupTimeoutMs` | How long to wait for the instance to come up. Defaults to 30000. |
 | `cleanupTimeoutMs` | How long `close()` spends removing an ephemeral home. Defaults to 30000. |
 | `inheritStderr` | Forward the instance's stderr to your process. Defaults to `false`. |
 
-A fixed `jcodeHome` persists transcripts on disk. `listSessions()` discovers
+A fixed `artermHome` persists transcripts on disk. `listSessions()` discovers
 those records even on a fresh, unattached connection, so a restarted process can
 rebuild its complete session index without keeping a separate id registry.
 
@@ -328,8 +328,8 @@ rebuild its complete session index without keeping a separate id registry.
 
 | Env var | Effect |
 | --- | --- |
-| `JCODE_API_SOCKET` | Override the API socket path |
-| `JCODE_RUNTIME_DIR` | Override the runtime directory |
+| `ARTERM_API_SOCKET` | Override the API socket path |
+| `ARTERM_RUNTIME_DIR` | Override the runtime directory |
 | `XDG_RUNTIME_DIR` | Default runtime directory on Linux |
 
 Or pass `socketPath` to `connect()`.
@@ -342,7 +342,7 @@ JavaScript errors (for example, an OS filesystem error) can still surface from
 the platform.
 
 ```ts
-import { HarnessError, StructuredOutputError } from "@1jehuang/jcode-sdk";
+import { HarnessError, StructuredOutputError } from "@1jehuang/arterm-sdk";
 
 try {
   await client.run(sessionId, prompt);
@@ -371,12 +371,12 @@ try {
 
 | Code | Cause | Recovery |
 | --- | --- | --- |
-| `jcode_not_found` | `launch()` could not execute jcode. | Install jcode, put it on `PATH`, or pass `binary` with an absolute path. |
+| `arterm_not_found` | `launch()` could not execute arterm. | Install arterm, put it on `PATH`, or pass `binary` with an absolute path. |
 | `startup_failed` | The private instance exited before opening its API socket. Its stderr is included in the message. | Display/log the message; fix the reported configuration, credential, or binary error before retrying. |
 | `startup_timeout` | The private instance did not open its API socket within `startupTimeoutMs`. | Increase the timeout on a slow machine; otherwise inspect stderr and ensure the runtime directory is writable. |
-| `invalid_instance_home` | `jcodeHome`, its credential paths, or the source login home is unsafe (same directory, symlink, file, or traversal). | Choose a separate real directory. Do not point a private instance at the user's live jcode home. |
-| `connect_failed` | The bridge is absent, dead, or listening at another socket path. | Run `jcode api-bridge`; verify `socketPath` or `JCODE_API_SOCKET`. The message names the attempted path. |
-| `handshake_failed` | The peer replied with an invalid frame during protocol negotiation. | Confirm the socket is a jcode harness socket and upgrade jcode/SDK together. |
+| `invalid_instance_home` | `artermHome`, its credential paths, or the source login home is unsafe (same directory, symlink, file, or traversal). | Choose a separate real directory. Do not point a private instance at the user's live arterm home. |
+| `connect_failed` | The bridge is absent, dead, or listening at another socket path. | Run `arterm api-bridge`; verify `socketPath` or `ARTERM_API_SOCKET`. The message names the attempted path. |
+| `handshake_failed` | The peer replied with an invalid frame during protocol negotiation. | Confirm the socket is a arterm harness socket and upgrade arterm/SDK together. |
 | `unsupported_version` | Client and bridge do not share a protocol major version. | Upgrade the older side. Do not retry unchanged versions. |
 
 ### Request and transport errors
@@ -386,11 +386,11 @@ try {
 | `disconnected` | The socket closed or a write failed while work was in flight. | Reconnect. Retry only idempotent reads, or first verify whether a mutating request took effect. |
 | `timeout` | No correlated reply arrived within `requestTimeoutMs` (30 seconds by default). | Check daemon health and raise the timeout for legitimately slow requests. Treat outcome as unknown before repeating mutations. |
 | `unexpected_reply` | A reply was valid protocol data but not the event kind required by that SDK method. | Upgrade both sides and report the server/client versions with the error. |
-| `unknown_request` | The bridge does not implement that request tag. | Upgrade jcode, or stop using that newer SDK method with this bridge. |
+| `unknown_request` | The bridge does not implement that request tag. | Upgrade arterm, or stop using that newer SDK method with this bridge. |
 | `unknown_session` | The session no longer exists, is not available to this instance, or the connection is not attached where attachment is required. | Refresh `listSessions()`, use the right private/shared instance, and attach when the method requires it. |
 | `invalid_request` | Arguments or current state violate the operation's contract (for example an invalid model, retry count, path, or compaction request). | Correct the caller input. The message contains the rejected constraint; do not blindly retry. |
 | `invalid_option` | A client-only option is outside its allowed range. | Correct the named option, such as `discoveryIntervalMs` or `maxBufferedEvents`. |
-| `internal` | The bridge or daemon failed unexpectedly while handling a valid request. | Preserve the message and jcode logs, retry once if safe, then report it if reproducible. |
+| `internal` | The bridge or daemon failed unexpectedly while handling a valid request. | Preserve the message and arterm logs, retry once if safe, then report it if reproducible. |
 
 ### Streaming and structured-output errors
 
@@ -461,5 +461,5 @@ npm run check   # typecheck + build + tests (mock harness, no daemon needed)
 ```
 
 `test/schema-parity.test.ts` reads the Rust enums directly, and
-`crates/jcode-harness-api`'s `typescript_sdk_lists_every_variant` test reads
+`crates/arterm-harness-api`'s `typescript_sdk_lists_every_variant` test reads
 this package. Adding a variant on either side without the other fails CI.

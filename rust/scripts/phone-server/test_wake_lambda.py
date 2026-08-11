@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ["WAKE_TOKEN"] = "test-token"
-os.environ["JCODE_GATEWAY_HOST"] = "100.64.0.10"
+os.environ["ARTERM_GATEWAY_HOST"] = "100.64.0.10"
 sys.modules.setdefault("boto3", types.ModuleType("boto3"))
 sys.modules["boto3"].client = lambda *_args, **_kwargs: None
 
@@ -91,7 +91,7 @@ class WakeLambdaTests(unittest.TestCase):
         result = wake.fetch_pair_code(FakeSsm())
         self.assertEqual(result["code"], "123456")
         self.assertEqual(result["host"], "100.64.0.10")
-        self.assertEqual(result["uri"], "jcode://pair?host=100.64.0.10&port=7643&code=123456")
+        self.assertEqual(result["uri"], "arterm://pair?host=100.64.0.10&port=7643&code=123456")
 
 
 if __name__ == "__main__":

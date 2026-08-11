@@ -3,11 +3,11 @@ set -euo pipefail
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 REPO_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
-JCODE_BIN="${JCODE_BIN:-$HOME/.local/bin/jcode}"
-DEMO_DIR="${JCODE_AGENTCARD_DEMO_DIR:-/tmp/jcode-agentcard-discovery-demo}"
-MODEL="${JCODE_AGENTCARD_DEMO_MODEL:-gpt-5.6-sol}"
-LOG_FILE="${JCODE_AGENTCARD_DEMO_LOG:-/tmp/jcode-agentcard-discovery-demo.log}"
-PROMPT='Use `./bin/jcode-demo-shop` to see whether this shop has a USB-C laptop charger for $50 or less and get it for me. Work through any prerequisites, but ask me for confirmation immediately before actually creating or funding a prepaid card, making a payment, or placing the order.'
+ARTERM_BIN="${ARTERM_BIN:-$HOME/.local/bin/arterm}"
+DEMO_DIR="${ARTERM_AGENTCARD_DEMO_DIR:-/tmp/arterm-agentcard-discovery-demo}"
+MODEL="${ARTERM_AGENTCARD_DEMO_MODEL:-gpt-5.6-sol}"
+LOG_FILE="${ARTERM_AGENTCARD_DEMO_LOG:-/tmp/arterm-agentcard-discovery-demo.log}"
+PROMPT='Use `./bin/arterm-demo-shop` to see whether this shop has a USB-C laptop charger for $50 or less and get it for me. Work through any prerequisites, but ask me for confirmation immediately before actually creating or funding a prepaid card, making a payment, or placing the order.'
 
 case "${1:-}" in
   --help|-h)
@@ -31,26 +31,26 @@ case "${1:-}" in
 esac
 
 mkdir -p "$DEMO_DIR/bin"
-ln -sfn "$REPO_ROOT/scripts/demo_shop.py" "$DEMO_DIR/bin/jcode-demo-shop"
+ln -sfn "$REPO_ROOT/scripts/demo_shop.py" "$DEMO_DIR/bin/arterm-demo-shop"
 chmod +x "$REPO_ROOT/scripts/demo_shop.py"
 export PATH="$DEMO_DIR/bin:$PATH"
-export JCODE_DEMO_SHOP_STATE="$DEMO_DIR/shop-state.json"
-jcode-demo-shop reset >>"$LOG_FILE" 2>&1
+export ARTERM_DEMO_SHOP_STATE="$DEMO_DIR/shop-state.json"
+arterm-demo-shop reset >>"$LOG_FILE" 2>&1
 
 before_file="$(mktemp)"
 after_file="$(mktemp)"
 trap 'rm -f "$before_file" "$after_file"' EXIT
 
 # Snapshot connected clients so prompt delivery targets only the new demo.
-"$JCODE_BIN" debug clients:map >"$before_file" 2>>"$LOG_FILE" || printf '{"clients":[]}' >"$before_file"
+"$ARTERM_BIN" debug clients:map >"$before_file" 2>>"$LOG_FILE" || printf '{"clients":[]}' >"$before_file"
 
 # The mock shop and Discovery are the only capabilities exposed. The shop has
 # no networking, account, payment, or order-placement implementation.
 kitty \
-  --class jcode-agentcard-demo \
-  --title "Jcode AgentCard Discovery Demo" \
+  --class arterm-agentcard-demo \
+  --title "Arterm AgentCard Discovery Demo" \
   --directory "$DEMO_DIR" \
-  "$JCODE_BIN" \
+  "$ARTERM_BIN" \
   --no-selfdev \
   --no-update \
   --model "$MODEL" \
@@ -61,7 +61,7 @@ kitty \
 
 session_id=""
 for _ in $(seq 1 100); do
-  if "$JCODE_BIN" debug clients:map >"$after_file" 2>>"$LOG_FILE"; then
+  if "$ARTERM_BIN" debug clients:map >"$after_file" 2>>"$LOG_FILE"; then
     session_id="$(python - "$before_file" "$after_file" "$DEMO_DIR" <<'PY'
 import json
 import sys
@@ -95,17 +95,17 @@ PY
 done
 
 if [[ -z "$session_id" ]]; then
-  notify-send "AgentCard demo could not start" "Jcode did not register a fresh demo session. See $LOG_FILE" 2>/dev/null || true
+  notify-send "AgentCard demo could not start" "Arterm did not register a fresh demo session. See $LOG_FILE" 2>/dev/null || true
   exit 1
 fi
 
 # Targeted debug delivery avoids timing-sensitive keyboard simulation.
 for _ in $(seq 1 25); do
-  if "$JCODE_BIN" debug --session "$session_id" "client:message:$PROMPT" >>"$LOG_FILE" 2>&1; then
+  if "$ARTERM_BIN" debug --session "$session_id" "client:message:$PROMPT" >>"$LOG_FILE" 2>&1; then
     exit 0
   fi
   sleep 0.2
 done
 
-notify-send "AgentCard demo prompt failed" "The Jcode window opened, but prompt delivery failed. See $LOG_FILE" 2>/dev/null || true
+notify-send "AgentCard demo prompt failed" "The Arterm window opened, but prompt delivery failed. See $LOG_FILE" 2>/dev/null || true
 exit 1

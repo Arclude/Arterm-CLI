@@ -68,7 +68,7 @@ impl Registry {
 **MCP Manager:**
 - Load config on startup
 - Connect to configured servers
-- Convert MCP tools to jcode Tool trait
+- Convert MCP tools to arterm Tool trait
 - Handle server lifecycle (start, stop, restart)
 
 ### Phase 4: Agent Self-Configuration
@@ -81,7 +81,7 @@ impl Registry {
 
 **Flow:**
 1. Agent calls `mcp_connect {"name": "playwright", "command": "npx", "args": ["-y", "@anthropic/mcp-server-playwright"]}`
-2. jcode spawns the process, does MCP handshake
+2. arterm spawns the process, does MCP handshake
 3. Tools from server are added to registry
 4. Agent can immediately use the new tools
 
@@ -93,7 +93,7 @@ MCP uses JSON-RPC 2.0 over stdio:
 
 **Initialize:**
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"jcode","version":"0.1.0"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"arterm","version":"0.1.0"}}}
 ```
 
 **List tools:**

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Reproduce the "typed character flickers in and out" bug in a live jcode TUI.
+Reproduce the "typed character flickers in and out" bug in a live arterm TUI.
 
 The symptom
 -----------
-Spawn a fresh jcode, press `/`, and the slash appears, vanishes, and reappears.
+Spawn a fresh arterm, press `/`, and the slash appears, vanishes, and reappears.
 Something repaints the composer from a state that does not yet contain the
 keystroke, so the character is briefly erased after it was already drawn.
 
@@ -171,7 +171,7 @@ def create_session(debug_sock: Path, working_dir: Path) -> str:
 
 @dataclass
 class EmulatedClient:
-    """A live jcode under a PTY, with its output rendered into a real screen.
+    """A live arterm under a PTY, with its output rendered into a real screen.
 
     Reading a `pyte` screen instead of raw bytes is what makes the flicker
     visible: the bug is a *state regression on screen*, which byte-level probes
@@ -295,16 +295,16 @@ def launch_client(binary: str, env: dict, session_id: str,
     master_fd, slave_fd = pty.openpty()
     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     cenv = dict(env)
-    cenv["JCODE_DEBUG_CMD_PATH"] = str(cmd_path)
-    cenv["JCODE_DEBUG_RESPONSE_PATH"] = str(resp_path)
+    cenv["ARTERM_DEBUG_CMD_PATH"] = str(cmd_path)
+    cenv["ARTERM_DEBUG_RESPONSE_PATH"] = str(resp_path)
     cenv["TERM"] = "xterm-256color"
     # Pin the theme so the client never issues an OSC 11 background query. Under
     # this harness the reply can land in stdin and be decoded as composer input,
     # which prepends garbage to everything typed and would mask the real signal.
-    cenv.setdefault("JCODE_THEME", "dark")
+    cenv.setdefault("ARTERM_THEME", "dark")
     proc = subprocess.Popen(
         [binary, "--no-update", "--no-selfdev",
-         "--socket", env["JCODE_SOCKET"], "--resume", session_id],
+         "--socket", env["ARTERM_SOCKET"], "--resume", session_id],
         stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
         env=cenv, preexec_fn=os.setsid,
     )
@@ -464,9 +464,9 @@ def observe_keystroke(client: EmulatedClient, ch: str, expect: str,
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    default_bin = REPO_ROOT / "target" / "selfdev" / "jcode"
+    default_bin = REPO_ROOT / "target" / "selfdev" / "arterm"
     if not default_bin.exists():
-        default_bin = Path.home() / ".jcode" / "builds" / "current" / "jcode"
+        default_bin = Path.home() / ".arterm" / "builds" / "current" / "arterm"
     ap.add_argument("--binary", default=str(default_bin))
     ap.add_argument("--live", action="store_true",
                     help="use the user's real server/home instead of a throwaway "
@@ -488,32 +488,32 @@ def main() -> int:
         print(f"binary not found: {binary}")
         return 3
 
-    root = Path(tempfile.mkdtemp(prefix="jcode-input-flicker-"))
+    root = Path(tempfile.mkdtemp(prefix="arterm-input-flicker-"))
     home, run = root / "home", root / "run"
     home.mkdir(parents=True)
     run.mkdir(parents=True)
 
     env = os.environ.copy()
     if args.live:
-        real_runtime = Path(env.get("JCODE_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
-        env["JCODE_SOCKET"] = env.get("JCODE_SOCKET") or str(real_runtime / "jcode.sock")
-        env["JCODE_DEBUG_CONTROL"] = "1"
-        debug_sock = real_runtime / "jcode-debug.sock"
+        real_runtime = Path(env.get("ARTERM_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+        env["ARTERM_SOCKET"] = env.get("ARTERM_SOCKET") or str(real_runtime / "arterm.sock")
+        env["ARTERM_DEBUG_CONTROL"] = "1"
+        debug_sock = real_runtime / "arterm-debug.sock"
     else:
-        env["JCODE_HOME"] = str(home)
-        env["JCODE_RUNTIME_DIR"] = str(run)
-        env["JCODE_SOCKET"] = str(run / "jcode.sock")
-        env["JCODE_NO_TELEMETRY"] = "1"
-        env["JCODE_DEBUG_CONTROL"] = "1"
-        env["JCODE_TEMP_SERVER"] = "1"
-        env["JCODE_SERVER_OWNER_PID"] = str(os.getpid())
+        env["ARTERM_HOME"] = str(home)
+        env["ARTERM_RUNTIME_DIR"] = str(run)
+        env["ARTERM_SOCKET"] = str(run / "arterm.sock")
+        env["ARTERM_NO_TELEMETRY"] = "1"
+        env["ARTERM_DEBUG_CONTROL"] = "1"
+        env["ARTERM_TEMP_SERVER"] = "1"
+        env["ARTERM_SERVER_OWNER_PID"] = str(os.getpid())
         if not env.get("ANTHROPIC_API_KEY"):
             env["ANTHROPIC_API_KEY"] = "sk-ant-repro-input-flicker"
-        debug_sock = run / "jcode-debug.sock"
+        debug_sock = run / "arterm-debug.sock"
     cmd_path, resp_path = run / "client_cmd", run / "client_resp"
 
     if not args.json:
-        print("== jcode input-flicker repro ==")
+        print("== arterm input-flicker repro ==")
         print(f"  binary : {binary}")
         print(f"  mode   : {'live' if args.live else 'isolated'}")
 
@@ -521,7 +521,7 @@ def main() -> int:
     server_log = root / "server.log"
     if not args.live:
         server = subprocess.Popen(
-            [binary, "serve", "--socket", env["JCODE_SOCKET"], "--debug-socket",
+            [binary, "serve", "--socket", env["ARTERM_SOCKET"], "--debug-socket",
              "--no-update", "--no-selfdev"],
             env=env, stdout=server_log.open("wb"), stderr=subprocess.STDOUT,
             preexec_fn=os.setsid,
@@ -530,7 +530,7 @@ def main() -> int:
     result: dict = {"binary": binary, "runs": []}
     clients: list[EmulatedClient] = []
     try:
-        wait_for_socket(Path(env["JCODE_SOCKET"]))
+        wait_for_socket(Path(env["ARTERM_SOCKET"]))
         wait_for_socket(debug_sock)
 
         for run_idx in range(max(1, args.repeat)):

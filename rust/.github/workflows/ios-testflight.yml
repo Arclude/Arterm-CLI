@@ -13,13 +13,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUNDLE_ID: com.jcode.mobile
-  SCHEME: JCodeMobile
+  BUNDLE_ID: com.arterm.mobile
+  SCHEME: ArtermMobile
   TEAM_ID: TAS6ARKDN7
 
 jobs:
   test:
-    name: swift test (JCodeKit)
+    name: swift test (ArtermKit)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -31,7 +31,7 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Run JCodeKit tests on macOS
+      - name: Run ArtermKit tests on macOS
         working-directory: ios
         run: swift test
 
@@ -54,7 +54,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild build \
-            -project JCodeMobile.xcodeproj \
+            -project ArtermMobile.xcodeproj \
             -scheme "$SCHEME" \
             -configuration Debug \
             -destination "generic/platform=iOS Simulator" \
@@ -92,11 +92,11 @@ jobs:
           # never be created at archive time. Archive unsigned; the export
           # step signs with cloud-managed Apple Distribution via the ASC key.
           xcodebuild archive \
-            -project JCodeMobile.xcodeproj \
+            -project ArtermMobile.xcodeproj \
             -scheme "$SCHEME" \
             -configuration Release \
             -destination "generic/platform=iOS" \
-            -archivePath build/JCodeMobile.xcarchive \
+            -archivePath build/ArtermMobile.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
@@ -132,7 +132,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -exportArchive \
-            -archivePath build/JCodeMobile.xcarchive \
+            -archivePath build/ArtermMobile.xcarchive \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath build/export \
             -allowProvisioningUpdates \

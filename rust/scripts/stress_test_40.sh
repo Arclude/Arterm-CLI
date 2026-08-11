@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 #
-# Stress test: spawn 40 jcode TUI client instances rapidly
+# Stress test: spawn 40 arterm TUI client instances rapidly
 # Measures startup time, memory usage, CPU, fd count, socket health
 #
 set -euo pipefail
 
 NUM_INSTANCES=${1:-40}
-JCODE_BIN="${JCODE_BIN:-$(which jcode)}"
-LOG_DIR="/tmp/jcode-stress-test-$(date +%s)"
+ARTERM_BIN="${ARTERM_BIN:-$(which arterm)}"
+LOG_DIR="/tmp/arterm-stress-test-$(date +%s)"
 mkdir -p "$LOG_DIR"
 
-MAIN_SOCK="/run/user/$(id -u)/jcode.sock"
-DEBUG_SOCK="/run/user/$(id -u)/jcode-debug.sock"
+MAIN_SOCK="/run/user/$(id -u)/arterm.sock"
+DEBUG_SOCK="/run/user/$(id -u)/arterm-debug.sock"
 
 echo "========================================="
-echo " jcode Stress Test: $NUM_INSTANCES instances"
+echo " arterm Stress Test: $NUM_INSTANCES instances"
 echo "========================================="
-echo "Binary: $JCODE_BIN"
+echo "Binary: $ARTERM_BIN"
 echo "Log dir: $LOG_DIR"
 echo "Main socket: $MAIN_SOCK"
 echo ""
@@ -39,17 +39,17 @@ snapshot() {
     free -m >> "$LOG_DIR/snapshots.log" 2>/dev/null
     echo "" >> "$LOG_DIR/snapshots.log"
 
-    # jcode process count and total RSS
-    local jcode_procs=$(pgrep -c jcode 2>/dev/null || echo 0)
+    # arterm process count and total RSS
+    local arterm_procs=$(pgrep -c arterm 2>/dev/null || echo 0)
     local total_rss=0
     local total_vms=0
-    for pid in $(pgrep jcode 2>/dev/null); do
+    for pid in $(pgrep arterm 2>/dev/null); do
         local rss=$(awk '/^VmRSS:/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)
         local vms=$(awk '/^VmSize:/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)
         total_rss=$((total_rss + rss))
         total_vms=$((total_vms + vms))
     done
-    echo "jcode_processes: $jcode_procs" >> "$LOG_DIR/snapshots.log"
+    echo "arterm_processes: $arterm_procs" >> "$LOG_DIR/snapshots.log"
     echo "total_rss_kb: $total_rss" >> "$LOG_DIR/snapshots.log"
     echo "total_vms_kb: $total_vms" >> "$LOG_DIR/snapshots.log"
 
@@ -72,7 +72,7 @@ snapshot() {
     echo "===" >> "$LOG_DIR/snapshots.log"
 
     # Print summary line to stdout
-    echo "[$label] procs=$jcode_procs rss=${total_rss}KB($(( total_rss / 1024 ))MB) server_rss=$(awk '/^VmRSS:/{print $2}' /proc/${server_pid:-0}/status 2>/dev/null || echo '?')KB fds=$(ls /proc/${server_pid:-0}/fd 2>/dev/null | wc -l) threads=$(ls /proc/${server_pid:-0}/task 2>/dev/null | wc -l)"
+    echo "[$label] procs=$arterm_procs rss=${total_rss}KB($(( total_rss / 1024 ))MB) server_rss=$(awk '/^VmRSS:/{print $2}' /proc/${server_pid:-0}/status 2>/dev/null || echo '?')KB fds=$(ls /proc/${server_pid:-0}/fd 2>/dev/null | wc -l) threads=$(ls /proc/${server_pid:-0}/task 2>/dev/null | wc -l)"
 }
 
 check_socket_health() {
@@ -125,8 +125,8 @@ echo "=== Pre-flight checks ==="
 
 # Check if server is running
 if ! [ -S "$MAIN_SOCK" ]; then
-    echo "ERROR: No jcode server running at $MAIN_SOCK"
-    echo "Start one with: jcode serve &"
+    echo "ERROR: No arterm server running at $MAIN_SOCK"
+    echo "Start one with: arterm serve &"
     exit 1
 fi
 
@@ -138,8 +138,8 @@ snapshot "baseline"
 echo ""
 
 # --- Record system baseline ---
-BASELINE_RSS=$(pgrep jcode 2>/dev/null | while read pid; do awk '/^VmRSS:/{print $2}' /proc/$pid/status 2>/dev/null; done | paste -sd+ | bc 2>/dev/null || echo 0)
-BASELINE_PROCS=$(pgrep -c jcode 2>/dev/null || echo 0)
+BASELINE_RSS=$(pgrep arterm 2>/dev/null | while read pid; do awk '/^VmRSS:/{print $2}' /proc/$pid/status 2>/dev/null; done | paste -sd+ | bc 2>/dev/null || echo 0)
+BASELINE_PROCS=$(pgrep -c arterm 2>/dev/null || echo 0)
 BASELINE_SERVER_PID=$(get_server_pid)
 BASELINE_FDS=$(ls /proc/${BASELINE_SERVER_PID:-0}/fd 2>/dev/null | wc -l)
 
@@ -154,9 +154,9 @@ echo "=== Starting background monitor ==="
 (
     while true; do
         ts=$(date +%s)
-        jcode_procs=$(pgrep -c jcode 2>/dev/null || echo 0)
+        arterm_procs=$(pgrep -c arterm 2>/dev/null || echo 0)
         total_rss=0
-        for pid in $(pgrep jcode 2>/dev/null); do
+        for pid in $(pgrep arterm 2>/dev/null); do
             rss=$(awk '/^VmRSS:/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)
             total_rss=$((total_rss + rss))
         done
@@ -165,7 +165,7 @@ echo "=== Starting background monitor ==="
         server_fds=$(ls /proc/${server_pid:-0}/fd 2>/dev/null | wc -l)
         server_threads=$(ls /proc/${server_pid:-0}/task 2>/dev/null | wc -l)
         cpu_load=$(awk '{print $1}' /proc/loadavg)
-        echo "$ts,$jcode_procs,$total_rss,$server_rss,$server_fds,$server_threads,$cpu_load"
+        echo "$ts,$arterm_procs,$total_rss,$server_rss,$server_fds,$server_threads,$cpu_load"
         sleep 1
     done
 ) > "$LOG_DIR/timeseries.csv" &
@@ -174,17 +174,17 @@ echo "Monitor PID: $MONITOR_PID"
 echo ""
 
 # --- Spawn instances ---
-echo "=== Spawning $NUM_INSTANCES jcode instances ==="
+echo "=== Spawning $NUM_INSTANCES arterm instances ==="
 PIDS=()
 SPAWN_TIMES=()
 
-# Use script to give each instance a pty (jcode requires tty)
+# Use script to give each instance a pty (arterm requires tty)
 for i in $(seq 1 $NUM_INSTANCES); do
     local_start=$(date +%s%N)
 
     # Each instance gets its own pseudo-terminal via script(1)
     # We connect to the existing server, which creates sessions
-    script -q -c "$JCODE_BIN --no-update --no-selfdev" /dev/null \
+    script -q -c "$ARTERM_BIN --no-update --no-selfdev" /dev/null \
         > "$LOG_DIR/instance_${i}_stdout.log" \
         2> "$LOG_DIR/instance_${i}_stderr.log" &
     pid=$!
@@ -268,9 +268,9 @@ echo ""
 
 # --- Post-kill: check for leaked resources ---
 echo "=== Post-kill resource check ==="
-POST_PROCS=$(pgrep -c jcode 2>/dev/null || echo 0)
+POST_PROCS=$(pgrep -c arterm 2>/dev/null || echo 0)
 POST_RSS=0
-for pid in $(pgrep jcode 2>/dev/null); do
+for pid in $(pgrep arterm 2>/dev/null); do
     rss=$(awk '/^VmRSS:/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)
     POST_RSS=$((POST_RSS + rss))
 done
@@ -311,7 +311,7 @@ echo "========================================="
 echo ""
 echo "Configuration:"
 echo "  Instances spawned: $NUM_INSTANCES"
-echo "  Binary: $JCODE_BIN"
+echo "  Binary: $ARTERM_BIN"
 echo ""
 
 # Spawn time stats

@@ -1,13 +1,13 @@
-# Jcode Desktop Build-Out Plan
+# Arterm Desktop Build-Out Plan
 
-> Historical: this document describes the removed legacy `crates/jcode-desktop` app. The current desktop app is `crates/jcode-desktop2`.
+> Historical: this document describes the removed legacy `crates/arterm-desktop` app. The current desktop app is `crates/arterm-desktop2`.
 
 Status: Active planning note
 Updated: 2026-05-25
 
 ## Current read
 
-Jcode Desktop has moved past the original blank-canvas prototype. The strongest current thread is a single-session desktop surface with a local GitHub issue browser/cache and background `gh` sync. Recent work added:
+Arterm Desktop has moved past the original blank-canvas prototype. The strongest current thread is a single-session desktop surface with a local GitHub issue browser/cache and background `gh` sync. Recent work added:
 
 - issue-browser renderer extraction
 - issue-browser interactions
@@ -45,7 +45,7 @@ Build next:
 
 Verification:
 
-- `cargo test -p jcode-desktop issue --no-default-features`
+- `cargo test -p arterm-desktop issue --no-default-features`
 - fake `gh` runner tests for auth/missing CLI/comment failures
 - UI snapshot/layout tests for empty, syncing, error, and narrow-width states
 

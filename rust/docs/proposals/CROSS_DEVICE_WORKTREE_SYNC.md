@@ -4,15 +4,15 @@ Status: Proposed (design only, not implemented)
 
 ## Problem
 
-A user develops jcode (and other repos) on multiple machines, e.g. a MacBook
+A user develops arterm (and other repos) on multiple machines, e.g. a MacBook
 (aarch64-darwin) and a Linux laptop. On a single machine, `selfdev build` +
-reload means every local jcode instance runs the new version, and multiple
+reload means every local arterm instance runs the new version, and multiple
 agents can share one worktree because the server mediates edits and tracks
 conflicts (`FileTouchService`, `file_activity.rs`).
 
 Split across machines, this breaks:
 
-- A `selfdev build` on the Linux laptop does not update the MacBook's jcode,
+- A `selfdev build` on the Linux laptop does not update the MacBook's arterm,
   and vice versa.
 - There is no shared worktree, so changes made on one machine are invisible
   to agents/sessions on the other until manually pushed/pulled.
@@ -25,10 +25,10 @@ single machine.
 
 | Building block | Where | Why it matters |
 | --- | --- | --- |
-| Arch-independent version identity | `jcode-build-support/src/source_state.rs` (`SourceState::version_label`, `fingerprint`) | Fingerprint hashes full commit hash + status + `diff --binary HEAD` + untracked contents. Identical source trees on two machines produce the same label, even though binaries differ per-arch. |
+| Arch-independent version identity | `arterm-build-support/src/source_state.rs` (`SourceState::version_label`, `fingerprint`) | Fingerprint hashes full commit hash + status + `diff --binary HEAD` + untracked contents. Identical source trees on two machines produce the same label, even though binaries differ per-arch. |
 | Auto-reload on newer binary | `server/util.rs::server_has_newer_binary`, `reload_exec_target` | Mtime-based channel scan. A peer-triggered local build that publishes to `builds/current` triggers the existing reload flow with zero changes. |
 | Pull → build → install → exec | `session_rebuild.rs` | Already implements the receiving side's pipeline shape. |
-| Network door, same protocol | `jcode-base/src/gateway.rs` (WS + plain HTTP on :7643) | Remote clients speak the identical newline-JSON protocol as Unix-socket clients. Plain HTTP handler (`/pair`, `/health`) is a natural place for `/peer/*` endpoints. |
+| Network door, same protocol | `arterm-base/src/gateway.rs` (WS + plain HTTP on :7643) | Remote clients speak the identical newline-JSON protocol as Unix-socket clients. Plain HTTP handler (`/pair`, `/health`) is a natural place for `/peer/*` endpoints. |
 | NAT-friendly device event bus | `server/jade_relay.rs` | Device IDs, heartbeats, long-polled command events. Works when machines cannot reach each other directly. |
 | Server-side tool execution | server architecture | Tools (bash, edit) run in the server process; a remote client attaching to another machine's server gets the full multi-agent-one-worktree behavior, including conflict warnings. |
 | Remote build precedent | `scripts/remote_build.sh` | rsync + ssh + sync-back pattern. |
@@ -39,7 +39,7 @@ single machine.
 git common dir / worktree. These will never match across machines
 (`/Users/jeremy/...` vs `/home/jeremy/...`). Cross-device features must key
 repos by something portable: normalized origin URL, or an explicit repo name
-in config (`[sync] repo_id = "jcode"`), falling back to origin URL hash.
+in config (`[sync] repo_id = "arterm"`), falling back to origin URL hash.
 
 ## Design tensions
 
@@ -62,8 +62,8 @@ HEAD or index:
 ```
 GIT_INDEX_FILE=$tmp git add -A          # tracked + untracked into temp index
 tree=$(GIT_INDEX_FILE=$tmp git write-tree)
-commit=$(git commit-tree $tree -p HEAD -m "jcode sync: <device> <fingerprint>")
-git push origin $commit:refs/jcode/sync/<device>
+commit=$(git commit-tree $tree -p HEAD -m "arterm sync: <device> <fingerprint>")
+git push origin $commit:refs/arterm/sync/<device>
 ```
 
 - Atomic, content-addressed, includes untracked files, excludes gitignored.
@@ -79,7 +79,7 @@ git push origin $commit:refs/jcode/sync/<device>
 After a successful `selfdev build` + publish on machine X:
 
 1. Compute `SourceState` (already done by the build pipeline).
-2. Snapshot the worktree to `refs/jcode/sync/<device>` (mechanism above) and
+2. Snapshot the worktree to `refs/arterm/sync/<device>` (mechanism above) and
    push to the shared git remote. Clean trees can skip the snapshot and use
    the existing commit.
 3. Announce a **version beacon** `{repo_id, version_label, fingerprint,
@@ -111,14 +111,14 @@ Config sketch:
 ```toml
 [sync]
 enabled = true
-repo_id = "jcode"                  # portable repo identity
+repo_id = "arterm"                  # portable repo identity
 peers = ["macbook.tail-net.ts.net:7643"]
 auto_apply = "clean-ff-only"       # off | clean-ff-only | always-notify
 ```
 
 ### Phase A - hub attach (one authoritative worktree when both online)
 
-`jcode attach <host>`: TUI connects to the peer machine's server through the
+`arterm attach <host>`: TUI connects to the peer machine's server through the
 existing gateway WS. Because tools execute server-side, the attached client
 participates fully in that machine's worktree, conflict tracking included.
 
@@ -128,7 +128,7 @@ Work items:
   server-side; needs a client-side counterpart).
 - Pairing/auth UX for a trusted personal device (DeviceRegistry exists).
 - Audit client-side local-disk reads that assume the session's filesystem,
-  e.g. `jcode-tui/src/tui/ui_file_diff.rs:270` (`std::fs::read_to_string` of
+  e.g. `arterm-tui/src/tui/ui_file_diff.rs:270` (`std::fs::read_to_string` of
   the diffed file). These need server RPCs (a `read_file` control request) or
   graceful degradation.
 
@@ -169,6 +169,6 @@ sync:
    polling only (no new ports), `selfdev status` showing peer parity.
 2. Add gateway `/peer/version-beacon` fast path + TUI notification for the
    blocked case.
-3. Phase A `jcode attach` (WS client transport + pairing + file-read RPC).
+3. Phase A `arterm attach` (WS client transport + pairing + file-read RPC).
 4. Phase C federation, reusing the beacon snapshot machinery and the peer
    link from A.

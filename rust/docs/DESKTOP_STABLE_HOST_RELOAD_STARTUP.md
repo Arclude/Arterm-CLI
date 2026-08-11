@@ -1,13 +1,13 @@
 # Desktop Stable Host, Hot Reload, and Fast Startup Plan
 
-> Historical: this document describes the removed legacy `crates/jcode-desktop` app. The current desktop app is `crates/jcode-desktop2`.
+> Historical: this document describes the removed legacy `crates/arterm-desktop` app. The current desktop app is `crates/arterm-desktop2`.
 
 Status: In progress
 Updated: 2026-05-24
 
 ## Why this exists
 
-The current desktop hot reload path starts a replacement `jcode-desktop` process. The replacement process creates a new `winit` window, waits behind a reload handoff marker, then the old process exits. This is enough to preserve session continuity, but it cannot reliably preserve the physical OS window.
+The current desktop hot reload path starts a replacement `arterm-desktop` process. The replacement process creates a new `winit` window, waits behind a reload handoff marker, then the old process exits. This is enough to preserve session continuity, but it cannot reliably preserve the physical OS window.
 
 On Wayland in particular, a client cannot count on restoring global window position, and a top-level window cannot be transferred from one process to another. That means a process-level desktop reload is inherently allowed to close/reopen or move the window.
 
@@ -20,10 +20,10 @@ The goal of this plan is to make the desktop architecture support:
 
 ## Current desktop ownership model
 
-Today `crates/jcode-desktop/src/main.rs` owns almost everything in one process:
+Today `crates/arterm-desktop/src/main.rs` owns almost everything in one process:
 
 ```text
-jcode-desktop process
+arterm-desktop process
   run()
     winit EventLoop<DesktopUserEvent>
     winit Window
@@ -117,11 +117,11 @@ Introduce a small stable desktop host that owns platform and rendering resources
 
 ```mermaid
 flowchart LR
-  Launcher[jcode-desktop launcher] --> Host[jcode-desktop-host]
+  Launcher[arterm-desktop launcher] --> Host[arterm-desktop-host]
   Host --> Window[winit window]
   Host --> Renderer[wgpu renderer + font/text atlases]
-  Host <-->|input, display updates, snapshots| Worker[jcode-desktop-app worker]
-  Worker <-->|session protocol| Server[jcode server/daemon]
+  Host <-->|input, display updates, snapshots| Worker[arterm-desktop-app worker]
+  Worker <-->|session protocol| Server[arterm server/daemon]
 ```
 
 ### Stable host responsibilities
@@ -285,7 +285,7 @@ The important rule is that WGPU readiness should upgrade the renderer in place; 
 
 For the fastest user-visible launch, add an optional linger/autostart host:
 
-- `jcode-desktop-host --daemon` starts at login or after first launch.
+- `arterm-desktop-host --daemon` starts at login or after first launch.
 - It keeps WGPU device, font DB, and maybe recent workspace snapshot warm.
 - Opening the app asks the resident host to show/create a window.
 - The daemon exits after an idle timeout if low idle resource use is preferred.
@@ -357,8 +357,8 @@ Initially, the existing `DesktopApp` implements this in the same process.
 
 Add two modes, possibly in the same binary first:
 
-- `jcode-desktop --host`
-- `jcode-desktop --app-worker --ipc <fd-or-socket>`
+- `arterm-desktop --host`
+- `arterm-desktop --app-worker --ipc <fd-or-socket>`
 
 The host owns the current `run()` window/event loop/canvas path. The worker owns the app driver and session protocol. Use a socket/stdio protocol to pass inputs and display-list frames.
 
@@ -373,11 +373,11 @@ Host binary reload can remain the current process handoff path because host chan
 Once the protocol is real, split into clearer crates/binaries:
 
 ```text
-crates/jcode-desktop-protocol   # host/worker messages and scene types
-crates/jcode-desktop-renderer   # Canvas/rendering/display-list renderer
-crates/jcode-desktop-host       # window/event loop/worker lifecycle
-crates/jcode-desktop-app        # product UI worker
-crates/jcode-desktop            # launcher or compatibility wrapper
+crates/arterm-desktop-protocol   # host/worker messages and scene types
+crates/arterm-desktop-renderer   # Canvas/rendering/display-list renderer
+crates/arterm-desktop-host       # window/event loop/worker lifecycle
+crates/arterm-desktop-app        # product UI worker
+crates/arterm-desktop            # launcher or compatibility wrapper
 ```
 
 This also supports cold-start optimization because the host can stay small and stable while app code grows.
@@ -419,11 +419,11 @@ After that, moving the scene builder into a worker process becomes a mechanical 
 
 For reloads that never move the window, we need a stable window owner. For faster starts, that stable owner should also be a small fast shell that can draw immediately, keep expensive renderer resources warm, and load product/session logic asynchronously.
 
-The recommended path is a stable `jcode-desktop-host` plus a reloadable `jcode-desktop-app` worker communicating via a typed display-list protocol. It avoids Wayland window-position limitations, avoids Rust plugin ABI hazards, and creates a natural path to both smooth hot reloads and better perceived cold-start performance.
+The recommended path is a stable `arterm-desktop-host` plus a reloadable `arterm-desktop-app` worker communicating via a typed display-list protocol. It avoids Wayland window-position limitations, avoids Rust plugin ABI hazards, and creates a natural path to both smooth hot reloads and better perceived cold-start performance.
 
 ## Current implementation snapshot
 
-As of 2026-05-24, the first stable-host slice exists in the current `jcode-desktop` binary:
+As of 2026-05-24, the first stable-host slice exists in the current `arterm-desktop` binary:
 
 - WGPU/canvas initialization is spawned after the `winit` window is created, so the event loop can enter before GPU setup finishes.
 - `DesktopScene`, `DesktopUiSnapshot`, host/worker protocol messages, JSON-lines IPC framing, and protocol-version validation are in place.
@@ -434,19 +434,19 @@ As of 2026-05-24, the first stable-host slice exists in the current `jcode-deskt
 
 Validation performed for this slice:
 
-- `cargo test -p jcode-desktop desktop_`
-- `cargo check -p jcode-desktop`
+- `cargo test -p arterm-desktop desktop_`
+- `cargo check -p arterm-desktop`
 - `selfdev build target=desktop`
-- runtime smoke: `cargo run -p jcode-desktop --bin jcode-desktop -- --desktop-process-role stable-host --startup-benchmark --startup-log`
+- runtime smoke: `cargo run -p arterm-desktop --bin arterm-desktop -- --desktop-process-role stable-host --startup-benchmark --startup-log`
 
 ## Crate-split and cold-start assessment
 
-The next split should not be a separate binary yet. The code is functionally split, but `crates/jcode-desktop/src/main.rs` is still a large 10k+ line compilation unit that imports both heavy renderer dependencies (`wgpu`, `glyphon`) and app/session logic. Splitting crates before moving more code out of `main.rs` would add build-system complexity without materially reducing cold-start work.
+The next split should not be a separate binary yet. The code is functionally split, but `crates/arterm-desktop/src/main.rs` is still a large 10k+ line compilation unit that imports both heavy renderer dependencies (`wgpu`, `glyphon`) and app/session logic. Splitting crates before moving more code out of `main.rs` would add build-system complexity without materially reducing cold-start work.
 
 Recommended order:
 
-1. **Module split inside `jcode-desktop` first.** Move stable-host/window/reload code, worker-process loop, and canvas/rendering code out of `main.rs` into focused modules. This reduces merge conflicts and makes crate boundaries obvious without changing packaging.
-2. **Promote protocol and scene types to a small crate.** `desktop_protocol`, `desktop_scene`, and IPC framing are already mostly independent. A future `jcode-desktop-protocol` crate can compile quickly and be shared by host and worker without pulling WGPU.
+1. **Module split inside `arterm-desktop` first.** Move stable-host/window/reload code, worker-process loop, and canvas/rendering code out of `main.rs` into focused modules. This reduces merge conflicts and makes crate boundaries obvious without changing packaging.
+2. **Promote protocol and scene types to a small crate.** `desktop_protocol`, `desktop_scene`, and IPC framing are already mostly independent. A future `arterm-desktop-protocol` crate can compile quickly and be shared by host and worker without pulling WGPU.
 3. **Create a host binary only after the host module no longer depends on app reducers.** The host binary should depend on `winit`, `wgpu`, `glyphon`, protocol/scene types, and worker lifecycle only. It should not depend on session reducers except for versioned snapshots and host fallback/error UI.
 4. **Create an app-worker binary after product UI state is behind `DesktopAppDriver`.** The worker binary should own `SingleSessionApp`, `Workspace`, session/server integration, and scene construction. It should not link WGPU or glyph atlases.
 5. **Measure before adding a resident daemon.** A resident host can make user-perceived launch nearly instant, but it also adds idle memory/GPU cost. Add it only after we have startup metrics for cold host process, WGPU readiness, worker ready, and first live scene.

@@ -1,7 +1,7 @@
 # OpenRelay Discovery test
 
 This is a local-only evaluation of adding OpenRelay to `discover_tools`. It does
-not modify the hosted Discovery manifest, Jcode's default endpoint, or any
+not modify the hosted Discovery manifest, Arterm's default endpoint, or any
 production deployment.
 
 The fixture lists OpenRelay's Rivet public Ethereum Classic JSON-RPC endpoint in
@@ -31,7 +31,7 @@ scripts/run_openrelay_discovery_test.sh
 The runner:
 
 1. starts the fixture on a random loopback port;
-2. creates a disposable `JCODE_HOME` with the fixture endpoint;
+2. creates a disposable `ARTERM_HOME` with the fixture endpoint;
 3. copies only local provider-auth state needed for the test;
 4. verifies the real read-only endpoint returns Ethereum Classic chain ID `61`;
 5. exposes only `bash` and `discover_tools` to the agent;

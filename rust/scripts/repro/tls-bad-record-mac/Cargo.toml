@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# Standalone: do not attach to the parent jcode workspace.
+# Standalone: do not attach to the parent arterm workspace.
 [workspace]
 
 [dependencies]

@@ -5,8 +5,8 @@
 > This document is preserved as a historical design/rollout plan. The current
 > architecture uses a single shared server, with self-dev handled as a
 > session-local canary capability rather than a separate dedicated daemon/socket.
-> Any references below to `/tmp/jcode-selfdev.sock`, `canary-wrapper`, or
-> `JCODE_SELFDEV_MODE` describe the pre-merge architecture or transition steps,
+> Any references below to `/tmp/arterm-selfdev.sock`, `canary-wrapper`, or
+> `ARTERM_SELFDEV_MODE` describe the pre-merge architecture or transition steps,
 > not the current runtime design.
 
 ## Goal
@@ -25,15 +25,15 @@ Today, normal sessions and self-dev sessions can end up with separate long-lived
 ## Current Architecture
 
 ### Normal mode
-- Main socket: runtime `jcode.sock`
-- Debug socket: runtime `jcode-debug.sock`
-- Startup path: `jcode` -> default client flow -> spawn `jcode serve` if needed
+- Main socket: runtime `arterm.sock`
+- Debug socket: runtime `arterm-debug.sock`
+- Startup path: `arterm` -> default client flow -> spawn `arterm serve` if needed
 
 ### Self-dev mode
-- Main socket: `/tmp/jcode-selfdev.sock`
-- Debug socket: `/tmp/jcode-selfdev-debug.sock`
+- Main socket: `/tmp/arterm-selfdev.sock`
+- Debug socket: `/tmp/arterm-selfdev-debug.sock`
 - Startup path:
-  - repo auto-detection or `jcode self-dev`
+  - repo auto-detection or `arterm self-dev`
   - `cli/selfdev.rs::run_self_dev()`
   - exec into `canary-wrapper`
   - wrapper ensures self-dev server exists on dedicated socket
@@ -54,14 +54,14 @@ This means the main remaining split is not the session model, but the **startup 
 ## Target Architecture
 
 ### One shared server
-- Main socket: runtime `jcode.sock`
-- Debug socket: runtime `jcode-debug.sock`
+- Main socket: runtime `arterm.sock`
+- Debug socket: runtime `arterm-debug.sock`
 - Self-dev sessions connect to the same server as normal sessions
 
 ### Self-dev becomes session-local
 A client is self-dev if any of the following are true:
-- explicit `jcode self-dev`
-- current working directory is the jcode repo (auto-detected)
+- explicit `arterm self-dev`
+- current working directory is the arterm repo (auto-detected)
 - resumed session is already canary
 
 That client connects to the shared server and sends:
@@ -107,11 +107,11 @@ Changes:
 - stop server self-dev detection from inferring self-dev based on current working directory
 
 Expected result:
-- opening jcode inside the repo uses the shared server path by default
+- opening arterm inside the repo uses the shared server path by default
 - session still becomes canary/self-dev
-- explicit `jcode self-dev` command may still use legacy wrapper temporarily
+- explicit `arterm self-dev` command may still use legacy wrapper temporarily
 
-### Phase 2 - Move explicit `jcode self-dev` onto shared server path
+### Phase 2 - Move explicit `arterm self-dev` onto shared server path
 **Goal:** make explicit self-dev command use the same shared-server flow.
 
 Changes:
@@ -122,7 +122,7 @@ Changes:
 - remove need for `canary-wrapper` in standard usage
 
 Expected result:
-- both auto-detected self-dev and explicit `jcode self-dev` share one server
+- both auto-detected self-dev and explicit `arterm self-dev` share one server
 
 ### Phase 3 - Session-targeted reload selection
 **Goal:** remove server-global self-dev assumptions from reload/update behavior.
@@ -139,7 +139,7 @@ Expected result:
 **Goal:** fully retire the separate socket model.
 
 Changes:
-- deprecate `/tmp/jcode-selfdev.sock` and `/tmp/jcode-selfdev-debug.sock`
+- deprecate `/tmp/arterm-selfdev.sock` and `/tmp/arterm-selfdev-debug.sock`
 - update docs, tests, and scripts that probe self-dev via separate sockets
 - simplify debug/test tooling to use the shared debug socket
 
@@ -153,7 +153,7 @@ This is the main behavior change and the key tradeoff for RAM savings.
 Some scripts and tests currently prefer the self-dev debug socket path and will need updating.
 
 ### Scattered env-based logic
-There are multiple `JCODE_SELFDEV_MODE` checks across startup, hot reload, and server behavior; these need to be separated into:
+There are multiple `ARTERM_SELFDEV_MODE` checks across startup, hot reload, and server behavior; these need to be separated into:
 - client self-dev request
 - server self-dev mode (legacy / compatibility)
 - session canary capability
@@ -174,6 +174,6 @@ There are multiple `JCODE_SELFDEV_MODE` checks across startup, hot reload, and s
 ## Recommended Order
 
 1. Land Phase 1 foundations and shared-path client self-dev
-2. Land explicit `jcode self-dev` shared-path behavior
+2. Land explicit `arterm self-dev` shared-path behavior
 3. Refactor reload/update selection to be session-targeted
 4. Remove legacy wrapper/socket assumptions and update tests/docs

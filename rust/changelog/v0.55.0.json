@@ -4,7 +4,7 @@
   "title": "Terminal panes, expanded model catalog, and smarter task tracking",
   "highlights": [
     "Terminal spawns inside tmux now open in split panes instead of new windows",
-    "Expanded Jcode Bedrock subscription model catalog",
+    "Expanded Arterm Bedrock subscription model catalog",
     "Todo planning now measures how well objectives and feedback loops match your request"
   ],
   "improvements": [

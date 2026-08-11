@@ -3,7 +3,7 @@
   "date": "2026-08-06",
   "title": "Subscription onboarding and broader model support",
   "highlights": [
-    "Onboarding now defaults to the Jcode subscription, with clearer hosted-model pricing and a direct path to subscription details",
+    "Onboarding now defaults to the Arterm subscription, with clearer hosted-model pricing and a direct path to subscription details",
     "OpenAI users can choose the full GPT-5.6 family, including Terra, and Meta Model API users can configure Muse and DeepSeek passback models"
   ],
   "improvements": [

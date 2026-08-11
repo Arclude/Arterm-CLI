@@ -1,8 +1,8 @@
 # Desktop Single Session Design
 
-> Historical: this document describes the removed legacy `crates/jcode-desktop` app. The current desktop app is `crates/jcode-desktop2`.
+> Historical: this document describes the removed legacy `crates/arterm-desktop` app. The current desktop app is `crates/arterm-desktop2`.
 
-This document describes the visual target for the default `jcode-desktop` single-session mode.
+This document describes the visual target for the default `arterm-desktop` single-session mode.
 
 ## Layering
 
@@ -10,7 +10,7 @@ The single-session view is the primitive desktop surface. The Niri/workspace mod
 
 ```mermaid
 flowchart TD
-    SingleSession[SingleSessionView\nspawn/connect/render one Jcode session]
+    SingleSession[SingleSessionView\nspawn/connect/render one Arterm session]
     Workspace[Niri Workspace Wrapper\narrange many sessions]
     SessionA[SingleSessionView]
     SessionB[SingleSessionView]

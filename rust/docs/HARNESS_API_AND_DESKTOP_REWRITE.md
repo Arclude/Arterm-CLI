@@ -5,10 +5,10 @@ Status: draft, approved direction (2026-07-24)
 ## Motivation
 
 - The agent runtime ("harness") is already client/server: NDJSON over Unix
-  socket (`~/.jcode/jcode.sock`), with `Request` / `ServerEvent` in
-  `crates/jcode-protocol`. But it is an *internal* wire format: unversioned,
+  socket (`~/.arterm/arterm.sock`), with `Request` / `ServerEvent` in
+  `crates/arterm-protocol`. But it is an *internal* wire format: unversioned,
   ~147 variants, TUI-shaped, and coupled to client rendering assumptions.
-- The current desktop app (`crates/jcode-desktop`, ~44k lines) hand-rolls
+- The current desktop app (`crates/arterm-desktop`, ~44k lines) hand-rolls
   rendering on wgpu 0.19 + winit 0.29 + glyphon, plus its own host/worker IPC.
   Text layout, rich text, scrolling, and markdown are all custom and are the
   main source of rendering quality problems. Rewrite from scratch.
@@ -20,7 +20,7 @@ web/mobile) is a client. No UI-specific logic in the runtime.
 
 ### Approach
 
-Introduce `crates/jcode-harness-api`:
+Introduce `crates/arterm-harness-api`:
 
 - **Versioned envelope.** Every frame carries `v` (protocol major) at the top
   level. Handshake: client sends `hello { min_version, max_version, client }`,
@@ -41,14 +41,14 @@ Introduce `crates/jcode-harness-api`:
   The API crate defines transport-agnostic types + a small client
   (`HarnessClient`) and server adapter, so a WebSocket/TCP transport can be
   added later without touching the schema.
-- **Relationship to `jcode-protocol`.** Short term the server adapter maps
+- **Relationship to `arterm-protocol`.** Short term the server adapter maps
   API requests onto existing internal handling. Long term the internal
   protocol shrinks toward the API. Do not fork semantics: the API is a
   facade, the runtime remains the source of truth.
 
 ### Deliverables
 
-1. `crates/jcode-harness-api`: types, version constants, handshake,
+1. `crates/arterm-harness-api`: types, version constants, handshake,
    `HarnessClient` (blocking + async-friendly framing).
 2. Server: accept API handshake on the existing socket (sniff first line:
    `hello` = API client, else legacy).
@@ -87,7 +87,7 @@ Explicitly rejected:
 ### Architecture sketch
 
 ```
-jcode-desktop2 (new crate, old crate untouched until parity)
+arterm-desktop2 (new crate, old crate untouched until parity)
 ├── platform/     winit event loop, window, input, clipboard
 ├── gpu/          wgpu device/surface, Vello renderer, custom passes
 ├── scene/        retained scene: nodes with transform + content + z
@@ -99,15 +99,15 @@ jcode-desktop2 (new crate, old crate untouched until parity)
 ```
 
 Key invariants:
-- The desktop talks to the runtime **only** through `jcode-harness-api`.
+- The desktop talks to the runtime **only** through `arterm-harness-api`.
 - Rendering is a pure function of (scene state, animation clock).
 - Text layout is cached and invalidated by content/width changes only.
 
 ### Milestones
 
 1. Harness API crate + handshake + reference client (validates Part 1).
-2. `jcode-desktop2` skeleton: window, Vello "hello scene", Parley paragraph.
+2. `arterm-desktop2` skeleton: window, Vello "hello scene", Parley paragraph.
 3. Transcript view: markdown -> rich spans -> Parley, smooth scrolling.
 4. Input box + live streaming from harness API (first usable build).
 5. Workspaces/tiling + spring animations (niri-like control).
-6. Parity checklist vs old desktop, then delete `jcode-desktop`.
+6. Parity checklist vs old desktop, then delete `arterm-desktop`.

@@ -2,23 +2,23 @@
  * Every `launch()` option the README documents should do what it says.
  *
  * Documented options are a promise, and two of these were broken when the
- * documentation for them was written: reusing a `jcodeHome` threw EEXIST
+ * documentation for them was written: reusing a `artermHome` threw EEXIST
  * relinking credentials, and then connected to the previous run's stale socket
  * with nothing behind it. Neither shows up in a suite that only ever launches
  * a fresh instance.
  *
- * Usage: node test/live-options.mjs [path-to-jcode-binary]
+ * Usage: node test/live-options.mjs [path-to-arterm-binary]
  */
 
-import { JcodeClient } from "../dist/index.js";
+import { ArtermClient } from "../dist/index.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const binary = process.argv[2] ?? "jcode";
+const binary = process.argv[2] ?? "arterm";
 // A binary that ignores its arguments and never opens a socket, for the
 // startup-timeout check.
-const slowBinary = path.join(os.tmpdir(), `jcode-slow-${process.pid}.sh`);
+const slowBinary = path.join(os.tmpdir(), `arterm-slow-${process.pid}.sh`);
 fs.writeFileSync(slowBinary, "#!/usr/bin/env bash\nsleep 60\n", { mode: 0o755 });
 process.once("exit", () => fs.rmSync(slowBinary, { force: true }));
 
@@ -34,10 +34,10 @@ const step = async (name, fn) => {
 };
 
 // Every option the README documents should do what it says.
-await step("jcodeHome keeps state at a fixed path across runs", async () => {
-  const home = path.join(os.tmpdir(), "jcode-sdk-option-home");
+await step("artermHome keeps state at a fixed path across runs", async () => {
+  const home = path.join(os.tmpdir(), "arterm-sdk-option-home");
   fs.rmSync(home, { recursive: true, force: true });
-  const a = await JcodeClient.launch({ binary, jcodeHome: home, workingDir: process.cwd() });
+  const a = await ArtermClient.launch({ binary, artermHome: home, workingDir: process.cwd() });
   const s = await a.createSession(process.cwd());
   await a.sendMessage(s.session_id, "persist me");
   await new Promise((r) => setTimeout(r, 1500));
@@ -46,7 +46,7 @@ await step("jcodeHome keeps state at a fixed path across runs", async () => {
 
   // listSessions() reports what the daemon announced to this connection, not
   // what is on disk, so a reused home is read back by id via peekSession.
-  const b = await JcodeClient.launch({ binary, jcodeHome: home, workingDir: process.cwd() });
+  const b = await ArtermClient.launch({ binary, artermHome: home, workingDir: process.cwd() });
   const seen = await b.peekSession(s.session_id, 5);
   await b.close();
   if (seen.length === 0) throw new Error("a named home should carry transcripts across runs");
@@ -54,7 +54,7 @@ await step("jcodeHome keeps state at a fixed path across runs", async () => {
 });
 
 await step("inheritLogins: false starts with no credentials", async () => {
-  const c = await JcodeClient.launch({
+  const c = await ArtermClient.launch({
     binary,
     workingDir: process.cwd(),
     inheritLogins: false,
@@ -66,10 +66,10 @@ await step("inheritLogins: false starts with no credentials", async () => {
 });
 
 await step("env reaches the instance", async () => {
-  const c = await JcodeClient.launch({
+  const c = await ArtermClient.launch({
     binary,
     workingDir: process.cwd(),
-    env: { JCODE_NO_TELEMETRY: "1" },
+    env: { ARTERM_NO_TELEMETRY: "1" },
   });
   await c.close();
 });
@@ -77,7 +77,7 @@ await step("env reaches the instance", async () => {
 await step("startupTimeoutMs is honoured", async () => {
   const t0 = Date.now();
   try {
-    await JcodeClient.launch({ binary: slowBinary, startupTimeoutMs: 1500 });
+    await ArtermClient.launch({ binary: slowBinary, startupTimeoutMs: 1500 });
     throw new Error("expected a timeout");
   } catch (e) {
     if (e.code !== "startup_timeout") throw new Error(`wrong code: ${e.code}: ${e.message}`);

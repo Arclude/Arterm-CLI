@@ -2,9 +2,9 @@
 
 Data sources:
 
-- `jcode-telemetry` D1 (`discovery_details` joined to `events`) for client-side attempts,
+- `arterm-telemetry` D1 (`discovery_details` joined to `events`) for client-side attempts,
   including attempts that never reached the endpoint.
-- `jcode-subscriptions` D1 (`discovery_request_events`, `discovery_events`,
+- `arterm-subscriptions` D1 (`discovery_request_events`, `discovery_events`,
   `discovery_suggestions`) for server-side funnel, raw `query`/`reason` text, and
   provenance classification.
 
@@ -32,7 +32,7 @@ never converts because the browse returns a product that does not match the requ
 `discovery_details` records 168 failures with `failure_reason = 'disabled'`, one per distinct
 user, i.e. 27% of the 625 users who ever tried discovery. Client versions are mostly
 post-flip (0.54.4: 93, 0.58.0: 35), so these are persisted `[sponsors] enabled = false`
-entries in `~/.jcode/config.toml`, not the current default.
+entries in `~/.arterm/config.toml`, not the current default.
 
 Root cause: discovery shipped opt-in in `203a3f3d3` (v0.36.x) with `enabled = false`, and
 `Config::save()` serializes the entire struct with `toml::to_string_pretty`. Any config write
@@ -96,7 +96,7 @@ an interactive `greptile login`, and a `greptile onboard` wizard the agent canno
   Greptile cannot review an uncommitted local diff without onboarding a repo.
 - 3 selects came from the queries whose wording matched "repository-aware PR review".
 
-The dominant pattern here is a failure of a jcode feature (swarm reviewer unavailable,
+The dominant pattern here is a failure of a arterm feature (swarm reviewer unavailable,
 recursive spawning disabled) leaking into discovery as a workaround attempt.
 
 ### web-data (27 units, 2 selects)

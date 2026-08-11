@@ -16,6 +16,6 @@
     "Restored desktop edit cards preserve their file names",
     "Desktop errors render as distinct red cards",
     "Todo assessment changes and low-confidence completion notices render correctly in the terminal",
-    "Activating a Jcode account now refreshes available models automatically"
+    "Activating a Arterm account now refreshes available models automatically"
   ]
 }

@@ -2,19 +2,19 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-provider=${JCODE_PROVIDER:-auto}
+provider=${ARTERM_PROVIDER:-auto}
 prompt=${1:-"Use the bash tool to run 'pwd', then use the ls tool to list the current directory, then respond with DONE."}
-expect=${JCODE_TRACE_EXPECT:-DONE}
+expect=${ARTERM_TRACE_EXPECT:-DONE}
 cargo_exec="$repo_root/scripts/cargo_exec.sh"
 
 echo "=== Real Provider Smoke ==="
 echo "Provider: ${provider}"
 
-if [[ "${JCODE_REAL_PROVIDER_TEST_API:-1}" == "1" ]]; then
-  if [[ "${provider}" == "claude" && "${JCODE_USE_DIRECT_API:-0}" != "1" ]]; then
+if [[ "${ARTERM_REAL_PROVIDER_TEST_API:-1}" == "1" ]]; then
+  if [[ "${provider}" == "claude" && "${ARTERM_USE_DIRECT_API:-0}" != "1" ]]; then
     echo ""
     echo "Test 1: Claude CLI smoke (test_api)"
-    if [[ "${JCODE_REMOTE_CARGO:-0}" == "1" ]]; then
+    if [[ "${ARTERM_REMOTE_CARGO:-0}" == "1" ]]; then
       (cd "$repo_root" && "$cargo_exec" build --bin test_api)
       (cd "$repo_root" && ./target/debug/test_api)
     else
@@ -22,22 +22,22 @@ if [[ "${JCODE_REAL_PROVIDER_TEST_API:-1}" == "1" ]]; then
     fi
   else
     echo ""
-    echo "Test 1: Skipping test_api (provider=${provider}, JCODE_USE_DIRECT_API=${JCODE_USE_DIRECT_API:-0})"
+    echo "Test 1: Skipping test_api (provider=${provider}, ARTERM_USE_DIRECT_API=${ARTERM_USE_DIRECT_API:-0})"
   fi
 fi
 
 echo ""
 echo "Test 2: Tool harness (network tools enabled)"
-if [[ "${JCODE_REMOTE_CARGO:-0}" == "1" ]]; then
-  (cd "$repo_root" && "$cargo_exec" build --bin jcode-harness)
-  (cd "$repo_root" && ./target/debug/jcode-harness -- --include-network)
+if [[ "${ARTERM_REMOTE_CARGO:-0}" == "1" ]]; then
+  (cd "$repo_root" && "$cargo_exec" build --bin arterm-harness)
+  (cd "$repo_root" && ./target/debug/arterm-harness -- --include-network)
 else
-  (cd "$repo_root" && cargo run --bin jcode-harness -- --include-network)
+  (cd "$repo_root" && cargo run --bin arterm-harness -- --include-network)
 fi
 
 echo ""
 echo "Test 3: End-to-end trace"
-if [[ ! -x "$repo_root/target/release/jcode" ]]; then
+if [[ ! -x "$repo_root/target/release/arterm" ]]; then
   (cd "$repo_root" && "$cargo_exec" build --release)
 fi
 
@@ -45,8 +45,8 @@ workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
 set +e
-output=$(JCODE_HOME="$workdir" PATH="$repo_root/target/release:$PATH" \
-  jcode run --no-update --trace --provider "$provider" "$prompt" 2>&1)
+output=$(ARTERM_HOME="$workdir" PATH="$repo_root/target/release:$PATH" \
+  arterm run --no-update --trace --provider "$provider" "$prompt" 2>&1)
 status=$?
 set -e
 

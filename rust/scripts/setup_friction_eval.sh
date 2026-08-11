@@ -10,13 +10,13 @@
 # mocked release endpoint, then probing the result with REAL shells.
 #
 #   Section A  fresh-install PATH resolution - after one `curl | sh`-equivalent
-#              install, does `jcode` resolve in a brand-new login/interactive
+#              install, does `arterm` resolve in a brand-new login/interactive
 #              shell of every kind we claim to support (bash -l, bash -i,
 #              sh -l, fish, zsh)? This is the exact "it wasn't on my PATH"
 #              complaint, asked of the real rc files the installer wrote.
 #   Section B  idempotency - three installs must leave exactly one PATH line
 #              per rc file (no duplicate exports piling up run after run).
-#   Section C  retention - an upgrade must preserve ~/.jcode config and auth,
+#   Section C  retention - an upgrade must preserve ~/.arterm config and auth,
 #              keep both immutable version binaries (rollback stays possible),
 #              and the launcher must serve the new version.
 #   Section D  Windows parity - static audit that the Git Bash installer path
@@ -86,16 +86,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$url" in
-  *telemetry.jcode.sh*) ;;
-  *jcode.sh/releases/latest/version) printf 'v%s\n' "${EVAL_VERSION:-1.2.3}" ;;
-  *jcode.sh/releases/v*/download-bases)
+  *telemetry.arterm.sh*) ;;
+  *arterm.sh/releases/latest/version) printf 'v%s\n' "${EVAL_VERSION:-1.2.3}" ;;
+  *arterm.sh/releases/v*/download-bases)
     printf 'https://github.com/1jehuang/jcode/releases/download/v%s\n' "${EVAL_VERSION:-1.2.3}"
     ;;
   *SHA256SUMS)
     # Checksum of the deterministic fake archive written by the tar mock's
     # sibling below (the literal bytes "fake archive").
     printf '8d57abb57a0dae3ff23c8f0df1f51951b7772822e0d560e860d6f68c24ef6d3d  %s\n' \
-      "${EVAL_CHECKSUM_ASSET:-jcode-linux-x86_64.tar.gz}"
+      "${EVAL_CHECKSUM_ASSET:-arterm-linux-x86_64.tar.gz}"
     ;;
   *github.com*/releases/latest)
     printf 'https://github.com/1jehuang/jcode/releases/tag/v%s' "${EVAL_VERSION:-1.2.3}"
@@ -117,10 +117,10 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
-artifact="${EVAL_ARCHIVE_ARTIFACT:-jcode-linux-x86_64}"
+artifact="${EVAL_ARCHIVE_ARTIFACT:-arterm-linux-x86_64}"
 cat > "$dest/$artifact" <<BIN
 #!/usr/bin/env bash
-if [ "\${1:-}" = "--version" ]; then printf 'jcode ${EVAL_VERSION:-1.2.3}\n'; fi
+if [ "\${1:-}" = "--version" ]; then printf 'arterm ${EVAL_VERSION:-1.2.3}\n'; fi
 exit 0
 BIN
 chmod +x "$dest/$artifact"
@@ -135,13 +135,13 @@ run_install() {
   PATH="$work/bin:/usr/bin:/bin" \
   HOME="$home" \
   XDG_CONFIG_HOME="$home/.config" \
-  JCODE_HOME="$home/.jcode" \
-  JCODE_SKIP_SERVER_RELOAD=1 \
-  JCODE_NO_TELEMETRY=1 \
+  ARTERM_HOME="$home/.arterm" \
+  ARTERM_SKIP_SERVER_RELOAD=1 \
+  ARTERM_NO_TELEMETRY=1 \
   bash "$install_sh" 2>&1
 }
 
-# Probe: does `jcode` resolve and run in a fresh shell of the given kind, with
+# Probe: does `arterm` resolve and run in a fresh shell of the given kind, with
 # only the sandbox HOME's rc files to set it up? PATH starts minimal (no
 # ~/.local/bin) so resolution can only come from what the installer wrote.
 probe_shell() { # probe_shell <home> <shell-cmd...>
@@ -150,7 +150,7 @@ probe_shell() { # probe_shell <home> <shell-cmd...>
   XDG_CONFIG_HOME="$home/.config" \
   ENV="$home/.profile" \
   PATH="/usr/bin:/bin" \
-  "$@" 'command -v jcode >/dev/null 2>&1 && jcode --version' 2>/dev/null </dev/null
+  "$@" 'command -v arterm >/dev/null 2>&1 && arterm --version' 2>/dev/null </dev/null
 }
 
 echo "================ SETUP FRICTION SCORECARD ================"
@@ -166,19 +166,19 @@ install_status=$?
 check "installer completes on a fresh home" \
   "exit 0" "exit $install_status" "$install_status"
 
-launcher="$home_a/.local/bin/jcode"
+launcher="$home_a/.local/bin/arterm"
 [ -x "$launcher" ]; check "launcher exists and is executable" \
-  "executable at ~/.local/bin/jcode" "missing or not executable: $launcher" "$?"
+  "executable at ~/.local/bin/arterm" "missing or not executable: $launcher" "$?"
 
 ver=$("$launcher" --version 2>/dev/null || true)
-[ "$ver" = "jcode 1.2.3" ]; check "launcher runs and reports the installed version" \
-  "jcode 1.2.3" "${ver:-<no output>}" "$?"
+[ "$ver" = "arterm 1.2.3" ]; check "launcher runs and reports the installed version" \
+  "arterm 1.2.3" "${ver:-<no output>}" "$?"
 
-# The success message must not dead-end the user: either jcode is already
+# The success message must not dead-end the user: either arterm is already
 # resolvable or the copy explicitly says future shells will have it.
-printf '%s' "$install_out" | grep -q "Run 'jcode' to get started\|Future terminal sessions will have jcode on PATH automatically"
+printf '%s' "$install_out" | grep -q "Run 'arterm' to get started\|Future terminal sessions will have arterm on PATH automatically"
 check "install output gives a working next step (no dead end)" \
-  "a 'run jcode' or 'future sessions' line" "neither line found in installer output" "$?"
+  "a 'run arterm' or 'future sessions' line" "neither line found in installer output" "$?"
 
 probe_case() { # probe_case <label> <binary> <shell-cmd...>
   local label="$1" binary="$2"; shift 2
@@ -188,15 +188,15 @@ probe_case() { # probe_case <label> <binary> <shell-cmd...>
   fi
   local out
   out=$(probe_shell "$home_a" "$@")
-  [ "$out" = "jcode 1.2.3" ]
-  check "$label" "jcode resolves and prints 'jcode 1.2.3'" "${out:-<not found on PATH>}" "$?"
+  [ "$out" = "arterm 1.2.3" ]
+  check "$label" "arterm resolves and prints 'arterm 1.2.3'" "${out:-<not found on PATH>}" "$?"
 }
 
-probe_case "bash login shell (bash -lc) finds jcode"        bash bash -lc
-probe_case "bash interactive shell (bash -ic) finds jcode"  bash bash -ic
-probe_case "sh login shell (sh -lc) finds jcode"            sh   sh -lc
-probe_case "fish shell (fish -c) finds jcode"               fish fish -c
-probe_case "zsh login shell (zsh -lc) finds jcode"          zsh  zsh -lc
+probe_case "bash login shell (bash -lc) finds arterm"        bash bash -lc
+probe_case "bash interactive shell (bash -ic) finds arterm"  bash bash -ic
+probe_case "sh login shell (sh -lc) finds arterm"            sh   sh -lc
+probe_case "fish shell (fish -c) finds arterm"               fish fish -c
+probe_case "zsh login shell (zsh -lc) finds arterm"          zsh  zsh -lc
 
 # ---------------------------------------------------------------------------
 # Section B: idempotency - reinstalling must not stack PATH lines.
@@ -209,11 +209,11 @@ run_install "$home_a" "1.2.3" >/dev/null 2>&1
 for rc in .bashrc .profile .zshenv .config/fish/config.fish; do
   file="$home_a/$rc"
   [ -f "$file" ] || continue
-  # Each install appends one "# Added by jcode installer" stanza when missing;
+  # Each install appends one "# Added by arterm installer" stanza when missing;
   # a correct idempotency guard leaves exactly one after any number of runs.
-  count=$(grep -cF "# Added by jcode installer" "$file" || true)
+  count=$(grep -cF "# Added by arterm installer" "$file" || true)
   [ "$count" -le 1 ]
-  check "~/$rc has at most one jcode PATH stanza after 3 installs" \
+  check "~/$rc has at most one arterm PATH stanza after 3 installs" \
     "<= 1 installer stanza" "$count installer stanzas" "$?"
 done
 
@@ -227,44 +227,44 @@ home_c="$work/home-c"
 run_install "$home_c" "1.2.3" >/dev/null 2>&1
 
 # Simulate accumulated user state between installs.
-mkdir -p "$home_c/.jcode"
-printf 'model = "kept"\n' > "$home_c/.jcode/config.toml"
-printf '{"kept":true}\n' > "$home_c/.jcode/auth.json"
+mkdir -p "$home_c/.arterm"
+printf 'model = "kept"\n' > "$home_c/.arterm/config.toml"
+printf '{"kept":true}\n' > "$home_c/.arterm/auth.json"
 
 run_install "$home_c" "1.3.0" >/dev/null 2>&1
 
-ver=$("$home_c/.local/bin/jcode" --version 2>/dev/null || true)
-[ "$ver" = "jcode 1.3.0" ]; check "upgrade switches the launcher to the new version" \
-  "jcode 1.3.0" "${ver:-<no output>}" "$?"
+ver=$("$home_c/.local/bin/arterm" --version 2>/dev/null || true)
+[ "$ver" = "arterm 1.3.0" ]; check "upgrade switches the launcher to the new version" \
+  "arterm 1.3.0" "${ver:-<no output>}" "$?"
 
-[ "$(cat "$home_c/.jcode/config.toml" 2>/dev/null)" = 'model = "kept"' ]
-check "upgrade preserves ~/.jcode/config.toml" \
+[ "$(cat "$home_c/.arterm/config.toml" 2>/dev/null)" = 'model = "kept"' ]
+check "upgrade preserves ~/.arterm/config.toml" \
   "file unchanged" "missing or modified" "$?"
 
-[ "$(cat "$home_c/.jcode/auth.json" 2>/dev/null)" = '{"kept":true}' ]
-check "upgrade preserves ~/.jcode/auth.json" \
+[ "$(cat "$home_c/.arterm/auth.json" 2>/dev/null)" = '{"kept":true}' ]
+check "upgrade preserves ~/.arterm/auth.json" \
   "file unchanged" "missing or modified" "$?"
 
-[ -x "$home_c/.jcode/builds/versions/1.2.3/jcode" ] && [ -x "$home_c/.jcode/builds/versions/1.3.0/jcode" ]
+[ -x "$home_c/.arterm/builds/versions/1.2.3/arterm" ] && [ -x "$home_c/.arterm/builds/versions/1.3.0/arterm" ]
 check "both immutable version binaries kept (rollback possible)" \
   "versions/1.2.3 and versions/1.3.0 both executable" \
-  "$(ls "$home_c/.jcode/builds/versions" 2>/dev/null | tr '\n' ' ')" "$?"
+  "$(ls "$home_c/.arterm/builds/versions" 2>/dev/null | tr '\n' ' ')" "$?"
 
-stable_ver=$(cat "$home_c/.jcode/builds/stable-version" 2>/dev/null || true)
+stable_ver=$(cat "$home_c/.arterm/builds/stable-version" 2>/dev/null || true)
 [ "$stable_ver" = "1.3.0" ]; check "stable channel marker points at the new version" \
   "1.3.0" "${stable_ver:-<missing>}" "$?"
 
-# A second post-upgrade login shell must still resolve jcode (PATH survives
+# A second post-upgrade login shell must still resolve arterm (PATH survives
 # upgrades, not just fresh installs).
 out=$(probe_shell "$home_c" bash -lc)
-[ "$out" = "jcode 1.3.0" ]; check "post-upgrade login shell still finds jcode" \
-  "jcode 1.3.0" "${out:-<not found on PATH>}" "$?"
+[ "$out" = "arterm 1.3.0" ]; check "post-upgrade login shell still finds arterm" \
+  "arterm 1.3.0" "${out:-<not found on PATH>}" "$?"
 
 # Uninstall (default, no --purge) must remove binaries but KEEP user data, so
 # a returning user's reinstall lands on their old config/auth. This is the
 # retention contract of leaving: coming back is cheap.
 uninstall_sh="$repo_dir/scripts/uninstall.sh"
-# uninstall.sh pkills running jcode servers; neuter that inside the sandbox so
+# uninstall.sh pkills running arterm servers; neuter that inside the sandbox so
 # the eval never touches real processes on the machine running it.
 printf '#!/usr/bin/env bash\nexit 0\n' > "$work/bin/pkill"
 chmod +x "$work/bin/pkill"
@@ -274,12 +274,12 @@ bash "$uninstall_sh" --yes >/dev/null 2>&1
 uninstall_status=$?
 check "uninstall (no --purge) completes" "exit 0" "exit $uninstall_status" "$uninstall_status"
 
-[ ! -e "$home_c/.local/bin/jcode" ] && [ ! -d "$home_c/.jcode/builds" ]
+[ ! -e "$home_c/.local/bin/arterm" ] && [ ! -d "$home_c/.arterm/builds" ]
 check "uninstall removes launcher and build channels" \
   "launcher and builds gone" "still present" "$?"
 
-[ "$(cat "$home_c/.jcode/config.toml" 2>/dev/null)" = 'model = "kept"' ] \
-  && [ "$(cat "$home_c/.jcode/auth.json" 2>/dev/null)" = '{"kept":true}' ]
+[ "$(cat "$home_c/.arterm/config.toml" 2>/dev/null)" = 'model = "kept"' ] \
+  && [ "$(cat "$home_c/.arterm/auth.json" 2>/dev/null)" = '{"kept":true}' ]
 check "uninstall keeps config/auth for a cheap return" \
   "config.toml and auth.json intact" "user data lost" "$?"
 
@@ -308,11 +308,11 @@ check "install.sh dedupes stale Windows PATH entries" \
 # (bash-escaped quotes are not PowerShell-escaped quotes) fails here instead
 # of silently no-oping on end-user machines.
 if command -v pwsh >/dev/null 2>&1; then
-  broadcast_block=$(awk "/<<'JCODE_PS_BROADCAST_EOF'/{inblock=1; next} /^JCODE_PS_BROADCAST_EOF\$/{inblock=0} inblock" "$install_sh")
+  broadcast_block=$(awk "/<<'ARTERM_PS_BROADCAST_EOF'/{inblock=1; next} /^ARTERM_PS_BROADCAST_EOF\$/{inblock=0} inblock" "$install_sh")
   printf '%s' "$broadcast_block" > "$work/broadcast.ps1"
-  parse_errors=$(JCODE_EVAL_PS_FILE="$work/broadcast.ps1" pwsh -NoProfile -NonInteractive -Command '
+  parse_errors=$(ARTERM_EVAL_PS_FILE="$work/broadcast.ps1" pwsh -NoProfile -NonInteractive -Command '
     $errors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile($env:JCODE_EVAL_PS_FILE, [ref]$null, [ref]$errors) | Out-Null
+    [System.Management.Automation.Language.Parser]::ParseFile($env:ARTERM_EVAL_PS_FILE, [ref]$null, [ref]$errors) | Out-Null
     $errors.Count
   ' 2>/dev/null | tr -d '[:space:]')
   [ -n "$broadcast_block" ] && [ "$parse_errors" = "0" ]
@@ -332,17 +332,17 @@ mkdir -p "$home_w" "$work/localappdata"
 win_state="$work/win-env"
 mkdir -p "$win_state"
 # Seed a user PATH that already contains a stale (case/slash variant) entry.
-printf 'C:\\Tools;%s\\' "$(printf '%s' "$work/localappdata/jcode/bin" | tr '[:lower:]' '[:upper:]')" > "$win_state/user-path"
+printf 'C:\\Tools;%s\\' "$(printf '%s' "$work/localappdata/arterm/bin" | tr '[:lower:]' '[:upper:]')" > "$win_state/user-path"
 cat > "$work/bin/powershell.exe" <<'EOF'
 #!/usr/bin/env bash
 # Minimal mock of the two PowerShell invocations install.sh makes on Windows:
 #   1. read the user PATH   -> print the stored value
-#   2. write the user PATH  -> persist $JCODE_NEW_USER_PATH
+#   2. write the user PATH  -> persist $ARTERM_NEW_USER_PATH
 #   3. broadcast            -> record that a broadcast happened
 args="$*"
 case "$args" in
   *GetEnvironmentVariable*) cat "$EVAL_WIN_STATE/user-path" ;;
-  *SetEnvironmentVariable*) printf '%s' "$JCODE_NEW_USER_PATH" > "$EVAL_WIN_STATE/user-path" ;;
+  *SetEnvironmentVariable*) printf '%s' "$ARTERM_NEW_USER_PATH" > "$EVAL_WIN_STATE/user-path" ;;
   *SendMessageTimeout*) touch "$EVAL_WIN_STATE/broadcasted" ;;
   *) exit 1 ;;
 esac
@@ -351,34 +351,34 @@ chmod +x "$work/bin/powershell.exe"
 
 EVAL_VERSION="1.2.3" \
 EVAL_UNAME_S="MINGW64_NT-10.0" \
-EVAL_ARCHIVE_ARTIFACT="jcode-windows-x86_64.exe" \
-EVAL_CHECKSUM_ASSET="jcode-windows-x86_64.tar.gz" \
+EVAL_ARCHIVE_ARTIFACT="arterm-windows-x86_64.exe" \
+EVAL_CHECKSUM_ASSET="arterm-windows-x86_64.tar.gz" \
 EVAL_WIN_STATE="$win_state" \
 PATH="$work/bin:/usr/bin:/bin" \
 HOME="$home_w" \
 LOCALAPPDATA="$work/localappdata" \
-JCODE_HOME="$home_w/.jcode" \
-JCODE_SKIP_SERVER_RELOAD=1 \
-JCODE_NO_TELEMETRY=1 \
+ARTERM_HOME="$home_w/.arterm" \
+ARTERM_SKIP_SERVER_RELOAD=1 \
+ARTERM_NO_TELEMETRY=1 \
 bash "$install_sh" >/dev/null 2>&1
 win_install_status=$?
 check "Git Bash Windows install completes" "exit 0" "exit $win_install_status" "$win_install_status"
 
 win_path_now=$(cat "$win_state/user-path" 2>/dev/null || true)
 case "$win_path_now" in
-  "$work/localappdata/jcode/bin;C:\\Tools") win_ok=0 ;;
+  "$work/localappdata/arterm/bin;C:\\Tools") win_ok=0 ;;
   *) win_ok=1 ;;
 esac
 check "Git Bash install persists + dedupes the Windows user PATH" \
-  "$work/localappdata/jcode/bin;C:\\Tools" "${win_path_now:-<unset>}" "$win_ok"
+  "$work/localappdata/arterm/bin;C:\\Tools" "${win_path_now:-<unset>}" "$win_ok"
 
 [ -f "$win_state/broadcasted" ]
 check "Git Bash install broadcasts WM_SETTINGCHANGE" \
   "broadcast recorded" "no broadcast" "$?"
 
-printf '%s' "$ps1_text" | grep -q 'Resolve-JcodePathUpdate'
+printf '%s' "$ps1_text" | grep -q 'Resolve-ArtermPathUpdate'
 check "install.ps1 persists + dedupes the user PATH" \
-  "Resolve-JcodePathUpdate present" "helper missing" "$?"
+  "Resolve-ArtermPathUpdate present" "helper missing" "$?"
 
 printf '%s' "$ps1_text" | grep -q 'SendMessageTimeout(\[IntPtr\]0xffff'
 check "install.ps1 broadcasts WM_SETTINGCHANGE to HWND_BROADCAST" \

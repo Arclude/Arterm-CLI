@@ -75,7 +75,7 @@ export function unixSocketTransport(socketPath: string): Promise<Transport> {
     // not on the path itself.
     const socket = net.createConnection(transportEndpoint(socketPath));
     socket.setNoDelay(true);
-    // A bare `connect ENOENT /run/user/1000/jcode-api.sock` names the syscall
+    // A bare `connect ENOENT /run/user/1000/arterm-api.sock` names the syscall
     // and hides the actual cause: the bridge is not running. The first thing
     // anyone does with this SDK is connect, so this is the error most likely
     // to be someone's first impression of it. Say what to do about it.
@@ -121,7 +121,7 @@ function connectError(socketPath: string, cause: NodeJS.ErrnoException): Harness
   const hint =
     code === "ENOENT"
       ? `no harness API socket at ${socketPath}. Start the bridge with ` +
-        "`jcode api-bridge`, or set JCODE_API_SOCKET to its path."
+        "`arterm api-bridge`, or set ARTERM_API_SOCKET to its path."
       : code === "ECONNREFUSED"
         ? `nothing is listening on ${socketPath}; a stale socket file is left over ` +
           "from a bridge that exited. Restart the bridge."
@@ -196,7 +196,7 @@ interface Pending {
  * without one is a stream event and is emitted on `event` plus a per-kind
  * channel (`client.on("text_delta", ...)`).
  */
-export class JcodeClient extends EventEmitter {
+export class ArtermClient extends EventEmitter {
   private readonly transport: Transport;
   private readonly decoder = new NdjsonDecoder();
   private readonly pending = new Map<number, Pending>();
@@ -207,7 +207,7 @@ export class JcodeClient extends EventEmitter {
   private closed = false;
   private closeError?: Error;
 
-  /** Server identity from the handshake, e.g. "jcode-harness-api-bridge/0.1.0". */
+  /** Server identity from the handshake, e.g. "arterm-harness-api-bridge/0.1.0". */
   server = "";
   /** Capability strings advertised by the server. */
   capabilities: string[] = [];
@@ -245,25 +245,25 @@ export class JcodeClient extends EventEmitter {
 
   /** State directory of the instance this client launched, if any. */
   get instanceHome(): string | undefined {
-    return this.instance?.jcodeHome;
+    return this.instance?.artermHome;
   }
 
   /**
-   * Start a private jcode instance and connect to it.
+   * Start a private arterm instance and connect to it.
    *
-   * This is the entry point for embedding jcode as an agent engine. The
+   * This is the entry point for embedding arterm as an agent engine. The
    * instance has its own state directory, its own sessions, and its own
-   * sockets, so it cannot see or disturb the jcode the user runs
+   * sockets, so it cannot see or disturb the arterm the user runs
    * interactively. `close()` shuts it down.
    *
    * Provider logins are inherited from the user by default, because an
    * instance without credentials cannot reach a model at all. Pass
    * `inheritLogins: false` to start empty.
    */
-  static async launch(options: LaunchOptions & ConnectOptions = {}): Promise<JcodeClient> {
+  static async launch(options: LaunchOptions & ConnectOptions = {}): Promise<ArtermClient> {
     const instance = await launchInstance(options);
     try {
-      const client = await JcodeClient.connect({
+      const client = await ArtermClient.connect({
         ...options,
         socketPath: instance.socketPath,
       });
@@ -278,18 +278,18 @@ export class JcodeClient extends EventEmitter {
   }
 
   /**
-   * Connect to the jcode already running on this machine.
+   * Connect to the arterm already running on this machine.
    *
-   * Use this to automate the user's own jcode: an editor plugin, a status
+   * Use this to automate the user's own arterm: an editor plugin, a status
    * dashboard, a hotkey tool. It shares the user's live sessions, so anything
-   * done here is visible in their terminal. To embed jcode as an engine
-   * instead, use {@link JcodeClient.launch}.
+   * done here is visible in their terminal. To embed arterm as an engine
+   * instead, use {@link ArtermClient.launch}.
    */
-  static async connect(options: ConnectOptions = {}): Promise<JcodeClient> {
+  static async connect(options: ConnectOptions = {}): Promise<ArtermClient> {
     const socketPath = options.transport ? undefined : (options.socketPath ?? apiSocketPath());
     const transport = options.transport ?? (await unixSocketTransport(socketPath!));
-    const clientName = options.clientName ?? "jcode-sdk-ts";
-    const client = new JcodeClient(
+    const clientName = options.clientName ?? "arterm-sdk-ts";
+    const client = new ArtermClient(
       transport,
       options.requestTimeoutMs ?? 30_000,
       socketPath,
@@ -618,7 +618,7 @@ export class JcodeClient extends EventEmitter {
     };
   }
 
-  /** Persist an API key in jcode's owner-only provider store and hot-reload it. */
+  /** Persist an API key in arterm's owner-only provider store and hot-reload it. */
   async setApiKey(provider: string, apiKey: string): Promise<void> {
     await this.expectReply({ req: "set_api_key", provider, api_key: apiKey }, "credential_updated");
   }
@@ -831,7 +831,7 @@ export class JcodeClient extends EventEmitter {
       reject: (error: Error) => void;
     };
     type Child = {
-      client: JcodeClient;
+      client: ArtermClient;
       stream: AsyncIterableIterator<ApiEvent>;
       pump?: Promise<void>;
     };
@@ -906,9 +906,9 @@ export class JcodeClient extends EventEmitter {
     const startChild = async (sessionId: string): Promise<void> => {
       if (stopped || children.has(sessionId) || starting.has(sessionId)) return;
       starting.add(sessionId);
-      let child: JcodeClient | undefined;
+      let child: ArtermClient | undefined;
       try {
-        child = await JcodeClient.connect({
+        child = await ArtermClient.connect({
           socketPath: this.socketPath,
           clientName: `${this.clientName}/global-events`,
           requestTimeoutMs: this.requestTimeoutMs,

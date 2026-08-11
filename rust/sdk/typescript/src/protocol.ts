@@ -1,7 +1,7 @@
 /**
- * Wire types for the jcode harness API (protocol v1).
+ * Wire types for the arterm harness API (protocol v1).
  *
- * Mirrors `crates/jcode-harness-api` exactly: request tags live under `req`,
+ * Mirrors `crates/arterm-harness-api` exactly: request tags live under `req`,
  * event tags under `ev`, and every frame carries `v`. Keep this file in sync
  * with the Rust enums; `test/schema-parity.test.ts` fails the build if the
  * tag sets drift apart.

@@ -1,11 +1,11 @@
-# jcode-tui test flakiness: root cause
+# arterm-tui test flakiness: root cause
 
-`cargo test -p jcode-tui --lib` fails 1-4 tests per run, with a varying set.
+`cargo test -p arterm-tui --lib` fails 1-4 tests per run, with a varying set.
 This is a parallelism race on process-global state, not a logic bug.
 
 ## Evidence
 
-- `cargo test -p jcode-tui --lib -- --test-threads=1` passes **2006/2006** (16 ignored).
+- `cargo test -p arterm-tui --lib -- --test-threads=1` passes **2006/2006** (16 ignored).
 - The failing set changes between runs at the default thread count.
 - Individually, each failing test passes when run alone.
 
@@ -17,7 +17,7 @@ which is a different failure from the race described here.
 ## Root cause
 
 `create_test_app()` (and its `create_named_provider_test_app` sibling) in
-`crates/jcode-tui/src/tui/app/tests/support_failover/part_01.rs` calls:
+`crates/arterm-tui/src/tui/app/tests/support_failover/part_01.rs` calls:
 
 ```rust
 crate::tui::ui::clear_test_render_state_for_tests();

@@ -1,6 +1,6 @@
 # Sponsored discovery sponsor onboarding
 
-This runbook is the source of truth for adding a tool sponsor to jcode's
+This runbook is the source of truth for adding a tool sponsor to arterm's
 `discover_tools` catalog. It covers product approval, catalog data, service
 behavior, client validation, rollout, and rollback.
 
@@ -12,9 +12,9 @@ preferential recommendations, hidden placement, or weaker user safeguards.
 ## What usually changes
 
 Adding a sponsor to an existing category is a discovery-service catalog change.
-It should not require a jcode release.
+It should not require a arterm release.
 
-A jcode code change is required when the sponsor needs:
+A arterm code change is required when the sponsor needs:
 
 - a new category in `DISCOVERY_CATEGORIES`;
 - a response field the current client does not support;
@@ -24,10 +24,10 @@ A jcode code change is required when the sponsor needs:
 The hosted catalog and discovery service are not stored in this repository.
 Coordinate that change with the service owner. The client-side contract is in:
 
-- `crates/jcode-app-core/src/tool/discover.rs`;
-- `crates/jcode-base/src/sponsors.rs`;
-- `crates/jcode-base/src/sponsors/provenance.rs`;
-- `crates/jcode-tui/src/tui/app/sponsor_disclosure.rs`; and
+- `crates/arterm-app-core/src/tool/discover.rs`;
+- `crates/arterm-base/src/sponsors.rs`;
+- `crates/arterm-base/src/sponsors/provenance.rs`;
+- `crates/arterm-tui/src/tui/app/sponsor_disclosure.rs`; and
 - `TELEMETRY.md`.
 
 ## 1. Intake and approval
@@ -54,7 +54,7 @@ The discovery owner must verify that:
    distribution channel where possible.
 4. No credential, API key, referral secret, user identifier, or environment
    value is embedded in catalog data.
-5. The setup does not bypass jcode's confirmation requirements. Signups,
+5. The setup does not bypass arterm's confirmation requirements. Signups,
    payments, destructive operations, and other consequential actions still
    require the normal user confirmation and sponsorship disclosure.
 6. The commercial agreement buys discoverability only. Editorial ranking and
@@ -65,7 +65,7 @@ Reject or pause onboarding if any item cannot be verified.
 ## 2. Choose or add a category
 
 Current categories are defined by `DISCOVERY_CATEGORIES` in
-`crates/jcode-base/src/sponsors.rs`. Category values are lowercase slugs.
+`crates/arterm-base/src/sponsors.rs`. Category values are lowercase slugs.
 
 Use an existing category whenever it accurately describes the capability. To
 add a category:
@@ -74,7 +74,7 @@ add a category:
 2. Add the same value to the discovery service's category allowlist.
 3. Update any public category documentation.
 4. Run the client tests listed below.
-5. Ship the jcode change before publishing entries that rely on the category.
+5. Ship the arterm change before publishing entries that rely on the category.
 
 Do not create a sponsor-specific category. Categories describe user needs, not
 vendors.
@@ -123,16 +123,16 @@ instructions. If an intentionally floating version is used, document who owns
 continuous monitoring and emergency disablement.
 
 For MCP entries, `mcp.command` and `mcp.args` are security- and
-measurement-sensitive. jcode records discovery provenance only when a later MCP
+measurement-sensitive. arterm records discovery provenance only when a later MCP
 connection exactly matches both values. A prose `setup` string alone does not
 enable provenance tagging or coarse usage metering.
 
 ## 4. Implement browse, select, and catalog suggestions
 
-The default client sends `GET https://api.jcode.sh/v1/discovery` with a
+The default client sends `GET https://api.arterm.sh/v1/discovery` with a
 three-second timeout and a 64 KiB maximum response. It sends a
-`User-Agent: jcode/<version>` header and a random
-`x-jcode-discovery-request-id` correlation header.
+`User-Agent: arterm/<version>` header and a random
+`x-arterm-discovery-request-id` correlation header.
 
 Current clients also send coarse provenance headers: the random local session
 ID, whether session metadata was available, self-dev/debug/canary flags, tool
@@ -144,7 +144,7 @@ transcript content, file paths, account identity, credentials, or user-authored
 text.
 
 Runs launched by `scripts/benchmark_discovery.py` also send
-`x-jcode-discovery-benchmark: 1`. The service must retain that marker with its
+`x-arterm-discovery-benchmark: 1`. The service must retain that marker with its
 request logs so benchmark traffic can be excluded from ordinary discovery and
 sponsor reporting.
 
@@ -159,7 +159,7 @@ Browse and select use these query parameters:
 
 The model-facing schema explicitly says browse/select `q` and `reason` may be
 sent to relevant sponsors for demand and selection reporting. Catalog
-suggestions are sent only to Jcode maintainers. The schema tells the model to
+suggestions are sent only to Arterm maintainers. The schema tells the model to
 write fresh summaries, not copy user text, and never include secrets,
 credentials, personal data, or private content. Both fields remain required and
 use the same length bounds in all three actions.
@@ -177,7 +177,7 @@ For ordinary non-benchmark traffic, the service stores both raw summaries in
 `discovery_events`. When a reviewed recipient is configured for a listed
 sponsor, it also sends that sponsor the browse or select summaries relevant to
 its listing. Recipient configuration is explicit and empty by default. Runs
-marked `x-jcode-discovery-benchmark: 1` remain stored with
+marked `x-arterm-discovery-benchmark: 1` remain stored with
 `benchmark_run = 1` for auditability but are never delivered as sponsor reports.
 
 ### Browse response
@@ -239,7 +239,7 @@ persist the suggestion before acknowledging it, and apply the same sensitive
 data validation to every text field. Return `202` with
 `{"suggestion_id":"...","status":"received"}`. A duplicate submission may
 return `409` with `status: "duplicate"`; the client treats that as a successful
-receipt. Suggestions go only to Jcode maintainers, never to sponsors. Receipt
+receipt. Suggestions go only to Arterm maintainers, never to sponsors. Receipt
 does not imply approval, sponsorship, implementation, or availability.
 
 ## 5. Validate before production
@@ -286,14 +286,14 @@ Verify all of the following:
 - a configured sponsor recipient receives both browse and select summaries, but
   the same requests with the benchmark header produce no sponsor delivery;
 - suggest requires a prior successful browse in the same category, persists one
-  actionable proposal per browse, and sends it only to Jcode maintainers;
+  actionable proposal per browse, and sends it only to Arterm maintainers;
 - suggestion receipts clearly state that the proposed product or capability is
   not approved or available yet;
 - the request ID appears in service logs and can be correlated for reliability
   debugging without a persistent user identifier; and
 - disabling the catalog entry removes it from browse and prevents selection.
 
-Then validate through jcode by pointing a test config at staging:
+Then validate through arterm by pointing a test config at staging:
 
 ```toml
 [sponsors]
@@ -301,7 +301,7 @@ enabled = true
 endpoint = "https://staging.example.com/v1/discovery"
 ```
 
-In a disposable jcode session, browse the category, select the sponsor or submit
+In a disposable arterm session, browse the category, select the sponsor or submit
 a suggestion when no entry fits, and, if applicable, connect the advertised MCP
 server. Confirm:
 
@@ -320,11 +320,11 @@ server. Confirm:
 For client-side changes, run at minimum:
 
 ```bash
-cargo test -p jcode-app-core tool::discover
-cargo test -p jcode-base sponsors
-cargo test -p jcode-base discovery_provenance
-cargo test -p jcode-tui sponsor_disclosure
-cargo check -p jcode
+cargo test -p arterm-app-core tool::discover
+cargo test -p arterm-base sponsors
+cargo test -p arterm-base discovery_provenance
+cargo test -p arterm-tui sponsor_disclosure
+cargo check -p arterm
 ```
 
 If Cargo's filters change, run the containing crate's tests instead of skipping
@@ -384,7 +384,7 @@ A sponsor is onboarded only when every box is checked:
 - [ ] Sponsor reporting recipients are reviewed and benchmark exclusion is tested.
 - [ ] Browse does not expose setup or MCP launch data.
 - [ ] MCP command and arguments exactly match the tested connection, if used.
-- [ ] Staging jcode validation passes, including disclosure and confirmation.
+- [ ] Staging arterm validation passes, including disclosure and confirmation.
 - [ ] Unknown and disabled entries fail closed.
 - [ ] Production smoke tests pass and monitoring has an owner.
 - [ ] Rollback has been tested or demonstrated by disabling the staging entry.

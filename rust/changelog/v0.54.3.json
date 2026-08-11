@@ -3,7 +3,7 @@
   "date": "2026-07-20",
   "title": "Subscription models, native terminal math, and portable builds",
   "highlights": [
-    "Jcode subscription routes include curated Bedrock coding models and appear reliably in model selection and provider diagnostics",
+    "Arterm subscription routes include curated Bedrock coding models and appear reliably in model selection and provider diagnostics",
     "LaTeX expressions render natively in Handterm-capable terminals",
     "The Windows hotkey listener prewarms the background server for faster first launches"
   ],

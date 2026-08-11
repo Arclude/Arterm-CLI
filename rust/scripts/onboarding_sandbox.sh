@@ -8,22 +8,22 @@ if [[ $# -gt 0 ]]; then
   shift
 fi
 
-sandbox_name=${JCODE_ONBOARDING_SANDBOX:-default}
+sandbox_name=${ARTERM_ONBOARDING_SANDBOX:-default}
 if [[ ! "$sandbox_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || "$sandbox_name" == "." || "$sandbox_name" == ".." ]]; then
   echo "Invalid onboarding sandbox name: $sandbox_name" >&2
   exit 2
 fi
-scratch_root=${JCODE_SCRATCH_DIR:-$HOME/.jcode/scratch}
+scratch_root=${ARTERM_SCRATCH_DIR:-$HOME/.arterm/scratch}
 sandbox_parent="$scratch_root/onboarding"
 sandbox_root_default="$sandbox_parent/$sandbox_name"
-sandbox_root=${JCODE_ONBOARDING_DIR:-$sandbox_root_default}
-jcode_home="$sandbox_root/home"
+sandbox_root=${ARTERM_ONBOARDING_DIR:-$sandbox_root_default}
+arterm_home="$sandbox_root/home"
 runtime_dir="$sandbox_root/runtime"
-marker_file="$sandbox_root/.jcode-onboarding-sandbox"
+marker_file="$sandbox_root/.arterm-onboarding-sandbox"
 
 ensure_dirs() {
-  mkdir -p "$jcode_home" "$runtime_dir"
-  chmod 700 "$sandbox_root" "$jcode_home" "$runtime_dir"
+  mkdir -p "$arterm_home" "$runtime_dir"
+  chmod 700 "$sandbox_root" "$arterm_home" "$runtime_dir"
   : > "$marker_file"
   chmod 600 "$marker_file"
 }
@@ -34,12 +34,12 @@ run_in_sandbox() {
     cd "$repo_root"
     # Strip any inherited self-dev markers so the sandbox behaves like a real
     # first-run install. `--no-selfdev` only prevents *setting*
-    # JCODE_CLIENT_SELFDEV_MODE; it cannot unset one inherited from a parent
+    # ARTERM_CLIENT_SELFDEV_MODE; it cannot unset one inherited from a parent
     # self-dev shell, which would otherwise force every sandbox session canary
     # (suppressing the new-session suggestion cards we are trying to verify).
-    env -u JCODE_CLIENT_SELFDEV_MODE -u JCODE_SELFDEV -u JCODE_CANARY \
-      JCODE_HOME="$jcode_home" \
-      JCODE_RUNTIME_DIR="$runtime_dir" \
+    env -u ARTERM_CLIENT_SELFDEV_MODE -u ARTERM_SELFDEV -u ARTERM_CANARY \
+      ARTERM_HOME="$arterm_home" \
+      ARTERM_RUNTIME_DIR="$runtime_dir" \
       "$@"
   )
 }
@@ -55,9 +55,9 @@ Commands:
   reset                  Delete the sandbox entirely
   purge-external         Delete copied real credentials/transcripts only
   shell                  Open a clean shell with sandbox env vars set
-  jcode [args...]        Run jcode inside the sandbox
-  auth-status            Run 'jcode auth status' inside the sandbox
-  fresh [args...]        Reset sandbox, then launch jcode with args
+  arterm [args...]        Run arterm inside the sandbox
+  auth-status            Run 'arterm auth status' inside the sandbox
+  fresh [args...]        Reset sandbox, then launch arterm with args
   seed-real-logins [--with-transcripts|--transcripts-only]
                          Copy your REAL external logins (Codex/Claude/Gemini/
                          Copilot/Cursor/OpenCode/pi) into the sandbox so the
@@ -66,20 +66,20 @@ Commands:
                          transcripts (so "continue where you left off" has data).
                          Originals are never modified.
   fresh-real [--with-transcripts]
-                         Reset sandbox, seed your real logins, then launch jcode
-  login <provider> ...   Run 'jcode --provider <provider> login ...' in sandbox
+                         Reset sandbox, seed your real logins, then launch arterm
+  login <provider> ...   Run 'arterm --provider <provider> login ...' in sandbox
   fixture-list           List saved local auth fixtures
   fixture-save <name>    Save current sandbox auth state as a local fixture
   fixture-load <name>    Load a saved auth fixture into this sandbox
   fixture-run <name> -- [args...]
-                         Load a fixture, then run jcode with args
+                         Load a fixture, then run arterm with args
   help                   Show this help
 
 Environment overrides:
-  JCODE_ONBOARDING_SANDBOX   Sandbox name (default: default)
-  JCODE_ONBOARDING_DIR       Explicit sandbox directory
-  JCODE_AUTH_FIXTURE_DIR     Fixture store (default: .tmp/auth-fixtures)
-  JCODE_ONBOARDING_KEEP_EXTERNAL=1
+  ARTERM_ONBOARDING_SANDBOX   Sandbox name (default: default)
+  ARTERM_ONBOARDING_DIR       Explicit sandbox directory
+  ARTERM_AUTH_FIXTURE_DIR     Fixture store (default: .tmp/auth-fixtures)
+  ARTERM_ONBOARDING_KEEP_EXTERNAL=1
                               Keep copied real credentials after fresh-real exits
 
 Examples:
@@ -94,8 +94,8 @@ EOF
 print_env() {
   ensure_dirs
   cat <<EOF
-export JCODE_HOME="$jcode_home"
-export JCODE_RUNTIME_DIR="$runtime_dir"
+export ARTERM_HOME="$arterm_home"
+export ARTERM_RUNTIME_DIR="$runtime_dir"
 EOF
 }
 
@@ -103,16 +103,16 @@ status() {
   ensure_dirs
   echo "Sandbox name: $sandbox_name"
   echo "Sandbox root: $sandbox_root"
-  echo "JCODE_HOME:   $jcode_home"
+  echo "ARTERM_HOME:   $arterm_home"
   echo "RUNTIME_DIR:  $runtime_dir"
   echo
 
-  if [[ -d "$jcode_home" ]]; then
+  if [[ -d "$arterm_home" ]]; then
     echo "Home contents:"
-    find "$jcode_home" -maxdepth 3 \( -type f -o -type d \) | sed "s#^$sandbox_root#.#" | sort
+    find "$arterm_home" -maxdepth 3 \( -type f -o -type d \) | sed "s#^$sandbox_root#.#" | sort
   fi
 
-  if [[ -d "$jcode_home/external" ]]; then
+  if [[ -d "$arterm_home/external" ]]; then
     echo
     echo "WARNING: this sandbox contains copies of real credentials or transcripts."
     echo "Remove them with: $(basename "$0") purge-external"
@@ -139,9 +139,9 @@ reset() {
 }
 
 purge_external() {
-  if [[ -d "$jcode_home/external" ]]; then
-    rm -rf "$jcode_home/external"
-    echo "Removed copied external credentials/transcripts: $jcode_home/external"
+  if [[ -d "$arterm_home/external" ]]; then
+    rm -rf "$arterm_home/external"
+    echo "Removed copied external credentials/transcripts: $arterm_home/external"
   else
     echo "No copied external credentials/transcripts found."
   fi
@@ -150,64 +150,64 @@ purge_external() {
 open_shell() {
   ensure_dirs
   echo "Opening sandbox shell"
-  echo "  JCODE_HOME=$jcode_home"
-  echo "  JCODE_RUNTIME_DIR=$runtime_dir"
-  env JCODE_HOME="$jcode_home" JCODE_RUNTIME_DIR="$runtime_dir" bash --noprofile --norc
+  echo "  ARTERM_HOME=$arterm_home"
+  echo "  ARTERM_RUNTIME_DIR=$runtime_dir"
+  env ARTERM_HOME="$arterm_home" ARTERM_RUNTIME_DIR="$runtime_dir" bash --noprofile --norc
 }
 
-run_jcode() {
+run_arterm() {
   # The sandbox should behave like a real standalone install, not a self-dev
-  # client. Because we launch from inside the repo, jcode would otherwise
+  # client. Because we launch from inside the repo, arterm would otherwise
   # auto-detect the repository and join the shared self-dev server (remote
   # mode), which both breaks isolation and skips local-only first-run behavior
   # like the new-session model validation. `--no-selfdev` keeps it standalone,
-  # spawning its own server under the sandbox's JCODE_RUNTIME_DIR. Set
-  # JCODE_SANDBOX_SELFDEV=1 to opt back into the shared-server behavior.
+  # spawning its own server under the sandbox's ARTERM_RUNTIME_DIR. Set
+  # ARTERM_SANDBOX_SELFDEV=1 to opt back into the shared-server behavior.
   local prefix=()
-  if [[ "${JCODE_SANDBOX_SELFDEV:-0}" != "1" ]]; then
+  if [[ "${ARTERM_SANDBOX_SELFDEV:-0}" != "1" ]]; then
     prefix=(--no-selfdev)
   fi
   # Allow pointing the sandbox at an already-built binary (e.g. the selfdev
   # profile output) without rebuilding the debug binary. Falls back to the
   # debug binary, then to `cargo run`.
-  if [[ -n "${JCODE_SANDBOX_BIN:-}" ]]; then
-    if [[ -x "$JCODE_SANDBOX_BIN" ]]; then
-      run_in_sandbox "$JCODE_SANDBOX_BIN" "${prefix[@]}" "$@"
+  if [[ -n "${ARTERM_SANDBOX_BIN:-}" ]]; then
+    if [[ -x "$ARTERM_SANDBOX_BIN" ]]; then
+      run_in_sandbox "$ARTERM_SANDBOX_BIN" "${prefix[@]}" "$@"
       return
     fi
-    echo "JCODE_SANDBOX_BIN=$JCODE_SANDBOX_BIN is not executable" >&2
+    echo "ARTERM_SANDBOX_BIN=$ARTERM_SANDBOX_BIN is not executable" >&2
     return 1
   fi
-  local binary_path="$repo_root/target/debug/jcode"
+  local binary_path="$repo_root/target/debug/arterm"
   if [[ -x "$binary_path" ]]; then
     run_in_sandbox "$binary_path" "${prefix[@]}" "$@"
   else
-    run_in_sandbox cargo run --bin jcode -- "${prefix[@]}" "$@"
+    run_in_sandbox cargo run --bin arterm -- "${prefix[@]}" "$@"
   fi
 }
 
 run_auth_fixture() {
-  JCODE_ONBOARDING_SANDBOX="$sandbox_name" \
-    JCODE_ONBOARDING_DIR="$sandbox_root" \
+  ARTERM_ONBOARDING_SANDBOX="$sandbox_name" \
+    ARTERM_ONBOARDING_DIR="$sandbox_root" \
     "$repo_root/scripts/auth_fixture.sh" "$@"
 }
 
 # Copy one real file from $HOME into the sandbox's external/ tree, preserving its
-# relative path. jcode resolves every external credential/transcript lookup to
-# $JCODE_HOME/external/<same-relative-path-as-$HOME> when JCODE_HOME is set, so
+# relative path. arterm resolves every external credential/transcript lookup to
+# $ARTERM_HOME/external/<same-relative-path-as-$HOME> when ARTERM_HOME is set, so
 # seeding here makes your real logins/transcripts visible to the onboarding
-# import + continue steps. Copies (never symlinks: jcode rejects symlinked auth
+# import + continue steps. Copies (never symlinks: arterm rejects symlinked auth
 # files) and never touches the originals.
 seed_one_file() {
   local rel=$1
   local src="$HOME/$rel"
-  local dst="$jcode_home/external/$rel"
+  local dst="$arterm_home/external/$rel"
   if [[ ! -e "$src" ]]; then
     return 1
   fi
   mkdir -p "$(dirname "$dst")"
   cp -a "$src" "$dst"
-  chmod -R go-rwx "$jcode_home/external" 2>/dev/null || true
+  chmod -R go-rwx "$arterm_home/external" 2>/dev/null || true
   return 0
 }
 
@@ -215,13 +215,13 @@ seed_one_file() {
 seed_one_dir() {
   local rel=$1
   local src="$HOME/$rel"
-  local dst="$jcode_home/external/$rel"
+  local dst="$arterm_home/external/$rel"
   if [[ ! -d "$src" ]]; then
     return 1
   fi
   mkdir -p "$dst"
   cp -a "$src/." "$dst/"
-  chmod -R go-rwx "$jcode_home/external" 2>/dev/null || true
+  chmod -R go-rwx "$arterm_home/external" 2>/dev/null || true
   return 0
 }
 
@@ -287,7 +287,7 @@ seed_real_logins() {
   fi
 
   echo "Seeded real logins into sandbox external dir:"
-  echo "  $jcode_home/external"
+  echo "  $arterm_home/external"
   echo
   if [[ ${#seeded[@]} -gt 0 ]]; then
     echo "Copied:"
@@ -308,7 +308,7 @@ seed_real_logins() {
   echo "These are copies; your real \$HOME files are untouched."
   echo "They contain sensitive data and persist until reset or purge-external."
   echo "Onboarding will now offer to import them. Start it with:"
-  echo "  $(basename "$0") jcode"
+  echo "  $(basename "$0") arterm"
 }
 
 scenario_arg() {
@@ -335,15 +335,15 @@ case "$command" in
   shell)
     open_shell
     ;;
-  jcode)
-    run_jcode "$@"
+  arterm)
+    run_arterm "$@"
     ;;
   auth-status)
-    run_jcode auth status
+    run_arterm auth status
     ;;
   fresh)
     reset
-    run_jcode "$@"
+    run_arterm "$@"
     ;;
   seed-real-logins)
     seed_real_logins "$@"
@@ -352,16 +352,16 @@ case "$command" in
     reset
     seed_real_logins "$@"
     echo
-    echo "Launching sandbox jcode with your real logins available to import..."
-    if run_jcode; then
+    echo "Launching sandbox arterm with your real logins available to import..."
+    if run_arterm; then
       rc=0
     else
       rc=$?
     fi
-    if [[ "${JCODE_ONBOARDING_KEEP_EXTERNAL:-0}" != "1" ]]; then
+    if [[ "${ARTERM_ONBOARDING_KEEP_EXTERNAL:-0}" != "1" ]]; then
       purge_external
     else
-      echo "Keeping copied external credentials because JCODE_ONBOARDING_KEEP_EXTERNAL=1."
+      echo "Keeping copied external credentials because ARTERM_ONBOARDING_KEEP_EXTERNAL=1."
     fi
     exit "$rc"
     ;;
@@ -372,7 +372,7 @@ case "$command" in
     fi
     provider=$1
     shift
-    run_jcode --provider "$provider" login "$@"
+    run_arterm --provider "$provider" login "$@"
     ;;
   fixture-list)
     run_auth_fixture list

@@ -2,7 +2,7 @@
 """End-to-end check of the Discovery browse -> select handoff.
 
 Serves a fake catalog locally and drives the real `discover_tools` tool through
-a jcode session, so the contract can be verified without model credits or the
+a arterm session, so the contract can be verified without model credits or the
 live endpoint:
 
 - browse lists entries and never leaks setup instructions;
@@ -11,7 +11,7 @@ live endpoint:
 - off-catalog select records the exact chosen product without returning provider
   information or setup instructions.
 
-Usage: python scripts/verify_discovery_select.py [path/to/jcode]
+Usage: python scripts/verify_discovery_select.py [path/to/arterm]
 """
 
 from __future__ import annotations
@@ -72,11 +72,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_tool(
-    jcode: str, socket: Path, session: str, payload: dict, env: dict, expect_error: bool = False
+    arterm: str, socket: Path, session: str, payload: dict, env: dict, expect_error: bool = False
 ) -> str:
     result = subprocess.run(
         [
-            jcode,
+            arterm,
             "--socket",
             str(socket),
             "debug",
@@ -101,31 +101,31 @@ def run_tool(
 
 
 def main() -> int:
-    jcode = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("JCODE_BIN", "jcode")
+    arterm = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ARTERM_BIN", "arterm")
     server = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     endpoint = f"http://127.0.0.1:{server.server_port}/discovery"
 
     failures: list[str] = []
-    with tempfile.TemporaryDirectory(prefix="jcode-discovery-e2e-") as temp:
+    with tempfile.TemporaryDirectory(prefix="arterm-discovery-e2e-") as temp:
         root = Path(temp)
         home = root / "home"
         home.mkdir()
         (home / "config.toml").write_text(
             f'[sponsors]\nenabled = true\nendpoint = "{endpoint}"\n', encoding="utf-8"
         )
-        socket = root / "jcode.sock"
+        socket = root / "arterm.sock"
         env = {
             **os.environ,
-            "JCODE_HOME": str(home),
-            "JCODE_RUNTIME_DIR": str(root),
-            "JCODE_DISCOVERY_BENCHMARK": "1",
+            "ARTERM_HOME": str(home),
+            "ARTERM_RUNTIME_DIR": str(root),
+            "ARTERM_DISCOVERY_BENCHMARK": "1",
         }
         workspace = root / "workspace"
         workspace.mkdir()
 
         server_process = subprocess.Popen(
-            [jcode, "--socket", str(socket), "--no-selfdev", "--no-update", "serve",
+            [arterm, "--socket", str(socket), "--no-selfdev", "--no-update", "serve",
              "--server-name", f"discovery-e2e-{os.getpid()}"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -136,7 +136,7 @@ def main() -> int:
             deadline = threading.Event()
             for _ in range(100):
                 probe = subprocess.run(
-                    [jcode, "--socket", str(socket), "debug", "server:info"],
+                    [arterm, "--socket", str(socket), "debug", "server:info"],
                     capture_output=True, text=True, env=env,
                 )
                 if probe.returncode == 0:
@@ -147,14 +147,14 @@ def main() -> int:
 
             created = json.loads(
                 subprocess.run(
-                    [jcode, "--socket", str(socket), "debug", f"create_session:{workspace}"],
+                    [arterm, "--socket", str(socket), "debug", f"create_session:{workspace}"],
                     capture_output=True, text=True, env=env, timeout=60,
                 ).stdout
             )
             session = created["session_id"]
 
             browse = run_tool(
-                jcode, socket, session,
+                arterm, socket, session,
                 {
                     "action": "search",
                     "category": "payments",
@@ -173,7 +173,7 @@ def main() -> int:
                 failures.append("browse did not direct the agent to select")
 
             select = run_tool(
-                jcode, socket, session,
+                arterm, socket, session,
                 {
                     "action": "select",
                     "category": "payments",
@@ -189,7 +189,7 @@ def main() -> int:
                 failures.append("select did not return the withheld setup instructions")
 
             off_catalog = run_tool(
-                jcode, socket, session,
+                arterm, socket, session,
                 {
                     "action": "select",
                     "category": "payments",
@@ -211,7 +211,7 @@ def main() -> int:
                 failures.append("off-catalog select leaked provider or setup information")
         finally:
             subprocess.run(
-                [jcode, "--socket", str(socket), "server", "stop"],
+                [arterm, "--socket", str(socket), "server", "stop"],
                 capture_output=True, text=True, env=env,
             )
             server_process.terminate()

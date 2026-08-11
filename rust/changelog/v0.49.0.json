@@ -3,7 +3,7 @@
   "date": "2026-07-16",
   "title": "Secure sign-in and smoother onboarding",
   "highlights": [
-    "Secure browser-based Jcode account sign-in is now available from both the CLI and TUI",
+    "Secure browser-based Arterm account sign-in is now available from both the CLI and TUI",
     "Onboarding presents a simpler start flow with clearer provider and model choices",
     "Launch shortcuts for supported external CLIs can be learned, installed automatically, and surfaced when useful"
   ],
@@ -18,7 +18,7 @@
   ],
   "fixes": [
     "Windows account credentials use secure storage and canceled browser exchanges are cleaned up safely",
-    "External CLI hooks launch Jcode through a trusted path instead of project-controlled executables",
+    "External CLI hooks launch Arterm through a trusted path instead of project-controlled executables",
     "Redirected output no longer attempts terminal image rendering",
     "Background telemetry delivery is bounded to prevent unrestrained concurrency",
     "Handterm native scrolling animates multi-row input instead of jumping directly to the final position"

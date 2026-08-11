@@ -1,0 +1,153 @@
+[package]
+name = "arterm-base"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Foundational layer of the arterm application core: the downward-closed set of
+# modules (provider, auth, config, session, message, memory, telemetry, ...)
+# that the server/tool/agent layer depends on. Split out of `arterm-app-core` so
+# the two halves compile as separate rustc units, halving peak compile memory.
+# `arterm-app-core` re-exports this crate (`pub use arterm_base::*`) so that every
+# existing `crate::<module>` path keeps resolving unchanged.
+
+[lib]
+name = "arterm_base"
+path = "src/lib.rs"
+
+[dependencies]
+# Memory allocator (reduces fragmentation for long-running server)
+tikv-jemalloc-ctl = { version = "0.6", optional = true }
+tikv-jemalloc-sys = { version = "0.6", optional = true }
+
+# Async runtime
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+serde_yaml = "0.9"
+toml = "0.8"
+
+# File operations
+
+# Utilities
+dirs = "5"               # home directory
+anyhow = "1"
+libc = "0.2"             # Unix system calls (flock)
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+urlencoding = "2"        # URL encoding for web search
+uuid = { version = "1", features = ["v4", "v5"] }
+proctitle = "0.1"
+
+# Embeddings (local inference) - behind feature flag (163 crates, slow to compile)
+arterm-embedding = { path = "../arterm-embedding", optional = true }
+arterm-gateway-types = { path = "../arterm-gateway-types" }
+arterm-import-core = { path = "../arterm-import-core" }
+arterm-logging = { path = "../arterm-logging" }
+
+# OAuth
+base64 = "0.22"
+sha2 = "0.10"
+arterm-transport = { path = "../arterm-transport" }
+rand = "0.9.3"
+hex = "0.4"
+url = "2"
+open = "5"               # Open URLs in browser
+arterm-auth-types = { path = "../arterm-auth-types" }
+arterm-azure-auth = { path = "../arterm-azure-auth" }
+arterm-agent-runtime = { path = "../arterm-agent-runtime" }
+arterm-provider-metadata = { path = "../arterm-provider-metadata" }
+arterm-provider-env = { path = "../arterm-provider-env" }
+arterm-provider-core = { path = "../arterm-provider-core" }
+# default-features=false so this crate's `bedrock` feature (below) controls the
+# AWS SDK stack; the pure model-metadata/credential-detection layer is always on.
+arterm-provider-bedrock = { path = "../arterm-provider-bedrock", default-features = false }
+arterm-provider-antigravity = { path = "../arterm-provider-antigravity" }
+arterm-provider-copilot = { path = "../arterm-provider-copilot" }
+arterm-provider-openai = { path = "../arterm-provider-openai" }
+arterm-provider-openrouter = { path = "../arterm-provider-openrouter" }
+arterm-provider-gemini = { path = "../arterm-provider-gemini" }
+# NOTE: this foundation layer intentionally does NOT depend on any `arterm-tui-*`
+# crate. The two pure-data/string symbols it used to reach for (`ResumeTarget`,
+# `reasoning_line_markup`) were moved to `arterm-session-types` and
+# `arterm-render-core` respectively, so the layering inversion (foundation
+# depending on presentation) is gone.
+arterm-render-core = { path = "../arterm-render-core" }
+arterm-terminal-launch = { path = "../arterm-terminal-launch" }
+arterm-terminal-image = { path = "../arterm-terminal-image" }
+arterm-telemetry-core = { path = "../arterm-telemetry-core" }
+arterm-usage-types = { path = "../arterm-usage-types" }
+
+# Streaming
+
+# Terminal I/O (event stream for interactive auth/secret prompts). NOTE: the
+# heavier presentation deps (ratatui widgets, arboard clipboard) were dropped
+# from this foundation layer; they are unused here and live only in `arterm-tui`.
+crossterm = { version = "0.29", features = ["event-stream"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }  # Only PNG/JPEG (skip avif/rav1e, exr, gif, tiff, etc)
+
+# NOTE: PDF text extraction (arterm-pdf) lives in the upper arterm-app-core crate
+# (tool/read.rs), not here.
+arterm-background-types = { path = "../arterm-background-types" }
+arterm-batch-types = { path = "../arterm-batch-types" }
+arterm-build-meta = { path = "../arterm-build-meta" }
+arterm-compaction-core = { path = "../arterm-compaction-core" }
+arterm-config-types = { path = "../arterm-config-types" }
+arterm-core = { path = "../arterm-core" }
+arterm-memory-types = { path = "../arterm-memory-types" }
+arterm-message-types = { path = "../arterm-message-types" }
+arterm-plan = { path = "../arterm-plan" }
+arterm-protocol = { path = "../arterm-protocol" }
+arterm-session-types = { path = "../arterm-session-types" }
+arterm-storage = { path = "../arterm-storage" }
+arterm-task-types = { path = "../arterm-task-types" }
+arterm-tool-core = { path = "../arterm-tool-core" }
+arterm-tool-types = { path = "../arterm-tool-types" }
+arterm-side-panel-types = { path = "../arterm-side-panel-types" }
+
+# Gzip decoding (used by provider import/helpers)
+tempfile = "3"
+qrcode = { version = "0.14.1", default-features = false }
+
+[features]
+default = ["embeddings", "bedrock"]
+# Compiles the in-crate test helpers (storage::lock_test_env,
+# auth::test_sandbox, bus::reset_models_updated_publish_state_for_tests, ...) as
+# `pub` so downstream crates' test targets can reach them. Enabled as a
+# dev-dependency feature by arterm-app-core / arterm / etc.; never in normal
+# (non-test) builds.
+test-support = []
+jemalloc = [
+    "dep:tikv-jemalloc-ctl",
+    "dep:tikv-jemalloc-sys",
+    "tikv-jemalloc-ctl/stats",
+]
+jemalloc-prof = [
+    "jemalloc",
+    "tikv-jemalloc-ctl/profiling",
+]
+embeddings = ["dep:arterm-embedding"]
+# Live AWS Bedrock support (the ~20-crate AWS SDK stack) lives in
+# arterm-provider-bedrock (aws-sdk); forward there. Without it the Bedrock
+# provider still compiles but live calls return an explanatory error.
+bedrock = ["arterm-provider-bedrock/aws-sdk"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Power", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+global-hotkey = "0.7"
+
+[dev-dependencies]
+# Dev-only cycle (cargo permits dev-dependencies on dependents): base's
+# MultiProvider routing tests exercise the real OpenRouter/OpenAI-compatible
+# runtime through the composition-root registry, exactly like the binary.
+arterm-provider-openrouter-runtime = { path = "../arterm-provider-openrouter-runtime" }

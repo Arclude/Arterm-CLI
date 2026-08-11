@@ -1,22 +1,22 @@
 <#
 .SYNOPSIS
-    Install jcode on Windows.
+    Install arterm on Windows.
 .DESCRIPTION
-    Downloads the latest jcode release and installs it to %LOCALAPPDATA%\jcode\bin.
+    Downloads the latest arterm release and installs it to %LOCALAPPDATA%\arterm\bin.
 
     One-liner install:
-      irm https://jcode.sh/install.ps1 | iex
+      irm https://arterm.sh/install.ps1 | iex
 
     Or download and run (allows parameters):
-      & ([scriptblock]::Create((irm https://jcode.sh/install.ps1)))
+      & ([scriptblock]::Create((irm https://arterm.sh/install.ps1)))
 .PARAMETER InstallDir
-    Override the installation directory (default: $env:LOCALAPPDATA\jcode\bin)
+    Override the installation directory (default: $env:LOCALAPPDATA\arterm\bin)
 .PARAMETER Version
     Override the version tag to install. Required when using a local artifact path.
 .PARAMETER ArtifactExePath
-    Use a local jcode.exe artifact instead of downloading from GitHub.
+    Use a local arterm.exe artifact instead of downloading from GitHub.
 .PARAMETER ArtifactTgzPath
-    Use a local jcode .tar.gz artifact instead of downloading from GitHub.
+    Use a local arterm .tar.gz artifact instead of downloading from GitHub.
 .PARAMETER BuildFromSource
     If no prebuilt release asset is available, explicitly allow a source build.
     Source builds require Git, Rust, and the Visual Studio C++ Build Tools.
@@ -48,39 +48,39 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     exit 1
 }
 
-$Repo = "1jehuang/jcode"
-$ReleaseMetadataBase = if ($env:JCODE_RELEASE_METADATA_BASE) {
-    $env:JCODE_RELEASE_METADATA_BASE.TrimEnd('/')
+$Repo = "1jehuang/arterm"
+$ReleaseMetadataBase = if ($env:ARTERM_RELEASE_METADATA_BASE) {
+    $env:ARTERM_RELEASE_METADATA_BASE.TrimEnd('/')
 } else {
-    "https://jcode.sh/releases"
+    "https://arterm.sh/releases"
 }
 
 if (-not $InstallDir) {
     $localAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData) }
     if (-not $localAppData -and $env:USERPROFILE) { $localAppData = Join-Path $env:USERPROFILE "AppData\Local" }
-    $InstallDir = Join-Path $localAppData "jcode\bin"
+    $InstallDir = Join-Path $localAppData "arterm\bin"
 }
 
-$JcodeHome = if ($env:JCODE_HOME) {
-    $env:JCODE_HOME
+$ArtermHome = if ($env:ARTERM_HOME) {
+    $env:ARTERM_HOME
 } elseif ($env:USERPROFILE) {
-    Join-Path $env:USERPROFILE ".jcode"
+    Join-Path $env:USERPROFILE ".arterm"
 } else {
-    Join-Path ([Environment]::GetFolderPath("UserProfile")) ".jcode"
+    Join-Path ([Environment]::GetFolderPath("UserProfile")) ".arterm"
 }
 
-$HotkeyDir = Join-Path $JcodeHome "hotkey"
-$SetupHintsPath = Join-Path $JcodeHome "setup_hints.json"
+$HotkeyDir = Join-Path $ArtermHome "hotkey"
+$SetupHintsPath = Join-Path $ArtermHome "setup_hints.json"
 
 function Write-Info($msg) { Write-Host $msg -ForegroundColor Blue }
 function Write-Err($msg) { throw "error: $msg" }
 function Write-Warn($msg) { Write-Host "warning: $msg" -ForegroundColor Yellow }
 
-function ConvertFrom-JcodeWebContent($Content) {
+function ConvertFrom-ArtermWebContent($Content) {
     if ($null -eq $Content) { return "" }
 
     # Windows PowerShell 5.1 returns Byte[] for some text responses when the
-    # server uses application/octet-stream (including jcode.sh metadata and
+    # server uses application/octet-stream (including arterm.sh metadata and
     # GitHub release checksum manifests). Casting Byte[] directly to [string]
     # produces a space-separated list of decimal bytes instead of the text.
     if ($Content -is [byte[]]) {
@@ -90,11 +90,11 @@ function ConvertFrom-JcodeWebContent($Content) {
     return [string]$Content
 }
 
-function Test-JcodeReleaseTag([string]$Tag) {
+function Test-ArtermReleaseTag([string]$Tag) {
     return [bool]($Tag -match '^v[0-9]+\.[0-9]+\.[0-9]+(?:[+.-][A-Za-z0-9.-]+)?$')
 }
 
-function Resolve-JcodeReleaseTagFromUri([string]$Uri) {
+function Resolve-ArtermReleaseTagFromUri([string]$Uri) {
     if (-not $Uri) { return $null }
     if ($Uri -match '/releases/tag/([^/?#]+)') {
         return [Uri]::UnescapeDataString($Matches[1])
@@ -102,14 +102,14 @@ function Resolve-JcodeReleaseTagFromUri([string]$Uri) {
     return $null
 }
 
-function Get-LatestJcodeReleaseTag {
+function Get-LatestArtermReleaseTag {
     # Avoid api.github.com here. Its unauthenticated limit is only 60 requests
     # per public IP per hour, so installs are unreliable behind shared NAT/VPNs.
     $metadataTag = $null
     try {
         $metadataResponse = Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseMetadataBase/latest/version"
-        $candidate = (ConvertFrom-JcodeWebContent -Content $metadataResponse.Content).Trim()
-        if (Test-JcodeReleaseTag $candidate) { $metadataTag = $candidate }
+        $candidate = (ConvertFrom-ArtermWebContent -Content $metadataResponse.Content).Trim()
+        if (Test-ArtermReleaseTag $candidate) { $metadataTag = $candidate }
     } catch {}
 
     try {
@@ -131,7 +131,7 @@ function Get-LatestJcodeReleaseTag {
             }
         }
 
-        $tag = Resolve-JcodeReleaseTagFromUri $resolvedUri
+        $tag = Resolve-ArtermReleaseTagFromUri $resolvedUri
         if ($tag) { return $tag }
     } catch {
         if (-not $metadataTag) {
@@ -140,17 +140,17 @@ function Get-LatestJcodeReleaseTag {
     }
 
     if ($metadataTag) {
-        Write-Warn "GitHub release lookup unavailable; using cached jcode.sh metadata ($metadataTag)."
+        Write-Warn "GitHub release lookup unavailable; using cached arterm.sh metadata ($metadataTag)."
         return $metadataTag
     }
     Write-Err "Failed to determine latest version"
 }
 
-function Get-JcodeReleaseDownloadBases([string]$ReleaseTag) {
+function Get-ArtermReleaseDownloadBases([string]$ReleaseTag) {
     $bases = New-Object System.Collections.Generic.List[string]
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseMetadataBase/$ReleaseTag/download-bases"
-        foreach ($line in ((ConvertFrom-JcodeWebContent -Content $response.Content) -split "`r?`n")) {
+        foreach ($line in ((ConvertFrom-ArtermWebContent -Content $response.Content) -split "`r?`n")) {
             $candidate = $line.Trim().TrimEnd('/')
             if ($candidate -match '^https://\S+$' -and -not $bases.Contains($candidate)) {
                 $bases.Add($candidate)
@@ -163,7 +163,7 @@ function Get-JcodeReleaseDownloadBases([string]$ReleaseTag) {
     return $bases.ToArray()
 }
 
-function Get-JcodeSha256FromManifest {
+function Get-ArtermSha256FromManifest {
     param(
         [Parameter(Mandatory = $true)][string]$ManifestText,
         [Parameter(Mandatory = $true)][string]$AssetName
@@ -189,7 +189,7 @@ function Get-ReleaseChecksum([string]$ReleaseTag, [string]$AssetName) {
     )) {
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl
-            $expected = Get-JcodeSha256FromManifest -ManifestText (ConvertFrom-JcodeWebContent -Content $response.Content) -AssetName $AssetName
+            $expected = Get-ArtermSha256FromManifest -ManifestText (ConvertFrom-ArtermWebContent -Content $response.Content) -AssetName $AssetName
             if ($expected) { return $expected }
         } catch {
             $lastError = $_
@@ -202,7 +202,7 @@ function Get-ReleaseChecksum([string]$ReleaseTag, [string]$AssetName) {
     Write-Err "SHA256SUMS for $ReleaseTag does not list $AssetName"
 }
 
-function Assert-JcodeFileChecksum([string]$FilePath, [string]$ExpectedSha256, [string]$AssetName) {
+function Assert-ArtermFileChecksum([string]$FilePath, [string]$ExpectedSha256, [string]$AssetName) {
     try {
         $actual = (Get-FileHash -LiteralPath $FilePath -Algorithm SHA256).Hash.ToLowerInvariant()
     } catch {
@@ -218,7 +218,7 @@ function Assert-JcodeFileChecksum([string]$FilePath, [string]$ExpectedSha256, [s
     return $actual
 }
 
-function Get-JcodeLocalAppDataDir {
+function Get-ArtermLocalAppDataDir {
     if ($env:LOCALAPPDATA) {
         return $env:LOCALAPPDATA
     }
@@ -235,11 +235,11 @@ function Get-JcodeLocalAppDataDir {
     return (Join-Path ([Environment]::GetFolderPath("UserProfile")) "AppData\Local")
 }
 
-function Get-DefaultJcodeInstallDir {
-    return (Join-Path (Get-JcodeLocalAppDataDir) "jcode\bin")
+function Get-DefaultArtermInstallDir {
+    return (Join-Path (Get-ArtermLocalAppDataDir) "arterm\bin")
 }
 
-function ConvertTo-JcodePathKey([string]$PathValue) {
+function ConvertTo-ArtermPathKey([string]$PathValue) {
     if (-not $PathValue) {
         return ""
     }
@@ -259,7 +259,7 @@ function ConvertTo-JcodePathKey([string]$PathValue) {
     return $clean.ToUpperInvariant()
 }
 
-function Split-JcodePathList([string]$PathValue) {
+function Split-ArtermPathList([string]$PathValue) {
     if (-not $PathValue) {
         return @()
     }
@@ -274,7 +274,7 @@ function Split-JcodePathList([string]$PathValue) {
     return $entries
 }
 
-function Join-JcodePathList([string[]]$Entries) {
+function Join-ArtermPathList([string[]]$Entries) {
     if (-not $Entries -or $Entries.Count -eq 0) {
         return ""
     }
@@ -282,10 +282,10 @@ function Join-JcodePathList([string[]]$Entries) {
     return ($Entries -join ';')
 }
 
-function Get-JcodeManagedPathKeys([string]$InstallDir) {
+function Get-ArtermManagedPathKeys([string]$InstallDir) {
     $keys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($candidate in @($InstallDir, (Get-DefaultJcodeInstallDir))) {
-        $key = ConvertTo-JcodePathKey $candidate
+    foreach ($candidate in @($InstallDir, (Get-DefaultArtermInstallDir))) {
+        $key = ConvertTo-ArtermPathKey $candidate
         if ($key) {
             [void]$keys.Add($key)
         }
@@ -293,19 +293,19 @@ function Get-JcodeManagedPathKeys([string]$InstallDir) {
     return $keys
 }
 
-function Resolve-JcodePathUpdate {
+function Resolve-ArtermPathUpdate {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDir,
         [AllowNull()][string]$CurrentPath,
         [switch]$RemoveOnly
     )
 
-    $managedKeys = Get-JcodeManagedPathKeys -InstallDir $InstallDir
+    $managedKeys = Get-ArtermManagedPathKeys -InstallDir $InstallDir
     $nextEntries = @()
     $removedManaged = 0
 
-    foreach ($entry in (Split-JcodePathList $CurrentPath)) {
-        $key = ConvertTo-JcodePathKey $entry
+    foreach ($entry in (Split-ArtermPathList $CurrentPath)) {
+        $key = ConvertTo-ArtermPathKey $entry
         if (-not $key) {
             continue
         }
@@ -322,7 +322,7 @@ function Resolve-JcodePathUpdate {
         $nextEntries = @($InstallDir) + $nextEntries
     }
 
-    $nextPath = Join-JcodePathList $nextEntries
+    $nextPath = Join-ArtermPathList $nextEntries
     $changed = ($nextPath -ne ([string]$CurrentPath))
 
     return [pscustomobject]@{
@@ -335,16 +335,16 @@ function Resolve-JcodePathUpdate {
     }
 }
 
-function Send-JcodeEnvironmentChangedBroadcast {
-    if ($env:JCODE_DISABLE_ENV_BROADCAST -eq "1") {
+function Send-ArtermEnvironmentChangedBroadcast {
+    if ($env:ARTERM_DISABLE_ENV_BROADCAST -eq "1") {
         return $false
     }
 
-    if (-not ("Jcode.EnvironmentBroadcast" -as [type])) {
+    if (-not ("Arterm.EnvironmentBroadcast" -as [type])) {
         Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
-namespace Jcode {
+namespace Arterm {
     public static class EnvironmentBroadcast {
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         public static extern IntPtr SendMessageTimeout(
@@ -361,11 +361,11 @@ namespace Jcode {
     }
 
     $result = [UIntPtr]::Zero
-    [Jcode.EnvironmentBroadcast]::SendMessageTimeout([IntPtr]0xffff, 0x001A, [UIntPtr]::Zero, "Environment", 0x0002, 5000, [ref]$result) | Out-Null
+    [Arterm.EnvironmentBroadcast]::SendMessageTimeout([IntPtr]0xffff, 0x001A, [UIntPtr]::Zero, "Environment", 0x0002, 5000, [ref]$result) | Out-Null
     return $true
 }
 
-function Set-JcodeUserPath {
+function Set-ArtermUserPath {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDir,
         [AllowNull()][string]$CurrentPath,
@@ -378,7 +378,7 @@ function Set-JcodeUserPath {
         $CurrentPath = [Environment]::GetEnvironmentVariable("Path", "User")
     }
 
-    $update = Resolve-JcodePathUpdate -InstallDir $InstallDir -CurrentPath $CurrentPath
+    $update = Resolve-ArtermPathUpdate -InstallDir $InstallDir -CurrentPath $CurrentPath
     $broadcasted = $false
 
     if ($update.Changed) {
@@ -392,7 +392,7 @@ function Set-JcodeUserPath {
             if ($BroadcastAction) {
                 & $BroadcastAction | Out-Null
             } else {
-                Send-JcodeEnvironmentChangedBroadcast | Out-Null
+                Send-ArtermEnvironmentChangedBroadcast | Out-Null
             }
             $broadcasted = $true
         }
@@ -402,7 +402,7 @@ function Set-JcodeUserPath {
     return $update
 }
 
-function Remove-JcodeUserPath {
+function Remove-ArtermUserPath {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDir,
         [AllowNull()][string]$CurrentPath,
@@ -415,7 +415,7 @@ function Remove-JcodeUserPath {
         $CurrentPath = [Environment]::GetEnvironmentVariable("Path", "User")
     }
 
-    $update = Resolve-JcodePathUpdate -InstallDir $InstallDir -CurrentPath $CurrentPath -RemoveOnly
+    $update = Resolve-ArtermPathUpdate -InstallDir $InstallDir -CurrentPath $CurrentPath -RemoveOnly
     $broadcasted = $false
 
     if ($update.Changed) {
@@ -429,7 +429,7 @@ function Remove-JcodeUserPath {
             if ($BroadcastAction) {
                 & $BroadcastAction | Out-Null
             } else {
-                Send-JcodeEnvironmentChangedBroadcast | Out-Null
+                Send-ArtermEnvironmentChangedBroadcast | Out-Null
             }
             $broadcasted = $true
         }
@@ -439,22 +439,22 @@ function Remove-JcodeUserPath {
     return $update
 }
 
-function Set-JcodeProcessPath([string]$InstallDir) {
-    $update = Resolve-JcodePathUpdate -InstallDir $InstallDir -CurrentPath $env:Path
+function Set-ArtermProcessPath([string]$InstallDir) {
+    $update = Resolve-ArtermPathUpdate -InstallDir $InstallDir -CurrentPath $env:Path
     $env:Path = $update.Path
     return $update
 }
 
-function Remove-JcodeStaleLauncherBackups {
+function Remove-ArtermStaleLauncherBackups {
     param(
         [Parameter(Mandatory = $true)][string]$LauncherDir
     )
 
-    Get-ChildItem -LiteralPath $LauncherDir -Filter '.jcode-launcher-old-*.exe' -File -Force -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $LauncherDir -Filter '.arterm-launcher-old-*.exe' -File -Force -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
-function Install-JcodeLauncher {
+function Install-ArtermLauncher {
     param(
         [Parameter(Mandatory = $true)][string]$SourcePath,
         [Parameter(Mandatory = $true)][string]$LauncherPath
@@ -464,8 +464,8 @@ function Install-JcodeLauncher {
     New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
 
     $operationId = [guid]::NewGuid().ToString('N')
-    $tempLauncher = Join-Path $launcherDir (".jcode-launcher-{0}.tmp.exe" -f $operationId)
-    $oldLauncher = Join-Path $launcherDir (".jcode-launcher-old-{0}.exe" -f $operationId)
+    $tempLauncher = Join-Path $launcherDir (".arterm-launcher-{0}.tmp.exe" -f $operationId)
+    $oldLauncher = Join-Path $launcherDir (".arterm-launcher-old-{0}.exe" -f $operationId)
     $movedExistingLauncher = $false
     try {
         Copy-Item -Path $SourcePath -Destination $tempLauncher -Force
@@ -490,7 +490,7 @@ function Install-JcodeLauncher {
 
         if ($movedExistingLauncher) {
             # Removal succeeds immediately for an idle launcher. If an older
-            # jcode process still has the renamed executable loaded, Windows
+            # arterm process still has the renamed executable loaded, Windows
             # keeps it until that process exits and the next install cleans it.
             Remove-Item -LiteralPath $oldLauncher -Force -ErrorAction SilentlyContinue
         }
@@ -498,7 +498,7 @@ function Install-JcodeLauncher {
         # Only prune backups after the stable path contains the new launcher.
         # Doing this before replacement could delete another concurrent
         # installer's rollback file during its short rename window.
-        Remove-JcodeStaleLauncherBackups -LauncherDir $launcherDir
+        Remove-ArtermStaleLauncherBackups -LauncherDir $launcherDir
     } finally {
         Remove-Item -LiteralPath $tempLauncher -Force -ErrorAction SilentlyContinue
     }
@@ -549,8 +549,8 @@ function Invoke-ProcessWithTimeout {
     $stdoutPath = $null
     $stderrPath = $null
     if ($CaptureOutput) {
-        $stdoutPath = Join-Path $env:TEMP ("jcode-{0}-{1}-stdout.log" -f $FriendlyName, [guid]::NewGuid().ToString('N'))
-        $stderrPath = Join-Path $env:TEMP ("jcode-{0}-{1}-stderr.log" -f $FriendlyName, [guid]::NewGuid().ToString('N'))
+        $stdoutPath = Join-Path $env:TEMP ("arterm-{0}-{1}-stdout.log" -f $FriendlyName, [guid]::NewGuid().ToString('N'))
+        $stderrPath = Join-Path $env:TEMP ("arterm-{0}-{1}-stderr.log" -f $FriendlyName, [guid]::NewGuid().ToString('N'))
         $startParams.RedirectStandardOutput = $stdoutPath
         $startParams.RedirectStandardError = $stderrPath
     }
@@ -671,37 +671,37 @@ function Install-Alacritty {
     return $true
 }
 
-function Stop-JcodeHotkeyListeners {
+function Stop-ArtermHotkeyListeners {
     try {
         Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'pwsh.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -like '*jcode-hotkey*' } |
+            Where-Object { $_.CommandLine -like '*arterm-hotkey*' } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     } catch {}
 
     try {
         $currentPid = $PID
-        Get-CimInstance Win32_Process -Filter "Name = 'jcode.exe'" -ErrorAction SilentlyContinue |
+        Get-CimInstance Win32_Process -Filter "Name = 'arterm.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.ProcessId -ne $currentPid -and $_.CommandLine -like '*--listen-windows-hotkey*' } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     } catch {}
 }
 
-function ConvertFrom-JcodeVersionOutput([string]$Output) {
+function ConvertFrom-ArtermVersionOutput([string]$Output) {
     if (-not $Output) {
         return $null
     }
 
     # A genuinely fresh profile may print the one-time telemetry notice before
     # the version. When output is captured by PowerShell, terminal control
-    # sequences can also leave the final `jcode v...` on the same logical line.
-    if ($Output -match '(?i)\bjcode\s+v?([0-9][0-9A-Za-z.+-]*)') {
+    # sequences can also leave the final `arterm v...` on the same logical line.
+    if ($Output -match '(?i)\barterm\s+v?([0-9][0-9A-Za-z.+-]*)') {
         return "v$($Matches[1])"
     }
 
     return $null
 }
 
-function Get-JcodeVersionFromBinary([string]$BinaryPath) {
+function Get-ArtermVersionFromBinary([string]$BinaryPath) {
     if (-not $BinaryPath -or -not (Test-Path -LiteralPath $BinaryPath)) {
         return $null
     }
@@ -719,7 +719,7 @@ function Get-JcodeVersionFromBinary([string]$BinaryPath) {
         if ($exitCode -ne 0) {
             return $null
         }
-        return (ConvertFrom-JcodeVersionOutput $output)
+        return (ConvertFrom-ArtermVersionOutput $output)
     } catch {
         return $null
     } finally {
@@ -727,19 +727,19 @@ function Get-JcodeVersionFromBinary([string]$BinaryPath) {
     }
 }
 
-function Assert-JcodeBinaryCandidate {
+function Assert-ArtermBinaryCandidate {
     param(
         [Parameter(Mandatory = $true)][string]$BinaryPath,
         [Parameter(Mandatory = $true)][string]$ExpectedVersion
     )
 
-    if ($env:JCODE_INSTALL_SKIP_BINARY_VALIDATION -eq "1") {
+    if ($env:ARTERM_INSTALL_SKIP_BINARY_VALIDATION -eq "1") {
         return $null
     }
 
-    $reportedVersion = Get-JcodeVersionFromBinary $BinaryPath
+    $reportedVersion = Get-ArtermVersionFromBinary $BinaryPath
     if (-not $reportedVersion) {
-        Write-Err "Downloaded jcode binary could not run '--version'. It may be corrupt, quarantined by antivirus, or built for the wrong architecture."
+        Write-Err "Downloaded arterm binary could not run '--version'. It may be corrupt, quarantined by antivirus, or built for the wrong architecture."
     }
 
     $expectedNumber = $ExpectedVersion.TrimStart('v')
@@ -747,11 +747,11 @@ function Assert-JcodeBinaryCandidate {
         Write-Err "Downloaded binary reports $reportedVersion, but the installer requested $ExpectedVersion"
     }
 
-    Write-Info "Validated jcode binary: $reportedVersion"
+    Write-Info "Validated arterm binary: $reportedVersion"
     return $reportedVersion
 }
 
-function Test-JcodeMsvcBuildToolsAvailable {
+function Test-ArtermMsvcBuildToolsAvailable {
     if (Get-Command link.exe -ErrorAction SilentlyContinue) {
         return $true
     }
@@ -774,7 +774,7 @@ function Test-JcodeMsvcBuildToolsAvailable {
     }
 }
 
-function Assert-JcodeSourceBuildPrerequisites {
+function Assert-ArtermSourceBuildPrerequisites {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Err "Git is required for -BuildFromSource. Install it with: winget install -e --id Git.Git"
     }
@@ -787,13 +787,13 @@ function Assert-JcodeSourceBuildPrerequisites {
         $rustHost = (& rustc -vV 2>$null | Select-String '^host:' | Select-Object -First 1).ToString()
     } catch {}
 
-    if ($rustHost -match 'pc-windows-msvc' -and -not (Test-JcodeMsvcBuildToolsAvailable)) {
+    if ($rustHost -match 'pc-windows-msvc' -and -not (Test-ArtermMsvcBuildToolsAvailable)) {
         Write-Err "The MSVC linker (link.exe) was not found. Install Visual Studio 2022 Build Tools with the 'Desktop development with C++' workload, then open a new PowerShell window before using -BuildFromSource."
     }
 }
 
 function Set-SetupHintsState([bool]$AlacrittyConfigured, [bool]$HotkeyConfigured) {
-    New-Item -ItemType Directory -Path $JcodeHome -Force | Out-Null
+    New-Item -ItemType Directory -Path $ArtermHome -Force | Out-Null
 
     $state = @{
         launch_count = 0
@@ -830,9 +830,9 @@ function Set-SetupHintsState([bool]$AlacrittyConfigured, [bool]$HotkeyConfigured
     $state | ConvertTo-Json | Set-Content -Path $SetupHintsPath -Encoding UTF8
 }
 
-function Get-JcodeHotkeyShortcutScript([string]$StartupShortcutPath, [string]$JcodeExePath) {
+function Get-ArtermHotkeyShortcutScript([string]$StartupShortcutPath, [string]$ArtermExePath) {
     $escapedShortcutPath = $StartupShortcutPath.Replace("'", "''")
-    $escapedExePath = $JcodeExePath.Replace("'", "''")
+    $escapedExePath = $ArtermExePath.Replace("'", "''")
     $listenerArguments = "-NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -Command `"& '$escapedExePath' setup-hotkey --listen-windows-hotkey`""
     $escapedListenerArguments = $listenerArguments.Replace("'", "''")
     $shortcutLines = @(
@@ -841,7 +841,7 @@ function Get-JcodeHotkeyShortcutScript([string]$StartupShortcutPath, [string]$Jc
         "`$shortcut = `$shell.CreateShortcut('$escapedShortcutPath')",
         "`$shortcut.TargetPath = 'powershell.exe'",
         "`$shortcut.Arguments = '$escapedListenerArguments'",
-        "`$shortcut.Description = 'jcode global launch hotkey listener'",
+        "`$shortcut.Description = 'arterm global launch hotkey listener'",
         '$shortcut.WindowStyle = 7',
         '$shortcut.Save()',
         "Write-Output 'OK'"
@@ -849,29 +849,29 @@ function Get-JcodeHotkeyShortcutScript([string]$StartupShortcutPath, [string]$Jc
     return ($shortcutLines -join "`r`n")
 }
 
-function Install-JcodeHotkey([string]$JcodeExePath) {
+function Install-ArtermHotkey([string]$ArtermExePath) {
     New-Item -ItemType Directory -Path $HotkeyDir -Force | Out-Null
     $skipProcessLifecycle = (
-        $env:JCODE_WINDOWS_SETUP_SKIP_EXTERNALS -eq "1" -or
-        $env:JCODE_WINDOWS_SETUP_SKIP_PROCESS_LIFECYCLE -eq "1"
+        $env:ARTERM_WINDOWS_SETUP_SKIP_EXTERNALS -eq "1" -or
+        $env:ARTERM_WINDOWS_SETUP_SKIP_PROCESS_LIFECYCLE -eq "1"
     )
     if (-not $skipProcessLifecycle) {
-        Stop-JcodeHotkeyListeners
+        Stop-ArtermHotkeyListeners
     }
 
     # Upgrade cleanup: v0.47 and earlier wrote a generated PowerShell listener.
-    # The first-party listener now lives in jcode.exe itself and is launched via
-    # `jcode setup-hotkey --listen-windows-hotkey` from a login shortcut.
-    Remove-Item -Path (Join-Path $HotkeyDir "jcode-hotkey.ps1") -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path (Join-Path $HotkeyDir "jcode-hotkey-launcher.vbs") -Force -ErrorAction SilentlyContinue
+    # The first-party listener now lives in arterm.exe itself and is launched via
+    # `arterm setup-hotkey --listen-windows-hotkey` from a login shortcut.
+    Remove-Item -Path (Join-Path $HotkeyDir "arterm-hotkey.ps1") -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $HotkeyDir "arterm-hotkey-launcher.vbs") -Force -ErrorAction SilentlyContinue
     $startupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
     New-Item -ItemType Directory -Path $startupDir -Force | Out-Null
-    $startupShortcutPath = Join-Path $startupDir "jcode-hotkey.lnk"
-    $shortcutScript = Get-JcodeHotkeyShortcutScript -StartupShortcutPath $startupShortcutPath -JcodeExePath $JcodeExePath
+    $startupShortcutPath = Join-Path $startupDir "arterm-hotkey.lnk"
+    $shortcutScript = Get-ArtermHotkeyShortcutScript -StartupShortcutPath $startupShortcutPath -ArtermExePath $ArtermExePath
 
-    if ($env:JCODE_WINDOWS_SETUP_SKIP_EXTERNALS -eq "1") {
-        Set-Content -Path (Join-Path $HotkeyDir "jcode-hotkey-shortcut.ps1") -Value $shortcutScript -Encoding UTF8
-        Write-Info "Configured Alt+; and the Copilot key to launch jcode"
+    if ($env:ARTERM_WINDOWS_SETUP_SKIP_EXTERNALS -eq "1") {
+        Set-Content -Path (Join-Path $HotkeyDir "arterm-hotkey-shortcut.ps1") -Value $shortcutScript -Encoding UTF8
+        Write-Info "Configured Alt+; and the Copilot key to launch arterm"
         return $true
     }
 
@@ -881,7 +881,7 @@ function Install-JcodeHotkey([string]$JcodeExePath) {
         return $false
     }
 
-    $escapedExePath = $JcodeExePath.Replace("'", "''")
+    $escapedExePath = $ArtermExePath.Replace("'", "''")
     $launchHotkeyCommand = "Start-Process -FilePath '$escapedExePath' -ArgumentList @('setup-hotkey', '--listen-windows-hotkey') -WindowStyle Hidden"
     if (-not $skipProcessLifecycle) {
         & powershell -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -Command $launchHotkeyCommand | Out-Null
@@ -890,25 +890,25 @@ function Install-JcodeHotkey([string]$JcodeExePath) {
         }
     }
 
-    Write-Info "Configured Alt+; and the Copilot key to launch jcode"
+    Write-Info "Configured Alt+; and the Copilot key to launch arterm"
     return $true
 }
-function Resolve-JcodeWindowsArtifact([string[]]$ArchitectureCandidates) {
+function Resolve-ArtermWindowsArtifact([string[]]$ArchitectureCandidates) {
     $sawX64 = $false
 
     foreach ($arch in @($ArchitectureCandidates)) {
         if (-not $arch) { continue }
         switch -Regex ($arch.Trim()) {
-            '^(Arm64|ARM64|AARCH64|aarch64)$' { return "jcode-windows-aarch64" }
+            '^(Arm64|ARM64|AARCH64|aarch64)$' { return "arterm-windows-aarch64" }
             '^(X64|AMD64|x86_64)$' { $sawX64 = $true }
         }
     }
 
-    if ($sawX64) { return "jcode-windows-x86_64" }
+    if ($sawX64) { return "arterm-windows-x86_64" }
     return $null
 }
 
-function Get-JcodeWindowsArtifact {
+function Get-ArtermWindowsArtifact {
     $candidates = @()
 
     try {
@@ -920,15 +920,15 @@ function Get-JcodeWindowsArtifact {
         if ($envArch) { $candidates += [string]$envArch }
     }
 
-    $artifact = Resolve-JcodeWindowsArtifact $candidates
+    $artifact = Resolve-ArtermWindowsArtifact $candidates
     if ($artifact) { return $artifact }
 
     $displayArch = if ($candidates.Count -gt 0) { $candidates -join ", " } else { "<unknown>" }
     Write-Err "Unsupported architecture: $displayArch (supported: x86_64, ARM64)"
 }
 
-function Invoke-JcodeInstall {
-$Artifact = Get-JcodeWindowsArtifact
+function Invoke-ArtermInstall {
+$Artifact = Get-ArtermWindowsArtifact
 
 $ResolvedArtifactExePath = Resolve-OptionalPath $ArtifactExePath
 $ResolvedArtifactTgzPath = Resolve-OptionalPath $ArtifactTgzPath
@@ -939,28 +939,28 @@ if ($ResolvedArtifactExePath -and $ResolvedArtifactTgzPath) {
 
 if (-not $Version) {
     if ($ResolvedArtifactExePath) {
-        $Version = Get-JcodeVersionFromBinary $ResolvedArtifactExePath
+        $Version = Get-ArtermVersionFromBinary $ResolvedArtifactExePath
         if (-not $Version) {
-            Write-Err "Could not detect a jcode version from '$ResolvedArtifactExePath'. Pass -Version explicitly if this is a trusted local build."
+            Write-Err "Could not detect a arterm version from '$ResolvedArtifactExePath'. Pass -Version explicitly if this is a trusted local build."
         }
         Write-Info "Detected local artifact version: $Version"
     } elseif ($ResolvedArtifactTgzPath) {
         Write-Err "-Version is required when using -ArtifactTgzPath"
     } else {
         Write-Info "Fetching latest release..."
-        $Version = Get-LatestJcodeReleaseTag
+        $Version = Get-LatestArtermReleaseTag
     }
 }
 
 if (-not $Version) { Write-Err "Failed to determine latest version" }
 
 $VersionNum = $Version.TrimStart('v')
-$DownloadBases = Get-JcodeReleaseDownloadBases $Version
+$DownloadBases = Get-ArtermReleaseDownloadBases $Version
 
-$BuildsDir = Join-Path (Get-JcodeLocalAppDataDir) "jcode\builds"
+$BuildsDir = Join-Path (Get-ArtermLocalAppDataDir) "arterm\builds"
 $StableDir = Join-Path $BuildsDir "stable"
 $VersionDir = Join-Path $BuildsDir "versions\$VersionNum"
-$LauncherPath = Join-Path $InstallDir "jcode.exe"
+$LauncherPath = Join-Path $InstallDir "arterm.exe"
 
 $Existing = ""
 if (Test-Path $LauncherPath) {
@@ -969,12 +969,12 @@ if (Test-Path $LauncherPath) {
 
 if ($Existing) {
     if ($Existing -match [regex]::Escape($VersionNum)) {
-        Write-Info "jcode $Version is already installed - reinstalling"
+        Write-Info "arterm $Version is already installed - reinstalling"
     } else {
-        Write-Info "Updating jcode $Existing -> $Version"
+        Write-Info "Updating arterm $Existing -> $Version"
     }
 } else {
-    Write-Info "Installing jcode $Version"
+    Write-Info "Installing arterm $Version"
 }
 Write-Info "  launcher: $LauncherPath"
 
@@ -982,12 +982,12 @@ foreach ($d in @($InstallDir, $StableDir, $VersionDir)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
-$TempDir = Join-Path $env:TEMP "jcode-install-$(Get-Random)"
+$TempDir = Join-Path $env:TEMP "arterm-install-$(Get-Random)"
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
 try {
 $DownloadMode = ""
-$DownloadPath = Join-Path $TempDir "jcode.download"
+$DownloadPath = Join-Path $TempDir "arterm.download"
 $DownloadedAssetName = $null
 
 if ($ResolvedArtifactExePath) {
@@ -1019,10 +1019,10 @@ if ($ResolvedArtifactExePath) {
 if (-not $ResolvedArtifactExePath -and -not $ResolvedArtifactTgzPath -and $DownloadMode) {
     $downloadedAssetName = if ($DownloadMode -eq "bin") { "$Artifact.exe" } else { "$Artifact.tar.gz" }
     $expectedSha256 = Get-ReleaseChecksum -ReleaseTag $Version -AssetName $downloadedAssetName
-    Assert-JcodeFileChecksum -FilePath $DownloadPath -ExpectedSha256 $expectedSha256 -AssetName $downloadedAssetName | Out-Null
+    Assert-ArtermFileChecksum -FilePath $DownloadPath -ExpectedSha256 $expectedSha256 -AssetName $downloadedAssetName | Out-Null
 }
 
-$DestBin = Join-Path $VersionDir "jcode.exe"
+$DestBin = Join-Path $VersionDir "arterm.exe"
 
 if ($DownloadMode -eq "tar") {
     Write-Info "Extracting..."
@@ -1041,9 +1041,9 @@ if ($DownloadMode -eq "tar") {
     }
 
     Write-Info "No prebuilt asset found for $Artifact in $Version; -BuildFromSource was requested"
-    Assert-JcodeSourceBuildPrerequisites
+    Assert-ArtermSourceBuildPrerequisites
 
-    $SrcDir = Join-Path $TempDir "jcode-src"
+    $SrcDir = Join-Path $TempDir "arterm-src"
     Write-Info "Cloning $Repo at $Version..."
     $gitCloneResult = Invoke-ProcessWithTimeout -FilePath "git" -ArgumentList @(
         "clone",
@@ -1063,9 +1063,9 @@ if ($DownloadMode -eq "tar") {
         Write-Err "Failed to clone $Repo at $Version (exit code: $($gitCloneResult.ExitCode))"
     }
 
-    Write-Info "Building jcode from source (this can take several minutes)..."
+    Write-Info "Building arterm from source (this can take several minutes)..."
     $cargoResult = Invoke-ProcessWithTimeout -FilePath "cargo" -ArgumentList @(
-        "build", "--release", "--locked", "-p", "jcode", "--bin", "jcode",
+        "build", "--release", "--locked", "-p", "arterm", "--bin", "arterm",
         "--manifest-path", (Join-Path $SrcDir "Cargo.toml")
     ) -TimeoutSeconds 1800 -FriendlyName "cargo-build" -CaptureOutput
     if ($cargoResult.TimedOut) {
@@ -1079,17 +1079,17 @@ if ($DownloadMode -eq "tar") {
         Write-Err "cargo build failed (exit code: $($cargoResult.ExitCode))"
     }
 
-    $BuiltBin = Join-Path $SrcDir "target\release\jcode.exe"
+    $BuiltBin = Join-Path $SrcDir "target\release\arterm.exe"
     if (-not (Test-Path $BuiltBin)) { Write-Err "Built binary not found at $BuiltBin" }
     Copy-Item -Path $BuiltBin -Destination $DestBin -Force
 }
 
-Assert-JcodeBinaryCandidate -BinaryPath $DestBin -ExpectedVersion $Version | Out-Null
+Assert-ArtermBinaryCandidate -BinaryPath $DestBin -ExpectedVersion $Version | Out-Null
 
-$StableBin = Join-Path $StableDir "jcode.exe"
+$StableBin = Join-Path $StableDir "arterm.exe"
 Copy-Item -Path $DestBin -Destination $StableBin -Force
 Set-Content -Path (Join-Path $BuildsDir "stable-version") -Value $VersionNum
-Install-JcodeLauncher -SourcePath $StableBin -LauncherPath $LauncherPath | Out-Null
+Install-ArtermLauncher -SourcePath $StableBin -LauncherPath $LauncherPath | Out-Null
 } finally {
     Get-Item -LiteralPath $TempDir -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -1100,24 +1100,24 @@ Install-JcodeLauncher -SourcePath $StableBin -LauncherPath $LauncherPath | Out-N
 # hands its live sessions to the new process, and is a no-op when nothing is
 # running, so it is safe to call unconditionally. Best-effort: never fail the
 # install over it.
-if ($env:JCODE_SKIP_SERVER_RELOAD -ne "1") {
+if ($env:ARTERM_SKIP_SERVER_RELOAD -ne "1") {
     try {
         & $LauncherPath server reload 2>$null | Out-Null
     } catch {
     }
 }
 
-$userPathUpdate = Set-JcodeUserPath -InstallDir $InstallDir
+$userPathUpdate = Set-ArtermUserPath -InstallDir $InstallDir
 if ($userPathUpdate.Changed) {
     Write-Info "Updated user PATH with $InstallDir"
     if ($userPathUpdate.RemovedManagedEntries -gt 0 -or $userPathUpdate.RemovedDuplicateEntries -gt 0) {
-        Write-Info "  removed $($userPathUpdate.RemovedManagedEntries) stale jcode PATH entr$(if ($userPathUpdate.RemovedManagedEntries -eq 1) { 'y' } else { 'ies' }) and $($userPathUpdate.RemovedDuplicateEntries) duplicate entr$(if ($userPathUpdate.RemovedDuplicateEntries -eq 1) { 'y' } else { 'ies' })"
+        Write-Info "  removed $($userPathUpdate.RemovedManagedEntries) stale arterm PATH entr$(if ($userPathUpdate.RemovedManagedEntries -eq 1) { 'y' } else { 'ies' }) and $($userPathUpdate.RemovedDuplicateEntries) duplicate entr$(if ($userPathUpdate.RemovedDuplicateEntries -eq 1) { 'y' } else { 'ies' })"
     }
 } else {
     Write-Info "User PATH already contains $InstallDir"
 }
 
-Set-JcodeProcessPath -InstallDir $InstallDir | Out-Null
+Set-ArtermProcessPath -InstallDir $InstallDir | Out-Null
 
 $installedAlacritty = $false
 $configuredHotkey = $false
@@ -1139,7 +1139,7 @@ if ($shouldSetupAlacritty) {
 }
 
 if ($shouldSetupHotkey) {
-    $configuredHotkey = Install-JcodeHotkey -JcodeExePath $LauncherPath
+    $configuredHotkey = Install-ArtermHotkey -ArtermExePath $LauncherPath
 } else {
     Write-Info "Optional global hotkey setup not requested"
 }
@@ -1147,7 +1147,7 @@ if ($shouldSetupHotkey) {
 Set-SetupHintsState -AlacrittyConfigured:(Test-AlacrittyInstalled) -HotkeyConfigured:$configuredHotkey
 
 Write-Host ""
-Write-Info "jcode $Version installed successfully!"
+Write-Info "arterm $Version installed successfully!"
 Write-Host ""
 
 if (Test-AlacrittyInstalled) {
@@ -1158,22 +1158,22 @@ if (Test-AlacrittyInstalled) {
 }
 
 if ($configuredHotkey) {
-    Write-Info "Global launch keys ready: Alt+; and the Copilot key open jcode"
+    Write-Info "Global launch keys ready: Alt+; and the Copilot key open arterm"
     Write-Host ""
 } elseif (-not $ConfigureHotkey) {
-    Write-Info "Optional: run 'jcode setup-hotkey' to configure global launch hotkeys and terminal preferences."
+    Write-Info "Optional: run 'arterm setup-hotkey' to configure global launch hotkeys and terminal preferences."
     Write-Host ""
 }
 
-if (Get-Command jcode -ErrorAction SilentlyContinue) {
-    Write-Info "Run 'jcode' to get started."
+if (Get-Command arterm -ErrorAction SilentlyContinue) {
+    Write-Info "Run 'arterm' to get started."
 } else {
     Write-Host "  Open a new terminal window, then run:"
     Write-Host ""
-    Write-Host "    jcode" -ForegroundColor Green
+    Write-Host "    arterm" -ForegroundColor Green
 }
 }
 
-if ($env:JCODE_INSTALL_PS1_IMPORT_ONLY -ne "1") {
-    Invoke-JcodeInstall
+if ($env:ARTERM_INSTALL_PS1_IMPORT_ONLY -ne "1") {
+    Invoke-ArtermInstall
 }

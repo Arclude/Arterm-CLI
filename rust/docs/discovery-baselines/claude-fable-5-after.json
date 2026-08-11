@@ -1,7 +1,7 @@
 {
   "benchmark": "discovery-call-rate",
   "config": {
-    "cases_file": "/home/jeremy/jcode/scripts/discovery_rate_cases.json",
+    "cases_file": "/home/jeremy/arterm/scripts/discovery_rate_cases.json",
     "min_precision": 0.9,
     "min_recall": 0.8,
     "model": "claude-fable-5",

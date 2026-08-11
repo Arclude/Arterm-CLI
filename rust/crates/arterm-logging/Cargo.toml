@@ -1,0 +1,16 @@
+[package]
+name = "arterm-logging"
+version = "0.1.0"
+edition = "2024"
+description = "File logging, structured events, and thread/task-local logging context for arterm"
+
+[lib]
+name = "arterm_logging"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = { version = "1", features = ["raw_value"] }
+tokio = { version = "1", features = ["rt"] }
+arterm-core = { path = "../arterm-core" }
+arterm-storage = { path = "../arterm-storage" }

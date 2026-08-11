@@ -69,7 +69,7 @@ impl AuthTestTarget {
     fn credential_paths(self) -> Result<Vec<String>> {
         match self {
             Self::Claude => Ok(vec![
-                crate::auth::claude::jcode_path()?.display().to_string(),
+                crate::auth::claude::arterm_path()?.display().to_string(),
                 crate::storage::user_home_path(".claude/.credentials.json")?
                     .display()
                     .to_string(),
@@ -81,7 +81,7 @@ impl AuthTestTarget {
                     .to_string(),
             ]),
             Self::Openai => Ok(vec![
-                crate::storage::jcode_dir()?
+                crate::storage::arterm_dir()?
                     .join("openai-auth.json")
                     .display()
                     .to_string(),
@@ -144,7 +144,7 @@ impl AuthTestTarget {
             Self::Cursor => Ok(vec![
                 dirs::config_dir()
                     .ok_or_else(|| anyhow::anyhow!("No config directory found"))?
-                    .join("jcode")
+                    .join("arterm")
                     .join("cursor.env")
                     .display()
                     .to_string(),
@@ -280,7 +280,7 @@ impl AuthTestSmokeKind {
         match self {
             Self::Provider => "Provider returned AUTH_TEST_OK.",
             Self::Tool => {
-                "Tool-enabled provider request returned AUTH_TEST_OK after one validated real Jcode bash tool call, successful registry execution, and tool-result followup."
+                "Tool-enabled provider request returned AUTH_TEST_OK after one validated real Arterm bash tool call, successful registry execution, and tool-result followup."
             }
         }
     }

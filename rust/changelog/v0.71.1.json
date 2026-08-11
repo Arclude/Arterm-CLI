@@ -3,7 +3,7 @@
   "date": "2026-08-08",
   "title": "TypeScript SDK reliability and runtime refresh",
   "highlights": [
-    "The TypeScript SDK now ships current jcode runtimes instead of the v0.67.1 runtime",
+    "The TypeScript SDK now ships current arterm runtimes instead of the v0.67.1 runtime",
     "Launched SDK sessions shut down reliably even when daemon registration is delayed"
   ],
   "improvements": [

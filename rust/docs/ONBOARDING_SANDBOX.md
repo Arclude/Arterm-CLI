@@ -1,12 +1,12 @@
 # Onboarding sandbox
 
-If you want to iterate on onboarding repeatedly without touching your real auth state, use a separate sandbox rooted under `JCODE_HOME` and `JCODE_RUNTIME_DIR`.
+If you want to iterate on onboarding repeatedly without touching your real auth state, use a separate sandbox rooted under `ARTERM_HOME` and `ARTERM_RUNTIME_DIR`.
 
 This repo already supports that isolation:
 
-- `JCODE_HOME` redirects jcode-owned state such as `~/.jcode` into a sandbox directory.
-- `JCODE_HOME` also redirects app config into `JCODE_HOME/config/jcode`.
-- `JCODE_RUNTIME_DIR` redirects sockets and other ephemeral runtime files.
+- `ARTERM_HOME` redirects arterm-owned state such as `~/.arterm` into a sandbox directory.
+- `ARTERM_HOME` also redirects app config into `ARTERM_HOME/config/arterm`.
+- `ARTERM_RUNTIME_DIR` redirects sockets and other ephemeral runtime files.
 - External auth trust decisions are stored in the sandbox config, so a fresh sandbox starts with no trusted external auth imports.
 
 ## Fast start
@@ -15,7 +15,7 @@ This repo already supports that isolation:
 scripts/onboarding_sandbox.sh fresh
 ```
 
-That gives you a clean jcode launch with isolated state.
+That gives you a clean arterm launch with isolated state.
 
 ## Test with your REAL logins (import them in the sandbox)
 
@@ -32,12 +32,12 @@ scripts/onboarding_sandbox.sh seed-real-logins
 # step has real history to resume:
 scripts/onboarding_sandbox.sh seed-real-logins --with-transcripts
 
-# Or do it all in one shot: reset, seed, and launch jcode
+# Or do it all in one shot: reset, seed, and launch arterm
 scripts/onboarding_sandbox.sh fresh-real --with-transcripts
 ```
 
-How it works: when `JCODE_HOME` is set, jcode resolves every external credential
-and transcript lookup to `$JCODE_HOME/external/<same-relative-path-as-$HOME>`.
+How it works: when `ARTERM_HOME` is set, arterm resolves every external credential
+and transcript lookup to `$ARTERM_HOME/external/<same-relative-path-as-$HOME>`.
 `seed-real-logins` copies your real files there, so detection and import behave
 exactly as they would on a first-run machine that already has those tools
 installed. The copies are real tokens, so the sandbox stays local-only; your
@@ -47,7 +47,7 @@ Once seeded, just launch the sandbox and walk onboarding; it will detect and
 offer to import each real login:
 
 ```bash
-scripts/onboarding_sandbox.sh jcode
+scripts/onboarding_sandbox.sh arterm
 ```
 
 ## Common commands
@@ -61,7 +61,7 @@ scripts/onboarding_sandbox.sh status
 scripts/onboarding_sandbox.sh reset
 scripts/onboarding_sandbox.sh fresh
 
-# Log into a provider without touching your normal jcode config
+# Log into a provider without touching your normal arterm config
 scripts/onboarding_sandbox.sh login openai
 scripts/onboarding_sandbox.sh login claude
 scripts/onboarding_sandbox.sh auth-status
@@ -76,15 +76,15 @@ scripts/onboarding_sandbox.sh auth-status
 # Or load and run one command in the fixture-backed sandbox
 scripts/onboarding_sandbox.sh fixture-run normal-openai -- auth-test --provider openai --no-smoke
 
-# Run arbitrary jcode commands in the sandbox
-scripts/onboarding_sandbox.sh jcode auth status
-scripts/onboarding_sandbox.sh jcode pair
+# Run arbitrary arterm commands in the sandbox
+scripts/onboarding_sandbox.sh arterm auth status
+scripts/onboarding_sandbox.sh arterm pair
 ```
 
 ## Reusable local auth fixtures
 
 For repeated login testing, use local auth fixtures. A fixture is a copy of a
-sandbox `JCODE_HOME` after you have put it into an interesting state, for
+sandbox `ARTERM_HOME` after you have put it into an interesting state, for
 example a typical logged-in OpenAI user, an expired token state, or an external
 auth import approval state.
 
@@ -104,7 +104,7 @@ scripts/onboarding_sandbox.sh fixture-save normal-openai
 # Fast repeat loop after that
 scripts/onboarding_sandbox.sh fixture-load normal-openai
 scripts/onboarding_sandbox.sh auth-status
-scripts/onboarding_sandbox.sh jcode auth-test --provider openai
+scripts/onboarding_sandbox.sh arterm auth-test --provider openai
 ```
 
 The lower-level helper can also be used directly:
@@ -118,10 +118,10 @@ scripts/auth_fixture.sh run normal-openai -- auth status
 
 Useful environment overrides:
 
-- `JCODE_ONBOARDING_SANDBOX`: select which sandbox receives the fixture.
-- `JCODE_ONBOARDING_DIR`: use an explicit sandbox directory.
-- `JCODE_AUTH_FIXTURE_DIR`: use a fixture store outside the repo, for example
-  `~/.local/share/jcode-auth-fixtures`.
+- `ARTERM_ONBOARDING_SANDBOX`: select which sandbox receives the fixture.
+- `ARTERM_ONBOARDING_DIR`: use an explicit sandbox directory.
+- `ARTERM_AUTH_FIXTURE_DIR`: use a fixture store outside the repo, for example
+  `~/.local/share/arterm-auth-fixtures`.
 
 Suggested fixture names:
 
@@ -158,12 +158,12 @@ Supported scenarios today:
 
 A fresh sandbox means:
 
-- no real jcode config files are reused
+- no real arterm config files are reused
 - no real runtime sockets are reused
 - no previously trusted external auth sources are reused
 - you can blow it away with one `reset`
 
-When using fixtures, the sandbox is still isolated from your normal jcode state,
+When using fixtures, the sandbox is still isolated from your normal arterm state,
 but the loaded fixture may intentionally contain copied auth state from an earlier
 sandbox login.
 
@@ -181,4 +181,4 @@ If you are iterating specifically on mobile onboarding UX, keep the simulator ru
 
 ## Caveat
 
-This sandbox is designed to isolate jcode-owned state and trusted external-import state. If you later decide to test explicit import/reuse flows from external tools, do that intentionally and treat it as a separate test case from first-run onboarding.
+This sandbox is designed to isolate arterm-owned state and trusted external-import state. If you later decide to test explicit import/reuse flows from external tools, do that intentionally and treat it as a separate test case from first-run onboarding.

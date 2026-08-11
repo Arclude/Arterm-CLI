@@ -7,12 +7,12 @@ ios_simulator_screenshot.png
 # Local onboarding sandbox + auth fixtures. May contain REAL OAuth tokens copied
 # from $HOME (see scripts/onboarding_sandbox.sh seed-real-logins). Never commit.
 /.tmp/
-/.jcode/generated-images/
+/.arterm/generated-images/
 /telemetry-worker/backups/
 target-ttest/
 target-ttest*/
 
-# Offscreen frames written by `jcode-desktop2 --capture`. These are review
+# Offscreen frames written by `arterm-desktop2 --capture`. These are review
 # artefacts for a single change, not committed baselines.
 captures/
 

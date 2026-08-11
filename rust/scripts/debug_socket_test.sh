@@ -2,8 +2,8 @@
 # Test script to capture and analyze debug socket events
 # Usage: ./scripts/debug_socket_test.sh [capture|compare]
 
-DEBUG_SOCKET="${XDG_RUNTIME_DIR:-/tmp}/jcode-debug.sock"
-CAPTURE_FILE="/tmp/jcode_debug_capture.jsonl"
+DEBUG_SOCKET="${XDG_RUNTIME_DIR:-/tmp}/arterm-debug.sock"
+CAPTURE_FILE="/tmp/arterm_debug_capture.jsonl"
 
 case "${1:-capture}" in
     capture)

@@ -1,6 +1,6 @@
 # Compile Performance Plan
 
-This document tracks the plan to make jcode's self-dev / refactor loop much faster
+This document tracks the plan to make arterm's self-dev / refactor loop much faster
 without sacrificing full-feature builds.
 
 See also:
@@ -21,14 +21,14 @@ See also:
 Measured locally on the current tree:
 
 - Warm `cargo check --quiet`: **~8.5s**
-- Warm `scripts/dev_cargo.sh build --release -p jcode --bin jcode --quiet`: **~47.3s**
+- Warm `scripts/dev_cargo.sh build --release -p arterm --bin arterm --quiet`: **~47.3s**
 
 Additional observations from this audit:
 
 - A previous warm-ish `cargo check` run landed around **~12.3s**.
 - A less-warm `cargo check --timings` run landed around **~23.8s**.
 - The previous local default `clang + mold` setup failed during release linking on this machine.
-- `clang + lld` links the release `jcode` binary successfully here.
+- `clang + lld` links the release `arterm` binary successfully here.
 
 ## Near-Term Targets
 
@@ -68,8 +68,8 @@ even if they cannot reach the same fast path.
 - Use `scripts/dev_cargo.sh` for local self-dev builds:
   - enables `sccache` automatically if installed
   - prefers `clang + lld` on Linux x86_64
-  - uses the dedicated Cargo `selfdev` profile for `jcode` self-dev build/reload paths
-  - can still opt into `mold` via `JCODE_FAST_LINKER=mold`
+  - uses the dedicated Cargo `selfdev` profile for `arterm` self-dev build/reload paths
+  - can still opt into `mold` via `ARTERM_FAST_LINKER=mold`
 - Route refactor-shadow builds through that wrapper.
 
 ### Phase 2 — Measurement and repeatability
@@ -77,8 +77,8 @@ even if they cannot reach the same fast path.
 Standard self-dev checkpoints now live behind `scripts/bench_selfdev_checkpoints.sh`, which runs:
 - cold `cargo check`
 - warm touched-file `cargo check`
-- cold self-dev `jcode` build
-- warm touched-file self-dev `jcode` build
+- cold self-dev `arterm` build
+- warm touched-file self-dev `arterm` build
 
 Use it when capturing comparable before/after numbers for refactors.
 
@@ -92,21 +92,21 @@ Use it when capturing comparable before/after numbers for refactors.
 - 2026-03-25: upgraded `scripts/dev_cargo.sh` with `--print-setup` plus clearer cache/linker
   diagnostics so developers can confirm whether `sccache` / fast-linker paths are actually active.
 - 2026-03-30: removed the per-build `build.rs` timestamp/build-number churn from local source
-  builds. `JCODE_VERSION` for source builds is now stable per `Cargo.toml` version + git hash,
+  builds. `ARTERM_VERSION` for source builds is now stable per `Cargo.toml` version + git hash,
   while UI/version build-time display comes from the binary mtime at runtime. Validation on this
-  machine: two no-op release-jcode runs measured **221.688s then 0.559s**, confirming the main
+  machine: two no-op release-arterm runs measured **221.688s then 0.559s**, confirming the main
   crate no longer recompiles just because build metadata changed.
 - 2026-04-09: introduced a dedicated Cargo `selfdev` profile for self-dev iteration. On this
-  machine, the warm local `jcode` self-dev build path dropped from about **56.1s** for
-  `scripts/dev_cargo.sh build --release -p jcode --bin jcode --quiet` to about **16.0s** for
-  `scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode --quiet`, while keeping the
+  machine, the warm local `arterm` self-dev build path dropped from about **56.1s** for
+  `scripts/dev_cargo.sh build --release -p arterm --bin arterm --quiet` to about **16.0s** for
+  `scripts/dev_cargo.sh build --profile selfdev -p arterm --bin arterm --quiet`, while keeping the
   normal release/distribution profile unchanged.
 - 2026-04-18: added `scripts/bench_selfdev_checkpoints.sh` to standardize cold/warm self-dev
   checkpoints. First local checkpoint attempt on this machine surfaced two environment blockers:
   - cold checkpoints failed because `cargo clean` could not remove part of `target/release`
     (`Permission denied` on a fingerprint timestamp file)
-  - warm `selfdev-jcode` touched-file measurement on `src/tool/read.rs` failed because the
-    `sccache`-wrapped rustc process terminated with signal 15 during the `jcode` crate build
+  - warm `selfdev-arterm` touched-file measurement on `src/tool/read.rs` failed because the
+    `sccache`-wrapped rustc process terminated with signal 15 during the `arterm` crate build
   - warm touched-file `cargo check` on `src/tool/read.rs` completed in **93.115s** then **9.430s**,
     which is useful as a rough upper/lower bound but not yet stable enough to treat as an
     authoritative checkpoint
@@ -116,60 +116,60 @@ Use it when capturing comparable before/after numbers for refactors.
   checkpoint failures and report them in JSON/text output instead of aborting early. Verified local
   output on this machine with `--touch src/tool/read.rs --runs 1`:
   - warm touched-file `cargo check`: **9.582s**
-  - warm touched-file `selfdev-jcode` build: **59.898s**
+  - warm touched-file `selfdev-arterm` build: **59.898s**
   - failed checkpoints reported cleanly: `cold_check`, `cold_selfdev_build`
 - 2026-04-18: added `--skip-cold` to `scripts/bench_selfdev_checkpoints.sh` so warm-only
   checkpoints remain usable while cold-path cleanup is blocked locally. Verified local output on this
   machine with `--skip-cold --touch src/tool/read.rs --runs 1`:
   - warm touched-file `cargo check`: **9.339s**
-  - warm touched-file `selfdev-jcode` build: **18.844s**
+  - warm touched-file `selfdev-arterm` build: **18.844s**
   - skipped checkpoints reported explicitly: `cold_check`, `cold_selfdev_build`
 - 2026-04-18: additional warm-only checkpoint on a broader shared edit target with
   `--skip-cold --touch src/server.rs --runs 1`:
   - warm touched-file `cargo check`: **8.711s**
-  - warm touched-file `selfdev-jcode` build: **18.969s**
+  - warm touched-file `selfdev-arterm` build: **18.969s**
 - 2026-04-18: additional warm-only checkpoint on a heavy tool-path file with
   `--skip-cold --touch src/tool/communicate.rs --runs 1`:
   - warm touched-file `cargo check`: **8.496s**
-  - warm touched-file `selfdev-jcode` build: **21.400s**
+  - warm touched-file `selfdev-arterm` build: **21.400s**
 - 2026-04-18: additional warm-only checkpoint on a provider-heavy file with
   `--skip-cold --touch src/provider/openai.rs --runs 1`:
   - warm touched-file `cargo check`: **8.750s**
-  - warm touched-file `selfdev-jcode` build: **21.386s**
+  - warm touched-file `selfdev-arterm` build: **21.386s**
 - 2026-04-18: additional warm-only checkpoint on the shared provider module with
   `--skip-cold --touch src/provider/mod.rs --runs 1`:
   - warm touched-file `cargo check`: **9.772s**
-  - warm touched-file `selfdev-jcode` build: **17.917s**
+  - warm touched-file `selfdev-arterm` build: **17.917s**
 - 2026-04-18: additional warm-only checkpoint on the agent entry module with
   `--skip-cold --touch src/agent.rs --runs 1`:
   - warm touched-file `cargo check`: **7.318s**
-  - warm touched-file `selfdev-jcode` build: **30.928s**
+  - warm touched-file `selfdev-arterm` build: **30.928s**
 - 2026-04-18: additional warm-only checkpoint on the memory tool with
   `--skip-cold --touch src/tool/memory.rs --runs 1`:
   - warm touched-file `cargo check`: **7.787s**
-  - warm touched-file `selfdev-jcode` build: **12.798s**
+  - warm touched-file `selfdev-arterm` build: **12.798s**
 - 2026-04-18: additional warm-only checkpoint on session search with
   `--skip-cold --touch src/tool/session_search.rs --runs 1`:
   - warm touched-file `cargo check`: **7.009s**
-  - warm touched-file `selfdev-jcode` build: **12.874s**
+  - warm touched-file `selfdev-arterm` build: **12.874s**
 - 2026-04-18: additional warm-only checkpoint on the browser tool with
   `--skip-cold --touch src/tool/browser.rs --runs 1`:
   - warm touched-file `cargo check`: **13.693s**
-  - warm touched-file `selfdev-jcode` build: **18.874s**
-- 2026-04-28: diagnosed the repeated self-dev `jcode` lib build `SIGTERM` on this 16 GiB,
+  - warm touched-file `selfdev-arterm` build: **18.874s**
+- 2026-04-28: diagnosed the repeated self-dev `arterm` lib build `SIGTERM` on this 16 GiB,
   no-swap workstation. `journalctl -u earlyoom` showed earlyoom sending `SIGTERM` to the root
   `rustc` when available memory crossed the 10% threshold. A direct no-`sccache` build reproduced
   the same signal, so `sccache` was only reporting the termination. `scripts/dev_cargo.sh` now
   enables adaptive low-memory overrides for `--profile selfdev` when Linux + earlyoom + no swap +
   <24 GiB RAM + <8 GiB currently available RAM are detected: `CARGO_INCREMENTAL=1`,
   `CARGO_PROFILE_SELFDEV_INCREMENTAL=true`, and `CARGO_PROFILE_SELFDEV_CODEGEN_UNITS=256`. Use
-  `JCODE_SELFDEV_LOW_MEMORY=off` to disable, or `JCODE_SELFDEV_LOW_MEMORY=on` to force. Initial
+  `ARTERM_SELFDEV_LOW_MEMORY=off` to disable, or `ARTERM_SELFDEV_LOW_MEMORY=on` to force. Initial
   validation completed under the earlier settings in **2m34s** after an interrupted partial build
   reused artifacts; a later benchmark with 9.4 GiB available showed that preserving the inherited
   selfdev profile can reduce warm edit builds from about **60s** to about **14s** when there is
   enough headroom.
 - 2026-05-21: rechecked the same failure mode during overnight TUI test triage. `journalctl -u
-  earlyoom` showed repeated `SIGTERM` events against root `jcode` `rustc` processes at about
+  earlyoom` showed repeated `SIGTERM` events against root `arterm` `rustc` processes at about
   **2.7-3.3 GiB RSS**. `CARGO_PROFILE_SELFDEV_CODEGEN_UNITS=16` still failed under current browser
   and desktop-session memory pressure, while a direct no-`sccache` selfdev build with incremental
   enabled and `CARGO_PROFILE_SELFDEV_CODEGEN_UNITS=256` completed. The adaptive low-memory default
@@ -178,39 +178,39 @@ Use it when capturing comparable before/after numbers for refactors.
   before auto-enabling the wrapper. Fresh lib-test compilation remains heavier than the binary
   build and may still require a remote builder, more free memory, or swap.
 - 2026-05-05: trimmed root compile surface by replacing broad `tokio/full` with explicit used
-  features, aligning Jcode-owned `crossterm` dependencies on 0.29, and replacing `qr2term` with
-  direct `qrcode` rendering. This removed the duplicate `crossterm 0.28` path from the `jcode`
-  tree while preserving login QR output. Validation: `cargo check --profile selfdev -p jcode --bin
-  jcode`, `cargo test --profile selfdev login_qr --lib -- --nocapture`, and coordinated
+  features, aligning Arterm-owned `crossterm` dependencies on 0.29, and replacing `qr2term` with
+  direct `qrcode` rendering. This removed the duplicate `crossterm 0.28` path from the `arterm`
+  tree while preserving login QR output. Validation: `cargo check --profile selfdev -p arterm --bin
+  arterm`, `cargo test --profile selfdev login_qr --lib -- --nocapture`, and coordinated
   `selfdev build` passed.
-- 2026-05-05: removed unused `reqwest/blocking` from `jcode-provider-core`; static search showed
+- 2026-05-05: removed unused `reqwest/blocking` from `arterm-provider-core`; static search showed
   no blocking API usage in that crate. Validation: `cargo check --profile selfdev -p
-  jcode-provider-core` and full `cargo check --profile selfdev -p jcode --bin jcode` passed.
-- 2026-05-03: added `JCODE_DEV_FEATURE_PROFILE` to `scripts/dev_cargo.sh` so compile-speed probes and
+  arterm-provider-core` and full `cargo check --profile selfdev -p arterm --bin arterm` passed.
+- 2026-05-03: added `ARTERM_DEV_FEATURE_PROFILE` to `scripts/dev_cargo.sh` so compile-speed probes and
   narrow inner-loop builds can consistently select feature sets without repeating Cargo flags. Profiles:
   `default`, `minimal`/`none` (`--no-default-features`), `pdf` (`--no-default-features --features pdf`),
   `embeddings` (`--no-default-features --features embeddings`), and `full` (`--features embeddings,pdf`).
   The wrapper leaves explicit `--features` / `--no-default-features` cargo args untouched. Validation on
-  this machine: `JCODE_DEV_FEATURE_PROFILE=minimal scripts/dev_cargo.sh check -p jcode --lib --quiet` passed.
+  this machine: `ARTERM_DEV_FEATURE_PROFILE=minimal scripts/dev_cargo.sh check -p arterm --lib --quiet` passed.
 - 2026-05-03: disabled Cargo auto-discovery for root binary targets and moved developer-only helper
   binaries (`tui_bench`, `session_memory_bench`, `mermaid_side_panel_probe`) behind the opt-in
   `dev-bins` feature. This keeps broad normal checks focused on production/test targets while preserving
-  explicit probe coverage via `cargo check --all-targets -p jcode --features dev-bins`. Validation showed
-  `cargo check --all-targets -p jcode` skips those three bins, while adding `--features dev-bins` includes them.
+  explicit probe coverage via `cargo check --all-targets -p arterm --features dev-bins`. Validation showed
+  `cargo check --all-targets -p arterm` skips those three bins, while adding `--features dev-bins` includes them.
 - 2026-05-03: moved the self-dev build/version/channel support implementation out of the root crate and
-  into `crates/jcode-build-support`, leaving `src/build.rs` as a re-export facade. This cuts another
+  into `crates/arterm-build-support`, leaving `src/build.rs` as a re-export facade. This cuts another
   stable, high-fanout support subsystem out of the root compile unit while preserving existing call sites
-  (`crate::build::*`). Validation: `cargo check -p jcode-build-support`, `cargo test -p jcode-build-support`,
-  and `cargo check -p jcode --lib` passed during the split.
+  (`crate::build::*`). Validation: `cargo check -p arterm-build-support`, `cargo test -p arterm-build-support`,
+  and `cargo check -p arterm --lib` passed during the split.
 - 2026-05-03: moved the pure keybinding parser/matcher/types from `src/tui/keybind.rs` into
-  `jcode-tui-core::keybind`, leaving root TUI config-loading wrappers in place. This creates a reusable
+  `arterm-tui-core::keybind`, leaving root TUI config-loading wrappers in place. This creates a reusable
   cache boundary for a low-coupling TUI helper module while preserving the existing `crate::tui::keybind::*`
-  API. Validation: `cargo check -p jcode-tui-core`, `cargo test -p jcode-tui-core`, and
-  `cargo check -p jcode --lib` passed.
+  API. Validation: `cargo check -p arterm-tui-core`, `cargo test -p arterm-tui-core`, and
+  `cargo check -p arterm --lib` passed.
 
 Warm-only touched-file checkpoints captured so far on this machine:
 
-| Touched file | Warm `cargo check` | Warm `selfdev-jcode` build |
+| Touched file | Warm `cargo check` | Warm `selfdev-arterm` build |
 | --- | ---: | ---: |
 | `src/tool/session_search.rs` | 7.009s | 12.874s |
 | `src/agent.rs` | 7.318s | 30.928s |
@@ -224,7 +224,7 @@ Warm-only touched-file checkpoints captured so far on this machine:
 
 Observed spread from these warm-only checkpoints:
 - warm touched-file `cargo check`: **7.009s to 13.693s**
-- warm touched-file `selfdev-jcode` build: **12.798s to 30.928s**
+- warm touched-file `selfdev-arterm` build: **12.798s to 30.928s**
 - fastest measured warm self-dev rebuilds so far are on smaller tool-path edits
 - `src/agent.rs` currently stands out as the most expensive warm self-dev rebuild in this sample set
 - `src/tool/browser.rs` currently stands out as the slowest warm `cargo check` in this sample set
@@ -238,30 +238,30 @@ as compatible with that RFC, not as the only acceptable final packaging.
 
 Proposed destination layout:
 
-- `jcode-core`
+- `arterm-core`
   - protocol, ids, message types, config primitives, shared utility types
-- `jcode-server`
+- `arterm-server`
   - server lifecycle, reload, socket, swarm, daemon behaviors
-- `jcode-agent`
+- `arterm-agent`
   - agent turn loop, tool orchestration, stream handling
-- `jcode-provider`
+- `arterm-provider`
   - provider traits, shared provider types, routing/catalog support
-- `jcode-embedding`
+- `arterm-embedding`
   - embedding model integration and related heavy inference dependencies
-- `jcode-tui`
+- `arterm-tui`
   - TUI rendering, widgets, state reduction, terminal UI support
-- `jcode-tui-core`
+- `arterm-tui-core`
   - low-level TUI helpers with minimal root coupling, including stream buffers and keybinding parsing
-- `jcode-selfdev`
+- `arterm-selfdev`
   - customization records, migration logic, self-dev productization
-- `jcode-build-support`
+- `arterm-build-support`
   - self-dev build commands, source-state fingerprints, binary channel paths/manifests
 
 ### Phase 4 — First crate splits
 
 Start with the highest-leverage cache boundaries:
 
-1. `jcode-embedding`
+1. `arterm-embedding`
 2. provider support / provider implementation splits
 3. self-dev/customization system once the new extension-point work lands
 4. server / agent split along the seams already being extracted
@@ -269,7 +269,7 @@ Start with the highest-leverage cache boundaries:
 ### Phase 4a — First workspace boundary landed
 
 - 2026-03-24: moved the heavy ONNX/tokenizer implementation into the new
-  `crates/jcode-embedding` workspace crate.
+  `crates/arterm-embedding` workspace crate.
 - The main `src/embedding.rs` module now acts as a facade for process-local
   cache/stats/path/logging integration.
 - This preserves the public `crate::embedding` API while creating a real Cargo
@@ -281,27 +281,27 @@ Start with the highest-leverage cache boundaries:
 - 2026-05-23: reverted that default-feature split because embedding-backed
   memory recall and semantic retrieval should work out of the box in normal
   builds. Default builds now enable both `pdf` and `embeddings`; developers who
-  need compile-speed probes can use `JCODE_DEV_FEATURE_PROFILE=minimal` or
-  `JCODE_DEV_FEATURE_PROFILE=pdf` to skip the local inference stack. Full local
+  need compile-speed probes can use `ARTERM_DEV_FEATURE_PROFILE=minimal` or
+  `ARTERM_DEV_FEATURE_PROFILE=pdf` to skip the local inference stack. Full local
   inference remains available explicitly via `--features embeddings` or
-  `JCODE_DEV_FEATURE_PROFILE=full` when testing non-default feature paths.
-  Validation target: `cargo tree -p jcode --edges normal --depth 1` should
-  include both `jcode-pdf` and `jcode-embedding`; `--no-default-features` should
+  `ARTERM_DEV_FEATURE_PROFILE=full` when testing non-default feature paths.
+  Validation target: `cargo tree -p arterm --edges normal --depth 1` should
+  include both `arterm-pdf` and `arterm-embedding`; `--no-default-features` should
   include neither.
 
-- 2026-03-24: moved PDF extraction behind the new `crates/jcode-pdf` workspace
+- 2026-03-24: moved PDF extraction behind the new `crates/arterm-pdf` workspace
   crate and fixed the `--no-default-features` build path by making PDF support
   degrade gracefully when the feature is disabled.
 
 - 2026-03-24: moved Azure bearer-token retrieval behind the new
-  `crates/jcode-azure-auth` workspace crate so the Azure SDK no longer lives
+  `crates/arterm-azure-auth` workspace crate so the Azure SDK no longer lives
   directly in the main crate.
 - Note: touched-file timing for `src/auth/azure.rs` needs more instrumentation
   cleanup; one post-split sample was anomalous and should not be treated as a
   trustworthy ROI datapoint yet.
 
 - 2026-03-24: moved email notification / IMAP reply transport behind the new
-  `crates/jcode-notify-email` workspace crate.
+  `crates/arterm-notify-email` workspace crate.
 - The main `src/notifications.rs` module now keeps the higher-level ambient,
   safety, and channel integration while SMTP/IMAP/mail parsing lives behind a
   dedicated crate boundary.
@@ -310,7 +310,7 @@ Start with the highest-leverage cache boundaries:
   itself still invalidate the main crate and are not the right sole ROI metric.
 
 - 2026-03-25: landed the first provider boundary slice with
-  `crates/jcode-provider-metadata`.
+  `crates/arterm-provider-metadata`.
 - Boundary decision: provider **metadata / profile catalogs / pure selection helpers** move into
   their own crate first, while env mutation, config-file I/O, and runtime integration remain in
   `src/provider_catalog.rs` as a facade.
@@ -318,14 +318,14 @@ Start with the highest-leverage cache boundaries:
   compile boundary without prematurely dragging streaming/message/runtime dependencies into a shared
   crate that would likely stay high-churn.
 
-- 2026-03-25: landed the next provider-core slice with `crates/jcode-provider-core`.
+- 2026-03-25: landed the next provider-core slice with `crates/arterm-provider-core`.
 - Boundary decision: move **shared HTTP client + route/cost/core provider value types** first,
   but keep the `Provider` trait itself in `src/provider/mod.rs` for now.
 - Reason: the trait currently still mixes in `message.rs`, runtime/auth behavior, and provider-specific
   streaming/compaction concerns; moving it too early would likely create a noisy, still-high-churn core crate.
 
 - 2026-03-25: landed the first provider-implementation support crate with
-  `crates/jcode-provider-openrouter`.
+  `crates/arterm-provider-openrouter`.
 - Boundary decision: move **OpenRouter-specific model catalog / endpoint cache / provider ranking /
   model-spec parsing support** into a dedicated crate, while keeping the actual `Provider` trait impl,
   auth wiring, and message/stream translation in `src/provider/openrouter.rs`.
@@ -333,7 +333,7 @@ Start with the highest-leverage cache boundaries:
   cycle through `Provider`, `EventStream`, or `message.rs`.
 
 - 2026-03-25: landed the next provider-implementation support crate with
-  `crates/jcode-provider-gemini`.
+  `crates/arterm-provider-gemini`.
 - Boundary decision: move **Gemini Code Assist schema/types, model-list constants, and pure support helpers**
   into a dedicated crate, while keeping the actual `Provider` trait impl, auth calls, and runtime/network orchestration
   in `src/provider/gemini.rs`.
@@ -341,7 +341,7 @@ Start with the highest-leverage cache boundaries:
   seam prematurely.
 
 - 2026-03-30: moved the pure OpenAI tool-schema normalization helpers into
-  `crates/jcode-provider-core/src/openai_schema.rs`.
+  `crates/arterm-provider-core/src/openai_schema.rs`.
 - Boundary decision: move **pure schema adaptation / strict-normalization helpers** first, while keeping
   `build_tools(...)` and request-history rewriting in `src/provider/openai_request.rs` because those still depend on
   local tool/message types.
@@ -349,103 +349,103 @@ Start with the highest-leverage cache boundaries:
   or the `Provider` trait into a shared crate.
 
 - 2026-05-05: moved provider catalog-refresh diffing into
-  `jcode-provider-core::catalog_refresh` and re-exported it from the root provider facade.
+  `arterm-provider-core::catalog_refresh` and re-exported it from the root provider facade.
 - Boundary decision: move the pure `ModelRoute` summary/diff logic first because it has no root-crate
   auth/runtime/config dependencies.
 - 2026-05-05: split the stable provider pricing tables/helpers into
-  `jcode-provider-core::pricing`, leaving `src/provider/pricing.rs` as a thin facade for root-only
+  `arterm-provider-core::pricing`, leaving `src/provider/pricing.rs` as a thin facade for root-only
   auth/env/OpenRouter-cache lookups.
 - Reason: provider pricing is relatively stable table/math code, but it previously lived in the main crate
   beside high-churn provider runtime code. This creates a reusable cache boundary without moving the
   `Provider` trait or network implementations prematurely.
-- Validation: `cargo test -p jcode-provider-core --quiet`, `cargo test -p jcode pricing:: --quiet`,
-  `cargo check -p jcode --quiet`, and `cargo check -p jcode --features embeddings --quiet` pass.
+- Validation: `cargo test -p arterm-provider-core --quiet`, `cargo test -p arterm pricing:: --quiet`,
+  `cargo check -p arterm --quiet`, and `cargo check -p arterm --features embeddings --quiet` pass.
 - 2026-05-05: moved provider failover prompt/decision/classifier contracts and provider
-  selection/fallback-order contracts into `jcode-provider-core`, leaving root provider modules as
+  selection/fallback-order contracts into `arterm-provider-core`, leaving root provider modules as
   facades for env/runtime/account state. This continues shrinking `src/provider/mod.rs` support
-  surfaces toward an eventual `jcode-provider` runtime crate.
-- Validation: `cargo test -p jcode-provider-core --quiet`, focused root provider selection/failover
-  tests, and `cargo check -p jcode --quiet` pass.
-- 2026-05-05: moved the Copilot `PremiumMode` provider-control enum into `jcode-provider-core`
+  surfaces toward an eventual `arterm-provider` runtime crate.
+- Validation: `cargo test -p arterm-provider-core --quiet`, focused root provider selection/failover
+  tests, and `cargo check -p arterm --quiet` pass.
+- 2026-05-05: moved the Copilot `PremiumMode` provider-control enum into `arterm-provider-core`
   and re-exported it from the root/Copilot facades. The `Provider` trait no longer needs to name
   the root `copilot` module for this control surface.
-- Validation: `cargo check -p jcode-provider-core --quiet` and `cargo check -p jcode --quiet` pass.
-- 2026-05-05: moved provider-native tool result DTOs/sender aliases into `jcode-provider-core`.
+- Validation: `cargo check -p arterm-provider-core --quiet` and `cargo check -p arterm --quiet` pass.
+- 2026-05-05: moved provider-native tool result DTOs/sender aliases into `arterm-provider-core`.
   The global `Provider` trait no longer has to expose types owned by the root Claude module.
-- Validation: `cargo check -p jcode-provider-core --quiet` and `cargo check -p jcode --quiet` pass.
+- Validation: `cargo check -p arterm-provider-core --quiet` and `cargo check -p arterm --quiet` pass.
 - 2026-05-05: moved stable provider model constants, static provider/model classification,
   Copilot model-name normalization, and fallback context-window heuristics into
-  `jcode-provider-core::models`. Root `src/provider/models.rs` now layers dynamic account catalogs,
+  `arterm-provider-core::models`. Root `src/provider/models.rs` now layers dynamic account catalogs,
   runtime availability, and cache hydration on top of those core helpers.
-- Validation: `cargo test -p jcode-provider-core models:: --quiet`,
-  `cargo check -p jcode-provider-core --quiet`, and `cargo check -p jcode --quiet` pass.
-- 2026-05-05: moved the global `Provider` trait and `EventStream` alias into `jcode-provider-core`.
+- Validation: `cargo test -p arterm-provider-core models:: --quiet`,
+  `cargo check -p arterm-provider-core --quiet`, and `cargo check -p arterm --quiet` pass.
+- 2026-05-05: moved the global `Provider` trait and `EventStream` alias into `arterm-provider-core`.
   Root `src/provider/mod.rs` now re-exports the contract while continuing to own concrete provider
   implementations and `MultiProvider` composition. This is the main provider seam needed before a
-  future `jcode-provider` runtime crate can be introduced safely.
-- Validation: `cargo check -p jcode-provider-core --quiet` and `cargo check -p jcode --quiet` pass.
+  future `arterm-provider` runtime crate can be introduced safely.
+- Validation: `cargo check -p arterm-provider-core --quiet` and `cargo check -p arterm --quiet` pass.
 - Warm-only touched-file benchmark on `src/provider/mod.rs` after the provider-core seam: first
   self-dev build was a noisy artifact-producing **140.739s**, then the immediate rerun measured
   **12.101s** warm `cargo check` and **27.433s** warm self-dev build. Treat the rerun as the
   comparable steady-state datapoint.
 
 - 2026-05-05: moved the stable provider-facing `ToolDefinition` contract from `src/message.rs` into
-  `jcode-message-types` and re-exported it from the root message facade. This is a prerequisite for
+  `arterm-message-types` and re-exported it from the root message facade. This is a prerequisite for
   shrinking the provider trait and tool registry surfaces away from root-crate-only message types.
-- Validation: `cargo test -p jcode-message-types --quiet` and `cargo check -p jcode --quiet` pass.
-- 2026-05-05: introduced `jcode-tool-types` for stable tool execution output DTOs and moved
+- Validation: `cargo test -p arterm-message-types --quiet` and `cargo check -p arterm --quiet` pass.
+- 2026-05-05: introduced `arterm-tool-types` for stable tool execution output DTOs and moved
   `ToolOutput` / `ToolImage` out of `src/tool/mod.rs`. Root tool modules continue using the same
   names via a facade re-export, but provider/agent/server seams can now depend on a narrow tool
   result contract without depending on the root tool registry.
-- Validation: `cargo check -p jcode-tool-types --quiet`, `cargo test -p jcode-tool-types --quiet`,
-  and `cargo check -p jcode --quiet` pass.
-- 2026-05-05: added `jcode-tool-core` for runtime tool contracts and moved `Tool`, `ToolContext`,
-  `ToolExecutionMode`, and `StdinInputRequest` out of `src/tool/mod.rs`. `jcode-tool-types` stays
+- Validation: `cargo check -p arterm-tool-types --quiet`, `cargo test -p arterm-tool-types --quiet`,
+  and `cargo check -p arterm --quiet` pass.
+- 2026-05-05: added `arterm-tool-core` for runtime tool contracts and moved `Tool`, `ToolContext`,
+  `ToolExecutionMode`, and `StdinInputRequest` out of `src/tool/mod.rs`. `arterm-tool-types` stays
   DTO-only, while channel/runtime-bearing context lives in the runtime-contract crate instead of
   contaminating pure type crates.
-- 2026-05-05: also moved the shared tool intent schema helper into `jcode-tool-core`, keeping the
+- 2026-05-05: also moved the shared tool intent schema helper into `arterm-tool-core`, keeping the
   root `src/tool/mod.rs` module focused on registry composition rather than shared schema contracts.
-- Validation: `cargo check -p jcode-tool-core --quiet`, `cargo check -p jcode-tool-types --quiet`,
-  and `cargo check -p jcode --quiet` pass.
+- Validation: `cargo check -p arterm-tool-core --quiet`, `cargo check -p arterm-tool-types --quiet`,
+  and `cargo check -p arterm --quiet` pass.
 - 2026-05-05: moved provider streaming contracts `StreamEvent` and `ConnectionPhase` from
-  `src/message.rs` into `jcode-message-types`, again preserving root facade re-exports. Together
+  `src/message.rs` into `arterm-message-types`, again preserving root facade re-exports. Together
   with `ToolDefinition`, this materially reduces the root-only surface of the provider trait and
-  prepares a future `jcode-provider` crate.
-- Validation: `cargo check -p jcode-message-types --quiet`, `cargo test -p jcode-message-types --quiet`,
-  and `cargo check -p jcode --quiet` pass.
+  prepares a future `arterm-provider` crate.
+- Validation: `cargo check -p arterm-message-types --quiet`, `cargo test -p arterm-message-types --quiet`,
+  and `cargo check -p arterm --quiet` pass.
 - 2026-05-05: moved core conversation DTOs `Message`, `ContentBlock`, `Role`, and `CacheControl`
-  into `jcode-message-types`, while keeping root-only redaction/generated-image/session helpers in
+  into `arterm-message-types`, while keeping root-only redaction/generated-image/session helpers in
   `src/message.rs`. Provider and agent contracts can now refer to message data through the lower
   type crate rather than the root crate facade.
-- Validation: `cargo check -p jcode-message-types --quiet`, `cargo test -p jcode-message-types --quiet`,
-  and `cargo check -p jcode --quiet` pass.
+- Validation: `cargo check -p arterm-message-types --quiet`, `cargo test -p arterm-message-types --quiet`,
+  and `cargo check -p arterm --quiet` pass.
 - 2026-05-05: moved pure message helpers for fresh-user-turn detection, stable message hashing,
-  tool ID sanitization, and the missing-tool-output constant into `jcode-message-types`. Root keeps
+  tool ID sanitization, and the missing-tool-output constant into `arterm-message-types`. Root keeps
   secret redaction and generated-image visual context because those still depend on regex/env/fs/base64
   integration details.
-- Validation: `cargo check -p jcode-message-types --quiet`, focused root message helper tests, and
-  `cargo check -p jcode --quiet` pass.
+- Validation: `cargo check -p arterm-message-types --quiet`, focused root message helper tests, and
+  `cargo check -p arterm --quiet` pass.
 - 2026-05-05: moved the provider split-system dynamic-context insertion helper and its tests into
-  `jcode-message-types`. This removes another pure message transformation from `src/provider/mod.rs`
+  `arterm-message-types`. This removes another pure message transformation from `src/provider/mod.rs`
   and keeps preparing the provider trait for an eventual runtime crate split.
-- Validation: `cargo test -p jcode-message-types dynamic_context --quiet`,
-  `cargo check -p jcode-message-types --quiet`, and `cargo check -p jcode --quiet` pass.
+- Validation: `cargo test -p arterm-message-types dynamic_context --quiet`,
+  `cargo check -p arterm-message-types --quiet`, and `cargo check -p arterm --quiet` pass.
 
 - 2026-05-05: moved the server lightweight-control request classifier from
-  `src/server/client_lifecycle.rs` into `jcode-protocol::Request::is_lightweight_control_request`.
+  `src/server/client_lifecycle.rs` into `arterm-protocol::Request::is_lightweight_control_request`.
   This is a small but directionally important server seam: protocol-shape policy belongs with the
   protocol contract, while the large client lifecycle module keeps runtime dispatch.
-- Validation: `cargo check -p jcode-protocol --quiet` and `cargo check -p jcode --quiet` pass.
+- Validation: `cargo check -p arterm-protocol --quiet` and `cargo check -p arterm --quiet` pass.
 - 2026-05-05: moved swarm task-control action parsing, assignment-message formatting, and status
-  eligibility/error policy from `src/server/comm_control.rs` into `jcode-plan`. This keeps plan/task
+  eligibility/error policy from `src/server/comm_control.rs` into `arterm-plan`. This keeps plan/task
   policy next to the plan graph/status helpers and leaves server comm control focused on runtime I/O
   and mutation orchestration.
-- Validation: `cargo test -p jcode-plan --quiet` and `cargo check -p jcode --quiet` pass.
+- Validation: `cargo test -p arterm-plan --quiet` and `cargo check -p arterm --quiet` pass.
 
-- 2026-03-30: moved the workspace-map subsystem into the new `crates/jcode-tui-workspace` crate.
+- 2026-03-30: moved the workspace-map subsystem into the new `crates/arterm-tui-workspace` crate.
 - Boundary decision: move **workspace map data/model + widget rendering** first, while keeping the surrounding
   `info_widget`, app state, and higher-level TUI composition in the main crate.
-- Reason: this is a safe first `jcode-tui` foothold because the workspace map code is already mostly self-contained and
+- Reason: this is a safe first `arterm-tui` foothold because the workspace map code is already mostly self-contained and
   avoids the much riskier `App` / renderer / markdown / mermaid seams.
 
 ### Phase 5 — Reduce invalidation pressure
@@ -465,7 +465,7 @@ Start with the highest-leverage cache boundaries:
   - routing/theme/layout data
 - Prefer those over direct Rust source edits whenever possible.
 - 2026-03-30: landed the first prompt-overlay seam for system-prompt customization without a rebuild.
-  jcode now loads `~/.jcode/prompt-overlay.md` and `./.jcode/prompt-overlay.md` into the
+  arterm now loads `~/.arterm/prompt-overlay.md` and `./.arterm/prompt-overlay.md` into the
   static prompt, which is a low-risk first step toward the broader issue #32 customization plan.
 
 ## Scenario Measurements (2026-03-24)
@@ -517,17 +517,17 @@ The next obvious heavy dependency boundaries are less clearly safe/local than th
 
 - provider support remains high-value, but `src/provider/mod.rs` and related implementations are
   broad enough that the next split should be designed carefully instead of rushed.
-- a future `jcode-provider-core` / provider-implementation split is still the most promising next
+- a future `arterm-provider-core` / provider-implementation split is still the most promising next
   compile-speed move, but it needs boundary design first so high-churn shared types do not create
   a new invalidation hotspot.
 
 Current provider-boundary stance:
 
-- **Done:** `jcode-provider-metadata` for stable login/profile catalog data and pure selection logic.
-- **Done:** `jcode-provider-core` for shared HTTP client plus route/cost/core provider value types.
-- **Done:** `jcode-provider-openrouter` for OpenRouter-specific catalog/cache/ranking/model-spec support.
-- **Done:** `jcode-provider-gemini` for Gemini Code Assist schema/types and pure model support helpers.
-- **Done:** `jcode-provider-core::openai_schema` for pure OpenAI schema adaptation / strict-normalization helpers.
+- **Done:** `arterm-provider-metadata` for stable login/profile catalog data and pure selection logic.
+- **Done:** `arterm-provider-core` for shared HTTP client plus route/cost/core provider value types.
+- **Done:** `arterm-provider-openrouter` for OpenRouter-specific catalog/cache/ranking/model-spec support.
+- **Done:** `arterm-provider-gemini` for Gemini Code Assist schema/types and pure model support helpers.
+- **Done:** `arterm-provider-core::openai_schema` for pure OpenAI schema adaptation / strict-normalization helpers.
 - **Not done yet:** `Provider` trait / `EventStream` extraction and fully independent provider impl crates.
 - **Reason:** the trait side still depends on `message.rs`, auth flows, runtime behavior, and provider-specific
   streaming logic; the current staged split avoids turning that unstable seam into a low-value high-churn crate.
@@ -538,8 +538,8 @@ That means the best next batch should likely target either:
 
 Current TUI-boundary stance:
 
-- **Done:** `jcode-tui-workspace` for workspace-map model + widget rendering.
-- **Not done yet:** broader `jcode-tui` extraction for markdown, mermaid, info widgets, and the shared renderer.
+- **Done:** `arterm-tui-workspace` for workspace-map model + widget rendering.
+- **Not done yet:** broader `arterm-tui` extraction for markdown, mermaid, info widgets, and the shared renderer.
 - **Reason:** the remaining high-value TUI files are larger but still more tightly coupled to `App`, config, images,
   side-panel state, and rendering orchestration, so they need staged extraction rather than a rushed top-level split.
 
@@ -584,7 +584,7 @@ DAG, after which modules peel off bottom-up. Cheapest-first (from the analyzer):
    (`scripts/bench_compile.sh`), so each extraction's memory/compile win is measurable.
 2. **Break the cheap back-edges first.** Eliminate the 1-2 ref couplings (image helpers, single config
    lookups, telemetry/cli) by moving shared primitives down into existing low-level crates
-   (`jcode-core`, `jcode-tui-*`) or inverting them behind small traits. Re-run the analyzer; watch the
+   (`arterm-core`, `arterm-tui-*`) or inverting them behind small traits. Re-run the analyzer; watch the
    SCC shrink.
 3. **Extract already-clean leaves.** Modules the analyzer marks "extractable now" (no in-root blockers):
    `background`, `prompt`, `safety`, `transport`, `replay`, `browser`, `perf`, plus the many <400 loc
@@ -610,10 +610,10 @@ crates. Each is its own rustc unit, so each type-checks/codegens independently a
 per-process memory is the max over units (not their sum).
 
 ```
-jcode (root: cli + bin)        depends on
-  -> jcode-tui (tui + video_export)   depends on
-       -> jcode-app-core (server/tool/agent SCC + leaves)  depends on
-            -> jcode-base (provider/auth/config/session/message/memory foundation)
+arterm (root: cli + bin)        depends on
+  -> arterm-tui (tui + video_export)   depends on
+       -> arterm-app-core (server/tool/agent SCC + leaves)  depends on
+            -> arterm-base (provider/auth/config/session/message/memory foundation)
 ```
 
 Ground-truth per-rustc peak `VmHWM` (selfdev profile, single-job, `/tmp/peakrss2.sh`):
@@ -621,26 +621,26 @@ Ground-truth per-rustc peak `VmHWM` (selfdev profile, single-job, `/tmp/peakrss2
 | unit | peak VmHWM | note |
 | --- | --- | --- |
 | monolith (before) | **3.18 GiB** | the unit that OOM-killed the 15 GB/no-swap machine |
-| jcode-base | 1.126 GiB | FLOOR: bottom crate, fewest internal deps |
-| jcode-app-core | 1.176 GiB | base + 0.050 |
-| jcode-tui | 1.280 GiB | app-core + 0.104 (98K loc adds only +0.104) |
-| jcode (root cli) | 0.664 GiB | thin shell, fast incremental for cli iteration |
+| arterm-base | 1.126 GiB | FLOOR: bottom crate, fewest internal deps |
+| arterm-app-core | 1.176 GiB | base + 0.050 |
+| arterm-tui | 1.280 GiB | app-core + 0.104 (98K loc adds only +0.104) |
+| arterm (root cli) | 0.664 GiB | thin shell, fast incremental for cli iteration |
 
 **Outcome: largest single compilation unit 3.18 -> 1.28 GiB (-60%).** No unit exceeds ~1.3 GiB, so the
 memory-adaptive job limiter can schedule parallel rustc jobs without OOM. Commits: `4dd91a9c` (Phase A),
-`4aec863e` (Phase B), `f649daeb` (test import), `85c96735` (Phase C jcode-tui), `2591c0e5` (test-support
+`4aec863e` (Phase B), `f649daeb` (test import), `85c96735` (Phase C arterm-tui), `2591c0e5` (test-support
 feature restoring cross-crate `#[cfg(test)]` helpers). Full `cargo check --workspace --all-targets` is
 clean.
 
 ### Why we STOPPED here (the Stop Conditions above)
 
-A further split of `jcode-tui` (the current 1.280 GiB max) was analyzed and deliberately **not** done:
+A further split of `arterm-tui` (the current 1.280 GiB max) was analyzed and deliberately **not** done:
 
 - **It is feasible but low-value.** The render layer already depends on a 106-method `TuiState` trait
   (`ui::draw(frame, app: &dyn TuiState)`), not the concrete `App`; production back-edges from render
   modules into `app` are essentially nil (one `ui_input.rs` use of two pure helpers/consts), so a clean
   `app` vs `render` cut exists.
-- **But the peak is floor-bound, not tui-bound.** `jcode-base` alone is already 1.126 GiB because every
+- **But the peak is floor-bound, not tui-bound.** `arterm-base` alone is already 1.126 GiB because every
   crate inherits the same external-dep monomorphization (serde/tokio/reqwest/ratatui). tui's entire 98K
   loc adds only +0.104 over app-core, so splitting it into ~49K halves would shave only ~30-50 MB and
   **cannot** reach the "<1.13 GiB" target, which is structurally pinned by the base floor.
@@ -665,9 +665,9 @@ remaining crate-size effect:
    idle machine uses all cores (and a pressured one gains a job: 4 -> 5 at ~9 GiB available) while staying
    OOM-safe (pessimistic 8-job concurrent RSS ~6.7 GiB).
 
-2. **Stopped git activity from forcing full-tree recompiles** (`crates/jcode-build-meta/build.rs`, commit
-   `8d87b2c0`). This was the dominant inner-loop tax. `jcode-build-meta` embeds version/git metadata that
-   every crate consumes via `env!("JCODE_*")`. It (a) declared `.git/HEAD` + `.git/index` as
+2. **Stopped git activity from forcing full-tree recompiles** (`crates/arterm-build-meta/build.rs`, commit
+   `8d87b2c0`). This was the dominant inner-loop tax. `arterm-build-meta` embeds version/git metadata that
+   every crate consumes via `env!("ARTERM_*")`. It (a) declared `.git/HEAD` + `.git/index` as
    `rerun-if-changed` inputs and (b) auto-incremented a persistent patch counter on every rerun. Cargo
    marks a build script dirty whenever a declared input is newer than its output, reruns it, and then
    force-recompiles all dependents via `StaleDepFingerprint`; the counter guaranteed the output actually
@@ -676,7 +676,7 @@ remaining crate-size effect:
 
    Fix: derive the dev patch number deterministically from committed git state
    (`base.patch + commits-since-base-tag`, a pure function of HEAD) and drop the `.git/*` rerun triggers,
-   keeping `Cargo.toml` + `JCODE_RELEASE_BUILD`/`JCODE_BUILD_SEMVER`/`JCODE_BUILD_GIT_*` env triggers so
+   keeping `Cargo.toml` + `ARTERM_RELEASE_BUILD`/`ARTERM_BUILD_SEMVER`/`ARTERM_BUILD_GIT_*` env triggers so
    release/dist builds still embed exact metadata.
 
    Measured (selfdev, warm, this machine):
@@ -685,7 +685,7 @@ remaining crate-size effect:
    | --- | --- | --- |
    | build after `git/index` touch (commit, `git add`, parallel agent) | ~18-25s | **0.65s** |
    | build after `git/HEAD` touch | ~18s | **0.87s** |
-   | build after a real code edit (`jcode-base/src/lib.rs`) | ~20s | ~20s (correctly unchanged) |
+   | build after a real code edit (`arterm-base/src/lib.rs`) | ~20s | ~20s (correctly unchanged) |
 
    The dev `--version` git hash may lag the latest in-session commit until the next real rebuild; that is
    cosmetic and refreshed automatically by release builds (which clean/override).
@@ -703,20 +703,20 @@ Use:
 
 ```bash
 scripts/dev_cargo.sh check --quiet
-scripts/dev_cargo.sh build --release -p jcode --bin jcode --quiet
-scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode --quiet
+scripts/dev_cargo.sh build --release -p arterm --bin arterm --quiet
+scripts/dev_cargo.sh build --profile selfdev -p arterm --bin arterm --quiet
 scripts/dev_cargo.sh --print-setup
 ```
 
-For narrower feature-set probes, set `JCODE_DEV_FEATURE_PROFILE` instead of spelling out Cargo flags:
+For narrower feature-set probes, set `ARTERM_DEV_FEATURE_PROFILE` instead of spelling out Cargo flags:
 
 ```bash
-JCODE_DEV_FEATURE_PROFILE=minimal scripts/dev_cargo.sh check -p jcode --lib --quiet
-JCODE_DEV_FEATURE_PROFILE=pdf scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode --quiet
-JCODE_DEV_FEATURE_PROFILE=full scripts/dev_cargo.sh check -p jcode --lib --quiet
+ARTERM_DEV_FEATURE_PROFILE=minimal scripts/dev_cargo.sh check -p arterm --lib --quiet
+ARTERM_DEV_FEATURE_PROFILE=pdf scripts/dev_cargo.sh build --profile selfdev -p arterm --bin arterm --quiet
+ARTERM_DEV_FEATURE_PROFILE=full scripts/dev_cargo.sh check -p arterm --lib --quiet
 ```
 
-This is especially useful because default `jcode` enables both `embeddings` and `pdf`; in the current
+This is especially useful because default `arterm` enables both `embeddings` and `pdf`; in the current
 dependency graph, the root tree is about **3740** lines with defaults, **1133** with PDF-only, and **1106**
 with no default features. Use these profiles for measurements and local probes, while keeping full/default
 builds in CI and release paths where feature coverage matters.
@@ -728,7 +728,7 @@ entrypoints by default:
 cargo run --features dev-bins --bin tui_bench -- --help
 cargo run --features dev-bins --bin session_memory_bench -- --help
 cargo run --features dev-bins --bin mermaid_side_panel_probe -- --help
-cargo check --all-targets -p jcode --features dev-bins --quiet
+cargo check --all-targets -p arterm --features dev-bins --quiet
 ```
 
 The wrapper:
@@ -736,21 +736,21 @@ The wrapper:
 - uses `sccache` automatically when available **for non-incremental builds only**
 - prefers `lld` locally on Linux x86_64
 - uses the fast `selfdev` Cargo profile for self-dev build/reload workflows
-- can inject a named feature profile via `JCODE_DEV_FEATURE_PROFILE` unless explicit feature args are present
+- can inject a named feature profile via `ARTERM_DEV_FEATURE_PROFILE` unless explicit feature args are present
 - avoids hard-forcing a linker mode that may be broken on a given machine
 - can print the currently selected cache/linker setup with `--print-setup`
 
 Override linker mode explicitly when needed:
 
 ```bash
-JCODE_FAST_LINKER=lld scripts/dev_cargo.sh build --release -p jcode --bin jcode
-JCODE_FAST_LINKER=mold scripts/dev_cargo.sh build --release -p jcode --bin jcode
-JCODE_FAST_LINKER=system scripts/dev_cargo.sh build --release -p jcode --bin jcode
+ARTERM_FAST_LINKER=lld scripts/dev_cargo.sh build --release -p arterm --bin arterm
+ARTERM_FAST_LINKER=mold scripts/dev_cargo.sh build --release -p arterm --bin arterm
+ARTERM_FAST_LINKER=system scripts/dev_cargo.sh build --release -p arterm --bin arterm
 ```
 
 ### sccache: non-incremental only
 
-`sccache` cannot cache incremental compilation units. All of jcode's common
+`sccache` cannot cache incremental compilation units. All of arterm's common
 profiles (`selfdev`, `dev`, `release`, `test`) set `incremental = true`, so on
 the inner loop sccache produced a **0% hit rate** (measured across 272 real
 compilations and clean workspace/dep rebuilds) while still adding per-rustc
@@ -766,21 +766,21 @@ wrapper overhead and a misleading "enabled" status.
 Overrides:
 
 ```bash
-JCODE_SCCACHE=on   scripts/dev_cargo.sh build --profile selfdev ...   # force-enable
-JCODE_SCCACHE=off  scripts/dev_cargo.sh build --profile release-lto ... # force-disable
+ARTERM_SCCACHE=on   scripts/dev_cargo.sh build --profile selfdev ...   # force-enable
+ARTERM_SCCACHE=off  scripts/dev_cargo.sh build --profile release-lto ... # force-disable
 CARGO_INCREMENTAL=0 scripts/dev_cargo.sh build --profile selfdev ...   # makes it cacheable
 ```
 
 - 2026-05-29: made sccache incremental-aware. Validation on this machine:
   `--print-setup` reports `skipped-incremental` for `--profile selfdev` and `enabled`
-  for `--profile release-lto`; `JCODE_SCCACHE=on` and `CARGO_INCREMENTAL=0` both
-  re-enable it for selfdev. A clean `jcode-azure-auth` rebuild under the old
+  for `--profile release-lto`; `ARTERM_SCCACHE=on` and `CARGO_INCREMENTAL=0` both
+  re-enable it for selfdev. A clean `arterm-azure-auth` rebuild under the old
   always-on sccache showed `0/54` cache hits, confirming the prior wasted overhead.
 
 ### Remote build host fast-fail / fast-recovery
 
-When `JCODE_REMOTE_CARGO=1` (commonly set in `~/.config/jcode/remote-build.env`),
-`dev_cargo.sh` offloads builds to `JCODE_REMOTE_HOST` via `scripts/remote_build.sh`.
+When `ARTERM_REMOTE_CARGO=1` (commonly set in `~/.config/arterm/remote-build.env`),
+`dev_cargo.sh` offloads builds to `ARTERM_REMOTE_HOST` via `scripts/remote_build.sh`.
 The preflight is designed so that remote builds "just work" when the host is up,
 without paying a slow timeout when it is down:
 
@@ -798,11 +798,11 @@ without paying a slow timeout when it is down:
 Tunables (all optional):
 
 ```bash
-JCODE_REMOTE_TCP_TIMEOUT=1            # first-probe TCP timeout (seconds, fractional ok)
-JCODE_REMOTE_RECOVERY_TCP_TIMEOUT=0.3 # probe timeout while host was recently down
-JCODE_REMOTE_DOWN_TTL=300             # how long to keep using the recovery timeout
-JCODE_REMOTE_TCP_PROBE=0              # disable the pre-probe; use SSH preflight only
-JCODE_REMOTE_CARGO=0                  # disable remote builds entirely for one command
+ARTERM_REMOTE_TCP_TIMEOUT=1            # first-probe TCP timeout (seconds, fractional ok)
+ARTERM_REMOTE_RECOVERY_TCP_TIMEOUT=0.3 # probe timeout while host was recently down
+ARTERM_REMOTE_DOWN_TTL=300             # how long to keep using the recovery timeout
+ARTERM_REMOTE_TCP_PROBE=0              # disable the pre-probe; use SSH preflight only
+ARTERM_REMOTE_CARGO=0                  # disable remote builds entirely for one command
 ```
 
 - 2026-05-29: added the TCP pre-probe + recovery-timeout logic above. Validation on this
@@ -823,7 +823,7 @@ directly, but it can exhaust disk and force full rebuilds when space runs out.
 
 - It never touches a `target/<profile>` dir that has an active `rustc`/`cargo`
   process (scanned via `/proc/<pid>/cmdline`) or that was written to within a recent
-  activity window (default 20min, `JCODE_CLEAN_ACTIVE_WINDOW_MIN`).
+  activity window (default 20min, `ARTERM_CLEAN_ACTIVE_WINDOW_MIN`).
 - Default mode removes only cross-compile/compat caches (regenerated on demand) and
   reports what it would free.
 - `--aggressive` additionally runs `cargo clean --profile <p>` on stale profiles
@@ -843,7 +843,7 @@ scripts/clean_target.sh --apply --aggressive   # also cargo-clean stale profiles
 
 The biggest day-to-day pain on the 8-core/15 GiB dev machine was **memory
 pressure**: several self-dev agents build at once, and `.cargo/config.toml` pinned
-a static `jobs = 6`. rustc on the large root `jcode` crate peaks around 2.5-3 GiB
+a static `jobs = 6`. rustc on the large root `arterm` crate peaks around 2.5-3 GiB
 RSS, so 6 concurrent rustc processes (across one or several builds) overshoot RAM
 on a no-swap box and `earlyoom` kills the build. A static job count is wrong in both
 directions: it wastes cores when the machine is idle and oversubscribes memory when
@@ -853,11 +853,11 @@ it is busy.
 **currently-available** memory each time it runs:
 
 - `select_build_jobs()` reads `MemAvailable` and divides by a per-job memory budget
-  (default **2048 MiB**, `JCODE_BUILD_MIB_PER_JOB`), then clamps into `[1, nproc]`.
+  (default **2048 MiB**, `ARTERM_BUILD_MIB_PER_JOB`), then clamps into `[1, nproc]`.
 - It exports `CARGO_BUILD_JOBS`, which overrides `build.jobs` from `.cargo/config.toml`.
 - An idle machine still uses every core; under pressure a fresh build self-throttles
   (e.g. it picked **2 jobs** at ~5.9 GiB available during a parallel-agent build).
-- Explicit `JCODE_BUILD_JOBS` / `CARGO_BUILD_JOBS` always win; invalid values warn and
+- Explicit `ARTERM_BUILD_JOBS` / `CARGO_BUILD_JOBS` always win; invalid values warn and
   fall back to adaptive sizing. Non-Linux hosts keep the cargo/`.cargo` default.
 
 The committed static fallback in `.cargo/config.toml` was also lowered from `6` to
@@ -865,24 +865,24 @@ The committed static fallback in `.cargo/config.toml` was also lowered from `6` 
 single build on ~15 GiB, but no longer assuming a near-full core count).
 
 ```bash
-JCODE_BUILD_JOBS=2            # hard override the job count for one command
-JCODE_BUILD_MIB_PER_JOB=2048  # memory budget per rustc job (default)
+ARTERM_BUILD_JOBS=2            # hard override the job count for one command
+ARTERM_BUILD_MIB_PER_JOB=2048  # memory budget per rustc job (default)
 scripts/dev_cargo.sh --print-setup   # shows build_jobs_status + cargo_build_jobs
 ```
 
 - 2026-05-29: added adaptive sizing. Verified via `--print-setup` and a stubbed-cargo
   harness that overrides win, invalid input falls through to adaptive, budget extremes
   clamp to `[1, nproc]`, and the chosen `CARGO_BUILD_JOBS` is exported to the child
-  cargo process. A real `dev_cargo.sh check -p jcode-logging` build succeeded.
+  cargo process. A real `dev_cargo.sh check -p arterm-logging` build succeeded.
 
 For compile timing, prefer repeatable touched-file measurements over no-op hot-cache reruns:
 
 ```bash
 scripts/bench_compile.sh check --runs 3 --touch src/server.rs
 scripts/bench_compile.sh check --runs 3 --touch src/tool/read.rs
-scripts/bench_compile.sh release-jcode --runs 3
-scripts/bench_compile.sh selfdev-jcode --runs 3
-scripts/bench_compile.sh build -- --package jcode --bin test_api
+scripts/bench_compile.sh release-arterm --runs 3
+scripts/bench_compile.sh selfdev-arterm --runs 3
+scripts/bench_compile.sh build -- --package arterm --bin test_api
 scripts/bench_selfdev_checkpoints.sh --touch src/server.rs --runs 3
 ```
 
@@ -914,7 +914,7 @@ documented as deliberately as the wins so we do not re-attempt them.
 
 ### Profiling: where warm time actually goes
 
-`-Ztime-passes` on `jcode-base` (selfdev profile, single-threaded, clean unit):
+`-Ztime-passes` on `arterm-base` (selfdev profile, single-threaded, clean unit):
 
 | pass | lib only | lib + tests |
 | --- | --- | --- |
@@ -936,18 +936,18 @@ Because the bottleneck is the front-end, `rustc -Zthreads` (nightly) is the sing
 highest-leverage lever. Measured on this machine (Intel Ultra 7, 8 logical cores,
 selfdev profile):
 
-- `jcode-base` clean recompile: **25.3s -> 12.7s** (`-Zthreads=4`)
+- `arterm-base` clean recompile: **25.3s -> 12.7s** (`-Zthreads=4`)
 - base-edit full-chain rebuild end-to-end: **~16s -> ~10s**
 - Diminishing returns past 4 threads on an 8-core box.
 
 Shipped in `scripts/dev_cargo.sh` (`configure_parallel_frontend`): auto-enabled
 for the `selfdev` profile when a nightly toolchain is installed, isolated to
 `target/selfdev` so it cannot thrash rust-analyzer's `target/debug` cache.
-Controls: `JCODE_PARALLEL_FRONTEND`, `JCODE_FRONTEND_THREADS`, `JCODE_DEV_TOOLCHAIN`.
+Controls: `ARTERM_PARALLEL_FRONTEND`, `ARTERM_FRONTEND_THREADS`, `ARTERM_DEV_TOOLCHAIN`.
 
 ### WIN 2 — prefer mold over lld for the bin link
 
-The `jcode` binary is **~300 MB** of `.text` (statically links aws-sdk, `tract`
+The `arterm` binary is **~300 MB** of `.text` (statically links aws-sdk, `tract`
 ML, ratatui, syntect, multiple rustls copies, ...). On a warm rebuild that
 relinks the bin (which is nearly every incremental build):
 
@@ -967,7 +967,7 @@ in both cases (lib 25.3s -> ... cranelift slower; base `--tests` 32.5s LLVM vs
 34.2s cranelift). The bottleneck is the front-end, not codegen, so cranelift's
 faster-codegen tradeoff loses here. **Do not enable cranelift.**
 
-### NEGATIVE — splitting provider/auth out of `jcode-base`
+### NEGATIVE — splitting provider/auth out of `arterm-base`
 
 Hypothesis: provider+auth account for ~70% of base churn; pulling them into a
 sibling crate should stop provider edits from recompiling base-core.
@@ -980,7 +980,7 @@ Did the full analysis and the full execution:
   move up (provider, auth, usage, memory, memory_agent, compaction, sidecar,
   skill, goal, gmail, catalogs), leaving a **~28k-LOC base-core** with **zero
   remaining back-edges** (verified).
-- Executed it in a worktree: created `jcode-provider-stack`, moved all 114 files,
+- Executed it in a worktree: created `arterm-provider-stack`, moved all 114 files,
   rewired `app-core` to re-export it. **Full build passed, binary ran, tests
   passed.**
 
@@ -1006,7 +1006,7 @@ rmeta pipelining are in play. The lever is crate *content/weight*, not crate
 ### NEGATIVE — moving inline `#[cfg(test)]` tests to separate targets
 
 Inline tests are large: base 1132 / app-core 830 / tui 1313 `#[test]`s,
-~49k LOC of test code. They add **+5.7s (+23%)** to a `cargo test -p jcode-base`
+~49k LOC of test code. They add **+5.7s (+23%)** to a `cargo test -p arterm-base`
 front-end, concentrated in codegen (test bodies become real code).
 
 But moving them out does **not** help:
@@ -1062,7 +1062,7 @@ that are built as dylibs (essentially Rust std); the workspace crates and the
 heavy deps (aws-sdk, tract, ratatui, ...) are still `rlib`s baked into the bin,
 so the link does the same work. The dynamic binary also needs its `.so` files on
 `LD_LIBRARY_PATH` to run, which would add fragility to the `selfdev reload` path
-(reload copies the binary to `~/.jcode/builds/current/`). Bad trade for zero gain.
+(reload copies the binary to `~/.arterm/builds/current/`). Bad trade for zero gain.
 
 The only way dynamic linking would help is compiling the heavy *dependency*
 stacks as dylibs — which is the product-level "dependency weight" lever, not a
@@ -1088,7 +1088,7 @@ but a multi-agent workflow detail was found that silently destroys cache reuse.
 - sccache is deliberately **skipped** for incremental builds (`maybe_enable_sccache`
   in `dev_cargo.sh`): sccache cannot cache incremental compilation units, so on
   our incremental profiles it would add wrapper overhead for 0% hits. Forcing it
-  on requires `JCODE_SCCACHE=on` (and a non-incremental profile to be useful). ✓
+  on requires `ARTERM_SCCACHE=on` (and a non-incremental profile to be useful). ✓
 - The nightly parallel front-end (`-Zthreads=4`) is incremental-compatible —
   verified: a genuinely idle no-op rebuild is **0.4s** (pure fingerprint checks),
   so `-Zthreads` does not defeat the dep-graph cache. ✓
@@ -1099,14 +1099,14 @@ A "no-op" rebuild (touch nothing) was observed taking **46s** instead of 0.4s.
 `CARGO_LOG=cargo::core::compiler::fingerprint=info` showed the cause:
 
 ```
-stale: changed ".../jcode-provider-core/src/lib.rs"
+stale: changed ".../arterm-provider-core/src/lib.rs"
   source_mtime > fingerprint_mtime   -> StaleDepFingerprint cascades to the whole graph
 ```
 
 The source content had not changed — only its **mtime** had, because **another
-agent was editing files in the same shared worktree** (`/home/jeremy/jcode`)
+agent was editing files in the same shared worktree** (`/home/jeremy/arterm`)
 between builds. Cargo keys freshness on mtime, so any concurrent edit to a low,
-high-fanout crate (e.g. `jcode-provider-core`, `jcode-base`) invalidates that
+high-fanout crate (e.g. `arterm-provider-core`, `arterm-base`) invalidates that
 crate and everything downstream, turning a 0.4s no-op into a full-chain rebuild.
 
 Proven back-to-back: build #2 (idle) = **0.4s**; build #3, after a sibling

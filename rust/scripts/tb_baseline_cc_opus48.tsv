@@ -1,4 +1,4 @@
-# Claude Code + Opus 4.8 baseline on Terminal-Bench (5 trials/task). jcode must never do worse.
+# Claude Code + Opus 4.8 baseline on Terminal-Bench (5 trials/task). arterm must never do worse.
 # task	trials	resolved	rate
 adaptive-rejection-sampler	5	4	80.0
 bn-fit-modify	5	5	100.0

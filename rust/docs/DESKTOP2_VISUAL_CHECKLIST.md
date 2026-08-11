@@ -1,9 +1,9 @@
 # Desktop2 Visual & Interface Checklist
 
-What "good visuals" means for `jcode-desktop2`, and how each rule is enforced.
+What "good visuals" means for `arterm-desktop2`, and how each rule is enforced.
 
 This is a working checklist, not a style essay. The design language itself
-lives in `~/jcode-website/STYLE.md` (print, one ink, JetBrains Mono); this
+lives in `~/arterm-website/STYLE.md` (print, one ink, JetBrains Mono); this
 document covers the things that actually break in a rendered app, plus the
 test that catches each one.
 
@@ -14,12 +14,12 @@ broken and the named test failed. Rows marked `manual` are honest gaps.
 ## Running it
 
 ```sh
-# build (selfdev routes crates/jcode-desktop2/ changes here automatically)
+# build (selfdev routes crates/arterm-desktop2/ changes here automatically)
 selfdev build target=desktop2
 
-# launch: ~/.local/bin/jcode-desktop2 prefers an installed binary, then the
+# launch: ~/.local/bin/arterm-desktop2 prefers an installed binary, then the
 # self-dev build, so a rebuild is picked up without reinstalling.
-jcode-desktop2
+arterm-desktop2
 ```
 
 Bound to `Alt+Shift+I` in niri, alongside `Alt+I` for the original desktop app.
@@ -32,23 +32,23 @@ scripts/desktop2_visual_check.sh
 scripts/desktop2_visual_check.sh --gpu   # also run pixel tests
 
 # geometry + text invariants only (fast, no GPU)
-cargo test -p jcode-desktop2
+cargo test -p arterm-desktop2
 
 # pixel-level visual invariants (renders offscreen, needs a GPU)
-cargo test -p jcode-desktop2 -- --ignored
+cargo test -p arterm-desktop2 -- --ignored
 
 # list the keybindings ported from the TUI, and what was skipped
-./target/selfdev/jcode-desktop2 --keys
+./target/selfdev/arterm-desktop2 --keys
 
 # drive a chord sequence and print the resulting composer state. Use this for
 # manual verification: synthetic input tools (wtype/ydotool) drop or remap
 # modifiers and pointer coordinates on Wayland, so they are not trustworthy
 # for keybinding checks.
-./target/selfdev/jcode-desktop2 --script 'type:alpha beta' ctrl+a shift+right shift+right
+./target/selfdev/arterm-desktop2 --script 'type:alpha beta' ctrl+a shift+right shift+right
 
 # render every state-space node to PNGs for eyeballing / agent review
-cargo build --profile selfdev -p jcode-desktop2 --bin jcode-desktop2
-./target/selfdev/jcode-desktop2 --capture all /tmp/d2caps
+cargo build --profile selfdev -p arterm-desktop2 --bin arterm-desktop2
+./target/selfdev/arterm-desktop2 --capture all /tmp/d2caps
 ```
 
 `--capture` renders at 2x so reviewed frames match what a HiDPI window shows.
@@ -89,7 +89,7 @@ The single highest-value category: this is where the first cut actually broke.
 | 3.2 | Body leading 1.65; captions carry 0.1-0.2em letterspacing. | `layout::BODY_LEADING`, caption styles |
 | 3.3 | Single-line fields **elide**, never wrap past their own rule. | `tests::elide_*`, `visual_tests::masthead_rule_is_clear_of_text` |
 | 3.4 | Elision keeps the informative ends (head and tail of paths, ids, errors). | `tests::elide_respects_budget_and_keeps_ends` |
-| 3.5 | Sentence case; product names keep their own casing (`jcode` lowercase). | manual |
+| 3.5 | Sentence case; product names keep their own casing (`arterm` lowercase). | manual |
 
 ## 4. Color and contrast
 

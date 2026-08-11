@@ -1,10 +1,10 @@
 # Code Quality 10/10 Plan
 
-This document defines the quality target for jcode, the standards required to reach it, and the phased execution plan to get there without destabilizing the product.
+This document defines the quality target for arterm, the standards required to reach it, and the phased execution plan to get there without destabilizing the product.
 
 ## Goal
 
-Raise jcode from its current state of roughly **7/10 overall code quality** to a sustained **9+/10 engineering standard**, with a practical target that feels like "10/10" in day-to-day development:
+Raise arterm from its current state of roughly **7/10 overall code quality** to a sustained **9+/10 engineering standard**, with a practical target that feels like "10/10" in day-to-day development:
 
 - clean builds
 - clear module ownership
@@ -14,7 +14,7 @@ Raise jcode from its current state of roughly **7/10 overall code quality** to a
 - predictable behavior under stress
 - strict CI guardrails that prevent regressions
 
-Because jcode is a fast-moving product, "10/10" does **not** mean "perfect". It means:
+Because arterm is a fast-moving product, "10/10" does **not** mean "perfect". It means:
 
 1. defects are easier to prevent than to introduce
 2. contributors can quickly understand where code belongs

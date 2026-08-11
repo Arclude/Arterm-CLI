@@ -1,11 +1,11 @@
 # TUI Colors and Palette Harmony
 
-Every color the jcode TUI renders is user-configurable, and palettes can be
+Every color the arterm TUI renders is user-configurable, and palettes can be
 measured objectively rather than eyeballed.
 
 ## The default palette is fixed
 
-jcode's built-in palette is hand-tuned and is **not** derived from the harmony
+arterm's built-in palette is hand-tuned and is **not** derived from the harmony
 metric. It stays the default. `default_palette_is_frozen` in `palette.rs` holds a
 redundant copy of every value and fails if any of them change, because the
 generator, scorer, and repair pass all read those constants and it would be easy
@@ -18,7 +18,7 @@ metric is there to help users evaluate palettes *they* choose, and to let
 
 ## Configuring colors
 
-Colors live in `~/.jcode/config.toml`:
+Colors live in `~/.arterm/config.toml`:
 
 ```toml
 [display.colors]
@@ -58,7 +58,7 @@ flowchart TD
     D --> E[Terminal]
 ```
 
-The order matters. The light/dark pass exists because jcode's *built-in* palette
+The order matters. The light/dark pass exists because arterm's *built-in* palette
 is designed for dark terminals, so it flips luminance to make those colors work
 on light ones. A color the user configured is already the color they want, so it
 runs last and is never flipped: otherwise a deliberately dark red for errors on a
@@ -190,7 +190,7 @@ backgrounds.
 
 ## Adding a role
 
-1. Add the variant to `Role` in `crates/jcode-tui-style/src/palette.rs`, list it
+1. Add the variant to `Role` in `crates/arterm-tui-style/src/palette.rs`, list it
    in `ALL_ROLES`, and give it a `key()` and a `default_rgb()` equal to the value
    currently hard-coded at its call sites. Defaults must preserve today's look.
 2. If it is a background, say so in `is_background()`; backgrounds are graded on
