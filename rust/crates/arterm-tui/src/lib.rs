@@ -1,6 +1,9 @@
 pub mod agent;
+mod commands;
 mod copy_selection;
+mod header;
 mod markdown;
+mod status_bar;
 
 use anyhow::Result;
 use crossterm::{
@@ -27,6 +30,7 @@ use tokio::sync::mpsc;
 
 use arterm_config::ArtermConfig;
 use agent::{Agent, AgentEvent};
+use commands::Command;
 use copy_selection::SelectionState;
 
 /// A transcript entry rendered in the TUI.
@@ -52,6 +56,12 @@ pub struct App {
     scroll_offset: usize,
     /// Mouse drag-to-select state for the transcript.
     selection: SelectionState,
+    /// Whether the help overlay is shown (toggled by `/help` or `?`).
+    show_help: bool,
+    /// Active model (mutable copy of `config.model`, changed by `/model`).
+    current_model: String,
+    /// Active permission mode (mutable copy of `config.mode`, changed by `/mode`).
+    current_mode: String,
 }
 
 impl App {
@@ -83,6 +93,9 @@ impl App {
             agent_busy: false,
             scroll_offset: 0,
             selection: SelectionState::default(),
+            show_help: false,
+            current_model: String::new(),
+            current_mode: String::new(),
         })
     }
 
@@ -138,6 +151,12 @@ impl App {
             });
         }
 
+        // Initialise mutable display state from the config so that `/model`
+        // and `/mode` can update them without needing to mutate the borrowed
+        // `config` (which is `&ArtermConfig`).
+        self.current_model = config.model.clone();
+        self.current_mode = config.mode.clone();
+
         // Welcome banner.
         self.messages.push(TranscriptEntry::System(format!(
             "Arterm {} · {}/{} · Type a message and press Enter. Press Ctrl+C twice to quit.",
@@ -172,12 +191,125 @@ impl App {
                                     continue;
                                 }
                                 let input = std::mem::take(&mut self.input);
-                                if input.trim().is_empty() {
+                                let trimmed = input.trim();
+                                if trimmed.is_empty() {
                                     continue;
                                 }
-                                if input.trim() == "/exit" || input.trim() == "/quit" {
-                                    break;
+
+                                // ── Slash-command dispatch ──────────────────
+                                // Inputs beginning with `/` (or the bare `?`
+                                // shortcut) are parsed as commands. Unknown
+                                // commands produce an error message in the
+                                // transcript.
+                                let is_command =
+                                    trimmed.starts_with('/') || trimmed == "?";
+                                if is_command {
+                                    match commands::parse_command(trimmed) {
+                                        Some(Command::Help) => {
+                                            self.show_help = !self.show_help;
+                                        }
+                                        Some(Command::Clear) => {
+                                            self.messages.clear();
+                                            self.live.clear();
+                                            self.scroll_offset = 0;
+                                        }
+                                        Some(Command::Exit) => break,
+                                        Some(Command::Model(name)) => {
+                                            if name.is_empty() {
+                                                self.messages.push(
+                                                    TranscriptEntry::System(format!(
+                                                        "Current model: {}",
+                                                        self.current_model
+                                                    )),
+                                                );
+                                            } else {
+                                                self.current_model = name.clone();
+                                                self.messages.push(
+                                                    TranscriptEntry::System(format!(
+                                                        "Model set to {name}"
+                                                    )),
+                                                );
+                                            }
+                                        }
+                                        Some(Command::Mode(mode)) => {
+                                            if mode.is_empty() {
+                                                self.messages.push(
+                                                    TranscriptEntry::System(format!(
+                                                        "Current mode: {}",
+                                                        self.current_mode
+                                                    )),
+                                                );
+                                            } else {
+                                                self.current_mode = mode.clone();
+                                                self.messages.push(
+                                                    TranscriptEntry::System(format!(
+                                                        "Mode set to {mode}"
+                                                    )),
+                                                );
+                                            }
+                                        }
+                                        Some(Command::Copy) => {
+                                            // Find the last assistant message.
+                                            let last_reply = self
+                                                .messages
+                                                .iter()
+                                                .rev()
+                                                .find_map(|e| match e {
+                                                    TranscriptEntry::Assistant(t) => {
+                                                        Some(t.clone())
+                                                    }
+                                                    _ => None,
+                                                });
+                                            match last_reply {
+                                                Some(text) => {
+                                                    let text = text.clone();
+                                                    std::thread::spawn(move || {
+                                                        copy_selection::copy_to_clipboard(
+                                                            &text,
+                                                        );
+                                                    });
+                                                    self.messages.push(
+                                                        TranscriptEntry::System(
+                                                            "Copied last reply to clipboard."
+                                                                .to_string(),
+                                                        ),
+                                                    );
+                                                }
+                                                None => {
+                                                    self.messages.push(
+                                                        TranscriptEntry::System(
+                                                            "No assistant reply to copy."
+                                                                .to_string(),
+                                                        ),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Some(Command::Compact) => {
+                                            self.messages.push(TranscriptEntry::System(
+                                                "Compact: context compaction is not yet implemented."
+                                                    .to_string(),
+                                                ));
+                                        }
+                                        Some(Command::Version) => {
+                                            self.messages.push(TranscriptEntry::System(
+                                                format!(
+                                                    "Arterm {}",
+                                                    env!("CARGO_PKG_VERSION")
+                                                ),
+                                            ));
+                                        }
+                                        None => {
+                                            self.messages.push(TranscriptEntry::System(
+                                                format!(
+                                                    "Unknown command: {trimmed}. Type /help for available commands."
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                    continue;
                                 }
+
                                 self.messages.push(TranscriptEntry::User(input.clone()));
                                 self.agent_busy = true;
                                 self.live.clear();
@@ -198,8 +330,21 @@ impl App {
                                     }
                                 }
                             }
+                            // ── Escape: close help overlay or clear input ──
+                            KeyCode::Esc => {
+                                if self.show_help {
+                                    self.show_help = false;
+                                } else if !self.input.is_empty() {
+                                    self.input.clear();
+                                }
+                            }
                             // ── Type characters ─────────────────────────────
                             KeyCode::Char(c) => {
+                                // Typing while the help overlay is open dismisses
+                                // it and starts fresh input.
+                                if self.show_help {
+                                    self.show_help = false;
+                                }
                                 self.input.push(c);
                             }
                             KeyCode::Backspace => {
@@ -274,26 +419,30 @@ impl App {
     /// Handle a crossterm mouse event: start/extend/finish a drag selection or
     /// scroll the transcript with the wheel.
     ///
-    /// Mouse coordinates are screen-relative. The transcript occupies the top
-    /// layout chunk (`chunks[0]` in [`App::draw`]); its screen y-origin is at
-    /// row 0 of the terminal, so `mouse.row` maps directly to a transcript
-    /// line *index* once the current scroll state is accounted for. Because the
-    /// selection needs to be stable across redraws (which recompute the visible
-    /// window), we store coordinates relative to the **visible window**: the
-    /// row is an index into the displayed lines, the column is the cell within
-    /// that line.
+    /// Mouse coordinates are screen-relative. The transcript occupies the
+    /// second layout chunk (`chunks[1]` in [`App::draw`]), starting 1 row below
+    /// the top because the header occupies row 0. So `mouse.row` must be
+    /// offset by the header height (1) to map to a transcript-line *index*.
+    /// Because the selection needs to be stable across redraws (which recompute
+    /// the visible window), we store coordinates relative to the **visible
+    /// window**: the row is an index into the displayed lines, the column is
+    /// the cell within that line.
     fn handle_mouse_event(&mut self, mouse: MouseEvent) {
         use crossterm::event::MouseButton;
 
-        // The transcript area starts at terminal row 0 (top of screen) and
-        // spans `transcript_height` rows. Rows outside this band are ignored
-        // for selection (e.g. a click in the input box or status line).
+        // The transcript area starts 1 row below the top of the screen (the
+        // header bar occupies row 0) and spans `transcript_height` rows.
         let transcript_height = self.transcript_height();
+        let header_offset: u16 = 1; // header occupies row 0
 
-        // Clamp the mouse row into the transcript band so a drag that overshoots
-        // the top or bottom edge of the transcript still extends the selection
-        // to the boundary line, just like a native terminal.
-        let screen_row = mouse.row.min(transcript_height.saturating_sub(1).max(0));
+        // Translate the screen row into transcript-line space by subtracting
+        // the header offset. Clamp into the transcript band so a drag that
+        // overshoots the top or bottom edge still extends the selection to
+        // the boundary line, just like a native terminal.
+        let screen_row = mouse
+            .row
+            .saturating_sub(header_offset)
+            .min(transcript_height.saturating_sub(1).max(0));
         let screen_col = mouse.column;
 
         let action = self
@@ -329,10 +478,10 @@ impl App {
     /// The height (in rows) of the transcript area, computed from the same
     /// layout used by [`App::draw`].
     fn transcript_height(&self) -> u16 {
-        // The layout reserves 3 rows for the input box and 1 for the status
-        // line; everything else is the transcript (`Constraint::Min(1)`).
+        // The layout reserves 1 row for the header, 3 for the input box, and
+        // 1 for the status bar; everything else is the transcript.
         let total = self.terminal.size().map(|r| r.height).unwrap_or(0);
-        total.saturating_sub(3 + 1)
+        total.saturating_sub(1 + 3 + 1)
     }
 
     /// The plain-text content of each currently visible transcript line, in
@@ -355,23 +504,33 @@ impl App {
         lines.split_off(start)
     }
 
-    /// Render the TUI: scrollable transcript, input box, and status line.
+    /// Render the TUI: header bar, scrollable transcript, input box, and
+    /// status bar.
     fn draw(&mut self, config: &ArtermConfig) -> Result<()> {
         let rect = self.terminal.size()?;
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(1), // header
                 Constraint::Min(1),    // transcript
                 Constraint::Length(3), // input box (top border + line)
-                Constraint::Length(1), // status line
+                Constraint::Length(1), // status bar
             ])
             .split(rect.into());
+
+        // When the help overlay is active, render the help panel instead of
+        // the transcript.
+        let help_lines: Vec<String> = if self.show_help {
+            commands::help_text()
+        } else {
+            Vec::new()
+        };
 
         // Build transcript items from committed messages + live text.
         let mut items = Self::build_transcript_items(&self.messages, &self.live);
 
         // Auto-scroll to bottom unless the user scrolled up.
-        let area_height = chunks[0].height as usize;
+        let area_height = chunks[1].height as usize;
         let total = items.len();
         let max_scroll = total.saturating_sub(area_height);
         if self.scroll_offset > max_scroll {
@@ -381,7 +540,7 @@ impl App {
         let display_items = items.split_off(start);
 
         let transcript = List::new(display_items)
-            .block(Block::default().borders(Borders::NONE));
+            .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::DarkGray)));
 
         // Input box with a `>` prompt.
         let prompt = if self.agent_busy { "…" } else { ">" };
@@ -391,25 +550,104 @@ impl App {
                 .border_style(Style::default().fg(Color::DarkGray)),
         );
 
-        // Status line: Arterm 0.1.0 | provider/model | idle/thinking
-        let status = format!(
-            " Arterm {} | {}/{} | {}",
-            env!("CARGO_PKG_VERSION"),
-            config.provider,
-            config.model,
-            if self.agent_busy { "thinking" } else { "idle" }
-        );
-        let status_line = Paragraph::new(status).style(Style::default().fg(Color::DarkGray));
+        // Determine the status string for the header.
+        let status = if self.agent_busy { "thinking" } else { "idle" };
+        let version = env!("CARGO_PKG_VERSION");
+        let header_provider = config.provider.clone();
+        let header_model = self.current_model.clone();
+        let header_status = status.to_string();
+
+        // Status bar arguments.
+        let key_hints = "Enter send · ↑↓ history · Esc cancel · Ctrl+C twice to quit";
+        let status_mode = self.current_mode.clone();
+        let status_scroll = self.scroll_offset;
 
         // Capture the selection range (if any) so we can invert the selected
         // cells in the screen buffer after the widgets are rendered.
         let selection_range = self.selection.normalized_range();
 
-        let transcript_area = chunks[0];
+        let transcript_area = chunks[1];
+        let header_area = chunks[0];
+        let input_area = chunks[2];
+        let status_bar_area = chunks[3];
         self.terminal.draw(|f| {
-            f.render_widget(transcript, transcript_area);
-            f.render_widget(input_box, chunks[1]);
-            f.render_widget(status_line, chunks[2]);
+            header::render_header(
+                f,
+                header_area,
+                &header_provider,
+                &header_model,
+                version,
+                &header_status,
+            );
+
+            if self.show_help {
+                // ── Help overlay ────────────────────────────────────────
+                // Render the help panel with a bordered box, replacing the
+                // transcript area. The first line is the title (bold cyan);
+                // group headers ("Chat & models:", "Tips:") are bold yellow;
+                // command lines are plain text with the command keyword in
+                // white and the description in gray.
+                let title = help_lines.first().cloned().unwrap_or_default();
+                let mut help_spans: Vec<Line> = Vec::new();
+                for (i, line) in help_lines.iter().enumerate() {
+                    if i == 0 {
+                        // Title — already handled by the block title.
+                        continue;
+                    }
+                    if line.is_empty() {
+                        help_spans.push(Line::raw(""));
+                    } else if line.ends_with(':') {
+                        // Group header.
+                        help_spans.push(Line::from(vec![Span::styled(
+                            line.clone(),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )]));
+                    } else {
+                        // Command line: split the indentation from the command
+                        // and the description.
+                        let indent_len = line.len() - line.trim_start().len();
+                        let indent = " ".repeat(indent_len);
+                        let rest = line.trim_start();
+                        // rest looks like "/help or ?      Show this help"
+                        let (command_part, description) =
+                            rest.split_at(rest.find("  ").unwrap_or(rest.len()));
+                        let description = description.trim_start();
+                        help_spans.push(Line::from(vec![
+                            Span::raw(indent),
+                            Span::styled(
+                                command_part.to_string(),
+                                Style::default().fg(Color::White),
+                            ),
+                            Span::raw("  "),
+                            Span::styled(
+                                description.to_string(),
+                                Style::default().fg(Color::Gray),
+                            ),
+                        ]));
+                    }
+                }
+
+                let help_widget = Paragraph::new(help_spans).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(format!(" {title} "))
+                        .title_alignment(ratatui::layout::Alignment::Center)
+                        .border_style(Style::default().fg(Color::Cyan)),
+                );
+                f.render_widget(help_widget, transcript_area);
+            } else {
+                f.render_widget(transcript, transcript_area);
+            }
+            f.render_widget(input_box, input_area);
+            status_bar::render_status_bar(
+                f,
+                status_bar_area,
+                key_hints,
+                &status_mode,
+                status_scroll,
+            );
 
             // ── Selection highlight ───────────────────────────────────────
             // Invert the colors of every cell inside the selected region. The
