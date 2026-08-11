@@ -26,7 +26,33 @@ use update_metadata::{record_release_update_duration, record_source_update_durat
 pub use update_rate_limit::{RATE_LIMIT_ERROR_PREFIX, is_rate_limit_error};
 use update_rate_limit::{clear_rate_limit_backoff, rate_limit_error};
 
-const GITHUB_REPO: &str = "1jehuang/arterm";
+/// The repository the self-updater downloads releases from, or `None`.
+///
+/// `None` — the default — disables self-update entirely, and that is a
+/// security default rather than a preference.
+///
+/// The rebrand rewrote upstream's `1jehuang/jcode` to `1jehuang/arterm`, a
+/// repository that does not exist. A self-updater is by construction a remote
+/// code execution path: it downloads a release asset and installs it over the
+/// running binary. Pointed at a name nobody controls, it is one repository
+/// registration away from installing an arbitrary third party's binary — and
+/// pointing it back at upstream would be no better, because it would replace
+/// this fork with jcode on the next release.
+///
+/// Set `ARTERM_UPDATE_REPO=owner/name` to re-enable it against a repository
+/// this project actually publishes.
+fn update_repo() -> Option<String> {
+    std::env::var("ARTERM_UPDATE_REPO")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Message returned wherever an update path is reached with no repository set.
+/// Stated rather than silent: a self-update that quietly does nothing reads as
+/// a broken updater, and the next person "fixes" it by hardcoding a repo.
+const UPDATE_DISABLED: &str = "self-update is disabled: no ARTERM_UPDATE_REPO is configured, \
+     and this build must not download releases from a repository it does not own";
 /// Minimum gap between *automatic* update checks.
 ///
 /// Every automatic check costs one or two unauthenticated `api.github.com`
@@ -161,10 +187,8 @@ fn is_inside_git_repo(path: &std::path::Path) -> bool {
 }
 
 pub fn fetch_latest_release_blocking() -> Result<GitHubRelease> {
-    let url = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        GITHUB_REPO
-    );
+    let repo = update_repo().ok_or_else(|| anyhow::anyhow!(UPDATE_DISABLED))?;
+    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
 
     let client = reqwest::blocking::Client::builder()
         .timeout(UPDATE_CHECK_TIMEOUT)
@@ -213,7 +237,8 @@ fn github_api_request(
 }
 
 fn latest_main_sha_blocking() -> Result<String> {
-    let url = format!("https://api.github.com/repos/{}/commits/main", GITHUB_REPO);
+    let repo = update_repo().ok_or_else(|| anyhow::anyhow!(UPDATE_DISABLED))?;
+    let url = format!("https://api.github.com/repos/{repo}/commits/main");
     let client = reqwest::blocking::Client::builder()
         .timeout(UPDATE_CHECK_TIMEOUT)
         .user_agent("arterm-updater")
@@ -282,7 +307,9 @@ fn synthetic_main_release(latest_sha: &str) -> GitHubRelease {
     GitHubRelease {
         tag_name: format!("main-{}", latest_sha),
         _name: Some(format!("Built from main ({})", latest_sha)),
-        _html_url: format!("https://github.com/{}/commit/{}", GITHUB_REPO, latest_sha),
+        _html_url: update_repo()
+            .map(|repo| format!("https://github.com/{repo}/commit/{latest_sha}"))
+            .unwrap_or_default(),
         _published_at: None,
         assets: vec![],
         _target_commitish: latest_sha.to_string(),
@@ -705,7 +732,12 @@ fn build_from_source() -> Result<PathBuf> {
     } else {
         // Clone
         crate::logging::info("Main channel: cloning repository...");
-        let clone_url = format!("https://github.com/{}.git", GITHUB_REPO);
+        // Same rule as the release download, and for a sharper reason: this
+        // clones a tree that is then BUILT and installed over the running
+        // binary, so an unowned repository name here is arbitrary code
+        // execution with a compile step in front of it.
+        let repo = update_repo().ok_or_else(|| anyhow::anyhow!(UPDATE_DISABLED))?;
+        let clone_url = format!("https://github.com/{repo}.git");
         let output = std::process::Command::new("git")
             .args([
                 "clone", "--depth", "1", "--branch", "main", &clone_url, "arterm",
@@ -1200,6 +1232,31 @@ mod tests {
     use super::*;
     use arterm_update_core::parse_sha256sums;
     use sha2::{Digest, Sha256};
+
+    #[test]
+    fn self_update_is_off_until_a_repository_is_named() {
+        // A self-updater downloads a release and installs it over the running
+        // binary. The rebrand left it pointed at `1jehuang/arterm`, which does
+        // not exist — one repository registration away from installing a
+        // stranger's build. It stays off until someone names a repository this
+        // project actually publishes.
+        let previous = std::env::var("ARTERM_UPDATE_REPO").ok();
+        crate::env::remove_var("ARTERM_UPDATE_REPO");
+        assert_eq!(update_repo(), None, "no repo configured must mean no updates");
+
+        // Whitespace is not a repository name; without the filter it would
+        // build a URL like `https://api.github.com/repos/ /releases/latest`.
+        crate::env::set_var("ARTERM_UPDATE_REPO", "   ");
+        assert_eq!(update_repo(), None);
+
+        crate::env::set_var("ARTERM_UPDATE_REPO", "acme/arterm");
+        assert_eq!(update_repo().as_deref(), Some("acme/arterm"));
+
+        match previous {
+            Some(value) => crate::env::set_var("ARTERM_UPDATE_REPO", value),
+            None => crate::env::remove_var("ARTERM_UPDATE_REPO"),
+        }
+    }
 
     #[test]
     fn test_version_is_newer() {
