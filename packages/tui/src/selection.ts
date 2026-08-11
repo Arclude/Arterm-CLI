@@ -147,8 +147,14 @@ export function normalizeRange(a: SelectionPoint, b: SelectionPoint): SelectionR
   return before ? { start: a, end: b } : { start: b, end: a };
 }
 
-/** Slice a single line's text between two display columns, on grapheme boundaries. */
-function sliceByColumns(text: string, startCol: number, endCol: number): string {
+/**
+ * Slice a single line's text between two display columns, on grapheme
+ * boundaries. Exported because `SelectionOverlay` paints the highlight from the
+ * SAME selection the copy reads — if the two sliced independently, the bytes a
+ * user sees highlighted could drift from the bytes that land on the clipboard,
+ * breaking the one invariant the mode exists to guarantee.
+ */
+export function sliceByColumns(text: string, startCol: number, endCol: number): string {
   if (endCol <= startCol) return "";
   const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
   let col = 0;

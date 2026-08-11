@@ -15,7 +15,8 @@ dependency direction is one-way — **everything depends on `core`**:
 | `@arterm/providers` | `OllamaProvider`, `LlamaCppProvider`, and their registry.                 |
 | `@arterm/tools`     | File & shell tools and their registry.                                    |
 | `@arterm/tui`       | The Ink terminal UI.                                                       |
-| `@arterm/cli`       | The `arterm` binary (commander) and session wiring.                       |
+| `arterm-cli`        | The `arterm` binary (commander) and session wiring.                       |
+| `@arterm/memory`    | Observation recording and persistent cross-session memory stores.          |
 
 `core` defines the interfaces (`ChatProvider`, `Tool`, `Message`, etc.); the
 other packages implement them. Don't add a dependency from `core` onto any other
@@ -67,6 +68,8 @@ node scripts/shell-writes-recorded-e2e.mjs # does the ledger see what a SHELL co
 node scripts/mention-attach-e2e.mjs        # does `@file` put the FILE in front of the model?
 node scripts/unattended-escalation-e2e.mjs # what happens to a prompt nobody will answer?
 node scripts/spool-roundtrip-e2e.mjs       # can the model go back for a spooled result?
+node scripts/wheel-scroll-e2e.mjs          # who owns the wheel — and can a tick still TYPE?
+node scripts/soft-interrupt-e2e.mjs        # does typing MID-TURN reach the model during it?
 ```
 
 It drives the real TUI in a pty through a whole `/sdd` run against a recording
@@ -304,6 +307,65 @@ The accounting was already right before the markers existed: `cache_read` and
 because a read costs ~10% of the input rate and merging them overstates an agent
 loop — which is mostly cache hits — by close to an order of magnitude.
 
+### The launcher exists for one line: `NODE_ENV`
+
+React ships two builds and chooses between them at IMPORT time, by reading
+`process.env.NODE_ENV`. Unset it loads the DEVELOPMENT build — validation on
+every element, a warning getter on every prop, a slower reconciler — which is
+what every user was running, because nothing set it. Measured against the built
+binary on a 1,200-chunk stream in fullscreen: **2,390ms of CPU unset versus
+1,940ms set**, same output, same frame count.
+
+It cannot be done inside `app.ts`, and that is why `cli/src/main.ts` exists as a
+separate entry. ESM hoists imports, so every `import` in a module is evaluated
+before the module's first statement: by the time any line of `app.ts` runs, Ink
+has imported React and React has already chosen. A tsup `banner` fails for the
+same reason — it is prepended to the module body, not ahead of its imports. Only
+a separate entry reaching the app through `await import(...)` can set it first,
+which is also why `dist/main.js` had to stay the name everyone runs (ten e2e
+scripts and the `bin` field point at it).
+
+Two halves keep it honest, and each is a test:
+
+- **`??=`, never `=`.** Someone who exported `NODE_ENV=development` meant it.
+- **What we set, we do not hand on.** `NODE_ENV=production` in a child's
+  environment makes npm, yarn and pnpm skip devDependencies, so an agent running
+  `npm install` would build a subtly wrong tree for a reason nobody could see.
+  `scrubEnv` removes it again — but ONLY when the launcher defaulted it, marked
+  by a well-known symbol on `globalThis` rather than an environment variable,
+  since a variable is exactly what would leak into the children being protected.
+  It is removed even under `credentials.scrub: false` (that switch is about
+  credentials, and this is not one) and never appears in `withheld` (a failing
+  command has nothing to learn from it).
+
+### The catalog SEARCH was the hot path, not the file read
+
+`cachedCatalogSync()` memoizes the file; `matchModels` was memoizing nothing,
+and that is where a streaming turn's CPU went. It walks the whole catalog —
+models.dev carries thousands of entries — calling `normalizeId` on each, which
+lowercases and runs a regex. One lookup is a few thousand regex operations, and
+the caller is not occasional: the TUI reads `effectiveContextWindow()` on EVERY
+render to draw the context gauge, so a turn asked it once per repaint.
+
+Measured with `--cpu-prof` against the built binary during a 600-chunk stream:
+`normalizeId` was the largest non-idle frame (199ms), and the cluster around it
+(`matchModels`, `leafId`, its regex, `findModelById`, `cachedCatalogSync`) came
+to roughly a quarter of all active CPU — for a question whose answer cannot
+change while the process runs. `lookupMemo` makes it exact rather than cheap:
+the catalog behind it is immutable once loaded, so a hit is the same object the
+search would have returned, and `clearCatalogMemo()` drops both memos together
+because an answer is exactly as stale as the catalog it came from.
+
+An explicit `models` argument never touches it — that list is the caller's own
+data and may disagree with the cache. A miss stores `null` rather than nothing,
+since a miss costs a full scan too; but a miss against an EMPTY catalog is not
+stored at all, because that is the pre-warm state and the fetch is about to
+populate it.
+
+Two numbers on the same harness, streaming 1,200 chunks in fullscreen: 2,450ms
+of CPU before, 2,290ms after — and 61 frames before, 88 after. The frame count
+is the one that matters; the saving was spent on drawing.
+
 ### The context window is a BELIEF, and headless runs got it wrong
 
 `effectiveContextWindow()` is the models.dev value for the model, falling back to
@@ -390,7 +452,7 @@ degrading quietly.
 `packages/core/src/kernel/` holds a tiny DI layer that the agent loop runs on:
 
 - **`Container`** — lazy, memoized typed DI (`bind`/`override`/`decorate`/`resolve`,
-  plus `createScope` for per-run children). `buildSession` (in `@arterm/cli`) is the
+  plus `createScope` for per-run children). `buildSession` (in `arterm-cli`) is the
   composition root: it builds the root container and binds the session's services
   (`Tokens.Bus`, `PermissionPolicy`, `Compactor`, `Pipelines`, `RunController`, …) to
   the instances it already creates, then hands that container to the `Agent`. An
@@ -1089,6 +1151,208 @@ whose picker draws no counter at all, so the check asserts 2/15 arrived AND 3/15
 did not. Its workspace carries twelve filler files for the same reason: in a
 directory with three, a box that truncates and a box that scrolls are the same
 box.
+
+### The wheel scrolls the chat, and the fix was the CHANNEL — not a better guess
+
+The alternate screen has no scrollback, so a fullscreen chat has to scroll
+itself, and everything here follows from what a wheel tick ARRIVES as. There are
+two channels and only one of them is decidable.
+
+**Alternate scroll (DECSET 1007) is the undecidable one**, and it is what this
+shipped with. The emulator answers a tick with ARROW KEYS. Two bugs were
+reported in one sentence, and both are that sentence: a tick expands to however
+many lines the system is set to — usually three — so the chat moved in jumps;
+and a terminal set to ONE line per tick sends a single arrow, byte-identical to
+a human pressing ↑. `arrowRouter` tried to separate them by timing, and on that
+setting there is nothing to separate. Scrolling the chat recalled prompts.
+
+**SGR mouse reporting (`?1000h` + `?1006h`) is the decidable one**, and it is
+now the default. A tick arrives as `ESC[<64;x;yM` — the direction is in the
+bytes, and no keypress can spell it. History recall listens for ↑; a tick simply
+is not ↑, so the ambiguity never exists rather than being resolved well.
+
+That is measured, not reasoned: `claude` was run in a pty and its boot bytes
+read back. It writes `?2004h`, `?1049h`, then `?1000h ?1002h ?1003h ?1006h`,
+re-asserts that set twice more inside eight seconds, and `?1007` appears
+**nowhere** in the stream. We enable the same pair minus `?1002/?1003` — motion
+reporting is a packet per mouse move for a feature nothing here reads, in a
+change that began as a report of lag.
+
+`MultiApp` owns the modes (process-global; per-App ownership flaps them on every
+session switch) and re-asserts on mount and on every resize, because a host
+emulator can restore reporting behind our back — the desktop app's renderer pool
+`reset()`s a pane on rebind and replays a snapshot that restores `?1000h` but not
+`?1006h`, downgrading the wheel to X10 bytes the SGR parser cannot read.
+
+**The cost is stated on screen, because half of it is invisible otherwise.**
+Capture takes plain left-drag from the terminal, so selecting text becomes
+⇧+drag (the terminal's own capture bypass) and ⇧+wheel likewise falls through.
+`StatusBar` therefore says `wheel scrolls · ⇧drag selects text` as one pair — a
+user who learns the first half from the footer and the second half by failing to
+copy a line reads the build as broken. `/mouse` and `tui.mouse: false` give the
+gesture back, and turning capture off captures **nothing**: it does not fall
+back to 1007, which would restore the original bug for exactly the people who
+wanted their drag back. There PgUp/PgDn scroll, and PgDn snaps to the bottom
+within `BOTTOM_SNAP_ROWS` — paging alone cannot reach it, because scrolling up
+raises the "N satır yukarıda" row, which costs the viewport a line, so the page
+back down is one row shorter than the page up was.
+
+`arrowKeypress` survives as that mode's belt: it answers only for a LONE arrow,
+so a batched chunk from a terminal that translates regardless is dropped rather
+than guessed at. The old timing classifier is gone either way, and with it the
+25 ms every history keypress used to wait.
+
+**Why the emulator's own behavior is not optional here.** The reported case was
+diagnosed against the terminal it was reported from — the Arterm desktop app,
+i.e. `@xterm/xterm`. That library does not implement 1007 at all (`grep -c 1007`
+over its bundle: **0**), and in the alt buffer it converts a tick to exactly ONE
+arrow. So the previous fix — writing `?1007l` and trusting it — was inert there
+by construction: a mode request the emulator has no code for. Its own wheel
+handler is what closes the argument, since the two channels are mutually
+exclusive in it: `if (0 === coreMouseService.consumeWheelEvent(…)) return cancel`
+runs BEFORE the arrow synthesis, so with reporting active the arrow branch is
+never reached.
+
+**The obvious next move is to hand the wheel back to the terminal, and it was
+tried: `tui.fullscreen: false` as the default, for one build.** In the normal
+buffer the chat prints into the terminal's own scrollback, so the wheel, the
+scrollbar and drag-to-select are all the terminal's and none of the above is
+needed. What sent it back is that the redrawn region there is CONTENT-sized:
+when the 8-row live-message area collapses onto a committed answer, the composer
+and status bar move up with it and leave the rows below them blank until new
+output scrolls the screen. Reported immediately, from a screenshot, as
+"bozulma". Pinning them would mean a dynamic region as tall as the window, which
+is the one thing that must not happen in the normal buffer — at `>= stdout.rows`
+Ink clears and rewrites the whole terminal every render, scrollback included
+(the same threshold `liveMaxRows` is kept far below). **A pinned footer and a
+terminal-owned scrollback cannot both be had**, so the mode that pins wins the
+default and the mode that scrolls natively stays one config key away.
+
+`scripts/wheel-scroll-e2e.mjs` is the guard, and the change bought it the
+assertion it could not previously make. Its earlier header had to admit that the
+reported case was unreproducible by construction — under 1007 a tick and a
+keypress are the same bytes, so no assertion could tell them apart. They are now
+different sequences, so the script sends a real tick and demands that it SCROLL
+while the prompt stays untouched. 14/14 after, **9/14** before, and the gap is
+the anchor lesson: two of those nine are vacuous passes ("did not recall the
+prompt" is equally true of a build that ignored the tick), and what separates the
+builds is the positive they hang off.
+
+### Putting the terminal back, including when nobody asked
+
+`terminalReset.ts` is one writer for every exit path. The normal one was already
+covered — Ink unmounts, `MultiApp`'s effect cleanup runs, `runTui`'s `finally`
+restores — and it covers exactly the exit that was never the problem. Being
+KILLED or crashing skips all three, and that is when it costs: with SGR
+reporting still enabled the user's shell prints `^[[<0;12;34M` on every click
+for the rest of its life, curable only by `reset`. Turning capture on by default
+is what made this expensive enough to fix.
+
+Three properties, each already paid for elsewhere in this repo:
+
+- **`writeSync`, never `stdout.write`** — a pipe makes stdout async, and an
+  async write queued just before `process.exit` never lands. The same lesson
+  `runHeadlessGoal`'s SIGTERM report is built on.
+- **The list is the full set**, not the modes we believe we enabled. A crashed
+  child or a host emulator replaying a snapshot can leave reporting on that we
+  never set; disabling an already-off mode costs nothing, while "did we set
+  this one?" is a question with a wrong answer available.
+- **The signals divide on whether a listener CHANGES Node's behavior.**
+  `SIGTERM`/`SIGHUP` terminate by default and registering any listener
+  suppresses that, so those handlers exit themselves (128+signal). `SIGINT`
+  already has Ink's, which unmounts and lets the normal restore run — ours only
+  writes the bytes, because exiting there would cut Ink's cleanup short to save
+  work about to be redone. `terminalReset.test.ts` pins that asymmetry
+  structurally, since it is invisible in a listener count.
+
+The disposer is not tidiness: `runTui` can run twice in one process, and a
+handler that outlives its session writes the escape bytes once per session ever
+started. `wheel-scroll-e2e.mjs` proves the mechanism on the built binary by
+SIGTERMing the TUI — its grandchild under `script`, since signalling the pty
+wrapper would prove nothing — and reading the restore off the wire.
+
+## Hooks: another program's chance to watch, and to gate
+
+`core/src/hooks.ts` is the MAPPING (which seam becomes which hook, what a hook
+is handed, what its exit code means); the mechanism is a child process and the
+wiring is one `toolCall` middleware registered by `buildSession`. Four observers
+(`turnEnd`, `sessionStart`, `sessionEnd`, `postTool`) are spawned detached and
+never awaited — they cannot slow a turn or fail one. `preTool` is the single
+gate: it runs synchronously before a call and `exit 2` blocks it, with the
+hook's **stderr** handed to the model as the tool error so it can adapt.
+
+**The gate fails OPEN**, matching `verify.ts`'s judge rather than the sandbox's
+boundary. A missing binary, a timeout, a syntax error, or the `1` a careless
+script returns from a failing `grep` all degrade to "no policy". User-supplied
+policy that silently becomes mandatory the day it breaks is worse than none;
+someone needing fail-closed semantics makes their own hook robust, since it is
+their trust boundary and not ours.
+
+Three things that are ours rather than borrowed from the design this follows:
+
+- **A hook is a spawned command, so it gets a SCRUBBED environment.** It is the
+  same door `bash` was, with the same keys behind it — see `credentials.ts`.
+  `hooks.test.ts` anchors that positively: with `scrub: false` the probe SHOWS
+  the key, because "the key is absent" is equally true of a hook that never ran.
+- **Registered `before("execute")`, not `before("permission")`** where the
+  chronicle sits. The chronicle's subject IS the decision, so it must see
+  denials; a gate answers "may this run?", and a call the ladder already refused
+  is not going to run. Measured while wiring this: an unattended `--print` run
+  records `tool.denied` for `bash` and the gate is never consulted, which is
+  correct and reads as a broken feature until you look at the ledger.
+- **The full tool input goes to STDIN**, with a 16 KB copy in the environment.
+  A `write` call is routinely larger than that cap, and the environment block
+  has a hard size limit — `E2BIG` at spawn time would turn a large edit into a
+  session that can run no tools at all.
+
+`ARTERM_HOOKS_DISABLED=1` is set in every hook's environment and read at the
+composition root, because a hook that shells out to `arterm` is the ordinary
+case (log this turn, ask a question) and would otherwise fire itself once per
+level for as long as the stack holds.
+
+One known imprecision, stated rather than hidden: a hook-blocked call is
+recorded by the chronicle as `tool.executed` / `failure`, not as a denial. The
+ledger reads `ctx.tool`, which the permission stage has already resolved by
+then, so it cannot tell a policy block from a tool that ran and failed. The
+outcome is honest; the attribution is one layer coarse.
+
+## Soft interrupt: typing into a turn that is already running
+
+`request.softInterrupt` folds something the user typed mid-turn into the
+conversation instead of cancelling it. What it replaces is a queue that held the
+message until `turn_end`, so a correction ("not that file") arrived *after* the
+work it was meant to redirect. Cancelling instead is worse: the partial work is
+thrown away, the whole prompt is re-sent, and it reads as a stutter.
+
+**The seam is not a choice, it is the only legal point.** Every `tool_use` must
+be answered by its `tool_result` before anything else can appear, so the one
+place a user turn can be added is after a round's results are ALL recorded and
+before the next request goes out — the top of a loop iteration. Hence the guard
+that the last message is a `tool` result: that is the definition of the point,
+not a heuristic. A text-only turn has no such point (the last message is the
+user's own input, and appending a second would say they spoke twice), so nothing
+lands and the text waits.
+
+It is a `request` stage rather than an edit to `run()` because `ctx.messages` IS
+the agent's history, by reference — the stage appends to the real conversation,
+not to a copy that the next iteration would forget.
+
+Two properties keep it from losing words or saying them twice:
+
+- **`takeInterjections()` hands back whatever never landed**, so a message typed
+  a moment before the turn ended is sent as an ordinary prompt rather than
+  dropped. The TUI keeps its queue as the source of truth and calls this at
+  `turn_end` — leaving the leftovers on the agent would deliver them again
+  inside the NEXT turn, once from each path.
+- **`interjected` fires when it LANDS**, not when it is typed, and the TUI
+  removes the queued copy on that event. A UI that announced the typing would be
+  describing a queue. Several pendings land as one message joined on a blank
+  line, so the removal matches by PART rather than by the event's whole text.
+
+The test severs one line — the `ctx.messages.push` — and exactly one case fails.
+That is the check worth keeping: the surrounding queue machinery works either
+way, so a test that only drove the composer would pass against a build where
+nothing ever reached the model.
 
 ## Telemetry: `gen_ai.*`, pinned
 
