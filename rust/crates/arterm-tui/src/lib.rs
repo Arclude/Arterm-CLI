@@ -1,4 +1,5 @@
 pub mod agent;
+mod markdown;
 
 use anyhow::Result;
 use crossterm::{
@@ -291,7 +292,7 @@ impl App {
                     push_text_lines(&mut items, text, "USER", Color::Cyan);
                 }
                 TranscriptEntry::Assistant(text) => {
-                    push_text_lines(&mut items, text, "ASSISTANT", Color::Green);
+                    push_assistant_lines(&mut items, text);
                 }
                 TranscriptEntry::System(text) => {
                     for line in text.lines() {
@@ -350,7 +351,7 @@ impl App {
 
         // Live streaming text (not yet committed as a message).
         if !live.is_empty() {
-            push_text_lines(&mut items, live, "ASSISTANT", Color::Green);
+            push_assistant_lines(&mut items, live);
         }
 
         items
@@ -366,6 +367,27 @@ impl App {
         )?;
         self.terminal.show_cursor()?;
         Ok(())
+    }
+}
+
+/// Push assistant message lines rendered as markdown, with a bold green
+/// `ASSISTANT` label on the first line.
+fn push_assistant_lines(items: &mut Vec<ListItem<'static>>, text: &str) {
+    // Hard-code a wide wrap here so word-wrap adapts to the terminal width at
+    // draw time rather than at message-commit time.  ratatui's `List` will
+    // truncate horizontally; long lines are still wrapped per the terminal.
+    let lines = markdown::render_markdown(text, 100);
+    for (i, line) in lines.into_iter().enumerate() {
+        if i == 0 {
+            let mut spans = vec![Span::styled(
+                "ASSISTANT ".to_string(),
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            )];
+            spans.extend(line.spans);
+            items.push(ListItem::new(Line::from(spans)));
+        } else {
+            items.push(ListItem::new(line));
+        }
     }
 }
 
