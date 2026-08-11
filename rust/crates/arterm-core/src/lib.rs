@@ -56,11 +56,39 @@ pub enum StreamChunk {
 }
 
 /// A tool call requested by the model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
+}
+
+/// Schema describing a tool/function the model may call.
+///
+/// Serialized into the provider's `tools` (OpenAI) or `tools` (Ollama) request
+/// field. `parameters` is a JSON Schema object describing the arguments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSchema {
+    /// The function name the model uses to invoke the tool.
+    pub name: String,
+    /// Human-readable description of what the tool does.
+    pub description: String,
+    /// JSON Schema describing the parameters object.
+    pub parameters: serde_json::Value,
+}
+
+impl ToolSchema {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            parameters,
+        }
+    }
 }
 
 /// A tool's result, fed back into the conversation.

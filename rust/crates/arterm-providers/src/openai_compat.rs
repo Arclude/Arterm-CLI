@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use arterm_core::{Message, StreamChunk};
+use arterm_core::{Message, StreamChunk, ToolCall, ToolSchema};
 
 use super::ChatProvider;
 
@@ -29,6 +29,7 @@ impl ChatProvider for OpenAiCompatProvider {
         &self,
         messages: &[Message],
         system: Option<&str>,
+        tools: &[ToolSchema],
     ) -> Result<tokio::sync::mpsc::Receiver<StreamChunk>> {
         let (tx, rx) = tokio::sync::mpsc::channel(64);
 
@@ -41,11 +42,29 @@ impl ChatProvider for OpenAiCompatProvider {
             msgs.push(serde_json::json!({"role": m.role(), "content": m.content()}));
         }
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": msgs,
             "stream": true,
         });
+
+        // Advertise tools when any are provided. OpenAI expects an array of
+        // function definitions under "tools".
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(
+                tools
+                    .iter()
+                    .map(|t| serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters,
+                        }
+                    }))
+                    .collect(),
+            );
+        }
 
         let mut req = reqwest::Client::new()
             .post(&url)
@@ -105,12 +124,52 @@ impl ChatProvider for OpenAiCompatProvider {
                     struct SseDelta {
                         #[serde(default)]
                         content: String,
+                        #[serde(default)]
+                        tool_calls: Vec<SseToolCall>,
+                    }
+                    #[derive(serde::Deserialize, Default)]
+                    struct SseToolCall {
+                        #[serde(default)]
+                        #[allow(dead_code)]
+                        index: Option<u32>,
+                        #[serde(default)]
+                        id: Option<String>,
+                        #[serde(default)]
+                        function: Option<SseToolFunction>,
+                    }
+                    #[derive(serde::Deserialize, Default)]
+                    struct SseToolFunction {
+                        #[serde(default)]
+                        name: Option<String>,
+                        #[serde(default)]
+                        arguments: Option<String>,
                     }
 
                     if let Ok(chunk) = serde_json::from_str::<SseChunk>(data) {
                         for choice in chunk.choices {
                             if !choice.delta.content.is_empty() {
                                 let _ = tx.send(StreamChunk::TextDelta(choice.delta.content)).await;
+                            }
+                            for tc in choice.delta.tool_calls {
+                                if let Some(func) = tc.function {
+                                    // OpenAI streams function args incrementally
+                                    // (delta chunks). Emit a ToolCall once we
+                                    // have the name and a complete arguments
+                                    // string; skip fragments that are still
+                                    // partial.
+                                    let name = func.name.unwrap_or_default();
+                                    let args_str = func.arguments.unwrap_or_default();
+                                    if !name.is_empty() && !args_str.is_empty() {
+                                        let arguments = serde_json::from_str::<serde_json::Value>(&args_str)
+                                            .unwrap_or(serde_json::Value::String(args_str.clone()));
+                                        let id = tc.id.unwrap_or_else(|| format!("call_{}", uuid_v4_like()));
+                                        let _ = tx.send(StreamChunk::ToolCall(ToolCall {
+                                            id,
+                                            name,
+                                            arguments,
+                                        })).await;
+                                    }
+                                }
                             }
                         }
                     }
@@ -122,4 +181,14 @@ impl ChatProvider for OpenAiCompatProvider {
 
         Ok(rx)
     }
+}
+
+/// Generate a lightweight unique-ish id without pulling in the uuid crate.
+fn uuid_v4_like() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}")
 }

@@ -4,7 +4,7 @@ pub mod openai_compat;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use arterm_core::{Message, StreamChunk, ToolCall};
+use arterm_core::{Message, StreamChunk, ToolSchema};
 
 /// A chat completion provider: Ollama, OpenAI-compatible, etc.
 #[async_trait]
@@ -17,11 +17,13 @@ pub trait ChatProvider: Send + Sync {
 
     /// Stream a completion for the given conversation, yielding chunks as they
     /// arrive. Tool calls are parsed from the stream and yielded as
-    /// `StreamChunk::ToolCall`.
+    /// `StreamChunk::ToolCall`. The `tools` slice advertises the tools the model
+    /// is allowed to call; pass an empty slice to disable tool use.
     async fn stream(
         &self,
         messages: &[Message],
         system: Option<&str>,
+        tools: &[ToolSchema],
     ) -> Result<tokio::sync::mpsc::Receiver<StreamChunk>>;
 }
 
