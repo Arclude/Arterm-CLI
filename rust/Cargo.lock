@@ -153,6 +153,7 @@ dependencies = [
  "async-trait",
  "crossterm 0.28.1",
  "ratatui",
+ "serde_json",
  "tokio",
 ]
 
