@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// `#[serde(default)]` so a partial user file (or an empty one) is always
 /// valid and fills in the defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArtermConfig {
     #[serde(default = "default_provider")]
     pub provider: String,
@@ -42,6 +43,7 @@ pub struct TuiConfig {
 
 /// Sandbox / execution-boundary settings for `bash`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SandboxConfig {
     /// Master switch. `None` means "unstated" — the active mode decides.
     #[serde(default)]
@@ -53,6 +55,7 @@ pub struct SandboxConfig {
 
 /// Autonomous goal-loop defaults.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AutonomyConfig {
     /// Safety step cap for bounded ("once") autonomy runs.
     #[serde(default)]
