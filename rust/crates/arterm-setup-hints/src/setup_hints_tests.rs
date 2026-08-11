@@ -73,26 +73,50 @@ fn default_resolved_hotkeys_match_legacy_three() {
 }
 
 #[test]
-fn linux_hotkeys_install_automatically_and_respect_opt_out() {
+fn starting_arterm_does_not_rebind_the_desktops_global_shortcuts() {
+    // The case this gate exists for, and it was observed rather than imagined:
+    // launching the binary wrote three bindings into ~/.config/kglobalshortcutsrc
+    // and three .desktop files, on a run deliberately isolated with ARTERM_HOME
+    // — which cannot redirect a write to the user's desktop config.
     assert_eq!(
         linux_hotkey_setup_action(None, false, 0),
+        LinuxHotkeySetupAction::None,
+        "an undecided config must not be read as consent to rebind Super+;"
+    );
+    assert_eq!(
+        linux_hotkey_setup_action(Some(false), false, 0),
+        LinuxHotkeySetupAction::None,
+        "an explicit launch-hotkey opt-out must be honored"
+    );
+}
+
+#[test]
+fn an_explicit_opt_in_still_installs_and_an_existing_install_still_refreshes() {
+    // The gate is about making a change nobody asked for, not about refusing
+    // one somebody did. `arterm setup-hotkey` and `enabled = true` both remain
+    // the way to ask.
+    assert_eq!(
+        linux_hotkey_setup_action(Some(true), false, 0),
         LinuxHotkeySetupAction::Install,
-        "a fresh install should configure compositor hotkeys automatically"
+        "an explicit opt-in must still configure the compositor"
     );
     assert_eq!(
         linux_hotkey_setup_action(Some(true), true, 0),
         LinuxHotkeySetupAction::Refresh,
         "an older managed block should refresh automatically"
     );
+    // Bindings already on disk mean a decision was taken at some point, so
+    // keeping them pointing at the right path is maintenance rather than a
+    // surprise — even while `enabled` is undecided.
+    assert_eq!(
+        linux_hotkey_setup_action(None, true, 0),
+        LinuxHotkeySetupAction::Refresh,
+        "an existing install must not be left to rot into a stale path"
+    );
     assert_eq!(
         linux_hotkey_setup_action(Some(true), true, LAUNCH_HOTKEY_TRACKING_VERSION),
         LinuxHotkeySetupAction::None,
         "an up-to-date install should remain idempotent"
-    );
-    assert_eq!(
-        linux_hotkey_setup_action(Some(false), false, 0),
-        LinuxHotkeySetupAction::None,
-        "an explicit launch-hotkey opt-out must be honored"
     );
 }
 

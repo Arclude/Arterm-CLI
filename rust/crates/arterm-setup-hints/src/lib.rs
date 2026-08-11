@@ -1560,20 +1560,48 @@ enum LinuxHotkeySetupAction {
     Refresh,
 }
 
+/// Decide what, if anything, to do to the compositor's global shortcut config
+/// at startup.
+///
+/// **Installing is opt-in in this fork, and `None` means "do nothing".**
+/// Upstream read an undecided `enabled` as consent and installed on first
+/// launch; three bindings then appeared in `~/.config/kglobalshortcutsrc` (plus
+/// three `.desktop` files) without anyone asking. That is a change to the
+/// user's DESKTOP, outside the process, made by simply starting a program —
+/// and it is the one kind of write `ARTERM_HOME` cannot redirect, so even a
+/// deliberately isolated run (`ARTERM_HOME=/tmp/...`, which is how this fork is
+/// tested) still rebinds Super+; on the real session. Observed exactly that
+/// way, twice, on two separate runs.
+///
+/// It matters more here than upstream for a reason specific to a fork: two
+/// arterm binaries live on this machine (the TypeScript CLI and this one), and
+/// a global chord can only point at one of them. A shortcut silently
+/// re-pointed at a half-ported development build is worse than no shortcut.
+///
+/// `arterm setup-hotkey` is untouched and remains the way to ask for this —
+/// that call site is a person typing the request, which is exactly the consent
+/// the startup path was assuming.
+///
+/// **A REFRESH of an existing install still happens under `None`.** The
+/// distinction is between making a change nobody asked for and keeping one
+/// somebody already has correct: if the bindings are on disk, a decision was
+/// taken at some point, and letting them rot into pointing at a stale path
+/// would be its own surprise.
 #[cfg(any(test, target_os = "linux"))]
 fn linux_hotkey_setup_action(
     enabled: Option<bool>,
     installed: bool,
     tracking_version: u32,
 ) -> LinuxHotkeySetupAction {
-    if enabled == Some(false) {
-        LinuxHotkeySetupAction::None
-    } else if !installed {
-        LinuxHotkeySetupAction::Install
-    } else if tracking_version < LAUNCH_HOTKEY_TRACKING_VERSION {
-        LinuxHotkeySetupAction::Refresh
-    } else {
-        LinuxHotkeySetupAction::None
+    match (enabled, installed) {
+        (Some(false), _) => LinuxHotkeySetupAction::None,
+        // The gate: an undecided config no longer licenses a first install.
+        (None, false) => LinuxHotkeySetupAction::None,
+        (_, false) => LinuxHotkeySetupAction::Install,
+        (_, true) if tracking_version < LAUNCH_HOTKEY_TRACKING_VERSION => {
+            LinuxHotkeySetupAction::Refresh
+        }
+        (_, true) => LinuxHotkeySetupAction::None,
     }
 }
 
@@ -2613,7 +2641,19 @@ pub fn reinstall_launch_hotkeys_after_config_change() {
         let Some(comp) = detect_linux_compositor() else {
             return;
         };
-        if load_launch_hotkeys_config().enabled == Some(false) {
+        // Same gate as `linux_hotkey_setup_action`, and it has to be repeated
+        // here because this path is a REINSTALL trigger rather than the startup
+        // decision: a config change would otherwise walk straight past the
+        // opt-in and write the bindings anyway. Refreshing an existing install
+        // is still fine — see that function for why the two differ.
+        if !matches!(
+            linux_hotkey_setup_action(
+                load_launch_hotkeys_config().enabled,
+                linux_hotkeys_installed(comp),
+                0,
+            ),
+            LinuxHotkeySetupAction::Install | LinuxHotkeySetupAction::Refresh
+        ) {
             return;
         }
         match install_linux_launch_hotkeys(comp) {
