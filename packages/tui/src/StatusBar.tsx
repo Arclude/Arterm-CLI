@@ -21,8 +21,20 @@ interface Props {
   mode: string;
   /** Terminal width in columns; drives the responsive layout. */
   columns: number;
-  /** Mouse is captured (fullscreen): selection needs the terminal's Shift+drag bypass. */
-  shiftSelect?: boolean;
+  /**
+   * Alternate-screen mode. Only consulted when the mouse is NOT captured: there
+   * the wheel belongs to the terminal, which has a scrollback to move in classic
+   * mode and nothing to move in fullscreen, so PgUp/PgDn become the scroll.
+   * Advertising "wheel scrolls" in a window where it does nothing is how a
+   * working build reads as broken.
+   */
+  fullscreen?: boolean;
+  /**
+   * Mouse capture is on, so the wheel scrolls the chat here and plain drag no
+   * longer selects — Shift+drag does. Both halves of that trade have to be on
+   * screen, or the first attempt to copy a line reads as a broken terminal.
+   */
+  mouseCapture?: boolean;
   /** Session working directory (multi-session: not necessarily process.cwd()). */
   cwd?: string;
   /** Multi-session summary for the badge: 1-based index, total, busy background count. */
@@ -156,13 +168,24 @@ export function StatusBar({
   toolCount,
   mode,
   columns,
-  shiftSelect = false,
+  fullscreen = false,
+  mouseCapture = false,
   cwd: cwdProp,
   version,
   sessions,
   fallbackTo,
 }: Props): React.ReactElement {
-  const selectHint = shiftSelect ? "shift+drag selects" : "drag selects text";
+  // Capture answers both halves at once: the wheel scrolls, and the gesture it
+  // took over has to be named in the same breath.
+  const scrollHint = mouseCapture
+    ? "wheel scrolls"
+    : fullscreen
+      ? "PgUp/PgDn scrolls"
+      : "wheel scrolls";
+  // With capture on, the terminal's own drag is gone; ⇧drag is the terminal's
+  // bypass, and Ctrl+S is the app's own selection mode (drag to select, release
+  // to copy). Name the app's, which is the one that also copies.
+  const selectHint = mouseCapture ? "^S selects text" : "drag selects text";
   // Name both ends of the switch: "backup" alone would look like the model was
   // changed, when in fact the configured one is still the one that failed.
   const answering =
@@ -335,7 +358,7 @@ export function StatusBar({
       <ChipRow chips={placeChips} columns={columns} words={words} />
       <Text color={theme.textMuted} dimColor wrap="truncate">
         {clip(
-          `Enter send · ↑↓ history · ← sessions · ^←/^→ switch · ^X close · wheel scrolls · ${selectHint} · ? help · ^C quit`,
+          `Enter send · ↑↓ history · ← sessions · ^←/^→ switch · ^X close · ${scrollHint} · ${selectHint} · ? help · ^C quit`,
           columns,
         )}
       </Text>

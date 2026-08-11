@@ -17,19 +17,24 @@ async function waitFor(view: () => string, pred: (f: string) => boolean, timeout
 }
 
 const ESC = String.fromCharCode(27);
-/** SGR mouse wheel reports (captured mode; 64 = up, 65 = down). */
-const SGR_UP = "[<64;10;10M";
-const SGR_DOWN = "[<65;10;10M";
-/** One wheel tick under alternate scroll (uncaptured fallback): arrow chunk. */
-const WHEEL_UP = `${ESC}[A`.repeat(3);
-const WHEEL_DOWN = `${ESC}[B`.repeat(3);
+/**
+ * One wheel tick as a CAPTURED mouse sends it: an SGR report whose button byte
+ * carries the direction (64 = up, 65 = down). The point of the whole mechanism
+ * is that no keypress can spell this, so it can never be read as history ↑.
+ */
+const WHEEL_UP = `${ESC}[<64;10;10M`;
+const WHEEL_DOWN = `${ESC}[<65;10;10M`;
+const PAGE_UP = `${ESC}[5~`;
+const PAGE_DOWN = `${ESC}[6~`;
 
-function fakeSession(bus: EventBus, tui?: { fullscreen?: boolean; mouse?: boolean }): Session {
+function fakeSession(bus: EventBus, tui?: { fullscreen?: boolean }): Session {
   const noop = (): void => {};
   return {
     agent: {
       model: "qwen2.5:7b",
       effectiveContextWindow: () => 8192,
+      interject: () => {},
+      takeInterjections: () => [],
       reset: () => {},
       run: async () => {},
     },
@@ -69,13 +74,11 @@ function fakeSession(bus: EventBus, tui?: { fullscreen?: boolean; mouse?: boolea
 }
 
 describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
-  it("captured mouse (tui.mouse: true): SGR wheel scrolls in-app, footer pinned in every frame", async () => {
+  it("PgUp/PgDn scroll the transcript, footer pinned in every frame", async () => {
     const bus = new EventBus();
-    // Capture is opt-in now — the default leaves the mouse to the terminal so
-    // plain left-drag selects text (the most common gesture of all).
     const { stdin, frames, unmount } = render(
       createElement(App, {
-        session: fakeSession(bus, { fullscreen: true, mouse: true }),
+        session: fakeSession(bus, { fullscreen: true }),
         fullscreen: true,
       }),
     );
@@ -89,46 +92,57 @@ describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
         message: { role: "assistant", content: `line number ${i}` },
       });
     }
-    await tick();
+    // Long enough for the transcript to MEASURE itself: the scroll offset is
+    // clamped to the measured content, so a key pressed before the first
+    // measurement lands is clamped to zero and silently does nothing.
+    await tick(200);
 
-    // Pinned to the newest output; the footer (status bar) is in the frame,
-    // and the hint advertises the capture-mode selection bypass.
+    // Pinned to the newest output; the footer (status bar) is in the frame, and
+    // the hint names the keys that actually scroll HERE — the wheel has no
+    // scrollback to move on the alternate screen, so advertising it would be a
+    // working build reading as a broken one.
     expect(ui()).toContain("ARTERM");
-    expect(ui()).toContain("shift+drag selects");
+    // (The rest of the hint line — "· ^S selects text" — is past the width
+    // this harness renders at, so it is asserted in statusChips.test.tsx.)
+    expect(ui()).toContain("wheel scrolls");
     expect(ui()).not.toContain("satır yukarıda");
-
-    // Pinned view shows the NEWEST line.
     expect(ui()).toContain("line number 59");
 
-    // Wheel UP (SGR reports — direction is IN the bytes) reveals OLDER lines:
-    // the newest line leaves the window, an older one enters, and the footer
-    // is STILL in the very same frame (pinned, not scrolled away).
-    stdin.write(SGR_UP);
-    stdin.write(SGR_UP);
+    // PgUp reveals OLDER lines: the newest leaves the window, an older one
+    // enters, and the footer is STILL in the very same frame (pinned).
+    stdin.write(PAGE_UP);
     await waitFor(ui, (f) => f.includes("satır yukarıda"));
     expect(ui()).not.toContain("line number 59");
-    expect(ui()).toContain("line number 53");
     expect(ui()).toContain("ARTERM");
     expect(ui()).toContain("› "); // the input line is visible while scrolled
 
-    // Wheel DOWN returns toward the newest output until the hint disappears.
-    stdin.write(SGR_DOWN);
-    stdin.write(SGR_DOWN);
+    stdin.write(PAGE_DOWN);
     await waitFor(ui, (f) => !f.includes("satır yukarıda"));
     expect(ui()).toContain("line number 59");
 
     unmount();
   });
 
-  it("uncaptured fallback (tui.mouse=false): alternate-scroll arrows drive the scroll", async () => {
+  it("a wheel tick scrolls the chat and never touches history", async () => {
+    // Both halves of the reported bug, in one test, against the channel that
+    // replaced the broken one. The tick has to MOVE the transcript — a wheel
+    // that does nothing is the complaint this started from — and it must not
+    // walk the prompt back through history, which is what "I scrolled and my
+    // old prompt appeared" was. With SGR reporting the second half is
+    // structural rather than heuristic: `ESC[<64;…M` is not `ESC[A`.
     const bus = new EventBus();
     const { stdin, frames, unmount } = render(
       createElement(App, {
-        session: fakeSession(bus, { fullscreen: true, mouse: false }),
+        session: fakeSession(bus, { fullscreen: true }),
         fullscreen: true,
       }),
     );
     const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
+    await tick();
+
+    stdin.write("an old prompt");
+    await tick();
+    stdin.write("\r");
     await tick();
 
     for (let i = 0; i < 60; i++) {
@@ -137,16 +151,21 @@ describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
         message: { role: "assistant", content: `line number ${i}` },
       });
     }
-    await tick();
-    expect(ui()).toContain("drag selects text"); // no capture — native selection
+    // The offset is clamped to the MEASURED content, so a tick arriving before
+    // the first measurement lands is clamped to zero and silently does nothing.
+    await tick(200);
 
     stdin.write(WHEEL_UP);
     stdin.write(WHEEL_UP);
-    await waitFor(ui, (f) => f.includes("satır yukarıda"));
+    await waitFor(ui, (f) => f.includes("satır yukarıda")); // it scrolled
+    expect(ui()).not.toContain("› an old prompt"); // and history is untouched
+    expect(ui()).not.toContain("line number 59");
 
-    stdin.write(WHEEL_DOWN);
-    stdin.write(WHEEL_DOWN);
+    // Back down returns to the newest output, and still never to the prompt.
+    for (let i = 0; i < 4; i++) stdin.write(WHEEL_DOWN);
     await waitFor(ui, (f) => !f.includes("satır yukarıda"));
+    expect(ui()).toContain("line number 59");
+    expect(ui()).not.toContain("› an old prompt");
 
     unmount();
   });

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mouse text selection in fullscreen (Ctrl+S).** Capturing the mouse for the
+  wheel took the terminal's own drag-to-select with it, so on the alternate
+  screen text could not be copied at all. Ctrl+S now enters a selection mode
+  (like jcode's): the transcript is drawn as a flat, plain-text projection, a
+  mouse drag selects a real span with a live highlight, and releasing copies it
+  to the system clipboard (`wl-copy`/`xclip`/`xsel`/`pbcopy`, OSC 52 over SSH)
+  and returns to the transcript. The projection the highlight paints and the
+  text the copy yields are the one and same buffer, so what looks selected is
+  what lands on the clipboard. Ctrl+S or Esc leaves without copying. Only
+  offered where it is needed — fullscreen with capture on; classic mode and
+  `tui.mouse: false` already have the terminal's own selection.
+
 - **Typing into a running turn now reaches the model during it.** A prompt
   submitted while the agent works used to wait for the whole turn to finish, so
   a correction arrived after the work it was meant to redirect. It is now folded
@@ -71,6 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exited — a live TUI painting over the shell, immune to further INTs. It exits
   130 now. The `uncaughtException` handler did the same to a crash the CLI
   deliberately survives, and is gone.
+
+- **The TUI runs React's production build.** Nothing set `NODE_ENV`, so every
+  session loaded React's development build — extra validation on every element
+  and a slower reconciler. Measured on a 1,200-chunk stream: 1,940ms of CPU
+  instead of 2,390ms, for the same output. A `NODE_ENV` you set yourself is
+  respected, and the value we default is stripped from every spawned command so
+  `npm install` and friends keep installing devDependencies.
 
 - **The chat repaints more often while streaming.** The context gauge asks for
   the model's context window on every render, and that question walked the whole

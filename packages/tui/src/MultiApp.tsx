@@ -114,14 +114,13 @@ export function MultiApp({
   // them). Mouse behavior is uniform across sessions: all configs share tui.*.
   const { stdout: rawStdout } = useStdout();
   // /mouse flips capture at runtime (null = follow config): selection needs the
-  // capture OFF, the in-app wheel needs it ON, and restarting to switch between
-  // "copy this text" and "scroll the chat" is not a real workflow.
+  // capture OFF, the wheel needs it ON, and restarting to switch between "copy
+  // this text" and "scroll the chat" is not a real workflow.
   const [mouseOverride, setMouseOverride] = useState<boolean | null>(null);
-  // Default OFF: plain left-drag must select text — the single most common
-  // mouse gesture — without a modifier or a slash command. The wheel still
-  // scrolls via the terminal's alternate-scroll arrows; /mouse (or
-  // tui.mouse: true) opts back into deterministic in-app wheel capture.
-  const mouseCapture = fullscreen && (mouseOverride ?? initial.session.config.tui?.mouse ?? false);
+  // Default ON, in fullscreen only. This is the one channel on which a wheel
+  // tick cannot be confused with a keypress, which is the whole requirement;
+  // the cost is that plain drag-select becomes Shift+drag.
+  const mouseCapture = fullscreen && (mouseOverride ?? initial.session.config.tui?.mouse ?? true);
   const toggleMouse = useCallback((): boolean => {
     const next = !mouseCapture;
     setMouseOverride(next);
@@ -130,15 +129,29 @@ export function MultiApp({
   useEffect(() => {
     if (!rawStdout) return;
     const ESC = String.fromCharCode(27);
+    // ?1007 is never enabled in either branch, and that is the fix. Alternate
+    // scroll answers a wheel tick with ARROW KEYS, which on a one-line-per-tick
+    // terminal is byte-identical to an ↑ keypress — so scrolling the chat
+    // recalled prompts from history, and a three-line setting moved the view in
+    // jumps. Nothing downstream can undo that, because there is nothing to tell
+    // apart. What replaces it is SGR reporting (?1000h + ?1006h), where the
+    // wheel arrives as ESC[<64;x;yM and no keypress can spell it.
+    //
+    // ?1002/?1003 stay OFF while capturing: they add drag- and any-motion
+    // reporting, which is a packet per mouse move for a feature nothing here
+    // reads — and this whole change started as a report of lag.
+    //
     // Written on mount AND on every resize: a host terminal can reset the
     // emulator behind our back — the desktop app's renderer pool reset()s a
-    // pane on rebind and replays a serialized snapshot that restores ?1000h
-    // but not ?1006h, downgrading wheel reports to X10 bytes the SGR parser
-    // can't read (dead wheel). Every such rebind ends in a SIGWINCH kick, so
-    // re-asserting here heals it; re-sending the modes is idempotent.
-    // ?25l rides along in both branches: the same renderer-pool reset that
-    // downgrades the wheel also replays a snapshot with the cursor SHOWN, and a
-    // hardware cursor over a UI that draws its own is a second cursor.
+    // pane on rebind and replays a serialized snapshot that restores ?1000h but
+    // not ?1006h, downgrading wheel reports to X10 bytes the SGR parser cannot
+    // read (dead wheel). Every such rebind ends in a SIGWINCH kick, so
+    // re-asserting here heals it; re-sending the modes is idempotent. Claude
+    // Code re-asserts its own set the same way, three times in eight seconds.
+    //
+    // ?25l rides along in both branches: that same snapshot replay brings the
+    // cursor back SHOWN, and a hardware cursor over a UI that draws its own is
+    // a second cursor.
     const assertModes = mouseCapture
       ? (): void => {
           rawStdout.write(
@@ -146,10 +159,12 @@ export function MultiApp({
           );
         }
       : (): void => {
-          // Clear any reporting a crashed program left behind; arrows carry the
-          // wheel in fullscreen (alternate scroll), nothing in classic.
+          // Capture off means NO mouse handling at all — not a fall back to
+          // alternate scroll, which is the mode this exists to avoid. The
+          // terminal keeps the wheel: its own scrollback in classic mode, and
+          // nothing on the alternate screen, where PgUp/PgDn scroll instead.
           rawStdout.write(
-            `${ESC}[?25l${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${fullscreen ? `${ESC}[?1007h` : ""}`,
+            `${ESC}[?25l${ESC}[?1000l${ESC}[?1002l${ESC}[?1003l${ESC}[?1006l${ESC}[?1007l`,
           );
         };
     assertModes();
@@ -158,7 +173,7 @@ export function MultiApp({
       rawStdout.off("resize", assertModes);
       if (mouseCapture) rawStdout.write(`${ESC}[?1000l${ESC}[?1006l`);
     };
-  }, [rawStdout, fullscreen, mouseCapture]);
+  }, [rawStdout, mouseCapture]);
 
   // Classic-mode resize recovery: reflowed wrapped lines invalidate Ink's
   // RELATIVE erase counts and the region loses its bottom anchor — blank the

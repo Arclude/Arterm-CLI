@@ -39,11 +39,12 @@ import { ModelPicker } from "./ModelPicker.js";
 import { type PendingPermission, PermissionPrompt } from "./PermissionPrompt.js";
 import { SddBoard, type SddBoardTask } from "./SddBoard.js";
 import { SddInterview } from "./SddInterview.js";
+import { SelectionOverlay } from "./SelectionOverlay.js";
 import { type Status, StatusBar } from "./StatusBar.js";
 import { TeamBoard, type TeamBoardKind, type TeamBoardMember } from "./TeamBoard.js";
 import { TodoStrip } from "./TodoStrip.js";
 import { agentColor } from "./agentColor.js";
-import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
+import { type ArrowDir, arrowKeypress } from "./arrowRouter.js";
 import { OSC52_MAX_CHARS, copyToClipboard } from "./clipboard.js";
 import {
   type HistoryNav,
@@ -77,6 +78,16 @@ import {
   movePick,
 } from "./mentionInput.js";
 import { formatProcesses, parsePsArgs } from "./psView.js";
+import {
+  type ProjectedLine,
+  type SelectionPoint,
+  type SelectionRange,
+  normalizeRange,
+  parseMouseEvents,
+  pointFromScreen,
+  projectTranscript,
+  selectionText,
+} from "./selection.js";
 import { appendFeed, formatMemberEvent } from "./teamFeed.js";
 import { looksLikeBigTask } from "./teamSuggest.js";
 import { truncateDisplay } from "./terminalWidth.js";
@@ -97,6 +108,9 @@ const RICH = new Set(["tool_call", "usage", "context_usage"]);
 
 /** Streamed tokens repaint the live message at most this often (~22 fps). */
 const LIVE_FLUSH_MS = 45;
+
+/** How close PgDn has to land before it counts as "back at the newest output". */
+const BOTTOM_SNAP_ROWS = 2;
 
 /** Custom single-line input so `?` on an empty line opens help. */
 function InputLine({
@@ -696,9 +710,10 @@ export function App({
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   // Fullscreen in-app scrolling: how many lines the view is lifted off the
-  // bottom (0 = pinned to newest). Wheel (via alternate-scroll arrows) and
-  // PgUp/PgDn drive it; keyboard ↑/↓ stay on prompt history (arrowRouter tells
-  // them apart). totalLines/viewportRows are measured to clamp the offset.
+  // bottom (0 = pinned to newest). PgUp/PgDn drive it — and nothing else does:
+  // the wheel belongs to the terminal, which in classic mode (the default) is
+  // scrolling its own buffer and in fullscreen has nothing to scroll.
+  // totalLines/viewportRows are measured to clamp the offset.
   const [scrollOffset, setScrollOffset] = useState(0);
   const [totalLines, setTotalLines] = useState(0);
   const [viewportRows, setViewportRows] = useState(() => Math.max(1, rows - 8));
@@ -706,6 +721,21 @@ export function App({
   const viewportRef = useRef(viewportRows);
   const prevContentRef = useRef(0);
   const maxOffsetRef = useRef(0);
+  // Copy-selection mode (jcode-style): while active, the fullscreen transcript
+  // is replaced by a flat plain-text projection the mouse can be resolved
+  // against, so a drag selects real text and the selection is copied to the
+  // system clipboard. Only meaningful in fullscreen with mouse capture on —
+  // classic mode already has the terminal's own selection.
+  const [selecting, setSelecting] = useState(false);
+  const [selectRange, setSelectRange] = useState<SelectionRange | null>(null);
+  const selectRangeRef = useRef<SelectionRange | null>(null);
+  const selectAnchorRef = useRef<SelectionPoint | null>(null);
+  const selectDraggingRef = useRef(false);
+  // The projection the current selection is resolved against, rebuilt whenever
+  // the mode is entered (and kept stable during a drag so coordinates hold).
+  const selectLinesRef = useRef<ProjectedLine[]>([]);
+  const selectingRef = useRef(false);
+  selectingRef.current = selecting;
   // Prompts entered while a turn is running — drained FIFO by the queue effect
   // (see submit/dispatch). Refs mirror the latest state so input handlers and
   // the drain guard never act through a stale closure.
@@ -970,27 +1000,43 @@ export function App({
     { isActive: visible && mentionOpen },
   );
 
-  // The mouse is NEVER captured (SGR reporting eats click-drag): in the normal
-  // buffer the terminal owns the wheel (native scrollback) and drag-to-select,
-  // so no scroll plumbing is needed at all. Any mouse reporting left over from
-  // a crashed program is switched off defensively so selection can't be broken.
-  // Fullscreen wheel input, two flavors (config tui.mouse):
-  //  - captured (default): SGR mouse reporting — wheel arrives as ESC[<64/65;x;yM
-  //    with the DIRECTION ENCODED IN THE BYTES (64=up, 65=down), immune to the
-  //    terminal's alternate-scroll arrow translation quirks. Like Claude Code's
-  //    fullscreen renderer; text selection then needs Shift+drag.
-  //  - uncaptured: alternate scroll (DECSET 1007) + arrowRouter timing/batching —
-  //    plain drag-select keeps working, wheel direction depends on the terminal.
-  // Classic mode captures nothing (native scrollback owns the wheel).
-  // The terminal-mode escape writes (mouse capture, alternate scroll, classic
-  // resize re-pad) live in MultiApp — they are process-global, and per-App
-  // ownership would flap the modes on every session switch.
+  // How the wheel reaches the chat without ever being mistaken for a keypress.
+  //
+  // The alternate screen has no scrollback, so a fullscreen chat has to be
+  // scrolled by the app — and the only question that matters is what a wheel
+  // tick ARRIVES as. Two channels exist and only one of them is decidable:
+  //
+  //  - alternate scroll (DECSET 1007): the terminal answers a tick with ARROW
+  //    KEYS. On a terminal set to one line per tick that is byte-for-byte an ↑
+  //    keypress, so scrolling the chat recalled prompts from history, and a
+  //    three-line setting moved the view in jumps. There is nothing to tell
+  //    apart, so this mode is never enabled (see MultiApp).
+  //  - SGR mouse reporting (?1000h + ?1006h): a tick arrives as
+  //    ESC[<64;x;yM — the DIRECTION IS IN THE BYTES (64 = up, 65 = down) and
+  //    no keypress can produce them. History recall listens for ↑; a tick
+  //    simply is not ↑, so the ambiguity never exists.
+  //
+  // Capture is therefore the default, and it is what Claude Code does: measured
+  // off its own wire, it writes ?1049h then ?1000h ?1002h ?1003h ?1006h at boot
+  // and re-asserts them during the run, and never once sends ?1007. The price
+  // is that plain drag-select becomes Shift+drag (the terminal's own capture
+  // bypass) — /mouse and `tui.mouse: false` give it back, and turning capture
+  // off leaves NO mouse handling at all rather than falling back to 1007.
+  //
+  // Classic mode captures nothing: the normal buffer means the terminal owns
+  // the wheel, its scrollback, and drag-to-select, so there is nothing to plumb.
+  // The terminal-mode escape writes are process-global and live in MultiApp;
+  // per-App ownership would flap them on every session switch.
   const { stdout: rawStdout } = useStdout();
   // The host's live value wins: /mouse can flip capture at runtime, and this
   // App's scroll/arrow machinery has to follow the modes actually on the wire.
-  const mouseCapture = mouseCaptureProp ?? (fullscreen && (session.config.tui?.mouse ?? false));
-  // True when the arrow ROUTER owns ↑/↓ (it tells wheel-synthesized arrows from
-  // keypresses). Read through a ref by the always-active board handler below.
+  const mouseCapture = mouseCaptureProp ?? (fullscreen && (session.config.tui?.mouse ?? true));
+  // True when raw ↑/↓ are read here rather than by the composer's `useInput`.
+  // Only needed with capture OFF: then a terminal that translates the wheel
+  // regardless can still deliver arrows, and `arrowKeypress` drops the batched
+  // ones. With capture ON the wheel is never an arrow, so ↑/↓ are purely
+  // keyboard and the composer reads them directly.
+  // Read through a ref by the always-active board handler below.
   const routedArrows = fullscreen && !mouseCapture;
   const routedArrowsRef = useRef(routedArrows);
   routedArrowsRef.current = routedArrows;
@@ -1029,10 +1075,10 @@ export function App({
   }, []);
 
   // Captured-mouse wheel: SGR reports (button bit 64; low bits 0 = up, 1 = down) —
-  // a fast scroll batches several into one chunk, so sum them. reduceInput
+  // a fast scroll batches several into one chunk, so sum them. `reduceInput`
   // separately swallows these so they never touch the prompt text. The mapping
-  // (up = +3 = toward OLDER lines) matches the scroll hint and was
-  // user-validated back in the SGR era (a4c35a8).
+  // (up = +3 = toward OLDER lines) matches the scroll hint and the three lines
+  // are the wheel's own convention, not a translation we can be handed wrong.
   useInput(
     (input) => {
       let delta = 0;
@@ -1044,59 +1090,190 @@ export function App({
       }
       if (delta !== 0) scrollBy(delta);
     },
-    { isActive: visible && mouseCapture },
+    { isActive: visible && mouseCapture && !selecting },
   );
 
-  // Routes ↑/↓ to prompt history (keyboard) or transcript scroll (wheel via
-  // alternate scroll) — see arrowRouter.ts for how the two are told apart.
+  // Live mirrors for the mouse handlers, which read through refs so a drag
+  // never acts on a stale render's transcript, width or scroll position.
+  const itemsRef = useRef<DisplayItem[]>(items);
+  itemsRef.current = items;
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+  const scrollOffsetRef = useRef(scrollOffset);
+  scrollOffsetRef.current = scrollOffset;
+
+  // The absolute projected-line index drawn on the overlay's top row. The
+  // projection is bottom-anchored exactly like the live transcript: the newest
+  // line sits on the last viewport row when scrollOffset is 0, and a positive
+  // offset lifts the window toward older lines.
+  const firstVisibleLine = useCallback((lineCount: number): number => {
+    const vp = viewportRef.current;
+    return Math.max(0, lineCount - vp - scrollOffsetRef.current);
+  }, []);
+
+  const exitSelection = useCallback(() => {
+    setSelecting(false);
+    setSelectRange(null);
+    selectRangeRef.current = null;
+    selectAnchorRef.current = null;
+    selectDraggingRef.current = false;
+    selectLinesRef.current = [];
+  }, []);
+
+  const enterSelection = useCallback(() => {
+    selectLinesRef.current = projectTranscript(
+      itemsRef.current,
+      columnsRef.current,
+      liveRef.current,
+    );
+    setSelectRange(null);
+    selectRangeRef.current = null;
+    selectAnchorRef.current = null;
+    selectDraggingRef.current = false;
+    setSelecting(true);
+  }, []);
+
+  // Update the range in BOTH the ref and state. The ref is what the mouse
+  // handler reads back synchronously — all three of a click's events (down,
+  // drag, up) can land in one input chunk, and React state set during that
+  // burst is not yet readable when the `up` fires the copy.
+  const setRange = useCallback((range: SelectionRange | null) => {
+    selectRangeRef.current = range;
+    setSelectRange(range);
+  }, []);
+
+  const copySelection = useCallback(async () => {
+    const range = selectRangeRef.current;
+    if (!range) return false;
+    const text = selectionText(selectLinesRef.current, range);
+    if (!text) return false;
+    const method = await copyToClipboard(text, {
+      ...(rawStdout ? { stdout: rawStdout } : {}),
+      tty: process.stdout.isTTY === true,
+    });
+    if (method === "none") {
+      push({ kind: "system", text: "clipboard unavailable (no helper, no terminal)" });
+      return false;
+    }
+    push({ kind: "system", text: `⧉ copied ${text.length} chars to the clipboard (${method})` });
+    return true;
+  }, [rawStdout, push]);
+
+  // The mouse plumbing for selection mode: Down arms an anchor, Drag extends the
+  // range, Up finalizes and copies. Runs only in fullscreen with capture on;
+  // decoded through the shared `parseMouseEvents` so a batched drag chunk is
+  // handled event by event. Reads the projection captured at mode entry so
+  // coordinates stay valid for the whole gesture.
+  const onSelectionMouse = useCallback(
+    (input: string) => {
+      const lines = selectLinesRef.current;
+      const first = firstVisibleLine(lines.length);
+      for (const ev of parseMouseEvents(input)) {
+        if (ev.kind === "wheel-up") {
+          scrollBy(3);
+          continue;
+        }
+        if (ev.kind === "wheel-down") {
+          scrollBy(-3);
+          continue;
+        }
+        const point = pointFromScreen(lines, first, ev.row, ev.col);
+        if (ev.kind === "down") {
+          if (!point) continue;
+          selectAnchorRef.current = point;
+          selectDraggingRef.current = true;
+          setRange({ start: point, end: point });
+        } else if (ev.kind === "drag") {
+          if (!selectDraggingRef.current || !point) continue;
+          const anchor = selectAnchorRef.current;
+          if (anchor) setRange(normalizeRange(anchor, point));
+        } else if (ev.kind === "up") {
+          if (!selectDraggingRef.current) continue;
+          selectDraggingRef.current = false;
+          const anchor = selectAnchorRef.current;
+          if (anchor && point) setRange(normalizeRange(anchor, point));
+          // Release copies and leaves the mode, the way a terminal's own
+          // drag-select ends: the selection is on the clipboard, the transcript
+          // is back, and the "copied N chars" line is visible again. Ctrl+S
+          // re-enters for another. A drag that selected nothing just exits.
+          void copySelection().then(() => exitSelection());
+        }
+      }
+    },
+    [firstVisibleLine, scrollBy, copySelection, exitSelection, setRange],
+  );
+
+  useInput(onSelectionMouse, { isActive: visible && mouseCapture && selecting });
+
+  // Selection needs DRAG reports (?1002h), which the base mouse setup leaves off
+  // on purpose — it is a packet per mouse-move that nothing else reads. Turn it
+  // on only while selecting, and take it back on exit, so the cost is paid only
+  // during a selection. ?1000h + ?1006h (press/release + SGR) are already on
+  // from the host; this just adds button-drag tracking on top.
+  useEffect(() => {
+    if (!selecting || !rawStdout) return;
+    const ESC = String.fromCharCode(27);
+    rawStdout.write(`${ESC}[?1002h`);
+    return () => {
+      rawStdout.write(`${ESC}[?1002l`);
+    };
+  }, [selecting, rawStdout]);
+
   const arrowHistoryRef = useRef<(dir: ArrowDir) => void>(() => {});
   const overlayOpenRef = useRef(false);
-  const arrowRouter = useMemo(
-    () =>
-      createArrowRouter({
-        onHistory: (dir) => arrowHistoryRef.current(dir),
-        onScroll: (dir, lines) => scrollBy(dir === "up" ? lines : -lines),
-      }),
-    [scrollBy],
-  );
-  useEffect(() => () => arrowRouter.dispose(), [arrowRouter]);
 
-  // Arrows are taken from Ink's RAW input events: its keypress parser collapses
-  // a batched multi-arrow wheel chunk into a single upArrow, hiding the count
-  // the router needs. Overlays (picker/login/interview) own arrow navigation.
+  // Fullscreen ↑/↓ are read from Ink's RAW input events rather than through
+  // `useInput`, and the reason is the one thing its keypress parser throws
+  // away: a chunk carrying three arrows at once collapses into a single
+  // upArrow, so by the time it is a key event a wheel tick is indistinguishable
+  // from a keypress. `arrowKeypress` returns a direction only for a lone arrow;
+  // a batched chunk is a wheel and is dropped here, which is the whole of the
+  // app's mouse handling.
   const { internal_eventEmitter } = useStdin();
   useEffect(() => {
-    // Only the uncaptured fallback needs arrow routing — with SGR capture the
-    // wheel never becomes arrows, so ↑/↓ are purely keyboard (direct history).
-    if (!fullscreen || mouseCapture) return;
+    // Only the uncaptured fallback needs this. With SGR capture the wheel never
+    // becomes arrows, so ↑/↓ are purely keyboard and the composer's own
+    // `useInput` is the one reader — which also keeps the `@` picker from being
+    // answered twice. Classic mode needs none of it either: no alternate screen
+    // means no alternate scroll, so the wheel never reaches the process.
+    if (!routedArrows) return;
     const onRawInput = (chunk: string): void => {
       // The `@` picker is an overlay like the others, and it has to bail out
       // HERE, because `useInput` listens on this very emitter (ink's own
       // `use-input` subscribes to `internal_eventEmitter`'s "input"). One ↓ was
-      // therefore delivered twice — once raw to the router below, once parsed to
-      // the picker's own handler — and the selection moved two rows per press.
-      // Invisible to `mention.test.tsx`, which renders App with `fullscreen`
-      // unset while every real session has it on (`tui.fullscreen` defaults
-      // true), so this path was live for users and dead for the test.
+      // therefore delivered twice — once raw here, once parsed to the picker's
+      // own handler — and the selection moved two rows per press.
       if (!visibleRef.current || overlayOpenRef.current || mentionOpenRef.current) return;
-      const runs = parseArrowChunk(chunk);
-      if (!runs) return;
-      for (const run of runs) arrowRouter.feed(run.dir, run.count);
+      const dir = arrowKeypress(chunk);
+      if (dir) arrowHistoryRef.current(dir);
     };
     internal_eventEmitter.on("input", onRawInput);
     return () => {
       internal_eventEmitter.removeListener("input", onRawInput);
     };
-  }, [fullscreen, mouseCapture, internal_eventEmitter, arrowRouter]);
+  }, [routedArrows, internal_eventEmitter]);
 
-  // PgUp/PgDn page the transcript — a timing-free fallback that also works on
-  // terminals whose wheel never reaches the app.
+  // PgUp/PgDn page the transcript — a keyboard route that works even where the
+  // wheel never reaches us (capture off, or a terminal reporting nothing).
+  // PgDn has to be able to actually reach the bottom, and paging alone
+  // cannot: scrolling up raises the "N satır yukarıda" row, which grows the
+  // footer, which costs the viewport a line, so the page back down is one row
+  // SHORTER than the page up was. One press each way left the view stranded a
+  // row off the newest output with the hint still on screen, and every further
+  // pair repeated it. Landing within a couple of rows of the bottom therefore
+  // means the bottom.
   useInput(
     (_input, key) => {
       if (overlayOpenRef.current) return;
       if (!key.pageUp && !key.pageDown) return;
       const page = Math.max(1, viewportRef.current - 1);
-      scrollBy(key.pageUp ? page : -page);
+      if (key.pageUp) {
+        scrollBy(page);
+        return;
+      }
+      setScrollOffset((o) => (o - page <= BOTTOM_SNAP_ROWS ? 0 : o - page));
     },
     { isActive: visible && fullscreen },
   );
@@ -1854,9 +2031,23 @@ export function App({
           });
           setFallbackTo({ provider: event.to.provider, model: event.to.model });
           break;
+        case "interjected": {
+          // It reached the model mid-turn, so the queue must let it go or the
+          // same words are sent twice. Several pendings land as one message
+          // joined on a blank line, which is why this removes by PART rather
+          // than by the event's text.
+          const parts = new Set(event.text.split("\n\n"));
+          setQueue((q) => q.filter((item) => !parts.has(item)));
+          push({ kind: "system", text: `↩ iletildi (tur sürerken): ${event.text}` });
+          break;
+        }
         case "turn_end": {
           setStatus("idle");
           statusRef.current = "idle";
+          // Anything that never found a safe point is still the queue's, and
+          // leaving it on the agent would deliver it AGAIN inside the next
+          // turn — once from here, once from the drain below.
+          session.agent.takeInterjections();
           drainRef.current(); // a queued prompt (if any) starts once this run unwinds
           resetLive();
           const changed = [...turnRef.current.changedFiles];
@@ -2111,6 +2302,40 @@ export function App({
     {
       isActive: visible && status === "idle" && !pickerOpen && !loginOpen && !pending && !interview,
     },
+  );
+
+  // Copy-selection mode toggle (fullscreen + capture only). Ctrl+S enters, and
+  // Ctrl+S or Esc leaves — the jcode-style drag-to-select workflow, wired for
+  // Ink. In classic mode or with capture off it is a no-op with a one-line
+  // explanation, because there the terminal's own selection already works.
+  useInput(
+    (input2, key) => {
+      const isToggle = key.ctrl && (input2 === "s" || input2 === "\u0013");
+      if (!isToggle) return;
+      if (selectingRef.current) {
+        exitSelection();
+        return;
+      }
+      if (!fullscreen || !mouseCapture) {
+        push({
+          kind: "system",
+          text: fullscreen
+            ? "text selection is the terminal's here — drag to select (capture is off)"
+            : "drag already selects text in this mode",
+        });
+        return;
+      }
+      enterSelection();
+    },
+    { isActive: visible && !pickerOpen && !loginOpen && !interview },
+  );
+
+  // Esc leaves selection mode before any other Esc handler acts on it.
+  useInput(
+    (_input2, key) => {
+      if (key.escape && selectingRef.current) exitSelection();
+    },
+    { isActive: visible && selecting },
   );
 
   // Shift+Tab cycles ASK → AUTO → PLAN → AUTONOMOUS → ASK. The last slot is
@@ -2742,9 +2967,9 @@ export function App({
         }
         case "mouse": {
           // Runtime escape hatch for "I just want to select and copy some
-          // text": capture owns drag events for in-app wheel scroll, so plain
-          // selection needs it OFF (Shift+drag bypasses it while ON). Runtime
-          // only — `tui.mouse: false` is the persistent form.
+          // text": capture owns drag events so the wheel can scroll the chat,
+          // so plain selection needs it OFF (Shift+drag bypasses it while ON).
+          // Runtime only — `tui.mouse: false` is the persistent form.
           if (!onToggleMouse) {
             push({
               kind: "system",
@@ -2757,8 +2982,8 @@ export function App({
             push({
               kind: "system",
               text: on
-                ? "▸ mouse capture ON — wheel scrolls in-app; select text with Shift+drag"
-                : "▸ mouse capture OFF — drag selects text; /mouse again to re-capture the wheel",
+                ? "▸ mouse capture ON — wheel scrolls the chat; select text with Shift+drag"
+                : "▸ mouse capture OFF — drag selects text; PgUp/PgDn scroll; /mouse re-captures the wheel",
             });
           }
           break;
@@ -3265,6 +3490,17 @@ export function App({
       // are exempt — there, plain text steers the engine immediately.)
       if (statusRef.current !== "idle" && session.autonomy.state === "idle") {
         setQueue((q) => [...q, text]);
+        // …and offer it to the RUNNING turn as well. A turn that is working
+        // through tool calls has a safe point to fold it in at (see
+        // `request.softInterrupt`), so a correction arrives before the work it
+        // was meant to redirect instead of after the turn it was about.
+        //
+        // The queue stays the source of truth and is not bypassed: a text-only
+        // turn has no such point, the interjection never lands, and the item
+        // drains exactly as it always did. When one DOES land, the
+        // `interjected` event below takes it back out of the queue — which is
+        // why this is an addition rather than a replacement.
+        session.agent.interject(text);
         return;
       }
       await dispatch(text);
@@ -3564,7 +3800,8 @@ export function App({
         toolCount={session.toolCount}
         mode={mode}
         columns={columns}
-        shiftSelect={mouseCapture}
+        fullscreen={fullscreen}
+        mouseCapture={mouseCapture}
         sessions={sessionsBadge}
         bgProcesses={bgProcesses}
         fallbackTo={fallbackTo}
@@ -3585,18 +3822,33 @@ export function App({
     // so the footer never moves, exactly like Claude Code's fullscreen renderer.
     return (
       <Box flexDirection="column" width={columns} height={Math.max(4, rows - 1)}>
-        <Transcript
-          items={items}
-          live={live}
-          viewportRows={viewportRows}
-          scrollOffset={clampedOffset}
-          columns={columns}
-          onMeasure={handleMeasure}
-        />
+        {selecting ? (
+          <SelectionOverlay
+            lines={selectLinesRef.current}
+            firstVisibleLine={firstVisibleLine(selectLinesRef.current.length)}
+            viewportRows={viewportRows}
+            columns={columns}
+            range={selectRange}
+          />
+        ) : (
+          <Transcript
+            items={items}
+            live={live}
+            viewportRows={viewportRows}
+            scrollOffset={clampedOffset}
+            columns={columns}
+            onMeasure={handleMeasure}
+          />
+        )}
         <Box ref={bottomRef} flexDirection="column" flexShrink={0}>
-          {clampedOffset > 0 ? (
+          {selecting ? (
+            <Text color="cyan" dimColor>
+              ⧉ SELECT · drag to select · release to copy · Ctrl+S or Esc to exit
+            </Text>
+          ) : clampedOffset > 0 ? (
             <Text color="gray" dimColor>
-              ↑ {clampedOffset} satır yukarıda · tekerleği aşağı çevir / mesaj gönder = en alta dön
+              ↑ {clampedOffset} satır yukarıda · {mouseCapture ? "tekerleği aşağı çevir" : "PgDn"} /
+              mesaj gönder = en alta dön
             </Text>
           ) : null}
           {footer}

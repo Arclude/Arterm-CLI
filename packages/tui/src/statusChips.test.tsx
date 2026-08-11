@@ -79,6 +79,30 @@ function bar(props: Record<string, unknown>): string {
 }
 
 describe("the status bar", () => {
+  it("names who owns the wheel, and what capture took in exchange", () => {
+    // Three states, three different true sentences. The one that matters is the
+    // middle: capture buys a wheel that scrolls the chat and costs plain
+    // drag-select, and a user who learns the first half from the footer and the
+    // second half by failing to copy a line reads the build as broken. With
+    // capture on, the footer names the app's OWN selection (Ctrl+S), which both
+    // selects and copies — the replacement for the terminal's lost drag.
+    const wide = { columns: 200 };
+    const captured = bar({ ...wide, fullscreen: true, mouseCapture: true });
+    expect(captured).toContain("wheel scrolls");
+    expect(captured).toContain("^S selects text");
+
+    // Fullscreen without capture: the alternate screen has no scrollback to
+    // give the wheel, so advertising it would name a key that does nothing.
+    const uncaptured = bar({ ...wide, fullscreen: true, mouseCapture: false });
+    expect(uncaptured).toContain("PgUp/PgDn scrolls");
+    expect(uncaptured).not.toContain("^S selects");
+
+    // Classic: the terminal owns its own scrollback and its own drag.
+    const classic = bar({ ...wide, fullscreen: false, mouseCapture: false });
+    expect(classic).toContain("wheel scrolls");
+    expect(classic).not.toContain("^S selects");
+  });
+
   it("keeps a constant height at every width", () => {
     // It used to fork at 84 columns and stack every group onto its own line —
     // five rows of chrome on a small terminal, and a full re-layout when the
