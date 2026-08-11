@@ -1,3 +1,5 @@
+pub mod sse;
+pub mod openai_stream;
 pub mod ollama;
 pub mod openai_compat;
 
@@ -38,7 +40,7 @@ pub fn build_provider(
 ) -> Result<Box<dyn ChatProvider>> {
     match provider {
         "ollama" => Ok(Box::new(crate::ollama::OllamaProvider::new(model.to_string()))),
-        "openai-compat" | "openai-compat" => {
+        "openai-compat" | "openai_compat" => {
             let host = host.ok_or_else(|| {
                 anyhow::anyhow!("openai-compat provider requires 'openaiCompatHost' in config")
             })?;

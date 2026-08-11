@@ -2,6 +2,11 @@
 resolver = "2"
 members = [
     "crates/arterm",
+    "crates/arterm-message-types",
+    "crates/arterm-tool-types",
+    "crates/arterm-agent-runtime",
+    "crates/arterm-tool-core",
+    "crates/arterm-provider-core",
     "crates/arterm-core",
     "crates/arterm-config",
     "crates/arterm-providers",
@@ -39,7 +44,17 @@ anyhow = "1"
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
 
-# Internal crates
+# Internal crates — listed in dependency order, lowest layer first.
+# L0 contracts: data only, no tokio/reqwest/ratatui. Everything depends on these,
+# so a runtime dependency here would put the whole tree on a type edit's rebuild path.
+arterm-message-types = { path = "crates/arterm-message-types" }
+arterm-tool-types = { path = "crates/arterm-tool-types" }
+
+# L1 runtime contracts: traits and primitives, still no UI or HTTP.
+arterm-agent-runtime = { path = "crates/arterm-agent-runtime" }
+arterm-tool-core = { path = "crates/arterm-tool-core" }
+arterm-provider-core = { path = "crates/arterm-provider-core" }
+
 arterm-core = { path = "crates/arterm-core" }
 arterm-config = { path = "crates/arterm-config" }
 arterm-providers = { path = "crates/arterm-providers" }

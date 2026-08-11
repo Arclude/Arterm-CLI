@@ -1,0 +1,16 @@
+[package]
+name = "arterm-provider-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Provider trait, its event stream, and shared retry/error-classification helpers."
+
+# No concrete provider client here: this crate is the contract every adapter
+# implements, so the HTTP stacks stay one layer up.
+[dependencies]
+arterm-message-types = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

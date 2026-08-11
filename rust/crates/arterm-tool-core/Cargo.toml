@@ -1,0 +1,15 @@
+[package]
+name = "arterm-tool-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Tool trait and the execution context every tool is handed."
+
+[dependencies]
+arterm-agent-runtime = { workspace = true }
+arterm-message-types = { workspace = true }
+arterm-tool-types = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

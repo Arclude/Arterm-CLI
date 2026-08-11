@@ -3,8 +3,11 @@ name = "arterm-providers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Concrete provider adapters: OpenAI-compatible, Ollama."
 
 [dependencies]
+arterm-message-types.workspace = true
+arterm-provider-core.workspace = true
 arterm-core.workspace = true
 reqwest.workspace = true
 serde.workspace = true

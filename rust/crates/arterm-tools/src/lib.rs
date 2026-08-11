@@ -1,7 +1,5 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-
 use arterm_core::Permission;
 
 /// A tool the agent can call. Each tool is a struct implementing this trait.

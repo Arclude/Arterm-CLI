@@ -1,0 +1,11 @@
+[package]
+name = "arterm-agent-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Runtime primitives shared by the agent loop: interrupts and the soft-interrupt queue."
+
+# Tokio only, and only for Notify. This sits under the tool layer, so a heavier
+# dependency here would reach every tool implementation.
+[dependencies]
+tokio = { workspace = true }
