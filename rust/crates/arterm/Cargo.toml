@@ -1,0 +1,18 @@
+[package]
+name = "arterm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+description = "Local AI coding agent for your terminal"
+
+[[bin]]
+name = "arterm"
+path = "src/main.rs"
+
+[dependencies]
+arterm-config.workspace = true
+arterm-tui.workspace = true
+tokio.workspace = true
+clap.workspace = true
+anyhow.workspace = true

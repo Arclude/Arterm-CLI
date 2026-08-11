@@ -1,0 +1,16 @@
+[package]
+name = "arterm-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+arterm-core.workspace = true
+arterm-config.workspace = true
+arterm-providers.workspace = true
+arterm-tools.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
