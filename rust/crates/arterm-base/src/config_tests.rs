@@ -1235,22 +1235,42 @@ fn migrate_idle_animation_off_noops_without_enabled_value() {
 }
 
 #[test]
-fn frozen_machine_written_sponsors_optout_is_repaired() {
+fn machine_written_sponsors_optout_is_left_alone() {
+    // Exactly the shape the removed repair recognized as "machine-written":
+    // `enabled` + a known default endpoint, nothing else. Loading must not
+    // touch it. Silently re-enabling a disabled third-party endpoint is the
+    // one thing an opt-out has to survive.
     let raw = "[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.sh/v1/discovery\"\n";
-    let mut config: Config = toml::from_str(raw).expect("parse");
-    assert!(!config.sponsors.enabled);
-    config.repair_frozen_sponsors_optout(raw);
+    let config: Config = toml::from_str(raw).expect("parse");
     assert!(
-        config.sponsors.enabled,
-        "a whole-struct config save must not permanently disable discovery"
+        !config.sponsors.enabled,
+        "a config that says disabled must load as disabled"
     );
 }
 
-/// End-to-end: a real config file frozen by an old save must load with
-/// discovery enabled, and the next save must drop the section entirely so the
-/// freeze cannot recur.
 #[test]
-fn frozen_sponsors_optout_recovers_through_a_real_config_file() {
+fn sponsors_opt_in_is_preserved_rather_than_repaired_away() {
+    // The mirror case, and the reason the repair is gone instead of inverted:
+    // a `true` we did not write is indistinguishable from one the user meant,
+    // so loading leaves it alone in this direction too. `discovery_endpoint_note`
+    // is what reports an enabled default endpoint at boot.
+    let raw = "[sponsors]\nenabled = true\nendpoint = \"https://api.arterm.sh/v1/discovery\"\n";
+    let config: Config = toml::from_str(raw).expect("parse");
+    assert!(config.sponsors.enabled, "an explicit opt-in must survive");
+
+    // And it must round-trip: with the default now false, an enabled section
+    // carries information and has to be written back rather than omitted.
+    let rendered = toml::to_string_pretty(&config).expect("serialize");
+    assert!(
+        rendered.contains("[sponsors]"),
+        "a non-default discovery setting must be persisted: {rendered}"
+    );
+}
+
+/// End-to-end through a real config file: an opt-out survives load, and the
+/// save that follows does not write the section back in.
+#[test]
+fn sponsors_optout_survives_a_real_config_round_trip() {
     let _guard = crate::storage::lock_test_env();
     let prev_home = std::env::var_os("ARTERM_HOME");
     let dir = tempfile::TempDir::new().expect("tempdir");
@@ -1267,8 +1287,8 @@ fn frozen_sponsors_optout_recovers_through_a_real_config_file() {
 
     let loaded = Config::load();
     assert!(
-        loaded.sponsors.enabled,
-        "loading a machine-frozen opt-out must restore the shipped default"
+        !loaded.sponsors.enabled,
+        "loading an opt-out must not silently re-enable discovery"
     );
 
     loaded.save().expect("save config");
@@ -1278,8 +1298,8 @@ fn frozen_sponsors_optout_recovers_through_a_real_config_file() {
         "saving must not write the discovery section back: {rewritten}"
     );
     assert!(
-        Config::load().sponsors.enabled,
-        "discovery must stay enabled after a save/load round trip"
+        !Config::load().sponsors.enabled,
+        "discovery must stay disabled after a save/load round trip"
     );
 
     if let Some(prev) = prev_home {
@@ -1291,25 +1311,20 @@ fn frozen_sponsors_optout_recovers_through_a_real_config_file() {
 }
 
 #[test]
-fn legacy_endpoint_optout_is_also_repaired() {
-    let raw =
-        "[sponsors]\nenabled = false\nendpoint = \"https://api.solosystems.dev/v1/discovery\"\n";
-    let mut config: Config = toml::from_str(raw).expect("parse");
-    config.repair_frozen_sponsors_optout(raw);
-    assert!(config.sponsors.enabled);
-}
-
-#[test]
-fn hand_written_sponsors_optout_is_respected() {
+fn every_spelling_of_a_sponsors_optout_is_respected() {
+    // The removed repair sorted these into "machine-written" (repaired) and
+    // "hand-written" (respected). That distinction is gone: a config file is
+    // the user's, so every one of these loads as disabled.
     for raw in [
         "[sponsors]\nenabled = false\n",
         "[sponsors]\nenabled = false\nendpoint = \"https://discovery.internal/v1\"\n",
+        "[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.sh/v1/discovery\"\n",
+        "[sponsors]\nenabled = false\nendpoint = \"https://api.solosystems.dev/v1/discovery\"\n",
     ] {
-        let mut config: Config = toml::from_str(raw).expect("parse");
-        config.repair_frozen_sponsors_optout(raw);
+        let config: Config = toml::from_str(raw).expect("parse");
         assert!(
             !config.sponsors.enabled,
-            "explicit user opt-out must survive: {raw}"
+            "an opt-out must survive load: {raw}"
         );
     }
 }

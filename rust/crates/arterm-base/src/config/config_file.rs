@@ -51,48 +51,27 @@ impl Config {
             anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e)
         })?;
         config.display.apply_legacy_compat();
-        config.repair_frozen_sponsors_optout(&content);
         Ok(Some(config))
     }
 
-    /// Undo a machine-frozen partner-discovery opt-out.
-    ///
-    /// Discovery shipped opt-in (`enabled = false`), and because [`Self::save`]
-    /// serializes the whole struct, any config write during that window baked
-    /// the old default into the user's file. Those users keep discovery
-    /// permanently disabled even after the default flipped to opt-out, and
-    /// telemetry shows this is the single largest discovery blocker.
-    ///
-    /// A machine-written section is exactly `enabled` plus `endpoint` with a
-    /// known default endpoint. A hand-written opt-out (`enabled = false` alone,
-    /// or paired with a custom endpoint) is always respected. Repair happens in
-    /// memory only; the section then disappears on the next save because it
-    /// serializes back to the default.
-    pub(crate) fn repair_frozen_sponsors_optout(&mut self, raw: &str) {
-        if self.sponsors.enabled {
-            return;
-        }
-        let Ok(doc) = raw.parse::<toml::Value>() else {
-            return;
-        };
-        let Some(table) = doc.get("sponsors").and_then(toml::Value::as_table) else {
-            return;
-        };
-        let machine_written = table.len() == 2
-            && table.get("enabled").and_then(toml::Value::as_bool) == Some(false)
-            && table
-                .get("endpoint")
-                .and_then(toml::Value::as_str)
-                .is_some_and(super::is_default_discovery_endpoint);
-        if !machine_written {
-            return;
-        }
-        self.sponsors = SponsorsConfig::default();
-        crate::logging::info(
-            "config: restored integration discovery default (legacy opt-in value was frozen by an \
-             earlier config save)",
-        );
-    }
+    // `repair_frozen_sponsors_optout` used to run here. It rewrote a config's
+    // `[sponsors] enabled = false` back to true in memory whenever the section
+    // looked machine-written (exactly `enabled` + a known default `endpoint`),
+    // to undo an opt-out that whole-struct saves had frozen into user files
+    // while discovery shipped opt-in upstream.
+    //
+    // It is gone rather than inverted. With the default back to false in this
+    // fork it was already inert — it assigned `SponsorsConfig::default()`,
+    // which now means disabled — so all that remained was a mechanism that
+    // silently changes a value the user has in their own config file. That is
+    // worth nothing in the safe direction and is a live hazard if the default
+    // ever flips back: an opt-out is only a control if it survives a load.
+    //
+    // The symmetric case it leaves behind is deliberate. A file inherited from
+    // upstream may carry `enabled = true` against an endpoint nobody here
+    // operates, and repairing THAT would be the same mistake pointing the
+    // other way — a true nobody typed is indistinguishable from one somebody
+    // meant. `discovery_endpoint_note` reports it at boot instead.
 
     /// Save config to file
     pub fn save(&self) -> anyhow::Result<()> {

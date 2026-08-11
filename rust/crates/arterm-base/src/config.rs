@@ -735,18 +735,23 @@ mod color_tests;
 /// Whether integration discovery settings carry no information beyond the shipped
 /// default, so `[sponsors]` can be left out of written config files.
 ///
-/// Discovery originally shipped opt-in with `enabled = false`, and because
-/// config saves serialize the whole struct, any save during that window froze
-/// the old default into the user's file and permanently disabled discovery even
-/// after the default flipped. Omitting default sections prevents a repeat.
+/// Config saves serialize the whole struct, so a section written while one
+/// default was in force freezes that value into the user's file and survives
+/// every later change of mind. Upstream learned this in the opt-in direction:
+/// discovery shipped `enabled = false`, saves froze it, and users stayed
+/// opted out after the default flipped on. This fork has flipped it back off
+/// (the endpoint is not ours — see `SponsorsConfig`), so the same mechanism
+/// now threatens the opposite: a file carrying `enabled = true` nobody chose,
+/// silently contacting a third party. Tracking the CURRENT default rather
+/// than a pinned value is what makes the omission safe in both directions.
 fn sponsors_is_default(sponsors: &SponsorsConfig) -> bool {
-    sponsors.enabled && is_default_discovery_endpoint(&sponsors.endpoint)
+    sponsors.enabled == SponsorsConfig::default().enabled
+        && is_default_discovery_endpoint(&sponsors.endpoint)
 }
 
 /// Endpoints that only ever came from a shipped default, never a user choice.
-fn is_default_discovery_endpoint(endpoint: &str) -> bool {
-    matches!(
-        endpoint.trim_end_matches('/'),
-        "https://api.arterm.sh/v1/discovery" | "https://api.solosystems.dev/v1/discovery"
-    )
+pub(crate) fn is_default_discovery_endpoint(endpoint: &str) -> bool {
+    let endpoint = endpoint.trim_end_matches('/');
+    endpoint == arterm_config_types::DEFAULT_DISCOVERY_ENDPOINT
+        || endpoint == arterm_config_types::LEGACY_DISCOVERY_ENDPOINT
 }

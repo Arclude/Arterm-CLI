@@ -880,27 +880,48 @@ pub struct AutoReviewConfig {
 /// Integration discovery configuration (legacy `[sponsors]` section name).
 ///
 /// Integration discovery makes third-party developer tools discoverable to
-/// the agent via a `discover_tools` tool backed by a hosted directory. Some
-/// providers may share revenue with Arterm when a referred user becomes a
-/// customer, but partnership status never influences recommendations.
-/// See <https://arterm.sh/discovery-tools>.
+/// the agent via a `discover_tools` tool backed by a hosted directory.
+///
+/// **Off by default in this fork, and the reason is who receives the data.**
+/// The default endpoint is upstream's, reachable only because the rebrand
+/// rewrote its hostname; nobody here operates it. What crosses it is not a
+/// counter — `discover_tools` sends the model's own `query` and `reason`,
+/// which describe what the user is currently building. `discover_secrets`
+/// screens that text for credentials and is a real backstop, but it is not
+/// this: a query naming a client, a product or an unreleased feature is not
+/// a secret by any pattern and is exactly what leaks. So this is opt-in
+/// (`[sponsors] enabled = true`), the same call telemetry got and for the
+/// same reason. Point `endpoint` at a directory you trust before enabling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SponsorsConfig {
-    /// Enable integration discovery. Enabled by default; set to false to opt
-    /// out. When false, no discovery categories are added to the prompt, the
-    /// `discover_tools` tool is not registered, and arterm never contacts the
-    /// discovery endpoint.
+    /// Enable integration discovery. **Disabled by default**; set to true to
+    /// opt in. When false, no discovery categories are added to the prompt,
+    /// the `discover_tools` tool is not registered, and arterm never contacts
+    /// the discovery endpoint.
     pub enabled: bool,
     /// Base URL of the discovery endpoint.
     pub endpoint: String,
 }
 
+/// The discovery endpoint that only ever came from a shipped default.
+///
+/// Spelled once and read everywhere that has to recognize it, because the
+/// readers disagree about what a match MEANS — the default builder wants it,
+/// `is_default_discovery_endpoint` gates config persistence on it, and
+/// `discovery_endpoint_note` warns about it. A second spelling that drifts
+/// does not fail loudly; it just stops matching, and every one of those
+/// readers then quietly decides the opposite of what it should.
+pub const DEFAULT_DISCOVERY_ENDPOINT: &str = "https://api.arterm.sh/v1/discovery";
+
+/// The pre-rebrand spelling of the same upstream service.
+pub const LEGACY_DISCOVERY_ENDPOINT: &str = "https://api.solosystems.dev/v1/discovery";
+
 impl Default for SponsorsConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            endpoint: "https://api.arterm.sh/v1/discovery".to_string(),
+            enabled: false,
+            endpoint: DEFAULT_DISCOVERY_ENDPOINT.to_string(),
         }
     }
 }

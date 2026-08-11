@@ -888,6 +888,30 @@ async fn run_default_command(args: Args) -> Result<()> {
     };
     startup_profile::mark("setup_hints");
 
+    // Integration discovery is opt-in in this fork because its default endpoint
+    // is upstream's. A config inherited from before that flip can still carry
+    // `enabled = true`, and load deliberately no longer rewrites it (see
+    // `config/config_file.rs`) — so this is the one place it gets said out loud.
+    //
+    // Deliberately NOT part of the `setup_hints` chain above: that chain is
+    // `.or_else`, i.e. at most one tip per boot, and a hint this can lose a
+    // race with is not a disclosure. It prints on every boot it applies to,
+    // like the telemetry notice it sits beside.
+    {
+        let config = crate::config::config();
+        if let Some(note) =
+            crate::sponsors::discovery_endpoint_note(config.sponsors.enabled, &config.sponsors.endpoint)
+        {
+            let (dim, reset) = if crate::console::stderr_supports_ansi() {
+                ("\x1b[90m", "\x1b[0m")
+            } else {
+                ("", "")
+            };
+            eprintln!("{dim}  warning: {note}{reset}");
+        }
+    }
+    startup_profile::mark("discovery_notice");
+
     // Best-effort: make sure the macOS menu bar session-count indicator is
     // running so it shows up automatically for every macOS user.
     commands::ensure_menubar_helper_running();

@@ -70,6 +70,50 @@ Eklenecek `Tool` yeteneklerinin upstream trait'inde karşılığı yok
 soru yok. Risk komutun *argümanlarından* hesaplanıyor, tool'un bir özelliği
 değil.
 
+### Rebrand'in yarattığı sınıf: adı değişen, alıcısı değişmeyen uçlar
+
+Bunlar fork'a özgü ve tek tek bulunmaları gerekti. Rebrand her `jcode.dev`
+adresini `arterm.sh`'ye çevirdi; **veriyi kimin aldığını değiştirmedi.** Ortaya
+çıkan şey, bizim işletmediğimiz bir alan adına giden ve varsayılan olarak açık
+kanallar oldu. Üçü bulundu, üçü de kapatıldı:
+
+| Uç | Neydi | Ne oldu |
+|---|---|---|
+| `telemetry.arterm.sh/v1/event` | varsayılan **açık** | `ARTERM_TELEMETRY=1` ile opt-in (`6b62ba8`) |
+| `github.com/1jehuang/arterm` | var olmayan depo üzerinden self-update | `ARTERM_UPDATE_REPO` adlanana dek kapalı (`6057590`) |
+| `api.arterm.sh/v1/discovery` | varsayılan **açık** | `[sponsors] enabled` ile opt-in |
+
+Discovery üçünün en ciddisiydi ve en geç fark edileni. Diğer ikisi sayaç ve
+sürüm bilgisi taşıyor; bu, `discover_tools` üzerinden **modelin kendi yazdığı
+`query` ve `reason` alanlarını** taşıyor — yani kullanıcının o an ne inşa
+ettiğinin tarifini. Upstream'in `discover_secrets.rs` taraması gerçek bir
+koruma ama bu deliği kapatmıyor: JWT, e-posta, kart numarası yakalar; "X
+firmasının ödeme entegrasyonunu yazıyorum" hiçbir desene göre sır değildir ve
+sızan tam olarak odur.
+
+İki mekanizma daha kaldırıldı, ikisi de aynı sebeple:
+
+- **`repair_frozen_sponsors_optout`** kullanıcının config dosyasındaki
+  `enabled = false` değerini bellekte `true`'ya çeviriyordu. Upstream'in
+  gerekçesi savunulabilirdi (eski bir kayıt tüm struct'ı serileştirip opt-in
+  varsayılanını dosyaya dondurmuştu, ve bu "en büyük discovery engeli" idi).
+  Fork'ta ters yöne çalışıyor. Ters çevirmek yerine **silindi**: bir opt-out,
+  ancak yüklemeden sağ çıkarsa bir denetimdir. Simetrik durum —
+  upstream'den miras `enabled = true` — kasten onarılmıyor, çünkü kimsenin
+  yazmadığı bir `true` ile kasten yazılmış olanı ayırt edemeyiz; onun yerine
+  `discovery_endpoint_note` açılışta bunu **söylüyor**. TS tarafındaki
+  `contextWindowNote` kuralı: düzeltme, bildir.
+- **Endpoint sabiti tek yazıma indirildi** (`DEFAULT_DISCOVERY_ENDPOINT`).
+  Aynı dize dört yerde duruyordu ve okuyucuları eşleşmeye zıt anlamlar
+  yüklüyor (biri varsayılanı kurar, biri kalıcılığı kapatır, biri uyarır).
+  Kayan bir ikinci yazım gürültülü biçimde patlamaz — sadece eşleşmeyi
+  bırakır, ve o okuyucuların hepsi sessizce tersini yapar.
+
+**Daha fazlası olduğunu varsayın.** Denetlenmemiş kalanlar: `arterm.sh/account`
+(abonelik/cihaz akışı), `api.arterm.sh/v1` (`subscription_api`), ve
+`{sponsors.endpoint}/usage` (bağlanan MCP sunucularının kaba kullanım sayacı —
+discovery kapalıyken zaten sessiz).
+
 ## Upstream'den korunacak, TS'de olmayanlar
 
 - **Akış hızı denetimi** (`StreamBuffer`): gelme ile gösterme ayrılır.
