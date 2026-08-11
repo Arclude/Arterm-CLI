@@ -63,8 +63,52 @@ fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
     global_test_lock()
 }
 
-fn lock_telemetry_test_state() -> std::sync::MutexGuard<'static, ()> {
-    global_test_lock()
+/// Lock for tests that drive the global `SESSION_STATE`, with telemetry
+/// switched ON for the duration.
+///
+/// Telemetry is opt-in here (see [`is_enabled`]), and every recording entry
+/// point returns early when it is off. Without the opt-in these tests would
+/// hit exactly the failure the module comment above describes, by a new route:
+/// `begin_session_with_mode` returns early, `SESSION_STATE` stays `None`, the
+/// test's `expect(...)` panics while holding that lock, and every other
+/// session test then fails with `PoisonError`.
+///
+/// The previous values are restored on drop so a developer whose shell already
+/// sets `DO_NOT_TRACK` does not have it silently cleared by running the suite.
+struct TelemetryEnabledGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    opt_in: Option<String>,
+    no_telemetry: Option<String>,
+    do_not_track: Option<String>,
+}
+
+impl Drop for TelemetryEnabledGuard {
+    fn drop(&mut self) {
+        restore(TELEMETRY_OPT_IN_ENV, self.opt_in.take());
+        restore("ARTERM_NO_TELEMETRY", self.no_telemetry.take());
+        restore("DO_NOT_TRACK", self.do_not_track.take());
+    }
+}
+
+fn restore(key: &str, previous: Option<String>) {
+    match previous {
+        Some(value) => arterm_core::env::set_var(key, value),
+        None => arterm_core::env::remove_var(key),
+    }
+}
+
+fn lock_telemetry_test_state() -> TelemetryEnabledGuard {
+    let lock = global_test_lock();
+    let guard = TelemetryEnabledGuard {
+        _lock: lock,
+        opt_in: std::env::var(TELEMETRY_OPT_IN_ENV).ok(),
+        no_telemetry: std::env::var("ARTERM_NO_TELEMETRY").ok(),
+        do_not_track: std::env::var("DO_NOT_TRACK").ok(),
+    };
+    arterm_core::env::remove_var("ARTERM_NO_TELEMETRY");
+    arterm_core::env::remove_var("DO_NOT_TRACK");
+    arterm_core::env::set_var(TELEMETRY_OPT_IN_ENV, "1");
+    guard
 }
 
 #[test]
@@ -73,6 +117,49 @@ fn test_opt_out_env_var() {
     arterm_core::env::set_var("ARTERM_NO_TELEMETRY", "1");
     assert!(!is_enabled());
     arterm_core::env::remove_var("ARTERM_NO_TELEMETRY");
+}
+
+#[test]
+fn telemetry_is_off_until_someone_opts_in() {
+    // Upstream shipped this on by default, which was theirs to choose: the
+    // data went to a host they operated. The rebrand repointed the hostname
+    // and nothing else, so the same default here would send a user's session
+    // activity to a domain this project does not own. Off unless asked for.
+    let _guard = lock_test_env();
+    arterm_core::env::remove_var(TELEMETRY_OPT_IN_ENV);
+    arterm_core::env::remove_var("ARTERM_NO_TELEMETRY");
+    arterm_core::env::remove_var("DO_NOT_TRACK");
+    assert!(!is_enabled(), "no opt-in must mean no telemetry");
+}
+
+#[test]
+fn an_explicit_opt_in_turns_it_on_and_an_opt_out_still_wins() {
+    let _guard = lock_test_env();
+    arterm_core::env::remove_var("ARTERM_NO_TELEMETRY");
+    arterm_core::env::remove_var("DO_NOT_TRACK");
+
+    arterm_core::env::set_var(TELEMETRY_OPT_IN_ENV, "1");
+    assert!(is_enabled(), "an explicit opt-in must be honored");
+
+    // Someone who already said no must not have to say it twice.
+    arterm_core::env::set_var("DO_NOT_TRACK", "1");
+    assert!(!is_enabled(), "an opt-out outranks the opt-in");
+
+    arterm_core::env::remove_var("DO_NOT_TRACK");
+    arterm_core::env::remove_var(TELEMETRY_OPT_IN_ENV);
+}
+
+#[test]
+fn a_meaningless_opt_in_value_is_not_consent() {
+    let _guard = lock_test_env();
+    arterm_core::env::remove_var("ARTERM_NO_TELEMETRY");
+    arterm_core::env::remove_var("DO_NOT_TRACK");
+    // `is_ok()` on the variable would read `ARTERM_TELEMETRY=0` as a yes.
+    for value in ["0", "false", "no", ""] {
+        arterm_core::env::set_var(TELEMETRY_OPT_IN_ENV, value);
+        assert!(!is_enabled(), "{value:?} must not read as consent");
+    }
+    arterm_core::env::remove_var(TELEMETRY_OPT_IN_ENV);
 }
 
 #[test]

@@ -407,13 +407,35 @@ enum DeliveryMode {
     Blocking(Duration),
 }
 
+/// Opt **in** to anonymous usage telemetry. Absent means off.
+///
+/// This inverts upstream's default, and the reason is not a preference about
+/// telemetry: [`TELEMETRY_ENDPOINT`] is a domain this fork does not operate.
+/// Upstream's default sent usage data to upstream's own server, which its
+/// users had a relationship with; the rebrand repointed the hostname without
+/// changing who receives it, so the same default here would send a user's
+/// session activity to a host nobody in this project controls — and if that
+/// name is ever registered by someone else, to them.
+///
+/// The disclosure also stopped being true: nothing here collects the data it
+/// promises to handle carefully. So the switch is off until someone stands up
+/// the endpoint and can honestly make that promise again.
+pub const TELEMETRY_OPT_IN_ENV: &str = "ARTERM_TELEMETRY";
+
 pub fn is_enabled() -> bool {
+    // The opt-outs are still honored first, so a user or a `DO_NOT_TRACK`
+    // environment that already said no is never asked to say it twice.
     if std::env::var("ARTERM_NO_TELEMETRY").is_ok() || std::env::var("DO_NOT_TRACK").is_ok() {
         logging::debug("telemetry disabled by environment");
         return false;
     }
     if opt_out_marker_path().map(|p| p.exists()).unwrap_or(false) {
         logging::debug("telemetry disabled by no_telemetry marker");
+        return false;
+    }
+    if !std::env::var(TELEMETRY_OPT_IN_ENV).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
+        logging::debug("telemetry off: no explicit opt-in");
         return false;
     }
     true
@@ -2327,12 +2349,16 @@ fn show_first_run_notice() {
     } else {
         ("", "")
     };
+    // Only reachable once telemetry has been switched on deliberately — every
+    // caller sits behind `is_enabled()`, which is opt-in. The wording says
+    // "you turned this on" rather than announcing a default, because
+    // announcing a default nobody chose is how a disclosure stops being read.
     eprintln!("{dim}");
-    eprintln!("  arterm collects anonymous usage statistics (install count, version, OS,");
-    eprintln!("  session activity, tool counts, and crash/exit reasons). No code, filenames,");
-    eprintln!("  prompts, or personal data is sent.");
-    eprintln!("  To opt out: export ARTERM_NO_TELEMETRY=1");
-    eprintln!("  Details: https://github.com/1jehuang/jcode/blob/master/TELEMETRY.md");
+    eprintln!("  Anonymous usage telemetry is ON (you set {TELEMETRY_OPT_IN_ENV}).");
+    eprintln!("  Sent: install count, version, OS, session activity, tool counts,");
+    eprintln!("  and crash/exit reasons. No code, filenames, prompts, or personal data.");
+    eprintln!("  To turn it off: unset {TELEMETRY_OPT_IN_ENV} (or export ARTERM_NO_TELEMETRY=1)");
+    eprintln!("  Details: TELEMETRY.md");
     eprintln!("{reset}");
 }
 
