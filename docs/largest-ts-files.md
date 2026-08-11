@@ -1,11 +1,33 @@
 # Projedeki en büyük TypeScript dosyaları
 
 Aşağıda, `node_modules` ve `dist` hariç projedeki tüm `.ts` dosyaları arasından
-**satır sayısına göre en büyük 3 tanesi** ele alınmıştır (test dosyaları hariç,
+**satır sayısına göre en büyük 4 tanesi** ele alınmıştır (test dosyaları hariç,
 yani asıl kaynak dosyalar). Her biri için dosyanın ne işe yaradığı bir
 paragrafla açıklanmıştır.
 
-## 1. `packages/core/src/autonomy.ts` — 920 satır
+> Sayımın kapsamı yalnızca `.ts` uzantısıdır. Projenin en büyük kaynak dosyası
+> aslında `packages/tui/src/App.tsx`'tir (3.684 satır); `.tsx` olduğu için bu
+> listenin dışında kalır.
+
+## 1. `packages/core/src/agent.ts` — 1.674 satır
+
+Bu dosya, konuşmayı sürükleyen çekirdek `Agent` sınıfını içerir: model çıktısını
+akış (stream) hâlinde toplar, araç çağrılarını (izinlerle geçitlenmiş biçimde)
+çalıştırır ve sonuçları modele geri besleyerek nihai yanıt üretilene dek döngüyü
+sürdürür. Döngünün davranışı doğrudan `run()` içinde değil, kernel üzerindeki
+**adlandırılmış middleware "pipeline" aşamaları** (`userInput`, `request`,
+`response`, `assistantOutput`, `toolCall`, `contextWindow`) olarak kurgulanır;
+`installDefaultPipelines()` bunların varsayılan davranışlarını kurar (izin
+denetimi, araç yürütme, döngü koruması/loop-guard, sistem istemi oluşturma,
+metinden JSON araç çağrısı kurtarma vb.). Tur ortasında yazılan bir mesajı bir
+araç turunun sonuçlarından hemen sonra konuşmaya katan `softInterrupt` aşaması
+da buradadır. Ayrıca sistem istemini ortam bilgisi + proje talimatları
+(CLAUDE.md/AGENTS.md) + yetenekler + hafıza ile inşa etme, bağlam penceresi
+dolunca otomatik sıkıştırma (auto-compaction) ve eski araç sonuçlarını temizleme,
+otonom motorun kullandığı `assess()`/`plan()` sondaları ve `RunController` ile
+turun iptal/temizlik yaşam döngüsü yönetimi burada bulunur.
+
+## 2. `packages/core/src/autonomy.ts` — 1.642 satır
 
 Bu dosya, ajanı bir hedefe doğru **otonom olarak** yürüten `AutonomyEngine`
 sınıfını içerir; döngüsü "karar ver → uygula → değerlendir → tekrarla"
@@ -19,7 +41,19 @@ aracını, bağımsız bir "verifier" ile taze bağlamda tamamlama denetimini,
 checkpoint (çökme kurtarma) desteğini ve steer / pause / resume / stop yaşam
 döngüsü kontrollerini barındırır.
 
-## 2. `packages/cli/src/main.ts` — 870 satır
+## 3. `packages/cli/src/session.ts` — 1.441 satır
+
+Bir oturumun **kurulduğu yer**: `buildSession()`, yapılandırmadan yola çıkıp
+sağlayıcıyı, araç listesini, izin yöneticisini ve kernel pipeline'larını tek bir
+çalışır `Session` nesnesinde birleştirir. Chronicle (karar kaydı), verify
+ledger'ı, checkpoint anlık görüntüleri, telemetri ve yaşam döngüsü hook'ları
+(`preTool`, `postTool`, `turnEnd`, `sessionStart`, `sessionEnd`) bu dosyada
+pipeline'lara ve olay veriyoluna bağlanır. Dosyanın diğer yarısı yıkımdır:
+`persist()`, her kapanış yolunda çağrılan son fonksiyon olarak filoyu, dil
+sunucularını, tarayıcıları, arka plan süreçlerini ve sandbox'ı kapatır, spool'u
+süpürür ve oturumun seçimlerini diske yazar.
+
+## 4. `packages/cli/src/main.ts` — 1.169 satır
 
 Bu dosya, `arterm` ikili dosyasının **giriş noktası** ve komut satırı
 yönlendirmesidir; commander ile tüm alt komutları (`chat`, `init`, `models`,
@@ -34,31 +68,15 @@ tanımları gibi dış yetenekleri yükleyip her oturuma iliştiren `enrichSessi
 fabrikası ile desktop durum sunucusunun (status server) başlatılması da bu
 dosyada yer alır.
 
-## 3. `packages/core/src/agent.ts` — 790 satır
-
-Bu dosya, konuşmayı sürükleyen çekirdek `Agent` sınıfını içerir: model çıktısını
-akış (stream) hâlinde toplar, araç çağrılarını (izinlerle geçitlenmiş biçimde)
-çalıştırır ve sonuçları modele geri besleyerek nihai yanıt üretilene dek döngüyü
-sürdürür. Döngünün davranışı doğrudan `run()` içinde değil, kernel üzerindeki
-**adlandırılmış middleware "pipeline" aşamaları** (`userInput`, `request`,
-`response`, `assistantOutput`, `toolCall`, `contextWindow`) olarak kurgulanır;
-`installDefaultPipelines()` bunların varsayılan davranışlarını kurar (izin
-denetimi, araç yürütme, döngü koruması/loop-guard, sistem istemi oluşturma,
-metinden JSON araç çağrısı kurtarma vb.). Ayrıca sistem istemini ortam bilgisi +
-proje talimatları (CLAUDE.md/AGENTS.md) + yetenekler + hafıza ile inşa etme,
-bağlam penceresi dolunca otomatik sıkıştırma (auto-compaction) ve eski araç
-sonuçlarını temizleme, otonom motorun kullandığı `assess()`/`plan()` sondaları
-ve `RunController` ile turun iptal/temizlik yaşam döngüsü yönetimi burada
-bulunur.
-
 ## Özet tablosu
 
 | # | Dosya | Satır | Paket | Kısaca ne işe yarar |
 |---|-------|------:|-------|---------------------|
-| 1 | `packages/core/src/autonomy.ts` | 920 | `@arterm/core` | Hedefe doğru otonom döngüyü (once/eternal/parallel/phased/team) yürüten `AutonomyEngine`; alt-ajan filosu, doğrulama ve checkpoint yönetimi. |
-| 2 | `packages/cli/src/main.ts` | 870 | `@arterm/cli` | `arterm` CLI giriş noktası; commander komutları, TUI/headless başlatma, oturum devamı, sağlayıcı ön-kontrolü ve dış yeteneklerin bağlanması. |
-| 3 | `packages/core/src/agent.ts` | 790 | `@arterm/core` | Konuşma/araç döngüsünü pipeline middleware'leriyle sürükleyen çekirdek `Agent`; izin geçitleme, sistem istemi, bağlam sıkıştırma. |
+| 1 | `packages/core/src/agent.ts` | 1.674 | `@arterm/core` | Konuşma/araç döngüsünü pipeline middleware'leriyle sürükleyen çekirdek `Agent`; izin geçitleme, sistem istemi, bağlam sıkıştırma. |
+| 2 | `packages/core/src/autonomy.ts` | 1.642 | `@arterm/core` | Hedefe doğru otonom döngüyü (once/eternal/parallel/phased/team) yürüten `AutonomyEngine`; alt-ajan filosu, doğrulama ve checkpoint yönetimi. |
+| 3 | `packages/cli/src/session.ts` | 1.441 | `arterm-cli` | Sağlayıcı, araçlar, izinler, hook'lar ve pipeline'ları tek bir `Session`'da birleştiren kurulum; `persist()` ile tüm yıkım yolu. |
+| 4 | `packages/cli/src/main.ts` | 1.169 | `arterm-cli` | `arterm` CLI giriş noktası; commander komutları, TUI/headless başlatma, oturum devamı, sağlayıcı ön-kontrolü ve dış yeteneklerin bağlanması. |
 
 > Not: Sıralamada test dosyaları (`*.test.ts`) hariç tutulmuştur. Testler dâhil
-> edilseydi `autonomy.test.ts` (778) ve `agent.test.ts` (728) de üst sıralarda
-> yer alırdı.
+> edilseydi `agent.test.ts` (1.968) ve `autonomy.test.ts` (1.763) de üst
+> sıralarda yer alırdı.

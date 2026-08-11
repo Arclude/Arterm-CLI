@@ -12,7 +12,7 @@ keys stored encrypted. Arterm streams chat into a rich
 your files and run shell commands through a permission-gated tool set.
 
 ```
-▌ARTERM v0.1.2  │  ● idle  │  ollama/qwen2.5:7b  │  ctx ██░░░░░░░░ 12%/32k  │  ↑1.2k ↓340
+▌ARTERM v0.9.1  │  ● idle  │  ollama/qwen2.5:7b  │  ctx ██░░░░░░░░ 12%/32k  │  ↑1.2k ↓340
 📁 my-project  │  ⎇ main  │  🔧 7 tools  │  ⏱ 15:45:27  │  ASK
 Enter send   ? help   Alt+P models   Esc cancel   ^C quit
 ```

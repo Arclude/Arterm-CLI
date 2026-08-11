@@ -5,6 +5,127 @@ All notable changes to **arterm-cli** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Typing into a running turn now reaches the model during it.** A prompt
+  submitted while the agent works used to wait for the whole turn to finish, so
+  a correction arrived after the work it was meant to redirect. It is now folded
+  into the conversation at the next safe point — after a tool round's results
+  are recorded, before the next request — without cancelling anything and
+  without re-sending the prompt. Turns that never reach such a point (a
+  text-only reply) behave exactly as before: the message stays queued and is
+  dispatched at the end, so nothing typed is ever dropped or sent twice.
+
+- **Lifecycle hooks** (`hooks` in the config): external commands run at
+  well-defined points, so another program can observe — and gate — the agent
+  without forking it. `turnEnd`, `sessionStart`, `sessionEnd` and `postTool` are
+  observers, spawned detached, unable to slow or fail a turn. `preTool` is a
+  gate: it runs before each tool call, `exit 2` blocks the call, and the hook's
+  stderr is handed to the model as the tool error so it can adapt. Every other
+  outcome — any other exit code, a timeout, a missing binary — fails OPEN, on
+  the same argument as the verify judge: policy that silently becomes mandatory
+  the day it breaks is worse than none.
+
+  Hooks get a **credential-scrubbed** environment (a hook is a spawned command,
+  the same door `bash` was) and `ARTERM_HOOKS_DISABLED=1`, so a hook may call
+  `arterm` without re-triggering itself. The tool's full input arrives on stdin,
+  with a 16 KB copy in `ARTERM_HOOK_TOOL_INPUT`.
+
+- **A turn at the cap that is still working gets another tranche**
+  (`budget.autoExtendTurn`, default true). The iteration cap exists for the
+  runaway turn, but it could not tell one from a long one, so auto mode died at
+  exactly 50 iterations mid-task. The loop detector already owns that diagnosis:
+  the boundary now extends unless the detector has CUT the turn. Set it to
+  `false` for the old hard stop. Sub-agents and the verify judge are never
+  extended either way.
+
+### Fixed
+
+- **A mid-turn message now survives the session it steered.** Something typed
+  into a running turn reached the model, but was appended straight to the live
+  message array — skipping the hook that writes history down. It shaped the
+  answer and then vanished from the transcript and the checkpoint, so resuming
+  replayed a conversation the correction never happened in.
+
+- **`hooks.sessionEnd` runs.** It validated, it counted as a configured hook, and
+  nothing ever fired it: a user who configured only that hook got the whole hook
+  machinery installed and silence. It is now fired at the top of session
+  teardown, while the session it describes still exists.
+
+- **`turnEnd` no longer reports `ok` for a turn that failed.** The status was a
+  literal, which made the hook useless for the thing an observer is mostly for.
+  A failed turn now reports `error`, with the message in `ARTERM_HOOK_ERROR`.
+
+- **A `pre_tool` gate that ignores stdin no longer takes the session down.**
+  Writing the tool's input to a hook that exits without reading fails with an
+  EPIPE delivered asynchronously, past the `try` guarding the write, where an
+  unhandled error event ends the process — so the gate's own correct verdict
+  killed the run.
+
+- **A killed TUI actually dies.** The SIGINT handler installed with the terminal
+  restore wrote the escape bytes and returned, and because registering any
+  listener suppresses Node's default termination, `kill -INT` left the app
+  running with its cursor shown, its mouse released and the alternate screen
+  exited — a live TUI painting over the shell, immune to further INTs. It exits
+  130 now. The `uncaughtException` handler did the same to a crash the CLI
+  deliberately survives, and is gone.
+
+- **The chat repaints more often while streaming.** The context gauge asks for
+  the model's context window on every render, and that question walked the whole
+  models.dev catalog — thousands of entries, each id normalized through a regex —
+  once per repaint. Profiled against the built binary during a stream, that
+  cluster was about a quarter of all active CPU. The lookup is now memoized
+  against the (immutable) cached catalog and dropped whenever the catalog is
+  refreshed. Measured on the same 1,200-chunk stream: 88 frames instead of 61.
+
+- **A killed session gives the terminal back.** Only a clean exit restored it;
+  SIGTERM, SIGHUP and crashes skipped Ink's teardown entirely, which is exactly
+  when it matters — mouse reporting left enabled makes the shell print
+  `^[[<0;12;34M` on every click until `reset`. All reporting modes, the cursor
+  and the alternate screen are now restored from one writer on every exit path,
+  with `writeSync` so the bytes actually land before the process leaves.
+
+### Changed
+
+- **The wheel scrolls the chat, and can no longer type.** Scrolling used to move
+  the chat in three-line jumps and, on a terminal set to one line per tick, put
+  an old prompt back in the composer instead. Both are one mechanism: on the
+  alternate screen there is no scrollback for the wheel to move, so the app asked
+  the terminal to translate ticks into arrow keys (DECSET 1007) and read the
+  scroll back out of them — and a one-line tick is byte-identical to pressing ↑,
+  which no amount of timing can separate.
+
+  The fix is to change the channel rather than guess better. The mouse is now
+  captured with SGR reporting (`?1000h` + `?1006h`), where a tick arrives as
+  `ESC[<64;x;yM`: the direction is in the bytes and no keypress can produce them,
+  so the chat scrolls and history is never touched. Alternate scroll is never
+  enabled again in either mode. This is what Claude Code does, measured off its
+  own wire rather than assumed. The price is that plain left-drag belongs to the
+  app while capture is on, so selecting text is **⇧+drag** — the status bar says
+  so beside the scroll hint. `/mouse` toggles it for the session and
+  `tui.mouse: false` is the persistent form; turning it off captures nothing at
+  all (it does not fall back to 1007) and PgUp/PgDn scroll instead.
+
+  PgUp/PgDn also now actually reach the bottom — paging alone could not, because
+  scrolling up raises the "N satır yukarıda" row, which costs the viewport a
+  line, so the page back down was always one row short. And ↑/↓ answer instantly:
+  the old classifier held every arrow keypress for 25 ms waiting to see whether
+  the wheel had sent a second one. `scripts/wheel-scroll-e2e.mjs` drives the
+  built binary in a pty and can finally assert the reported case itself: 14/14
+  after, **9/14** before.
+
+  Classic rendering (`tui.fullscreen: false`) was tried as the default here and
+  reverted before release. It hands the wheel back to the terminal, which is the
+  right shape — but the redrawn region is content-sized there, so the moment the
+  8-row live-message area collapses onto a committed answer the composer and
+  status bar move up and leave the rows below them blank. Pinning them would
+  take a region as tall as the window, which is exactly what must not happen in
+  the normal buffer: at that height Ink clears and rewrites the whole terminal
+  every render, scrollback included. A pinned footer and a terminal-owned
+  scrollback cannot both be had.
+
 ## [0.9.1] — 2026-08-11
 
 ### Added
