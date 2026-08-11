@@ -84,23 +84,23 @@ describe("the status bar", () => {
     // middle: capture buys a wheel that scrolls the chat and costs plain
     // drag-select, and a user who learns the first half from the footer and the
     // second half by failing to copy a line reads the build as broken. With
-    // capture on, the footer names the app's OWN selection (Ctrl+S), which both
+    // capture on, the footer names the app's OWN selection (Ctrl+E), which both
     // selects and copies — the replacement for the terminal's lost drag.
     const wide = { columns: 200 };
     const captured = bar({ ...wide, fullscreen: true, mouseCapture: true });
     expect(captured).toContain("wheel scrolls");
-    expect(captured).toContain("^S selects text");
+    expect(captured).toContain("^E selects text");
 
     // Fullscreen without capture: the alternate screen has no scrollback to
     // give the wheel, so advertising it would name a key that does nothing.
     const uncaptured = bar({ ...wide, fullscreen: true, mouseCapture: false });
     expect(uncaptured).toContain("PgUp/PgDn scrolls");
-    expect(uncaptured).not.toContain("^S selects");
+    expect(uncaptured).not.toContain("^E selects");
 
     // Classic: the terminal owns its own scrollback and its own drag.
     const classic = bar({ ...wide, fullscreen: false, mouseCapture: false });
     expect(classic).toContain("wheel scrolls");
-    expect(classic).not.toContain("^S selects");
+    expect(classic).not.toContain("^E selects");
   });
 
   it("keeps a constant height at every width", () => {

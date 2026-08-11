@@ -2304,13 +2304,15 @@ export function App({
     },
   );
 
-  // Copy-selection mode toggle (fullscreen + capture only). Ctrl+S enters, and
-  // Ctrl+S or Esc leaves — the jcode-style drag-to-select workflow, wired for
-  // Ink. In classic mode or with capture off it is a no-op with a one-line
-  // explanation, because there the terminal's own selection already works.
+  // Copy-selection mode toggle (fullscreen + capture only). Ctrl+E enters, and
+  // Ctrl+E or Esc leaves — the jcode-style drag-to-select workflow, wired for
+  // Ink. Ctrl+S would be swallowed by the terminal's own flow control (XOFF —
+  // it freezes output, never reaching the app), so Ctrl+E it is. In classic
+  // mode or with capture off it is a no-op with a one-line explanation,
+  // because there the terminal's own selection already works.
   useInput(
     (input2, key) => {
-      const isToggle = key.ctrl && (input2 === "s" || input2 === "\u0013");
+      const isToggle = key.ctrl && (input2 === "e" || input2 === "\u0005");
       if (!isToggle) return;
       if (selectingRef.current) {
         exitSelection();
@@ -3843,7 +3845,7 @@ export function App({
         <Box ref={bottomRef} flexDirection="column" flexShrink={0}>
           {selecting ? (
             <Text color="cyan" dimColor>
-              ⧉ SELECT · drag to select · release to copy · Ctrl+S or Esc to exit
+              ⧉ SELECT · drag to select · release to copy · Ctrl+E or Esc to exit
             </Text>
           ) : clampedOffset > 0 ? (
             <Text color="gray" dimColor>

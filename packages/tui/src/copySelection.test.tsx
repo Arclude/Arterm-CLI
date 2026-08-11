@@ -7,7 +7,7 @@ import type { Session } from "./types.js";
 
 /**
  * The jcode-style copy-selection mode, driven end to end through the real App:
- * Ctrl+S enters, a mouse press-drag-release over the transcript selects text,
+ * Ctrl+E enters, a mouse press-drag-release over the transcript selects text,
  * and the release copies it. The projection and the coordinate math are unit
  * tested in selection.test.ts; this proves the wiring — the mode toggles, the
  * overlay renders, and a drag reaches the clipboard call.
@@ -19,7 +19,7 @@ import type { Session } from "./types.js";
  */
 
 const ESC = String.fromCharCode(27);
-const CTRL_S = "\u0013";
+const CTRL_E = "\u0005";
 const tick = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** SGR mouse byte helpers (1-based wire coordinates). */
@@ -87,19 +87,19 @@ function fakeSession(bus: EventBus): Session {
 }
 
 describe("copy-selection mode", () => {
-  it("Ctrl+S in classic mode explains that the terminal owns selection", async () => {
+  it("Ctrl+E in classic mode explains that the terminal owns selection", async () => {
     const bus = new EventBus();
     const { stdin, frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
     const seen = () => frames.join("\n");
     await tick();
 
-    stdin.write(CTRL_S);
+    stdin.write(CTRL_E);
     await waitFor(seen, (f) => f.includes("drag already selects text"));
 
     unmount();
   });
 
-  it("Ctrl+S in fullscreen enters SELECT, a drag copies, and it reports the copy", async () => {
+  it("Ctrl+E in fullscreen enters SELECT, a drag copies, and it reports the copy", async () => {
     const bus = new EventBus();
     const { stdin, lastFrame, frames, unmount } = render(
       createElement(App, { session: fakeSession(bus), fullscreen: true }),
@@ -120,7 +120,7 @@ describe("copy-selection mode", () => {
     await tick(200);
 
     // Enter selection mode: the SELECT hint replaces the scroll hint.
-    stdin.write(CTRL_S);
+    stdin.write(CTRL_E);
     await waitFor(ui, (f) => f.includes("SELECT"));
 
     // Press, drag across a filled row, release. With the viewport full every
