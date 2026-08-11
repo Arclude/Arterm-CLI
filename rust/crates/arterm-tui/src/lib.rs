@@ -2,6 +2,7 @@ pub mod agent;
 mod commands;
 mod copy_selection;
 mod header;
+mod login;
 mod markdown;
 mod status_bar;
 
@@ -28,10 +29,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use arterm_config::ArtermConfig;
+use arterm_config::{save_config, ArtermConfig};
 use agent::{Agent, AgentEvent};
 use commands::Command;
 use copy_selection::SelectionState;
+use login::{LoginState, ModelPickerState};
 
 /// A transcript entry rendered in the TUI.
 enum TranscriptEntry {
@@ -62,6 +64,11 @@ pub struct App {
     current_model: String,
     /// Active permission mode (mutable copy of `config.mode`, changed by `/mode`).
     current_mode: String,
+    /// When `Some`, the login / provider-config overlay is open and captures
+    /// all keyboard input until saved (Enter) or cancelled (Esc).
+    login_state: Option<LoginState>,
+    /// When `Some`, the model-picker popup is open and captures keyboard input.
+    model_picker: Option<ModelPickerState>,
 }
 
 impl App {
@@ -96,6 +103,8 @@ impl App {
             show_help: false,
             current_model: String::new(),
             current_mode: String::new(),
+            login_state: None,
+            model_picker: None,
         })
     }
 
@@ -106,6 +115,12 @@ impl App {
     /// are handled concurrently. The agent turn runs in a separate
     /// `tokio::spawn` task, keeping the UI responsive.
     pub async fn run(&mut self, config: &ArtermConfig) -> Result<()> {
+        // Clone the borrowed config into a mutable local so that the login
+        // overlay can update provider/host/key/model and persist the result.
+        // The agent task (below) gets the initial provider built from this
+        // snapshot; hot-swapping the provider mid-session requires a restart.
+        let mut config = config.clone();
+
         // Build provider and tools.
         let provider = arterm_providers::build_provider(
             &config.provider,
@@ -170,7 +185,7 @@ impl App {
 
         // ── Main event loop ────────────────────────────────────────────────
         loop {
-            self.draw(config)?;
+            self.draw(&config)?;
 
             // Drain agent events (non-blocking) — update display state.
             while let Ok(ev) = agent_rx.try_recv() {
@@ -184,6 +199,20 @@ impl App {
                         if key.kind != KeyEventKind::Press {
                             continue;
                         }
+
+                        // ── Overlay key routing ─────────────────────────────
+                        // When the login or model-picker overlay is open it
+                        // captures all keyboard input; the normal input line
+                        // is unreachable until the overlay closes.
+                        if self.login_state.is_some() {
+                            self.handle_login_key(key, &mut config);
+                            continue;
+                        }
+                        if self.model_picker.is_some() {
+                            self.handle_model_picker_key(key, &mut config);
+                            continue;
+                        }
+
                         match key.code {
                             // ── Submit input ────────────────────────────────
                             KeyCode::Enter => {
@@ -193,6 +222,20 @@ impl App {
                                 let input = std::mem::take(&mut self.input);
                                 let trimmed = input.trim();
                                 if trimmed.is_empty() {
+                                    continue;
+                                }
+
+                                // ── Overlay commands (/login, bare /model) ────
+                                // These open modal popups and are intercepted
+                                // before the generic command parser because
+                                // commands.rs cannot be extended here.
+                                if trimmed == "/login" {
+                                    self.login_state = Some(LoginState::from_config(&config));
+                                    continue;
+                                }
+                                if trimmed == "/model" || trimmed == "/m" {
+                                    self.model_picker =
+                                        Some(ModelPickerState::new(&self.current_model));
                                     continue;
                                 }
 
@@ -416,6 +459,107 @@ impl App {
         }
     }
 
+    /// Route a key press to the login overlay.
+    ///
+    /// Tab / Shift+Tab cycle fields, Enter writes the updated config to disk
+    /// and closes the overlay, Esc cancels without saving.
+    fn handle_login_key(&mut self, key: crossterm::event::KeyEvent, config: &mut ArtermConfig) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let Some(state) = self.login_state.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.login_state = None;
+            }
+            KeyCode::Tab => {
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    state.field = state.current_field().prev().as_index();
+                } else {
+                    state.field = state.current_field().next().as_index();
+                }
+            }
+            KeyCode::BackTab => {
+                state.field = state.current_field().prev().as_index();
+            }
+            KeyCode::Enter => {
+                // Save config and close.
+                if let Some(login) = self.login_state.take() {
+                    *config = login.apply_to_config(config.clone());
+                    self.current_model = config.model.clone();
+                    match save_config(config) {
+                        Ok(()) => self.messages.push(TranscriptEntry::System(format!(
+                            "Provider configured: {} — {}. Restart to apply.",
+                            config.provider, config.model
+                        ))),
+                        Err(e) => self.messages.push(TranscriptEntry::System(format!(
+                            "Failed to save config: {e}"
+                        ))),
+                    }
+                    self.scroll_offset = 0;
+                }
+            }
+            KeyCode::Backspace => {
+                state.active_text_mut().pop();
+            }
+            KeyCode::Char(c) => {
+                state.active_text_mut().push(c);
+            }
+            _ => {}
+        }
+    }
+
+    /// Route a key press to the model-picker overlay.
+    ///
+    /// Up/Down move the selection, Enter confirms (writing the model back to
+    /// the config and the live `current_model`), Esc cancels. Typing filters
+    /// the list; when no models are known the filter doubles as the entry.
+    fn handle_model_picker_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        config: &mut ArtermConfig,
+    ) {
+        use crossterm::event::KeyCode;
+        let Some(state) = self.model_picker.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.model_picker = None;
+            }
+            KeyCode::Up => {
+                state.select_up();
+            }
+            KeyCode::Down => {
+                state.select_down();
+            }
+            KeyCode::Enter => {
+                if let Some(picker) = self.model_picker.take() {
+                    let model = picker.chosen_model();
+                    if !model.is_empty() {
+                        self.current_model = model.clone();
+                        config.model = model.clone();
+                        let _ = save_config(config); // best-effort persist
+                        self.messages.push(TranscriptEntry::System(format!(
+                            "Model set to {model}"
+                        )));
+                    }
+                    self.scroll_offset = 0;
+                }
+            }
+            KeyCode::Backspace => {
+                state.filter.pop();
+                // Reset selection to stay in range after filtering.
+                state.selected = 0;
+            }
+            KeyCode::Char(c) => {
+                state.filter.push(c);
+                state.selected = 0;
+            }
+            _ => {}
+        }
+    }
+
     /// Handle a crossterm mouse event: start/extend/finish a drag selection or
     /// scroll the transcript with the wheel.
     ///
@@ -570,6 +714,14 @@ impl App {
         let header_area = chunks[0];
         let input_area = chunks[2];
         let status_bar_area = chunks[3];
+
+        // Capture overlay state as references *before* the draw closure so the
+        // borrow checker is happy: the closure borrows `f` mutably and we need
+        // shared reads of the overlay state at the same time.
+        let login_ref = self.login_state.as_ref();
+        let model_ref = self.model_picker.as_ref();
+        let full_area = rect;
+
         self.terminal.draw(|f| {
             header::render_header(
                 f,
@@ -685,6 +837,14 @@ impl App {
                         }
                     }
                 }
+            }
+
+            // ── Modal overlays (rendered last so they sit on top) ────────
+            if let Some(login) = login_ref {
+                login::render_login(f, full_area.into(), login);
+            }
+            if let Some(picker) = model_ref {
+                login::render_model_picker(f, full_area.into(), picker);
             }
         })?;
 
