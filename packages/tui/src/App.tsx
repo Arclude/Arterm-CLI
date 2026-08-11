@@ -708,6 +708,35 @@ export function App({
   const { exit } = useApp();
   const { rows, columns } = useTermSize();
   const [items, setItems] = useState<DisplayItem[]>([]);
+
+  // Two-press Ctrl+C to quit: a single accidental press won't kill the session.
+  // The first press shows a "press again" hint; the second within a window
+  // actually exits. Any other key or a timeout cancels the armed state.
+  const ctrlCRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [ctrlCArmed, setCtrlCArmed] = useState(false);
+  useInput(
+    (input2, key) => {
+      if (key.ctrl && input2 === "c") {
+        if (ctrlCArmed) {
+          // Second press: quit.
+          if (ctrlCRef.current) clearTimeout(ctrlCRef.current);
+          ctrlCRef.current = null;
+          exit();
+          return;
+        }
+        // First press: arm and show a hint.
+        setCtrlCArmed(true);
+        if (ctrlCRef.current) clearTimeout(ctrlCRef.current);
+        ctrlCRef.current = setTimeout(() => setCtrlCArmed(false), 3000);
+      } else if (ctrlCArmed) {
+        // Any other key cancels the armed state.
+        if (ctrlCRef.current) clearTimeout(ctrlCRef.current);
+        ctrlCRef.current = null;
+        setCtrlCArmed(false);
+      }
+    },
+    { isActive: visible },
+  );
   const [status, setStatus] = useState<Status>("idle");
   // Fullscreen in-app scrolling: how many lines the view is lifted off the
   // bottom (0 = pinned to newest). PgUp/PgDn drive it — and nothing else does:
@@ -3666,9 +3695,11 @@ export function App({
                 ? `${glyphs.image}${attachments.length > 1 ? `×${attachments.length}` : ""} ${fmtBytes(
                     attachments.reduce((n, a) => n + a.attachment.bytes, 0),
                   )} attached · ⌫ over the token removes it`
-                : busy && autoState === "idle"
-                  ? "Esc cancels · Enter queues the next message"
-                  : "Enter send · ? help · ↑↓ history · Esc cancels"
+                : ctrlCArmed
+                  ? "press Ctrl+C again to quit"
+                  : busy && autoState === "idle"
+                    ? "Esc cancels · Enter queues the next message"
+                    : "Enter send · ? help · ↑↓ history · Esc cancels · Ctrl+C twice to quit"
             }
             onChange={setInput}
             onSubmit={submit}

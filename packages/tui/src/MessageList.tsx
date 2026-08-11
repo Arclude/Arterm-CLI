@@ -192,7 +192,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
       ["/limits", "provider rate limits: what remains, when it resets"],
       ["/mouse", "says who owns the wheel — the app never captures it"],
       ["/clear", "reset the conversation"],
-      ["/exit", "quit  (or Ctrl+C)"],
+      ["/exit", "quit  (or Ctrl+C twice)"],
     ],
   },
   {
@@ -244,7 +244,7 @@ const HELP_GROUPS: { title: string; items: [string, string][] }[] = [
 const HELP_FOOTER: [string, string][] = [
   [
     "Keys",
-    "Enter send · ↑/↓ history · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C quit",
+    "Enter send · ↑/↓ history · Shift+Tab cycle mode · Alt+P models · Esc cancel · Ctrl+C twice to quit",
   ],
   ["Modes", "ASK prompts · AUTO auto-approves edits · PLAN read-only · YOLO approves all"],
   ["Edit", "Backspace del char · Ctrl+W del word · Ctrl+U clear line"],
