@@ -146,4 +146,21 @@ describe("parseMouseEvents", () => {
   it("ignores non-mouse bytes", () => {
     expect(parseMouseEvents("just text")).toEqual([]);
   });
+
+  it("decodes the exact form Ink delivers press/drag/wheel in — the SAME path", () => {
+    // This is the load-bearing assumption behind the whole feature working on a
+    // real terminal. Ink's `parseKeypress` does NOT match an SGR mouse sequence
+    // (`fnKeyRe` requires a digit/letter after `[`, not `<`), so it returns an
+    // empty key name and hands `useInput` the raw sequence with the single
+    // leading ESC stripped. That is why press (button 0), drag (32) and wheel
+    // (64) all arrive as `[<b;x;yM` — byte-identical shapes differing only in
+    // `b`. The app's wheel scroll is known to work interactively, and this
+    // parser is the one both the wheel handler and the selection handler run,
+    // so a press that stops decoding here is the one way selection could break
+    // while the wheel still scrolls. Pin the delivered form (leading ESC gone).
+    expect(parseMouseEvents("[<0;12;5M")).toEqual([{ kind: "down", col: 11, row: 4 }]);
+    expect(parseMouseEvents("[<32;12;5M")).toEqual([{ kind: "drag", col: 11, row: 4 }]);
+    expect(parseMouseEvents("[<0;12;5m")).toEqual([{ kind: "up", col: 11, row: 4 }]);
+    expect(parseMouseEvents("[<64;12;5M")).toEqual([{ kind: "wheel-up", col: 11, row: 4 }]);
+  });
 });
