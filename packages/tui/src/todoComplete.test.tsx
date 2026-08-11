@@ -29,6 +29,8 @@ function fakeSession(bus: EventBus): Session {
     agent: {
       model: "fake",
       effectiveContextWindow: () => 8192,
+      interject: () => {},
+      takeInterjections: () => [],
       reset: noop,
       run: async () => {},
       tools: [],

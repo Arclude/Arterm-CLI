@@ -69,6 +69,13 @@ function fakeModel(bodies) {
  * Pinned per run because the CLI persists the whole config on exit: a stale
  * saved host silently redirects the next run away from the fake server, which
  * shows up as zero requests and an instant provider error.
+ *
+ * `tui.fullscreen` is pinned rather than left to the default, and it has to STAY
+ * pinned: this script is the harness that caught the picker moving two rows per
+ * ↓, and that double-step exists only in fullscreen, where arrows are read off
+ * raw stdin as well as by Ink. Measured while the default was briefly classic —
+ * every check below still passed there, so a flipped default would not have
+ * failed anything; the coverage would simply have gone quiet.
  */
 function sandbox(port) {
   const home = mkdtempSync(join(tmpdir(), "arterm-mention-home-"));
@@ -81,6 +88,7 @@ function sandbox(port) {
         model: "fake",
         openaiCompatHost: `http://127.0.0.1:${port}/v1`,
         permissions: { mode: "auto" },
+        tui: { fullscreen: true },
       },
       null,
       2,

@@ -104,6 +104,11 @@ export type AgentEvent =
   // The iteration cap granted itself another tranche mid-turn (progress gate —
   // see `autoExtendTurn` in agent.ts). Token/clock ceilings never extend.
   | { type: "turn_extended"; granted: number; total: number }
+  // Something typed mid-turn reached the model without cancelling the turn —
+  // folded in after a tool round, before the next request (`request.softInterrupt`).
+  // Emitted when it LANDS rather than when it is typed: until then it is only a
+  // note in the composer, and a UI that said "sent" would be describing a queue.
+  | { type: "interjected"; text: string }
   | { type: "turn_end" }
   // A turn failed. When the failure came from a provider it carries the taxonomy
   // (see ProviderError), so a UI can say "out of quota" instead of pasting a

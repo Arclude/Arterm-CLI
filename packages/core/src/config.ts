@@ -175,6 +175,33 @@ export interface ArtermConfig {
     deny?: string[];
   };
   /**
+   * External commands run at lifecycle points, so another program can watch —
+   * and gate — the agent without forking us. See `hooks.ts` for the contract.
+   *
+   * Every command is a shell line (`sh -c`), run in the session's working
+   * directory with a CREDENTIAL-SCRUBBED environment and `ARTERM_HOOKS_DISABLED=1`
+   * so a hook may call `arterm` without re-triggering itself. Four are observers,
+   * spawned detached and never awaited; `preTool` is the one gate — `exit 2`
+   * blocks the call and its stderr is handed to the model as the tool's error.
+   * Every other outcome (any other code, a timeout, a missing binary) FAILS
+   * OPEN, on the same argument as the verify judge: user-supplied policy that
+   * silently becomes mandatory the day it breaks is worse than none.
+   */
+  hooks?: {
+    /** After each completed turn. */
+    turnEnd?: string;
+    /** When a session becomes active. */
+    sessionStart?: string;
+    /** When a session closes. */
+    sessionEnd?: string;
+    /** Before each tool call — `exit 2` blocks it. */
+    preTool?: string;
+    /** After each tool call. */
+    postTool?: string;
+    /** How long the gate may take before it counts as absent (default 5000). */
+    preToolTimeoutMs?: number;
+  };
+  /**
    * How much of the tool roster the model is given.
    *
    * Every tool's schema is sent on every request, so the roster is a fixed tax
@@ -499,22 +526,44 @@ export interface ArtermConfig {
   /** Terminal UI rendering options. */
   tui: {
     /**
-     * Fullscreen mode (default): the TUI owns the whole window on the alternate
-     * screen — the footer stays pinned to the bottom even while scrolling, and
-     * the wheel scrolls the chat in-app (Claude Code's fullscreen renderer).
-     * false = classic mode: the chat flows into the terminal's own scrollback.
+     * true (**default**): the TUI owns the whole window on the alternate
+     * screen. The composer and the status bar are the last children of a
+     * fixed-height column, so they sit on the bottom row and STAY there —
+     * which is the only reason this is the default. It scrolls with PgUp/PgDn.
+     *
+     * false: the chat is printed into the terminal's own scrollback and only
+     * the bottom region is redrawn in place, so the wheel, the scrollbar and
+     * drag-to-select are the terminal's. Tried as the default and reverted, for
+     * a reason worth keeping: in the normal buffer the redrawn region is
+     * CONTENT-sized, so when the 8-row live-message area collapses on a
+     * committed answer, the footer moves up and leaves the rows below it blank
+     * until new output scrolls the screen again. Pinning it would mean a region
+     * as tall as the window, which is the one thing that must not happen there
+     * — at that height Ink clears and rewrites the whole terminal every render,
+     * taking the scrollback with it. A pinned footer and a terminal-owned
+     * scrollback are the two things you cannot have at once.
+     *
+     * Alternate scroll (DECSET 1007, the wheel-to-arrow translation) is switched
+     * OFF in both modes and never comes back — see `mouse`.
      */
     fullscreen?: boolean;
     /**
-     * Fullscreen only. false (default): no capture — plain left-drag selects
-     * text natively (then Ctrl+Shift+C / right-click copies) and the wheel is
-     * routed through the terminal's alternate-scroll arrows. true: capture the
-     * mouse (SGR reporting) so the wheel scrolls the chat deterministically —
-     * selection then needs Shift+drag (the terminal's capture bypass), like
-     * Claude Code. Default flipped to false after real use: "select some text"
-     * happens far more often than "the wheel direction felt off", and a copy
-     * that needs a modifier or a slash command reads as broken. /mouse toggles
-     * the live session either way.
+     * Fullscreen only. true (**default**): capture the mouse with SGR reporting
+     * (?1000h + ?1006h) so a wheel tick arrives as `ESC[<64;x;yM` — bytes no
+     * keypress can produce. That is the entire point. The alternative channel,
+     * alternate scroll, answers a tick with ARROW KEYS, and on a terminal set to
+     * one line per tick that is byte-for-byte an ↑: scrolling the chat recalled
+     * prompts from history, and no amount of timing could separate them because
+     * there is nothing to separate. Measured against Claude Code's own wire,
+     * which is the behavior this matches: it writes ?1049h then ?1000h ?1002h
+     * ?1003h ?1006h at boot, re-asserts them mid-run, and never sends ?1007.
+     *
+     * The cost is that the terminal stops delivering plain left-drag to itself,
+     * so selecting text needs ⇧+drag (the terminal's own capture bypass) — and
+     * ⇧+wheel likewise falls through to the terminal. `/mouse` toggles it for
+     * the session; false is the persistent form, and it captures NOTHING rather
+     * than falling back to 1007 — the wheel goes back to the terminal and
+     * PgUp/PgDn scroll the chat.
      */
     mouse?: boolean;
   };
@@ -640,7 +689,7 @@ export function defaultConfig(): ArtermConfig {
       blackboard: true,
       memory: true,
     },
-    tui: { fullscreen: true, mouse: false },
+    tui: { fullscreen: true, mouse: true },
     fleet: {
       concurrency: 4,
       isolation: "none",
@@ -724,6 +773,16 @@ const configFileSchema = z
         scrub: z.boolean().optional(),
         allow: z.array(z.string()).optional(),
         deny: z.array(z.string()).optional(),
+      })
+      .partial(),
+    hooks: z
+      .object({
+        turnEnd: z.string().optional(),
+        sessionStart: z.string().optional(),
+        sessionEnd: z.string().optional(),
+        preTool: z.string().optional(),
+        postTool: z.string().optional(),
+        preToolTimeoutMs: z.number().int().positive().optional(),
       })
       .partial(),
     exec: z.object({ allow: z.array(z.string()).optional() }).partial(),

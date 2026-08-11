@@ -33,6 +33,8 @@ function fakeSession(bus: EventBus): Session {
     agent: {
       model: "qwen2.5:7b",
       effectiveContextWindow: () => 8192,
+      interject: () => {},
+      takeInterjections: () => [],
       reset: noop,
       run: async () => {},
     },
@@ -335,14 +337,17 @@ describe("fleet board (parallel autonomy)", () => {
   });
 
   it("never walks the swarm on a wheel tick, which is a bare arrow on the wire", async () => {
-    // Fullscreen with no mouse capture is the mode where the terminal's
-    // alternate-scroll turns each wheel tick into arrow sequences. At one line
-    // per tick that is ONE arrow — the same bytes a keypress sends — so a board
-    // that steps on bare arrows steps on every scroll. Seen on a live /team run:
-    // scrolling the transcript walked the swarm's cells alongside it.
+    // `mouseCapture: false` is the point of this test, not incidental setup.
+    // Capture is the default now and makes a tick unmistakable (SGR bytes), but
+    // the uncaptured mode is still reachable (/mouse, `tui.mouse: false`) and
+    // there a terminal doing alternate-scroll turns each tick into arrow
+    // sequences. At one line per tick that is ONE arrow — the same bytes a
+    // keypress sends — so a board that steps on bare arrows steps on every
+    // scroll. Seen on a live /team run: scrolling the transcript walked the
+    // swarm's cells alongside it.
     const bus = new EventBus();
     const { stdin, frames, unmount } = render(
-      createElement(App, { session: fakeSession(bus), fullscreen: true }),
+      createElement(App, { session: fakeSession(bus), fullscreen: true, mouseCapture: false }),
     );
     const ui = () => [...frames].reverse().find((f) => f.includes("ARTERM")) ?? "";
     await tick();

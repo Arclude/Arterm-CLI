@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type ArrowDir, createArrowRouter, parseArrowChunk } from "./arrowRouter.js";
+import { describe, expect, it } from "vitest";
+import { arrowKeypress, parseArrowChunk } from "./arrowRouter.js";
 
 const ESC = String.fromCharCode(27);
 const UP = `${ESC}[A`;
@@ -34,92 +34,35 @@ describe("parseArrowChunk", () => {
   });
 });
 
-describe("createArrowRouter", () => {
-  let history: ArrowDir[];
-  let scrolls: Array<{ dir: ArrowDir; lines: number }>;
-  let router: ReturnType<typeof createArrowRouter>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    history = [];
-    scrolls = [];
-    router = createArrowRouter({
-      onHistory: (dir) => history.push(dir),
-      onScroll: (dir, lines) => scrolls.push({ dir, lines }),
-    });
+describe("arrowKeypress", () => {
+  it("a lone arrow is a keypress, in both encodings", () => {
+    expect(arrowKeypress(UP)).toBe("up");
+    expect(arrowKeypress(DOWN)).toBe("down");
+    expect(arrowKeypress(`${ESC}OA`)).toBe("up");
   });
 
-  afterEach(() => {
-    router.dispose();
-    vi.useRealTimers();
+  it("a batched chunk is a wheel tick and is dropped, not scrolled", () => {
+    // The regression this file exists for: three arrows in one chunk is what a
+    // terminal sends for ONE wheel tick under alternate scroll. Routed to
+    // history it walked the prompt back three entries; routed to a scroll it
+    // moved the chat in three-line jumps. Neither is what the wheel meant.
+    expect(arrowKeypress(UP.repeat(3))).toBeNull();
+    expect(arrowKeypress(DOWN.repeat(2))).toBeNull();
+    expect(arrowKeypress(`${UP}${DOWN}`)).toBeNull();
   });
 
-  it("a lone arrow becomes history after the hold-back window", () => {
-    router.feed("up", 1);
-    expect(history).toEqual([]);
-    vi.advanceTimersByTime(30);
-    expect(history).toEqual(["up"]);
-    expect(scrolls).toEqual([]);
+  it("is silent about everything that is not an arrow", () => {
+    expect(arrowKeypress("hello")).toBeNull();
+    expect(arrowKeypress(`${ESC}[<65;10;10M`)).toBeNull();
+    expect(arrowKeypress("")).toBeNull();
   });
 
-  it("a batched multi-arrow chunk scrolls immediately", () => {
-    router.feed("up", 3);
-    expect(scrolls).toEqual([{ dir: "up", lines: 3 }]);
-    expect(history).toEqual([]);
-  });
-
-  it("two lone arrows inside the window reclassify as wheel", () => {
-    router.feed("up", 1);
-    vi.advanceTimersByTime(5);
-    router.feed("up", 1);
-    expect(scrolls).toEqual([{ dir: "up", lines: 2 }]);
-    vi.advanceTimersByTime(100);
-    expect(history).toEqual([]);
-  });
-
-  it("lone arrows keep scrolling while the burst is sticky", () => {
-    router.feed("up", 3);
-    vi.advanceTimersByTime(50); // within stickyMs
-    router.feed("up", 1);
-    expect(scrolls).toEqual([
-      { dir: "up", lines: 3 },
-      { dir: "up", lines: 1 },
-    ]);
-    expect(history).toEqual([]);
-  });
-
-  it("keyboard auto-repeat spacing stays history", () => {
-    router.feed("up", 1);
-    vi.advanceTimersByTime(33);
-    router.feed("up", 1);
-    vi.advanceTimersByTime(33);
-    expect(history).toEqual(["up", "up"]);
-    expect(scrolls).toEqual([]);
-  });
-
-  it("a direction flip inside the window resolves both as history", () => {
-    router.feed("up", 1);
-    vi.advanceTimersByTime(5);
-    router.feed("down", 1);
-    expect(history).toEqual(["up"]);
-    vi.advanceTimersByTime(30);
-    expect(history).toEqual(["up", "down"]);
-    expect(scrolls).toEqual([]);
-  });
-
-  it("a held lone arrow joins a burst instead of becoming history", () => {
-    router.feed("up", 1);
-    vi.advanceTimersByTime(5);
-    router.feed("up", 3);
-    expect(scrolls).toEqual([{ dir: "up", lines: 4 }]);
-    vi.advanceTimersByTime(100);
-    expect(history).toEqual([]);
-  });
-
-  it("dispose cancels a pending hold-back", () => {
-    router.feed("up", 1);
-    router.dispose();
-    vi.advanceTimersByTime(100);
-    expect(history).toEqual([]);
+  it("answers immediately — a keypress is never held back", () => {
+    // The old router waited 25 ms on every lone arrow to see whether a second
+    // one landed. That delay was paid by every ↑ a human pressed, to guess at
+    // an input that is now simply discarded.
+    const before = Date.now();
+    expect(arrowKeypress(UP)).toBe("up");
+    expect(Date.now() - before).toBeLessThan(5);
   });
 });

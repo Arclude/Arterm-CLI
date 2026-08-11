@@ -64,6 +64,30 @@ const CREDENTIAL_NAME =
   /(?:^|_)(?:API_?KEYS?|KEYS?|ACCESS_?KEY(?:_?ID)?|SECRETS?|TOKENS?|PASS(?:WORD|WD|PHRASE)?|CREDENTIALS?|PRIVATE_?KEY|CLIENT_?SECRET|AUTH_?TOKEN|SESSION_?TOKEN|BEARER|COOKIE|SIGNING_?KEY|WEBHOOK_?SECRET)(?:_|$)/i;
 
 /**
+ * Set by the launcher when IT defaulted `NODE_ENV`, so the value can be taken
+ * back out again on the way to a child. A well-known symbol on `globalThis`
+ * rather than an environment variable, because an environment variable is
+ * precisely the thing that would leak into the children this protects.
+ */
+const NODE_ENV_DEFAULTED = Symbol.for("arterm.nodeEnvDefaulted");
+
+/**
+ * True when `NODE_ENV=production` is OURS rather than the user's.
+ *
+ * We set it so React loads its production build (see `cli/src/main.ts`), and a
+ * spawned command must not inherit it: npm, yarn and pnpm all skip
+ * devDependencies under it, so an agent running `npm install` would produce a
+ * subtly wrong tree for a reason nobody could see. A value the user exported
+ * themselves is theirs, and passes through untouched — which is the only reason
+ * this asks the marker instead of just deleting the variable.
+ */
+function nodeEnvIsOurs(value: string | undefined): boolean {
+  return (
+    value === "production" && (globalThis as Record<symbol, unknown>)[NODE_ENV_DEFAULTED] === true
+  );
+}
+
+/**
  * Build the environment a spawned command actually gets.
  *
  * Pure and total: it never reads `process.env` itself, so a test can state the
@@ -75,7 +99,16 @@ export function scrubEnv(
   base: Record<string, string | undefined>,
   settings?: CredentialSettings,
 ): ScrubbedEnv {
-  if (settings?.scrub === false) return { env: { ...base }, withheld: [] };
+  if (settings?.scrub === false) {
+    // Even here: `scrub: false` is a decision about CREDENTIALS, and this
+    // variable is not one — it is a value we invented for our own renderer.
+    const env = { ...base };
+    // `undefined`, not `delete`: this map's type already carries undefined, and
+    // Node skips undefined entries when it builds a child's environment — so
+    // the two are the same thing to a spawn, and this one is the house style.
+    if (nodeEnvIsOurs(env.NODE_ENV)) env.NODE_ENV = undefined;
+    return { env, withheld: [] };
+  }
 
   // Env var names are case-sensitive on POSIX and case-insensitive on Windows.
   // Matching the lists case-insensitively is the behaviour that is correct on
@@ -90,6 +123,10 @@ export function scrubEnv(
     if (withholds(name, allow, deny)) withheld.push(name);
     else env[name] = value;
   }
+  // Removed, never REPORTED: `withheld` is what `withheldNote` shows the model
+  // when a command fails for want of a credential, and this is not one. A
+  // command that fails has nothing to learn from "NODE_ENV was withheld".
+  if (nodeEnvIsOurs(env.NODE_ENV)) env.NODE_ENV = undefined;
   return { env, withheld: withheld.sort() };
 }
 

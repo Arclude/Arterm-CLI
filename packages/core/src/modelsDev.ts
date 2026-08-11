@@ -223,9 +223,50 @@ export function cachedCatalogSync(): CatalogModel[] {
   return memo.data;
 }
 
+/**
+ * Answers already computed against the memoized catalog, keyed by the question.
+ *
+ * The file read was memoized; the SEARCH was not, and that is where the time
+ * went. `matchModels` walks the whole catalog — models.dev carries a few
+ * thousand entries — and calls `normalizeId` on each, which lowercases and runs
+ * a regex. One lookup is a few thousand regex operations, and the callers are
+ * not occasional: the TUI asks for the context window on EVERY render to draw
+ * the gauge, so a streaming turn asks it once per repaint.
+ *
+ * Measured with `--cpu-prof` on a streaming turn before this existed:
+ * `normalizeId` alone was the largest non-idle frame at 199ms, and the cluster
+ * around it (`matchModels`, `leafId`, its regex, `findModelById`) came to
+ * roughly a quarter of all active CPU — for a question whose answer cannot
+ * change while the process runs.
+ *
+ * Exact rather than heuristic: the catalog behind it is immutable once loaded,
+ * so a hit is the same object the search would have returned. `null` is stored
+ * for a miss, because a miss costs a full scan too and `undefined` would mean
+ * "not asked yet".
+ */
+const lookupMemo = new Map<string, CatalogModel | null>();
+
+function cachedFind(modelId: string, providerId?: string): CatalogModel | undefined {
+  // NUL separates the two halves: a provider id cannot contain one, so no pair
+  // of different questions can collide on a key.
+  const key = `${providerId ?? ""} ${modelId}`;
+  const hit = lookupMemo.get(key);
+  if (hit !== undefined) return hit ?? undefined;
+  const list = cachedCatalogSync();
+  // Not cached when the catalog is empty: that is the pre-warm state, and a
+  // `null` stored now would outlive the fetch that is about to populate it.
+  if (list.length === 0) return undefined;
+  const found = findModelById(list, modelId, providerId);
+  lookupMemo.set(key, found ?? null);
+  return found;
+}
+
 /** Drop the sync memo (tests, or after a refresh writes a new cache). */
 export function clearCatalogMemo(): void {
   memo = { loaded: false, data: [] };
+  // Both, always: answers derived from the old catalog are exactly as stale as
+  // the catalog, and a survivor here would outlive the data it came from.
+  lookupMemo.clear();
 }
 
 /**
@@ -257,7 +298,12 @@ export function modelContextWindow(
   providerId?: string,
   models?: CatalogModel[],
 ): number | undefined {
-  const list = models ?? cachedCatalogSync();
-  if (list.length === 0) return undefined;
-  return findModelById(list, modelId, providerId)?.contextWindow;
+  // An explicit list is the caller's own data and is never memoized against the
+  // shared key space; the no-list path is the hot one and goes through the memo.
+  if (models) {
+    return models.length === 0
+      ? undefined
+      : findModelById(models, modelId, providerId)?.contextWindow;
+  }
+  return cachedFind(modelId, providerId)?.contextWindow;
 }

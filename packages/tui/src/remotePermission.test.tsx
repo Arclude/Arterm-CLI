@@ -22,6 +22,8 @@ function fakeSession(bus: EventBus, permissionBroker: PermissionBroker): Session
     agent: {
       model: "qwen2.5:7b",
       effectiveContextWindow: () => 8192,
+      interject: () => {},
+      takeInterjections: () => [],
       reset: noop,
       run: async () => {},
     },

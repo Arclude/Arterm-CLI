@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type CatalogModel,
+  clearCatalogMemo,
   fetchCatalog,
   findModelById,
   flattenCatalog,
@@ -160,5 +161,31 @@ describe("fetchCatalog", () => {
     await fs.writeFile(join(dir, "models-dev.json"), JSON.stringify(RAW), "utf8");
     const models = await fetchCatalog({ dir, ttlMs: 60_000 });
     expect(models.map((m) => m.id).sort()).toEqual(["claude-opus-4-8", "qwen2.5:7b"]);
+  });
+});
+
+describe("the catalog lookup memo", () => {
+  it("answers a repeated question without re-scanning, and forgets on refresh", () => {
+    // Not a micro-optimisation. `matchModels` walks the whole catalog and
+    // normalizes every id with a regex, and the TUI asks for the context window
+    // on EVERY render to draw the gauge — so a streaming turn asked it once per
+    // repaint. Measured with --cpu-prof before this existed: the cluster around
+    // `normalizeId` was roughly a quarter of all active CPU.
+    clearCatalogMemo();
+    const first = modelContextWindow("claude-opus-4", "anthropic");
+    const again = modelContextWindow("claude-opus-4", "anthropic");
+    expect(again).toBe(first);
+
+    // The memo is exact rather than heuristic, so an explicit list must never be
+    // answered from it: that list is the caller's own data and may disagree.
+    expect(modelContextWindow("claude-opus-4", "anthropic", [])).toBeUndefined();
+    expect(modelContextWindow("m1", "p", [{ id: "m1", provider: "p", contextWindow: 4242 }])).toBe(
+      4242,
+    );
+
+    // And a refresh drops it: an answer derived from the old catalog is exactly
+    // as stale as the catalog it came from.
+    clearCatalogMemo();
+    expect(modelContextWindow("m1", "p", [{ id: "m1", provider: "p", contextWindow: 7 }])).toBe(7);
   });
 });

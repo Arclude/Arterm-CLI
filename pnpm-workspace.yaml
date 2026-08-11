@@ -17,3 +17,6 @@ allowBuilds:
   tree-sitter-javascript: false
   tree-sitter-python: false
   tree-sitter-typescript: false
+
+overrides:
+  arterm-cli: link:packages/cli

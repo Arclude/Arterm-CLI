@@ -47,6 +47,8 @@ function fakeSession(bus: EventBus, seen: string[]): Session {
     agent: {
       model: "qwen2.5:7b",
       effectiveContextWindow: () => 8192,
+      interject: () => {},
+      takeInterjections: () => [],
       reset: () => {},
       run: async (text: string) => {
         seen.push(text);

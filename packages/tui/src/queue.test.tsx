@@ -30,6 +30,8 @@ function fakeSession(bus: EventBus): Session {
     agent: {
       model: "qwen2.5:7b",
       effectiveContextWindow: () => 8192,
+      interject: () => {},
+      takeInterjections: () => [],
       reset: () => {},
       run: async (text: string) => {
         bus.emit({ type: "turn_start" });
@@ -120,6 +122,34 @@ describe("prompt queue (typing stays live while a turn runs)", () => {
     const out = seen();
     expect(out.indexOf("echo:one")).toBeLessThan(out.indexOf("echo:two"));
     expect(out.indexOf("echo:two")).toBeLessThan(out.indexOf("echo:three"));
+
+    unmount();
+  }, 30_000);
+
+  it("a landed interjection leaves the queue instead of being sent twice", async () => {
+    // The queue stays the source of truth while a turn runs, so the two paths
+    // have to agree: when the agent folds a prompt into the RUNNING turn, the
+    // queued copy must go, or the same words are dispatched again at turn end.
+    const bus = new EventBus();
+    const { stdin, frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
+    const seen = () => frames.join("\n");
+    const latest = () => frames[frames.length - 1] ?? "";
+
+    await waitFor(latest, (f) => f.includes("message…"));
+    stdin.write("one");
+    await waitFor(latest, (f) => f.includes("one"));
+    stdin.write(ENTER);
+    await waitFor(seen, (f) => /working \d/.test(f));
+
+    stdin.write("two");
+    await waitFor(latest, (f) => f.includes("two"));
+    stdin.write(ENTER);
+    await waitFor(seen, (f) => f.includes("\u23f3 two"));
+
+    // The agent reports that it reached the model mid-turn.
+    bus.emit({ type: "interjected", text: "two" });
+    await waitFor(latest, (f) => !f.includes("\u23f3 two"));
+    expect(seen()).toContain("iletildi");
 
     unmount();
   }, 30_000);

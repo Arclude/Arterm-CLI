@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { scrubEnv, withheldNote } from "./credentials.js";
 
 const names = (env: Record<string, string | undefined>) => Object.keys(env).sort();
@@ -119,5 +119,48 @@ describe("withheldNote", () => {
     expect(note).toContain("A, B");
     expect(note).toContain("+2 more");
     expect(note).not.toContain("C,");
+  });
+});
+
+describe("the NODE_ENV the launcher invented", () => {
+  const MARK = Symbol.for("arterm.nodeEnvDefaulted");
+  const g = globalThis as Record<symbol, unknown>;
+  afterEach(() => {
+    g[MARK] = undefined;
+  });
+
+  it("is taken back out of a child's environment", () => {
+    // We set it so React loads its production build. A command must not inherit
+    // it: npm, yarn and pnpm all skip devDependencies under it, so `npm install`
+    // would build a subtly wrong tree for a reason nobody could see.
+    g[MARK] = true;
+    // `undefined` is how this map spells "not set" — Node skips such entries
+    // when it builds a child's environment, so the command sees nothing.
+    const { env } = scrubEnv({ NODE_ENV: "production", PATH: "/usr/bin" });
+    expect(env.NODE_ENV).toBeUndefined();
+    expect(env.PATH).toBe("/usr/bin");
+  });
+
+  it("but a value the USER exported is theirs and passes through", () => {
+    // The marker is the whole difference, and it is why this asks instead of
+    // deleting unconditionally. Both halves have to hold or the feature is
+    // either useless or a silent override of the operator.
+    g[MARK] = true;
+    expect(scrubEnv({ NODE_ENV: "development" }).env.NODE_ENV).toBe("development");
+    g[MARK] = undefined;
+    expect(scrubEnv({ NODE_ENV: "production" }).env.NODE_ENV).toBe("production");
+  });
+
+  it("is removed even when credential scrubbing is switched off", () => {
+    // `scrub: false` is a decision about CREDENTIALS; this variable is not one.
+    g[MARK] = true;
+    expect(scrubEnv({ NODE_ENV: "production" }, { scrub: false }).env.NODE_ENV).toBeUndefined();
+  });
+
+  it("is never REPORTED as withheld", () => {
+    // `withheldNote` shows `withheld` to the model when a command fails for want
+    // of a credential. A failing command has nothing to learn from this one.
+    g[MARK] = true;
+    expect(scrubEnv({ NODE_ENV: "production", API_KEY: "x" }).withheld).toEqual(["API_KEY"]);
   });
 });
