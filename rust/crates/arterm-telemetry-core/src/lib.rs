@@ -422,6 +422,19 @@ enum DeliveryMode {
 /// the endpoint and can honestly make that promise again.
 pub const TELEMETRY_OPT_IN_ENV: &str = "ARTERM_TELEMETRY";
 
+/// Whether the environment carries the explicit opt-in [`is_enabled`] requires.
+///
+/// Exposed because UI has to be able to explain itself: the onboarding
+/// telemetry page persists a choice through markers, and without this the
+/// screen would offer "send everything", save it, and send nothing — a page
+/// describing a decision it cannot carry out. Read from here rather than
+/// re-spelled at the call site, since a second copy of this test would drift
+/// from the one [`is_enabled`] actually applies and the disagreement would be
+/// silent.
+pub fn opt_in_present() -> bool {
+    std::env::var(TELEMETRY_OPT_IN_ENV).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
 pub fn is_enabled() -> bool {
     // The opt-outs are still honored first, so a user or a `DO_NOT_TRACK`
     // environment that already said no is never asked to say it twice.
@@ -433,8 +446,7 @@ pub fn is_enabled() -> bool {
         logging::debug("telemetry disabled by no_telemetry marker");
         return false;
     }
-    if !std::env::var(TELEMETRY_OPT_IN_ENV).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-    {
+    if !opt_in_present() {
         logging::debug("telemetry off: no explicit opt-in");
         return false;
     }

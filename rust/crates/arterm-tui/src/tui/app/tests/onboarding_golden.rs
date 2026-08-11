@@ -389,6 +389,15 @@ fn onboarding_golden_telemetry_settings_page() {
     );
     assert!(text.contains("Send nothing"), "option 3: {text}");
     assert!(text.contains("/telemetry"), "later-change hint: {text}");
+    // The caveat, asserted through the real render path rather than by calling
+    // `telemetry_settings_lines` directly: without `ARTERM_TELEMETRY=1` the
+    // page saves a choice that cannot take effect, and saying so is the whole
+    // point. A unit test on the line builder would pass even if the page
+    // stopped drawing it.
+    assert!(
+        text.contains("Saved, but inactive"),
+        "a choice that cannot take effect must say so on screen: {text}"
+    );
     // The import summary is hidden while the sub-page is open.
     assert!(
         !text.contains("We found 1 existing login"),

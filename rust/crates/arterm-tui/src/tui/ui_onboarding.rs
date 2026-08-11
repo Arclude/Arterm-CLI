@@ -11,6 +11,7 @@
 
 use super::dim_color;
 use crate::tui::TuiState;
+use crate::tui::app::onboarding_flow::TelemetryLevel;
 use crate::tui::color_support::rgb;
 use ratatui::{prelude::*, widgets::Paragraph};
 
@@ -205,14 +206,26 @@ fn telemetry_settings_lines(
         lines.push(Line::from(""));
     }
 
-    if env_forced_off {
-        lines.push(
-            Line::from(Span::styled(
-                "Your environment already disables telemetry (ARTERM_NO_TELEMETRY).",
-                dim,
-            ))
-            .alignment(align),
-        );
+    // Two different ways this page's choice does not take effect, and both have
+    // to be said or the page invites a decision it cannot carry out.
+    //
+    // The second is specific to this fork. `persist()` writes the markers, but
+    // `is_enabled()` additionally requires an explicit `ARTERM_TELEMETRY=1`
+    // opt-in, so picking "Everything" here and walking away sends exactly
+    // nothing. That errs safe, and it is still the screen telling the user
+    // something untrue about what they just chose.
+    for note in [
+        env_forced_off.then_some(
+            "Your environment already disables telemetry (ARTERM_NO_TELEMETRY).",
+        ),
+        (!env_forced_off && !crate::telemetry::opt_in_present()).then_some(
+            "Saved, but inactive: telemetry also needs ARTERM_TELEMETRY=1 in your environment.",
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        lines.push(Line::from(Span::styled(note, dim)).alignment(align));
     }
     lines.push(
         Line::from(Span::styled(
@@ -352,15 +365,49 @@ fn import_two_column_lines(prompt: &crate::tui::LoginImportPrompt) -> Vec<Line<'
     out
 }
 
+/// What the onboarding header says about telemetry, given what is actually on.
+///
+/// It used to be a fixed string announcing that "arterm collects anonymous
+/// usage statistics". That stopped being true when telemetry became opt-in in
+/// this fork (the endpoint is not ours — see `TELEMETRY_OPT_IN_ENV`): the
+/// screen claimed to collect while `is_enabled()` returned false. A disclosure
+/// that describes a build other than the one running is worse than none,
+/// whichever direction it errs in.
+///
+/// **Nothing is said when nothing is sent.** The alternative — a line reading
+/// "telemetry is off" — announces a default nobody chose, which is how a notice
+/// becomes something people scroll past, and on this screen it would double as
+/// an invitation to switch on a host this project does not operate. `/telemetry`
+/// answers the question for anyone who asks it.
+///
+/// Pure on purpose: the level comes in as an argument, so the wording is tested
+/// without touching the process environment or the marker file.
+fn telemetry_header_text(level: TelemetryLevel) -> Vec<&'static str> {
+    match level {
+        TelemetryLevel::Nothing => Vec::new(),
+        TelemetryLevel::NoContent => vec![
+            "Anonymous usage telemetry is ON (you set ARTERM_TELEMETRY=1).",
+            "Sent: version, OS, session activity, tool counts, crash reasons.",
+            "No code, filenames, prompts, or personal data.",
+            "Change anytime: /telemetry (or export ARTERM_NO_TELEMETRY=1)",
+        ],
+        // Spelled out rather than softened. This level ships prompts and
+        // transcripts, which is the whole of a coding session's content, and it
+        // is the one setting where a vague summary would be a misrepresentation.
+        TelemetryLevel::Everything => vec![
+            "Telemetry is ON and includes CONTENT (you set ARTERM_TELEMETRY=1).",
+            "Sent: your prompts and transcripts, plus version, OS, session",
+            "activity, tool counts, and crash reasons.",
+            "Change anytime: /telemetry (or export ARTERM_NO_TELEMETRY=1)",
+        ],
+    }
+}
+
 /// Grayed telemetry notice shown at the very top of the onboarding screen.
-fn telemetry_header_lines(width: u16) -> Vec<Line<'static>> {
+fn telemetry_header_lines(width: u16, level: TelemetryLevel) -> Vec<Line<'static>> {
     let align = Alignment::Center;
     let dim = Style::default().fg(dim_color());
-    let lines = vec![
-        "arterm collects anonymous usage statistics (version, OS, session",
-        "activity, and crash reasons). No code, prompts, or personal data.",
-        "Change anytime: /telemetry (or export ARTERM_NO_TELEMETRY=1)",
-    ];
+    let lines = telemetry_header_text(level);
     lines
         .into_iter()
         .map(|text| {
@@ -684,7 +731,7 @@ pub(super) fn draw_onboarding_welcome(frame: &mut Frame, app: &dyn TuiState, are
         return;
     }
 
-    let telemetry = telemetry_header_lines(area.width);
+    let telemetry = telemetry_header_lines(area.width, TelemetryLevel::current());
     let body = welcome_body_lines(app);
     let telemetry_h = (telemetry.len() as u16).min(TELEMETRY_LINES);
     let body_h = body.len() as u16;
@@ -742,4 +789,142 @@ pub(super) fn draw_onboarding_welcome(frame: &mut Frame, app: &dyn TuiState, are
         Paragraph::new(body).alignment(Alignment::Center),
         chunks[idx],
     );
+}
+
+#[cfg(test)]
+mod telemetry_header_tests {
+    use super::{TELEMETRY_LINES, TelemetryLevel, telemetry_header_text};
+
+    /// The bug this replaced: the header was a fixed string claiming arterm
+    /// "collects anonymous usage statistics" while telemetry was off, because
+    /// the opt-in flip changed `is_enabled()` and left this screen behind.
+    #[test]
+    fn a_build_that_sends_nothing_claims_nothing() {
+        assert!(
+            telemetry_header_text(TelemetryLevel::Nothing).is_empty(),
+            "with telemetry off there is nothing to disclose, and announcing a \
+             default nobody chose is how a notice stops being read"
+        );
+    }
+
+    #[test]
+    fn an_enabled_build_says_so_and_says_how_to_stop_it() {
+        for level in [TelemetryLevel::NoContent, TelemetryLevel::Everything] {
+            let text = telemetry_header_text(level).join(" ");
+            assert!(text.contains("is ON"), "{level:?} must not read as passive");
+            assert!(
+                text.contains("ARTERM_TELEMETRY=1"),
+                "{level:?} must name what turned it on: {text}"
+            );
+            assert!(
+                text.contains("/telemetry"),
+                "{level:?} must say how to change it: {text}"
+            );
+        }
+    }
+
+    /// The two enabled levels differ in the one way that matters to a user, and
+    /// the wording has to carry it: `Everything` ships prompts and transcripts.
+    /// A shared summary would make the more invasive setting read like the
+    /// cautious one.
+    #[test]
+    fn content_sharing_is_stated_rather_than_summarized() {
+        let everything = telemetry_header_text(TelemetryLevel::Everything).join(" ");
+        assert!(everything.contains("CONTENT"), "{everything}");
+        assert!(everything.contains("prompts and transcripts"), "{everything}");
+
+        let no_content = telemetry_header_text(TelemetryLevel::NoContent).join(" ");
+        assert!(
+            no_content.contains("No code, filenames, prompts"),
+            "{no_content}"
+        );
+        assert!(
+            !no_content.contains("your prompts"),
+            "the cautious level must not read like the invasive one: {no_content}"
+        );
+    }
+
+    /// The renderer reserves `TELEMETRY_LINES` rows and truncates past them, so
+    /// a longer block would be silently cut mid-disclosure.
+    /// The settings page persists a choice through markers, but `is_enabled()`
+    /// additionally requires `ARTERM_TELEMETRY=1`. Without this line the page
+    /// offers "send everything", saves it, and sends nothing — describing a
+    /// decision it cannot carry out.
+    #[test]
+    fn the_settings_page_says_when_a_saved_choice_would_be_inactive() {
+        use crate::tui::TelemetryChoice;
+        use ratatui::prelude::Alignment;
+
+        let _guard = crate::storage::lock_test_env();
+        let previous = std::env::var_os(crate::telemetry::TELEMETRY_OPT_IN_ENV);
+
+        // SAFETY: the test-env lock serializes every test that mutates the
+        // process environment.
+        unsafe { std::env::remove_var(crate::telemetry::TELEMETRY_OPT_IN_ENV) };
+        let without = render_lines(super::telemetry_settings_lines(
+            TelemetryChoice::Everything,
+            false,
+            Alignment::Center,
+        ));
+        assert!(
+            without.contains("Saved, but inactive"),
+            "a choice that cannot take effect must say so: {without}"
+        );
+
+        unsafe { std::env::set_var(crate::telemetry::TELEMETRY_OPT_IN_ENV, "1") };
+        let with = render_lines(super::telemetry_settings_lines(
+            TelemetryChoice::Everything,
+            false,
+            Alignment::Center,
+        ));
+        assert!(
+            !with.contains("Saved, but inactive"),
+            "with the opt-in present the caveat is noise: {with}"
+        );
+
+        // And an explicit env opt-out keeps its own, more specific sentence
+        // rather than gaining a second one about a variable that is moot.
+        let forced = render_lines(super::telemetry_settings_lines(
+            TelemetryChoice::Everything,
+            true,
+            Alignment::Center,
+        ));
+        assert!(forced.contains("ARTERM_NO_TELEMETRY"), "{forced}");
+        assert!(!forced.contains("Saved, but inactive"), "{forced}");
+
+        unsafe {
+            match previous {
+                Some(v) => std::env::set_var(crate::telemetry::TELEMETRY_OPT_IN_ENV, v),
+                None => std::env::remove_var(crate::telemetry::TELEMETRY_OPT_IN_ENV),
+            }
+        }
+    }
+
+    fn render_lines(lines: Vec<ratatui::text::Line<'static>>) -> String {
+        lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn every_variant_fits_the_reserved_height() {
+        for level in [
+            TelemetryLevel::Nothing,
+            TelemetryLevel::NoContent,
+            TelemetryLevel::Everything,
+        ] {
+            let n = telemetry_header_text(level).len();
+            assert!(
+                n <= TELEMETRY_LINES as usize,
+                "{level:?} needs {n} rows, {TELEMETRY_LINES} are reserved"
+            );
+        }
+    }
 }

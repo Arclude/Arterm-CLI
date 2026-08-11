@@ -1675,12 +1675,33 @@ fn recent_project_review_falls_back_cleanly_when_no_repo_is_known() {
     }));
 }
 
+/// Run `f` with the telemetry opt-in present in the environment.
+///
+/// `is_enabled()` requires `ARTERM_TELEMETRY=1` in this fork (the endpoint is
+/// not ours — see `TELEMETRY_OPT_IN_ENV`), so a test about what the telemetry
+/// PAGE does to the on-disk markers has to supply it. Without it, every
+/// assertion about telemetry being on is false for a reason that has nothing to
+/// do with the page: the test would measure the opt-in and not the feature.
+///
+/// Takes no lock of its own — the callers already hold the test-env lock via
+/// `with_temp_arterm_home`, and taking it twice on one thread would deadlock.
+fn with_telemetry_opt_in<T>(f: impl FnOnce() -> T) -> T {
+    let previous = std::env::var_os(crate::telemetry::TELEMETRY_OPT_IN_ENV);
+    crate::env::set_var(crate::telemetry::TELEMETRY_OPT_IN_ENV, "1");
+    let result = f();
+    match previous {
+        Some(value) => crate::env::set_var(crate::telemetry::TELEMETRY_OPT_IN_ENV, value),
+        None => crate::env::remove_var(crate::telemetry::TELEMETRY_OPT_IN_ENV),
+    }
+    result
+}
+
 #[test]
 fn telemetry_pill_opens_settings_page_and_commits_choice() {
     use crate::external_auth::ExternalAuthReviewCandidate;
     use crate::tui::app::onboarding_flow::{ImportReview, TelemetryLevel};
 
-    with_temp_arterm_home(|| {
+    with_temp_arterm_home(|| with_telemetry_opt_in(|| {
         let mut app = create_test_app();
         app.onboarding_flow = None;
         app.begin_onboarding_flow_at_login();
@@ -1724,7 +1745,7 @@ fn telemetry_pill_opens_settings_page_and_commits_choice() {
             other => panic!("expected import summary, got {other:?}"),
         }
         assert!(app.onboarding_import_in_progress.is_none());
-    });
+    }));
 }
 
 #[test]
@@ -1732,7 +1753,7 @@ fn telemetry_page_send_nothing_disables_telemetry_and_esc_goes_back() {
     use crate::external_auth::ExternalAuthReviewCandidate;
     use crate::tui::app::onboarding_flow::ImportReview;
 
-    with_temp_arterm_home(|| {
+    with_temp_arterm_home(|| with_telemetry_opt_in(|| {
         let mut app = create_test_app();
         app.onboarding_flow = None;
         app.begin_onboarding_flow_at_login();
@@ -1762,7 +1783,7 @@ fn telemetry_page_send_nothing_disables_telemetry_and_esc_goes_back() {
         assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Enter));
         assert!(!crate::telemetry::is_enabled());
         assert!(!crate::telemetry::content_sharing_enabled());
-    });
+    }));
 }
 
 #[test]

@@ -41,17 +41,18 @@ fn onboarding_state() -> TestState {
 }
 
 #[test]
-fn onboarding_welcome_shows_telemetry_title_and_suggestions() {
+fn onboarding_welcome_shows_title_and_suggestions_without_a_telemetry_claim() {
     let state = onboarding_state();
     let text = render_onboarding(&state, 80, 30);
 
+    // This used to assert the screen said arterm "collects anonymous usage
+    // statistics". Telemetry is opt-in in this fork and off here, so that
+    // sentence described a different build. The header is now silent when
+    // nothing is sent, and states what IS sent when something is; the wording
+    // per level is pinned in `ui_onboarding::telemetry_header_tests`.
     assert!(
-        text.contains("anonymous usage statistics"),
-        "telemetry notice should be rendered:\n{text}"
-    );
-    assert!(
-        text.contains("ARTERM_NO_TELEMETRY=1"),
-        "telemetry opt-out hint should be rendered:\n{text}"
+        !text.contains("anonymous usage statistics"),
+        "a build that sends nothing must not claim to collect:\n{text}"
     );
     assert!(
         text.contains("Welcome to arterm onboarding"),
