@@ -6,11 +6,10 @@ import { App } from "./App.js";
 import type { Session } from "./types.js";
 
 /**
- * The jcode-style copy-selection mode, driven end to end through the real App:
- * Ctrl+E enters, a mouse press-drag-release over the transcript selects text,
- * and the release copies it. The projection and the coordinate math are unit
- * tested in selection.test.ts; this proves the wiring — the mode toggles, the
- * overlay renders, and a drag reaches the clipboard call.
+ * Direct drag-to-select (like jcode): no key to enter a mode, just press-drag-
+ * release over the transcript. The projection and the coordinate math are unit
+ * tested in selection.test.ts; this proves the wiring — the overlay shows on a
+ * drag, and the release copies it to the clipboard.
  *
  * The clipboard write goes through the real `copyToClipboard`, which on a
  * non-TTY test process falls to OSC 52 written to `rawStdout`. We do not assert
@@ -19,7 +18,6 @@ import type { Session } from "./types.js";
  */
 
 const ESC = String.fromCharCode(27);
-const CTRL_E = "\u0005";
 const tick = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** SGR mouse byte helpers (1-based wire coordinates). */
@@ -86,20 +84,8 @@ function fakeSession(bus: EventBus): Session {
   } as unknown as Session;
 }
 
-describe("copy-selection mode", () => {
-  it("Ctrl+E in classic mode explains that the terminal owns selection", async () => {
-    const bus = new EventBus();
-    const { stdin, frames, unmount } = render(createElement(App, { session: fakeSession(bus) }));
-    const seen = () => frames.join("\n");
-    await tick();
-
-    stdin.write(CTRL_E);
-    await waitFor(seen, (f) => f.includes("drag already selects text"));
-
-    unmount();
-  });
-
-  it("Ctrl+E in fullscreen enters SELECT, a drag copies, and it reports the copy", async () => {
+describe("drag-to-select", () => {
+  it("a mouse drag over the transcript selects, release copies", async () => {
     const bus = new EventBus();
     const { stdin, lastFrame, frames, unmount } = render(
       createElement(App, { session: fakeSession(bus), fullscreen: true }),
@@ -108,9 +94,7 @@ describe("copy-selection mode", () => {
     const seen = () => frames.join("\n");
     await tick();
 
-    // Overflow the viewport so every visible row carries text — the projection
-    // is bottom-anchored, so a short transcript leaves the top rows blank and a
-    // drag there would (correctly) select nothing.
+    // Overflow the viewport so every visible row carries text.
     for (let i = 0; i < 60; i++) {
       bus.emit({
         type: "assistant_message",
@@ -119,12 +103,7 @@ describe("copy-selection mode", () => {
     }
     await tick(200);
 
-    // Enter selection mode: the SELECT hint replaces the scroll hint.
-    stdin.write(CTRL_E);
-    await waitFor(ui, (f) => f.includes("SELECT"));
-
-    // Press, drag across a filled row, release. With the viewport full every
-    // row has content, so this selects a real span and the release copies it.
+    // Direct drag: no key needed. Press, drag, release over a filled row.
     stdin.write(down(1, 2));
     stdin.write(drag(24, 2));
     stdin.write(up(24, 2));
@@ -132,20 +111,35 @@ describe("copy-selection mode", () => {
     await waitFor(seen, (f) => /⧉ copied \d+ chars to the clipboard/.test(f), 3000);
     expect(seen()).toMatch(/⧉ copied \d+ chars/);
 
-    // Prove the CONTENT reached the clipboard, not just that a copy fired. On a
-    // non-TTY test process copyToClipboard falls to OSC 52, whose payload is the
-    // selected text base64-encoded in an ESC]52;c;<b64> sequence written to
-    // stdout. Decode it and confirm it is a real slice of a projected line.
+    // Prove the CONTENT reached the clipboard. On a non-TTY test process
+    // copyToClipboard falls to OSC 52, whose payload is the selected text
+    // base64-encoded in an ESC]52;c;<b64> sequence written to stdout.
     const osc = seen().match(/\]52;c;([A-Za-z0-9+/=]+)/);
     expect(osc, "an OSC 52 clipboard write was emitted").not.toBeNull();
     const copied = Buffer.from(osc?.[1] ?? "", "base64").toString("utf8");
     expect(copied.length).toBeGreaterThan(0);
     expect(copied).toMatch(/selectable line number/);
 
-    // A successful copy leaves selection mode on its own (like a terminal's own
-    // drag-select), so the SELECT hint is gone and the transcript is back.
-    await waitFor(ui, (f) => !f.includes("SELECT"), 3000);
+    // After the copy, the overlay is gone and the transcript is back.
+    await waitFor(ui, (f) => !f.includes("selecting"), 3000);
 
+    unmount();
+  });
+
+  it("a plain click (no drag) does not select or copy", async () => {
+    const bus = new EventBus();
+    const { stdin, frames, unmount } = render(
+      createElement(App, { session: fakeSession(bus), fullscreen: true }),
+    );
+    const seen = () => frames.join("\n");
+    await tick();
+
+    // A quick press+release with no drag event — should not trigger a copy.
+    stdin.write(down(1, 2));
+    stdin.write(up(1, 2));
+    await tick(300);
+
+    expect(seen()).not.toMatch(/⧉ copied/);
     unmount();
   });
 });

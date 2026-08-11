@@ -89,18 +89,18 @@ describe("the status bar", () => {
     const wide = { columns: 200 };
     const captured = bar({ ...wide, fullscreen: true, mouseCapture: true });
     expect(captured).toContain("wheel scrolls");
-    expect(captured).toContain("^E selects text");
+    expect(captured).toContain("drag selects text");
 
     // Fullscreen without capture: the alternate screen has no scrollback to
     // give the wheel, so advertising it would name a key that does nothing.
     const uncaptured = bar({ ...wide, fullscreen: true, mouseCapture: false });
     expect(uncaptured).toContain("PgUp/PgDn scrolls");
-    expect(uncaptured).not.toContain("^E selects");
+    expect(uncaptured).not.toContain("drag selects text");
 
     // Classic: the terminal owns its own scrollback and its own drag.
     const classic = bar({ ...wide, fullscreen: false, mouseCapture: false });
     expect(classic).toContain("wheel scrolls");
-    expect(classic).not.toContain("^E selects");
+    expect(classic).not.toContain("drag selects text");
   });
 
   it("keeps a constant height at every width", () => {

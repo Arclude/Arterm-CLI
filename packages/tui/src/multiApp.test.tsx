@@ -31,6 +31,8 @@ function fakeSession(bus: EventBus, label: string): Session {
       model: "qwen2.5:7b",
       history,
       effectiveContextWindow: () => 8192,
+      interject: () => {},
+      takeInterjections: () => [],
       reset: () => {},
       run: async (text: string) => {
         history.push({ role: "user", content: text });
@@ -265,7 +267,7 @@ describe("MultiApp (multi-session host)", () => {
     m.unmount();
   });
 
-  it("starts uncaptured (drag selects), /mouse captures the wheel, /mouse again releases", async () => {
+  it("captures the wheel with SGR and never enables alternate scroll", async () => {
     const bus = new EventBus();
     const instance = render(
       createElement(MultiApp, {
@@ -275,24 +277,31 @@ describe("MultiApp (multi-session host)", () => {
     );
     const out = () => instance.frames.join("");
     const seen = () => instance.frames.join("\n");
-    // Default: NO capture — plain left-drag select works from the first frame;
-    // the wheel rides the terminal's alternate-scroll arrows (?1007h).
-    await waitFor(out, (f) => f.includes(`${ESC}[?1007h`));
-    expect(out()).not.toContain(`${ESC}[?1006h`);
+    // The pair that makes a wheel tick READABLE: ?1000h reports the button,
+    // ?1006h asks for it in SGR form, so a tick is `ESC[<64;x;yM`.
+    await waitFor(out, (f) => f.includes(`${ESC}[?1000h`) && f.includes(`${ESC}[?1006h`));
+    // ?1007h is the one that must NEVER appear, in any frame. With alternate
+    // scroll on, the terminal answers a tick with arrow keys — byte-identical
+    // to the ↑ that recalls a prompt, which is the bug this replaced.
+    expect(out()).not.toContain(`${ESC}[?1007h`);
+    expect(out()).toContain(`${ESC}[?1007l`);
+    // Motion reporting is now ON (?1002h): drag-to-select needs drag events,
+    // and jcode's own selection works the same way. ?1003 (all motion) stays
+    // off — it is a packet per mouse-MOVE for a feature nothing reads.
+    expect(out()).toContain(`${ESC}[?1002h`);
+    expect(out()).not.toContain(`${ESC}[?1003h`);
 
+    // /mouse gives the gesture back, and turning capture off must not fall back
+    // to alternate scroll — it captures nothing at all.
+    const before = instance.frames.length;
     instance.stdin.write("/mouse");
     await waitFor(seen, (f) => f.includes("/mouse"));
     instance.stdin.write(ENTER);
-    // Opt IN: capture on the wire (?1006h) and announced.
-    await waitFor(seen, (f) => f.includes("mouse capture ON"));
-    await waitFor(out, (f) => f.includes(`${ESC}[?1006h`));
-
-    instance.stdin.write("/mouse");
-    await tick();
-    instance.stdin.write(ENTER);
-    // And back out: released (?1006l) with alternate scroll restored.
     await waitFor(seen, (f) => f.includes("mouse capture OFF"));
-    await waitFor(out, (f) => f.includes(`${ESC}[?1006l`));
+    const after = instance.frames.slice(before).join("");
+    expect(after).toContain(`${ESC}[?1000l`);
+    expect(after).toContain(`${ESC}[?1006l`);
+    expect(after).not.toContain(`${ESC}[?1007h`);
     instance.unmount();
   });
 
@@ -303,7 +312,7 @@ describe("MultiApp (multi-session host)", () => {
     // modes already get: the host pool's snapshot replay restores ?25h.
     const bus = new EventBus();
     const session = fakeSession(bus, "A");
-    session.config.tui = { fullscreen: true, mouse: false };
+    session.config.tui = { fullscreen: true };
     const instance = render(
       createElement(MultiApp, { initial: { id: "sess-a", session }, fullscreen: true }),
     );
@@ -321,29 +330,29 @@ describe("MultiApp (multi-session host)", () => {
     instance.unmount();
   });
 
-  it("re-asserts SGR mouse modes on resize (heals a host-emulator reset)", async () => {
+  it("re-asserts the mouse-off modes on resize (heals a host-emulator reset)", async () => {
     const bus = new EventBus();
-    // The rebind-heal scenario is about CAPTURE mode (?1006h downgraded to X10
-    // by a pool restore) — so this test opts into capture explicitly.
+    // A host can turn reporting back on behind our back: the desktop app's
+    // renderer pool reset()s a pane on rebind and replays a serialized snapshot
+    // that can restore ?1000h. Every such rebind ends in a SIGWINCH, so the
+    // OFF-assert has to ride the resize or the wheel starts typing again.
     const session = fakeSession(bus, "A");
-    session.config.tui = { fullscreen: true, mouse: true };
+    session.config.tui = { fullscreen: true };
     const instance = render(
       createElement(MultiApp, {
         initial: { id: "sess-a", session },
         fullscreen: true,
       }),
     );
-    const sgrWrites = (): number => instance.frames.join("").split(`${ESC}[?1006h`).length - 1;
-    // Mount writes the capture modes once…
+    const offWrites = (): number => instance.frames.join("").split(`${ESC}[?1007l`).length - 1;
     await waitFor(
-      () => String(sgrWrites()),
+      () => String(offWrites()),
       (n) => Number(n) >= 1,
     );
-    const before = sgrWrites();
-    // …and a SIGWINCH (the desktop pool's rebind kick) re-asserts them.
+    const before = offWrites();
     instance.stdout.emit("resize");
     await waitFor(
-      () => String(sgrWrites()),
+      () => String(offWrites()),
       (n) => Number(n) > before,
     );
     instance.unmount();

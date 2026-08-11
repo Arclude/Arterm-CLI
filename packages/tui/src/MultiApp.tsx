@@ -154,8 +154,11 @@ export function MultiApp({
     // a second cursor.
     const assertModes = mouseCapture
       ? (): void => {
+          // ?1002h = button-event tracking (drag reports). Without this the
+          // terminal never tells us about a drag, only press/release — and
+          // drag-to-select is exactly what jcode offers with no key needed.
           rawStdout.write(
-            `${ESC}[?25l${ESC}[?1002l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1006h`,
+            `${ESC}[?25l${ESC}[?1003l${ESC}[?1007l${ESC}[?1000h${ESC}[?1002h${ESC}[?1006h`,
           );
         }
       : (): void => {
@@ -171,7 +174,7 @@ export function MultiApp({
     rawStdout.on("resize", assertModes);
     return () => {
       rawStdout.off("resize", assertModes);
-      if (mouseCapture) rawStdout.write(`${ESC}[?1000l${ESC}[?1006l`);
+      if (mouseCapture) rawStdout.write(`${ESC}[?1000l${ESC}[?1002l${ESC}[?1006l`);
     };
   }, [rawStdout, mouseCapture]);
 

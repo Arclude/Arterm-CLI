@@ -734,8 +734,6 @@ export function App({
   // The projection the current selection is resolved against, rebuilt whenever
   // the mode is entered (and kept stable during a drag so coordinates hold).
   const selectLinesRef = useRef<ProjectedLine[]>([]);
-  const selectingRef = useRef(false);
-  selectingRef.current = selecting;
   // Prompts entered while a turn is running — drained FIFO by the queue effect
   // (see submit/dispatch). Refs mirror the latest state so input handlers and
   // the drain guard never act through a stale closure.
@@ -1074,25 +1072,6 @@ export function App({
     setScrollOffset((o) => Math.max(0, Math.min(maxOffsetRef.current, o + lines)));
   }, []);
 
-  // Captured-mouse wheel: SGR reports (button bit 64; low bits 0 = up, 1 = down) —
-  // a fast scroll batches several into one chunk, so sum them. `reduceInput`
-  // separately swallows these so they never touch the prompt text. The mapping
-  // (up = +3 = toward OLDER lines) matches the scroll hint and the three lines
-  // are the wheel's own convention, not a translation we can be handed wrong.
-  useInput(
-    (input) => {
-      let delta = 0;
-      for (const mm of input.matchAll(/\[<(\d+);\d+;\d+[Mm]/g)) {
-        const cb = Number(mm[1]);
-        if ((cb & 64) === 0) continue; // not a wheel event
-        const low = cb & 3;
-        delta += low === 0 ? 3 : low === 1 ? -3 : 0;
-      }
-      if (delta !== 0) scrollBy(delta);
-    },
-    { isActive: visible && mouseCapture && !selecting },
-  );
-
   // Live mirrors for the mouse handlers, which read through refs so a drag
   // never acts on a stale render's transcript, width or scroll position.
   const itemsRef = useRef<DisplayItem[]>(items);
@@ -1122,19 +1101,6 @@ export function App({
     selectLinesRef.current = [];
   }, []);
 
-  const enterSelection = useCallback(() => {
-    selectLinesRef.current = projectTranscript(
-      itemsRef.current,
-      columnsRef.current,
-      liveRef.current,
-    );
-    setSelectRange(null);
-    selectRangeRef.current = null;
-    selectAnchorRef.current = null;
-    selectDraggingRef.current = false;
-    setSelecting(true);
-  }, []);
-
   // Update the range in BOTH the ref and state. The ref is what the mouse
   // handler reads back synchronously — all three of a click's events (down,
   // drag, up) can land in one input chunk, and React state set during that
@@ -1161,15 +1127,14 @@ export function App({
     return true;
   }, [rawStdout, push]);
 
-  // The mouse plumbing for selection mode: Down arms an anchor, Drag extends the
-  // range, Up finalizes and copies. Runs only in fullscreen with capture on;
-  // decoded through the shared `parseMouseEvents` so a batched drag chunk is
-  // handled event by event. Reads the projection captured at mode entry so
-  // coordinates stay valid for the whole gesture.
-  const onSelectionMouse = useCallback(
+  // Direct drag-to-select, like jcode and like a terminal's own selection.
+  // No key, no mode to enter: a left-drag over the transcript selects real
+  // text (shown live as an overlay), and releasing copies it to the clipboard.
+  // A wheel tick scrolls; a plain click (press + release, no drag) does
+  // nothing. The projection is built on every press so it matches the current
+  // transcript, and stays stable for the gesture.
+  const onMouseDragSelect = useCallback(
     (input: string) => {
-      const lines = selectLinesRef.current;
-      const first = firstVisibleLine(lines.length);
       for (const ev of parseMouseEvents(input)) {
         if (ev.kind === "wheel-up") {
           scrollBy(3);
@@ -1179,25 +1144,41 @@ export function App({
           scrollBy(-3);
           continue;
         }
-        const point = pointFromScreen(lines, first, ev.row, ev.col);
         if (ev.kind === "down") {
-          if (!point) continue;
-          selectAnchorRef.current = point;
-          selectDraggingRef.current = true;
-          setRange({ start: point, end: point });
+          // Build the projection on press so it matches what's on screen right
+          // now. Held for the whole gesture so coordinates don't drift.
+          selectLinesRef.current = projectTranscript(
+            itemsRef.current,
+            columnsRef.current,
+            liveRef.current,
+          );
+          const lines = selectLinesRef.current;
+          const first = firstVisibleLine(lines.length);
+          const point = pointFromScreen(lines, first, ev.row, ev.col);
+          if (point) {
+            selectAnchorRef.current = point;
+            selectDraggingRef.current = true;
+            selectRangeRef.current = null;
+            setSelectRange(null);
+            setSelecting(true);
+          }
         } else if (ev.kind === "drag") {
-          if (!selectDraggingRef.current || !point) continue;
+          if (!selectDraggingRef.current) continue;
+          const lines = selectLinesRef.current;
+          const first = firstVisibleLine(lines.length);
+          const point = pointFromScreen(lines, first, ev.row, ev.col);
           const anchor = selectAnchorRef.current;
-          if (anchor) setRange(normalizeRange(anchor, point));
+          if (anchor && point) setRange(normalizeRange(anchor, point));
         } else if (ev.kind === "up") {
           if (!selectDraggingRef.current) continue;
           selectDraggingRef.current = false;
+          const lines = selectLinesRef.current;
+          const first = firstVisibleLine(lines.length);
+          const point = pointFromScreen(lines, first, ev.row, ev.col);
           const anchor = selectAnchorRef.current;
           if (anchor && point) setRange(normalizeRange(anchor, point));
-          // Release copies and leaves the mode, the way a terminal's own
-          // drag-select ends: the selection is on the clipboard, the transcript
-          // is back, and the "copied N chars" line is visible again. Ctrl+S
-          // re-enters for another. A drag that selected nothing just exits.
+          // Copy, then return to the rich transcript after a beat so the
+          // "copied N chars" line is visible.
           void copySelection().then(() => exitSelection());
         }
       }
@@ -1205,21 +1186,9 @@ export function App({
     [firstVisibleLine, scrollBy, copySelection, exitSelection, setRange],
   );
 
-  useInput(onSelectionMouse, { isActive: visible && mouseCapture && selecting });
-
-  // Selection needs DRAG reports (?1002h), which the base mouse setup leaves off
-  // on purpose — it is a packet per mouse-move that nothing else reads. Turn it
-  // on only while selecting, and take it back on exit, so the cost is paid only
-  // during a selection. ?1000h + ?1006h (press/release + SGR) are already on
-  // from the host; this just adds button-drag tracking on top.
-  useEffect(() => {
-    if (!selecting || !rawStdout) return;
-    const ESC = String.fromCharCode(27);
-    rawStdout.write(`${ESC}[?1002h`);
-    return () => {
-      rawStdout.write(`${ESC}[?1002l`);
-    };
-  }, [selecting, rawStdout]);
+  // Always active in fullscreen + capture: the terminal now sends drag reports
+  // (?1002h) permanently, so this handler sees every mouse event.
+  useInput(onMouseDragSelect, { isActive: visible && mouseCapture });
 
   const arrowHistoryRef = useRef<(dir: ArrowDir) => void>(() => {});
   const overlayOpenRef = useRef(false);
@@ -2302,42 +2271,6 @@ export function App({
     {
       isActive: visible && status === "idle" && !pickerOpen && !loginOpen && !pending && !interview,
     },
-  );
-
-  // Copy-selection mode toggle (fullscreen + capture only). Ctrl+E enters, and
-  // Ctrl+E or Esc leaves — the jcode-style drag-to-select workflow, wired for
-  // Ink. Ctrl+S would be swallowed by the terminal's own flow control (XOFF —
-  // it freezes output, never reaching the app), so Ctrl+E it is. In classic
-  // mode or with capture off it is a no-op with a one-line explanation,
-  // because there the terminal's own selection already works.
-  useInput(
-    (input2, key) => {
-      const isToggle = key.ctrl && (input2 === "e" || input2 === "\u0005");
-      if (!isToggle) return;
-      if (selectingRef.current) {
-        exitSelection();
-        return;
-      }
-      if (!fullscreen || !mouseCapture) {
-        push({
-          kind: "system",
-          text: fullscreen
-            ? "text selection is the terminal's here — drag to select (capture is off)"
-            : "drag already selects text in this mode",
-        });
-        return;
-      }
-      enterSelection();
-    },
-    { isActive: visible && !pickerOpen && !loginOpen && !interview },
-  );
-
-  // Esc leaves selection mode before any other Esc handler acts on it.
-  useInput(
-    (_input2, key) => {
-      if (key.escape && selectingRef.current) exitSelection();
-    },
-    { isActive: visible && selecting },
   );
 
   // Shift+Tab cycles ASK → AUTO → PLAN → AUTONOMOUS → ASK. The last slot is
@@ -3845,7 +3778,7 @@ export function App({
         <Box ref={bottomRef} flexDirection="column" flexShrink={0}>
           {selecting ? (
             <Text color="cyan" dimColor>
-              ⧉ SELECT · drag to select · release to copy · Ctrl+E or Esc to exit
+              ⧉ selecting… release to copy
             </Text>
           ) : clampedOffset > 0 ? (
             <Text color="gray" dimColor>

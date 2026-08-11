@@ -185,7 +185,7 @@ export function StatusBar({
   // With capture on, the terminal's own drag is gone; ⇧drag is the terminal's
   // bypass, and Ctrl+E is the app's own selection mode (drag to select, release
   // to copy). Name the app's, which is the one that also copies.
-  const selectHint = mouseCapture ? "^E selects text" : "drag selects text";
+  const selectHint = mouseCapture ? "drag selects text" : "Shift+drag selects text";
   // Name both ends of the switch: "backup" alone would look like the model was
   // changed, when in fact the configured one is still the one that failed.
   const answering =

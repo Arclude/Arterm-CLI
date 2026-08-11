@@ -102,7 +102,7 @@ describe("fullscreen mode (alt buffer: pinned footer + in-app scroll)", () => {
     // scrollback to move on the alternate screen, so advertising it would be a
     // working build reading as a broken one.
     expect(ui()).toContain("ARTERM");
-    // (The rest of the hint line — "· ^E selects text" — is past the width
+    // (The rest of the hint line — "· drag selects text" — is past the width
     // this harness renders at, so it is asserted in statusChips.test.tsx.)
     expect(ui()).toContain("wheel scrolls");
     expect(ui()).not.toContain("satır yukarıda");
