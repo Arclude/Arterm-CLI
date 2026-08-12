@@ -882,6 +882,20 @@ pub fn openai_compatible_profile_is_configured(profile: OpenAiCompatibleProfile)
         .unwrap_or(false)
 }
 
+/// True when at least one OpenAI-compatible profile has usable credentials.
+///
+/// The 38 profiles share one shape and have no per-provider fields in
+/// [`crate::auth::AuthStatus`], so "does the user have a login at all" has to
+/// ask them as a set. It stops at the first configured profile, and a fresh
+/// install answers `false`: every profile either requires an API key or has to
+/// be pointed at a local endpoint deliberately.
+pub fn any_openai_compatible_profile_is_configured() -> bool {
+    openai_compatible_profiles()
+        .iter()
+        .copied()
+        .any(openai_compatible_profile_is_configured)
+}
+
 /// Resolve the active named provider profile's credential env var + env file,
 /// as set by [`apply_named_provider_profile_env`], if one is active.
 ///

@@ -388,9 +388,16 @@ impl AuthStatus {
     }
 
     /// Returns true if at least one provider has usable credentials.
+    ///
+    /// `openai_compatible` is one field standing for 38 providers, and leaving
+    /// it out is not a cosmetic omission: this function is what onboarding, the
+    /// TUI's "Log in to get started" hint and default-model validation ask, so
+    /// a user whose only login is Z.AI or Cerebras was sent back to the login
+    /// screen on every boot with a perfectly good key on disk.
     pub fn has_any_available(&self) -> bool {
         self.anthropic.state == AuthState::Available
             || self.arterm == AuthState::Available
+            || self.openai_compatible == AuthState::Available
             || self.openai == AuthState::Available
             || self.openrouter == AuthState::Available
             || self.azure == AuthState::Available
@@ -967,6 +974,14 @@ fn build_auth_status_uncached(mode: AuthProbeMode) -> (AuthStatus, Vec<(&'static
                     .map(|tokens| (tokens.is_expired(), tokens.refresh_token.clone())),
             )
         }
+    });
+    record_auth_probe_step(&mut timings, "openai_compatible", || {
+        status.openai_compatible =
+            if crate::provider_catalog::any_openai_compatible_profile_is_configured() {
+                AuthState::Available
+            } else {
+                AuthState::NotConfigured
+            }
     });
     record_auth_probe_step(&mut timings, "cursor", || {
         probe_cursor_status(&mut status, mode)

@@ -46,6 +46,17 @@ pub struct AuthStatus {
     pub gemini: AuthState,
     /// Cursor provider configured via Cursor Agent plus API key or CLI session
     pub cursor: AuthState,
+    /// At least one OpenAI-compatible profile (Z.AI, Cerebras, Groq, a local
+    /// endpoint, ...) has credentials.
+    ///
+    /// They get one field between them because there are 38 of them and they
+    /// share a shape; `assessment_for_provider` still reports each one
+    /// individually off its own profile. What needs a field is
+    /// [`AuthStatus::has_any_available`], which reads this struct and nothing
+    /// else -- without it, a user whose only login is one of these is told they
+    /// have no credentials at all.
+    #[serde(default)]
+    pub openai_compatible: AuthState,
     /// Google/Gmail OAuth configured
     pub google: AuthState,
     /// Google Gmail has send capability (Full tier)

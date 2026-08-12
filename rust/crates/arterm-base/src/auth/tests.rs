@@ -1041,3 +1041,33 @@ fn missing_refreshable_credentials_are_not_configured() {
         AuthState::NotConfigured
     );
 }
+
+/// An OpenAI-compatible key is a login. This is the fork's own default case --
+/// Z.AI is what it ships pointed at -- and before `AuthStatus.openai_compatible`
+/// existed, `has_any_available` read a struct with no field for any of the 38
+/// such providers and answered `false` with a working key on disk. Onboarding
+/// then restarted at the login screen on every boot.
+#[test]
+fn an_openai_compatible_key_alone_counts_as_a_login() {
+    let sandbox = crate::auth::test_sandbox::AuthTestSandbox::new().expect("sandbox");
+
+    assert!(
+        !AuthStatus::check().has_any_available(),
+        "a fresh sandbox has no credentials at all"
+    );
+
+    sandbox
+        .write_openai_compatible_api_key(
+            crate::provider_catalog::ZAI_PROFILE,
+            "test-zai-key-not-a-real-key",
+        )
+        .expect("write zai key");
+    AuthStatus::invalidate_cache();
+
+    let status = AuthStatus::check();
+    assert_eq!(status.openai_compatible, AuthState::Available);
+    assert!(
+        status.has_any_available(),
+        "the only configured provider is an OpenAI-compatible profile, and it is configured"
+    );
+}
