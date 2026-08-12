@@ -33,7 +33,7 @@ pub use reload::{ReloadRecoveryDirective, persisted_background_tasks_note};
 pub use status::selfdev_status_output;
 
 /// Public GitHub source used when cloning the arterm repository for self-dev.
-pub const ARTERM_REPO_URL: &str = "https://github.com/1jehuang/jcode.git";
+pub const ARTERM_REPO_URL: &str = "https://github.com/Arclude/Arterm-CLI.git";
 
 #[derive(Debug, Deserialize)]
 struct SelfDevInput {

@@ -89,7 +89,7 @@ case "$url" in
   *telemetry.arterm.sh*) ;;
   *arterm.sh/releases/latest/version) printf 'v%s\n' "${EVAL_VERSION:-1.2.3}" ;;
   *arterm.sh/releases/v*/download-bases)
-    printf 'https://github.com/1jehuang/jcode/releases/download/v%s\n' "${EVAL_VERSION:-1.2.3}"
+    printf 'https://github.com/Arclude/Arterm-CLI/releases/download/v%s\n' "${EVAL_VERSION:-1.2.3}"
     ;;
   *SHA256SUMS)
     # Checksum of the deterministic fake archive written by the tar mock's
@@ -98,7 +98,7 @@ case "$url" in
       "${EVAL_CHECKSUM_ASSET:-arterm-linux-x86_64.tar.gz}"
     ;;
   *github.com*/releases/latest)
-    printf 'https://github.com/1jehuang/jcode/releases/tag/v%s' "${EVAL_VERSION:-1.2.3}"
+    printf 'https://github.com/Arclude/Arterm-CLI/releases/tag/v%s' "${EVAL_VERSION:-1.2.3}"
     ;;
   *github.com*/releases/download/*)
     [ -n "$output" ] || exit 2

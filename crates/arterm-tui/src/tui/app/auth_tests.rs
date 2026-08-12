@@ -86,7 +86,7 @@ fn tui_openai_compatible_api_base_keeps_arterm_docs_and_remote_endpoint() -> any
         let resolved = save_tui_openai_compatible_api_base("https://api.deepseek.com/")?;
         assert_eq!(resolved.api_base, "https://api.deepseek.com");
         assert!(resolved.requires_api_key);
-        assert!(resolved.setup_url.contains("github.com/1jehuang/jcode"));
+        assert!(resolved.setup_url.contains("github.com/Arclude/Arterm-CLI"));
         assert!(!resolved.setup_url.contains("opencode.ai"));
         Ok(())
     })

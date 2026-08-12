@@ -12,7 +12,7 @@ use super::provider_init::ProviderChoice;
 pub use arterm_selfdev_types::CLIENT_SELFDEV_ENV;
 pub use arterm_selfdev_types::client_selfdev_requested;
 
-const ARTERM_REPO_URL: &str = "https://github.com/1jehuang/jcode.git";
+const ARTERM_REPO_URL: &str = "https://github.com/Arclude/Arterm-CLI.git";
 
 fn selfdev_clone_dir() -> Result<PathBuf> {
     Ok(crate::storage::arterm_dir()?.join("source").join("arterm"))

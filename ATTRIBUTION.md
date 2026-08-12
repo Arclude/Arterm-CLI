@@ -18,6 +18,74 @@ tree is 698,473 lines of Rust, of which 2,032 were written here.** The rest is
 upstream's, and the notice requirement tracks that ratio rather than the
 project's name. It shrinks as the code is genuinely rewritten, which is the
 stated direction; it does not shrink because the directory was renamed.
+: 0.75.0
+- Copyright (c) 2025 Jeremy Huang
+- License: MIT — see [LICENSE](./LICENSE)
+
+The MIT license permits use, modification and redistribution, and requires that
+the copyright notice and permission notice survive in copies and substantial
+portions. This file is where that notice lives; `LICENSE` carries Arclude's.
+
+**Stated plainly so nobody has to reconstruct it later: as of 2026-08-12 the
+tree is 698,473 lines of Rust, of which 2,032 were written here.** The rest is
+upstream's, and the notice requirement tracks that ratio rather than the
+project's name. It shrinks as the code is genuinely rewritten, which is the
+stated direction; it does not shrink because the directory was renamed.
+
+The links back to the upstream repository are excluded from every rebranding
+pass for the same reason the notice is: those are provenance, not branding, and
+rewriting them would point a reader at a URL that does not exist.
+: 0.75.0
+- Copyright (c) 2025 Jeremy Huang
+- License: MIT — see [LICENSE](./LICENSE)
+
+The MIT license permits use, modification and redistribution, and requires that
+the copyright notice and permission notice survive in copies and substantial
+portions. This file is where that notice lives; `LICENSE` carries Arclude's.
+
+**Stated plainly so nobody has to reconstruct it later: as of 2026-08-12 the
+tree is 698,473 lines of Rust, of which 2,032 were written here.** The rest is
+upstream's, and the notice requirement tracks that ratio rather than the
+project's name. It shrinks as the code is genuinely rewritten, which is the
+stated direction; it does not shrink because the directory was renamed.
+
+The links back to the upstream repository are excluded from every rebranding
+pass for the same reason the notice is: those are provenance, not branding, and
+rewriting them would point a reader at a URL that does not exist.
+: 0.75.0
+- Copyright (c) 2025 Jeremy Huang
+- License: MIT — see [LICENSE](./LICENSE)
+
+The MIT license permits use, modification and redistribution, and requires that
+the copyright notice and permission notice survive in copies and substantial
+portions. This file is where that notice lives; `LICENSE` carries Arclude's.
+
+**Stated plainly so nobody has to reconstruct it later: as of 2026-08-12 the
+tree is 698,473 lines of Rust, of which 2,032 were written here.** The rest is
+upstream's, and the notice requirement tracks that ratio rather than the
+project's name. It shrinks as the code is genuinely rewritten, which is the
+stated direction; it does not shrink because the directory was renamed.
+
+The links back to the upstream repository are excluded from every rebranding
+pass for the same reason the notice is: those are provenance, not branding, and
+rewriting them would point a reader at a URL that does not exist.
+: 0.75.0
+- Copyright (c) 2025 Jeremy Huang
+- License: MIT — see [LICENSE](./LICENSE)
+
+The MIT license permits use, modification and redistribution, and requires that
+the copyright notice and permission notice survive in copies and substantial
+portions. This file is where that notice lives; `LICENSE` carries Arclude's.
+
+**Stated plainly so nobody has to reconstruct it later: as of 2026-08-12 the
+tree is 698,473 lines of Rust, of which 2,032 were written here.** The rest is
+upstream's, and the notice requirement tracks that ratio rather than the
+project's name. It shrinks as the code is genuinely rewritten, which is the
+stated direction; it does not shrink because the directory was renamed.
+
+The links back to the upstream repository are excluded from every rebranding
+pass for the same reason the notice is: those are provenance, not branding, and
+rewriting them would point a reader at a URL that does not exist.
 
 The links back to the upstream repository are excluded from every rebranding
 pass for the same reason the notice is: those are provenance, not branding, and

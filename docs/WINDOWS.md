@@ -68,7 +68,7 @@ Get-Command arterm
 Get-FileHash (Get-Command arterm).Source -Algorithm SHA256
 ```
 
-Compare the hash with `SHA256SUMS` on the matching [GitHub release](https://github.com/1jehuang/jcode/releases/latest).
+Compare the hash with `SHA256SUMS` on the matching [GitHub release](https://github.com/Arclude/Arterm-CLI/releases/latest).
 
 After Authenticode signing is enabled, this must report `Valid`:
 

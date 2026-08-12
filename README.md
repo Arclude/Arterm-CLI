@@ -46,6 +46,51 @@ CI additionally runs the guardrail scripts in `scripts/` — code-size, panic an
 swallowed-error ratchets, crate dependency boundaries — which are not tests and
 fail independently of them.
 
+## OpenAI-compatible providers
+
+Arterm ships profiles for 38 providers that speak the OpenAI API — Z.AI,
+Cerebras, Groq, Moonshot, Nebius, Together, Hugging Face, LM Studio, Ollama and
+the rest. Each one knows its own endpoint and default model, so logging in is
+the provider's name and nothing else:
+
+```bash
+arterm login zai            # stores the key under ~/.config/arterm/zai.env
+arterm login cerebras
+arterm login ollama         # local endpoint, no key
+```
+
+`arterm login` with no argument lists them. The key is read from the profile's
+env file or from its environment variable, whichever is present.
+
+For an endpoint with no built-in profile, use the generic one and give it the
+base URL:
+
+```bash
+arterm login openai-compatible \
+  --api-base https://api.example.com/v1 \
+  --api-key-env EXAMPLE_API_KEY
+```
+
+Or declare it in `~/.arterm/config.toml`, which is also how you pin a default
+model and a context window:
+
+```toml
+[provider]
+default_provider = "example"
+default_model = "example-large"
+
+[providers.example]
+type = "openai-compatible"
+base_url = "https://api.example.com/v1"
+auth = "bearer"
+api_key = "…"
+default_model = "example-large"
+
+  [[providers.example.models]]
+  id = "example-large"
+  context_window = 200000
+```
+
 ## Layout
 
 Layered so that high-churn orchestration depends on stable contracts and never

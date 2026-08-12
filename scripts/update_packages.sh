@@ -8,10 +8,10 @@ VERSION_NUM="${VERSION#v}"
 
 echo "Updating packages for $VERSION..."
 
-LINUX_URL="https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-linux-x86_64.tar.gz"
-LINUX_ARM_URL="https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-linux-aarch64.tar.gz"
-MACOS_ARM_URL="https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-macos-aarch64.tar.gz"
-MACOS_INTEL_URL="https://github.com/1jehuang/jcode/releases/download/${VERSION}/arterm-macos-x86_64.tar.gz"
+LINUX_URL="https://github.com/Arclude/Arterm-CLI/releases/download/${VERSION}/arterm-linux-x86_64.tar.gz"
+LINUX_ARM_URL="https://github.com/Arclude/Arterm-CLI/releases/download/${VERSION}/arterm-linux-aarch64.tar.gz"
+MACOS_ARM_URL="https://github.com/Arclude/Arterm-CLI/releases/download/${VERSION}/arterm-macos-aarch64.tar.gz"
+MACOS_INTEL_URL="https://github.com/Arclude/Arterm-CLI/releases/download/${VERSION}/arterm-macos-x86_64.tar.gz"
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
@@ -41,7 +41,7 @@ git clone --depth 1 git@github.com:1jehuang/homebrew-arterm.git "$BREW_DIR" 2>/d
 cat > "$BREW_DIR/Formula/arterm.rb" <<EOF
 class Arterm < Formula
   desc "AI coding agent powered by Claude and ChatGPT"
-  homepage "https://github.com/1jehuang/jcode"
+  homepage "https://github.com/Arclude/Arterm-CLI"
   version "$VERSION_NUM"
   license "MIT"
 
@@ -112,7 +112,7 @@ pkgver=$VERSION_NUM
 pkgrel=1
 pkgdesc="AI coding agent powered by Claude and ChatGPT"
 arch=('x86_64')
-url="https://github.com/1jehuang/jcode"
+url="https://github.com/Arclude/Arterm-CLI"
 license=('MIT')
 provides=('arterm')
 conflicts=('arterm')
