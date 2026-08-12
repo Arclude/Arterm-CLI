@@ -645,7 +645,11 @@ pub const NOT_PORTED: &[(&str, &str)] = &[
         "tab",
         "no slash-command autocomplete yet (Ctrl+Tab switches sessions)",
     ),
-    ("ctrl+t", "no queue mode yet"),
+    // Named by the ACTION, not the bare chord: Ctrl+T *is* bound on desktop2
+    // (new session, the browser convention), so listing the chord itself put it
+    // in both tables at once. Same shape as the `ctrl+a as start-of-line` entry
+    // below -- the chord survived, the TUI's meaning of it did not.
+    ("ctrl+t as queue mode", "no queue mode yet"),
     ("ctrl+a as start-of-line", "web select-all wins; use Home"),
     ("ctrl+s", "no input stash yet"),
     ("ctrl+p", "no auto-poke yet"),

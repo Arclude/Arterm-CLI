@@ -115,6 +115,13 @@ mod tests {
 
     #[test]
     fn reload_flag_is_consumed_once() {
+        // `request()` raises SIGUSR2, and the flag is only set by the handler
+        // `install()` registers -- which until now only `main` ever called. In
+        // a test binary the signal therefore arrived with its DEFAULT
+        // disposition, which is to terminate the process: this one test killed
+        // the whole `arterm-desktop2` suite mid-run, so the harness printed no
+        // summary at all and the other 761 tests reported nothing.
+        install();
         request();
         assert!(requested());
         assert!(!requested());
