@@ -2124,6 +2124,37 @@ fn anthropic_model_quality_rank(model: &str) -> usize {
 /// "Claude Fable 5 is not available. Please use Opus 4.8." -> the catalog id
 /// `claude-opus-4-8`. Returns the best matching known catalog id, if any.
 /// `error_str` is expected to already be lowercased.
+/// Byte offset of the sentence boundary that ends a "please use X"
+/// recommendation.
+///
+/// A `.` between two digits is a version dot, not a sentence boundary. Cutting
+/// at the first `.` turned "please use opus 4.8" into the hint `opus 4`, whose
+/// tokens score identically against every `claude-opus-4-*` id -- so the winner
+/// was decided by `max_by_key` returning the LAST of the tied candidates, i.e.
+/// whichever the catalog happens to list last. Measured: a server telling us to
+/// use Opus 4.8 routed the fallback to Opus 4.5, silently downgrading on the one
+/// path whose whole job is to honor the server over our own ranking.
+fn recommendation_phrase_end(hint: &str) -> usize {
+    let mut chars = hint.char_indices().peekable();
+    let mut previous: Option<char> = None;
+    while let Some((index, ch)) = chars.next() {
+        let ends_here = match ch {
+            '!' | '\n' => true,
+            '.' => {
+                let next_is_digit = chars.peek().is_some_and(|(_, next)| next.is_ascii_digit());
+                let previous_is_digit = previous.is_some_and(|prev| prev.is_ascii_digit());
+                !(previous_is_digit && next_is_digit)
+            }
+            _ => false,
+        };
+        if ends_here {
+            return index;
+        }
+        previous = Some(ch);
+    }
+    hint.len()
+}
+
 fn anthropic_recommended_model_from_error(error_str: &str) -> Option<String> {
     // Look for the phrase after "please use" / "use " and try to match it against
     // the known catalog by collapsing it to a comparable token form. The server
@@ -2134,7 +2165,7 @@ fn anthropic_recommended_model_from_error(error_str: &str) -> Option<String> {
         .nth(1)
         .or_else(|| error_str.split("use ").nth(1))?;
     // Take up to the next sentence boundary.
-    let hint = hint.split(['.', '!', '\n']).next().unwrap_or(hint).trim();
+    let hint = hint[..recommendation_phrase_end(hint)].trim();
     if hint.is_empty() {
         return None;
     }
