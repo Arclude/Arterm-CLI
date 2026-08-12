@@ -96,6 +96,10 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
             .is_some_and(|state| state.kind == crate::tui::PickerKind::Model),
     });
     let mut needs_redraw = crate::tui::periodic_redraw_required(app);
+    // See the local tick: a character held as a possible terminal color reply is
+    // released once its burst has ended. The client mode needs this just as much
+    // — it is the mode a normal `arterm` launch ends up in.
+    needs_redraw |= super::input::release_held_terminal_reply(app);
     needs_redraw |= app.flush_pending_resize_redraw();
     app.maybe_capture_runtime_memory_heartbeat();
     app.maybe_release_idle_heap();

@@ -209,6 +209,11 @@ fn detect_terminal_theme() -> Option<ThemeMode> {
                     &terminal_identity(),
                 );
             }
+            // The query went out and nothing came back in time. The reply may
+            // still be in flight, and once the TUI owns the terminal it would be
+            // decoded as typing: `11;rgb:1c1c/1c1c/1c1c\` appearing in an empty
+            // composer at startup. Arm the filter that swallows it.
+            crate::tui::terminal_reply_filter::arm_for_late_color_reply();
             crate::logging::info(&format!(
                 "Terminal background detection unavailable ({e}); defaulting to dark theme"
             ));

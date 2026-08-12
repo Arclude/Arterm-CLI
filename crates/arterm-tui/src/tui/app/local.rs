@@ -70,6 +70,10 @@ pub(super) fn handle_tick(app: &mut App) -> bool {
     // no paint at all, which drops the animation to whatever unrelated events
     // happen to trigger (~4fps in practice).
     let mut needs_redraw = crate::tui::periodic_redraw_required(app);
+    // A character held back as a possible terminal color reply is released here
+    // once its burst has clearly ended, so real typing never waits on a second
+    // keystroke to appear.
+    needs_redraw |= super::input::release_held_terminal_reply(app);
     needs_redraw |= app.flush_pending_resize_redraw();
     app.maybe_capture_runtime_memory_heartbeat();
     app.maybe_release_idle_heap();

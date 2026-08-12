@@ -1068,6 +1068,28 @@ pub(super) fn insert_input_text(app: &mut App, text: &str) {
 }
 
 pub(super) fn handle_text_input(app: &mut App, text: &str) -> bool {
+    // A terminal answering the startup color query late arrives here as a burst
+    // of ordinary characters. Filter it out before it becomes a draft.
+    match crate::tui::terminal_reply_filter::filter_insert(text) {
+        Some(text) => handle_text_input_unfiltered(app, &text),
+        None => false,
+    }
+}
+
+/// Insert a character that was held back as a possible terminal color reply and
+/// has since proven to be ordinary typing.
+///
+/// Called from both idle ticks — local and remote — because the composer is fed
+/// through [`handle_text_input`] in either mode, and a character held in one
+/// loop must not wait for the other.
+pub(in crate::tui::app) fn release_held_terminal_reply(app: &mut App) -> bool {
+    match crate::tui::terminal_reply_filter::flush_stale() {
+        Some(released) => handle_text_input_unfiltered(app, &released),
+        None => false,
+    }
+}
+
+pub(super) fn handle_text_input_unfiltered(app: &mut App, text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
