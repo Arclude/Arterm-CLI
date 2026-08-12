@@ -1,7 +1,7 @@
 {
-  "version": "0.76.0",
+  "version": "9.1.0",
   "date": "2026-08-12",
-  "title": "Nothing phones home, and every login counts",
+  "title": "Arterm's own version line",
   "highlights": [
     "Telemetry, tool discovery and self-update are now off unless you turn them on",
     "Commands arterm runs are no longer handed your API keys",

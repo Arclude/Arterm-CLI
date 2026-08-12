@@ -1,6 +1,6 @@
 [package]
 name = "arterm"
-version = "0.75.0"
+version = "9.1.0"
 description = "Possibly the greatest coding agent ever built — blazing-fast TUI, multi-model, swarm coordination, 30+ tools"
 edition = "2024"
 autobins = false
