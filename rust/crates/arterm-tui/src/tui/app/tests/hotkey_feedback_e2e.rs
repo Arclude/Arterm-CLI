@@ -33,6 +33,11 @@ fn unknown_ctrl_chord_sets_hotkey_feedback_with_suggestion() {
 
 #[test]
 fn rare_known_hotkey_sets_feedback_and_repeats_stop_once_familiar() {
+    // "A fresh ARTERM_HOME" has to be MADE, not assumed: hotkey usage counts
+    // are persisted under it, so with any home that has run this suite before
+    // -- the workspace's `.cargo/config.toml` now names one -- Ctrl+T is
+    // already familiar and the note it asserts never appears.
+    with_temp_arterm_home(|| {
     let mut app = create_test_app();
 
     // Ctrl+T toggles queue mode; a fresh ARTERM_HOME has no usage history, so
@@ -58,6 +63,7 @@ fn rare_known_hotkey_sets_feedback_and_repeats_stop_once_familiar() {
         app.hotkey_feedback.is_none(),
         "familiar hotkeys should not re-announce"
     );
+    })
 }
 
 #[test]

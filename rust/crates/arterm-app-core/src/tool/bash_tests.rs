@@ -920,14 +920,14 @@ async fn bash_holds_a_risky_delete_until_justified_then_runs_it() {
     std::fs::create_dir_all(&target).expect("target");
     std::fs::write(target.join("f.txt"), "x").expect("file");
 
-    // The concrete outside-workspace directory is allowed by policy. Its glob
-    // keeps this test focused on the Confirm path for a statically unknown set
-    // of affected files.
-    let command = format!(
-        "rm -rf {}/* && rmdir {}",
-        target.display(),
-        target.display()
-    );
+    // The Confirm tier is about a blast radius that cannot be read off the
+    // command, so the target is computed at runtime. A glob does not work here:
+    // the fixture necessarily lives under the OS temp dir, and policy calls a
+    // glob bounded by a temp directory `Low` on purpose ("glob is bounded to
+    // the working or temporary directory"), so `rm -rf <tempdir>/*` runs
+    // immediately by design and the test measured the fixture's location rather
+    // than the gate.
+    let command = format!("OUTSIDE={}; rm -rf \"$OUTSIDE\"", target.display());
     let tool = BashTool::new();
 
     // First attempt: no justification, so it is held.

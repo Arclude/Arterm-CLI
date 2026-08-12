@@ -435,7 +435,16 @@ mod tests {
     #[tokio::test]
     async fn test_list_empty() {
         let tool = create_test_tool();
-        let ctx = create_test_context();
+        // "Empty" has to be a property of the context, not of wherever the
+        // process happens to be standing. With `working_dir: None` the project
+        // overlay resolves `.arterm/skills` against the process CWD, so this
+        // test passed under `cargo test` (CWD = the crate dir) and failed when
+        // the same binary was run from the workspace root, which has one.
+        let empty_dir = tempfile::tempdir().expect("temp working dir");
+        let ctx = ToolContext {
+            working_dir: Some(empty_dir.path().to_path_buf()),
+            ..create_test_context()
+        };
         let input = json!({"action": "list"});
 
         let result = tool.execute(input, ctx).await.unwrap();

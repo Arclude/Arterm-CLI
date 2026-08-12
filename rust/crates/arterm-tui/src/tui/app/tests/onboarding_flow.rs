@@ -1661,6 +1661,11 @@ fn starting_recent_project_review_queues_remote_turn_without_stuck_sending() {
 
 #[test]
 fn recent_project_review_falls_back_cleanly_when_no_repo_is_known() {
+    // "No repo is known" is a property of the HOME, not just of the working
+    // directory: the fallback also consults recent-project history, which is
+    // persisted. Against a home that has run this suite before, a repository
+    // from an earlier test is still on record and the fallback never fires.
+    with_temp_arterm_home(|| {
     let mut app = onboarding_test_app();
     app.is_remote = true;
     app.session.working_dir = dirs::home_dir().map(|path| path.to_string_lossy().into_owned());
@@ -1673,6 +1678,7 @@ fn recent_project_review_falls_back_cleanly_when_no_repo_is_known() {
     assert!(app.status_notice.as_ref().is_some_and(|(notice, _)| {
         notice.contains("No recent Git repository found")
     }));
+    })
 }
 
 /// Run `f` with the telemetry opt-in present in the environment.

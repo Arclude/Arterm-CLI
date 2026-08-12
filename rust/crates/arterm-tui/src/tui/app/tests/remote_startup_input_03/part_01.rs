@@ -954,6 +954,12 @@ fn test_save_and_restore_reload_state_preserves_queued_messages() {
 
 #[test]
 fn test_new_for_remote_restored_queued_messages_stay_queued_until_remote_idle() {
+    // Reload/catalog state lives under the arterm home, and sibling tests swap
+    // `ARTERM_HOME` while holding the test-env lock. Without a home of its own
+    // this test wrote one home and read another whenever it happened to run
+    // beside one of them -- a failure that appeared roughly once per parallel
+    // run and never twice on the same test.
+    with_temp_arterm_home(|| {
     let mut app = create_test_app();
     let session_id = format!("test-remote-queued-restore-{}", std::process::id());
 
@@ -972,6 +978,7 @@ fn test_new_for_remote_restored_queued_messages_stay_queued_until_remote_idle() 
     assert!(!restored.pending_queued_dispatch);
     assert!(!restored.is_processing);
     assert!(matches!(restored.status, ProcessingStatus::Idle));
+    })
 }
 
 #[test]
@@ -1113,6 +1120,12 @@ fn test_save_and_restore_reload_state_preserves_split_view_mode() {
 
 #[test]
 fn test_new_for_remote_restores_observe_mode_from_reload_state() {
+    // Reload/catalog state lives under the arterm home, and sibling tests swap
+    // `ARTERM_HOME` while holding the test-env lock. Without a home of its own
+    // this test wrote one home and read another whenever it happened to run
+    // beside one of them -- a failure that appeared roughly once per parallel
+    // run and never twice on the same test.
+    with_temp_arterm_home(|| {
     let mut app = create_test_app();
     let session_id = format!("test-remote-observe-{}", std::process::id());
 
@@ -1129,6 +1142,7 @@ fn test_new_for_remote_restores_observe_mode_from_reload_state() {
         .expect("observe page should be focused");
     assert_eq!(page.id, "observe");
     assert!(page.content.contains("Restored after reload."));
+    })
 }
 
 #[test]

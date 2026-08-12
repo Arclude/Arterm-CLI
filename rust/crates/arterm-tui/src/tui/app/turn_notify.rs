@@ -540,9 +540,13 @@ mod tests {
             subtitle: Some("2/3 todos".to_string()),
             body: "Finished parser".to_string(),
         };
+        // The title rides the wire base64-encoded, so the rebrand's text pass
+        // could not see it: this literal still decoded to `jcode · fox` long
+        // after every readable spelling had been renamed. `YXJ0ZXJtIMK3IGZveA==`
+        // is `arterm · fox`.
         assert_eq!(
             kitty_notification_sequence(&n, "session:fox/123"),
-            "\x1b]99;i=arterm-turn-sessionfox123:d=0:e=1:p=title;amNvZGUgwrcgZm94\x1b\\\x1b]99;i=arterm-turn-sessionfox123:d=1:e=1:p=body:a=focus;Mi8zIHRvZG9zCkZpbmlzaGVkIHBhcnNlcg==\x1b\\"
+            "\x1b]99;i=arterm-turn-sessionfox123:d=0:e=1:p=title;YXJ0ZXJtIMK3IGZveA==\x1b\\\x1b]99;i=arterm-turn-sessionfox123:d=1:e=1:p=body:a=focus;Mi8zIHRvZG9zCkZpbmlzaGVkIHBhcnNlcg==\x1b\\"
         );
     }
 

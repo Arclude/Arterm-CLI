@@ -451,7 +451,12 @@ async fn tool_descriptions_stay_under_token_cap() {
     // integration_tools keeps a deliberate second sentence explaining that catalog
     // entries integrate directly with the agent.
     // swarm appends the user-tunable swarm-prompt.md by design.
-    const EXEMPT: &[&str] = &["integration_tools", "swarm"];
+    // batch carries a worked JSON example because its input shape (a flat call
+    // object, not a nested `parameters` map) is not guessable from the schema,
+    // and `batch_tests::description_includes_parallel_tool_call_example`
+    // asserts that example is present -- so the exemption is the only reading
+    // under which both tests can be true at once.
+    const EXEMPT: &[&str] = &["integration_tools", "swarm", "batch"];
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
@@ -508,6 +513,27 @@ fn collect_param_descriptions(schema: &Value, path: &str, out: &mut Vec<(String,
 #[tokio::test]
 async fn tool_parameter_descriptions_stay_under_token_cap() {
     const PARAM_DESCRIPTION_TOKEN_CAP: usize = 25;
+    // The todo goal calibration rubric. These three fields ask the model to
+    // grade its own work, and the enum values they grade with
+    // (`representative` vs `acceptance_aligned`, `partial` vs `complete`) do
+    // not mean anything from their names alone -- `todo::tests` pins the
+    // relevance wording phrase by phrase for that reason. Trimming them to the
+    // cap would trade one failing test for another AND change what the
+    // completion gate measures, so the prompt cost is paid deliberately.
+    const EXEMPT_PARAMS: &[(&str, &str)] = &[
+        (
+            "todo",
+            "$.properties.goals.items.properties.feedback_loop_relevance",
+        ),
+        (
+            "todo",
+            "$.properties.goals.items.properties.feedback_loop_coverage",
+        ),
+        (
+            "todo",
+            "$.properties.goals.items.properties.feedback_loop_traceability",
+        ),
+    ];
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
@@ -516,6 +542,9 @@ async fn tool_parameter_descriptions_stay_under_token_cap() {
         let mut descriptions = Vec::new();
         collect_param_descriptions(&def.input_schema, "$", &mut descriptions);
         for (path, description) in descriptions {
+            if EXEMPT_PARAMS.contains(&(def.name.as_str(), path.as_str())) {
+                continue;
+            }
             let tokens = crate::util::estimate_tokens(&description);
             if tokens > PARAM_DESCRIPTION_TOKEN_CAP {
                 over_cap.push(format!(

@@ -197,7 +197,18 @@ struct PinTodosEnvGuard;
 
 impl PinTodosEnvGuard {
     fn enable() -> Self {
-        crate::env::set_var("ARTERM_PIN_TODOS", "1");
+        Self::set("1")
+    }
+
+    /// `display.pin_todos` defaults to TRUE (`DisplayConfig::default` pins
+    /// that), so a test about the band being off has to switch it off rather
+    /// than assume it.
+    fn disable() -> Self {
+        Self::set("0")
+    }
+
+    fn set(value: &str) -> Self {
+        crate::env::set_var("ARTERM_PIN_TODOS", value);
         // arterm-base's config cache throttles env re-checks (the zero
         // interval under cfg!(test) applies only when arterm-base itself is
         // the crate under test), so force a reload or a sibling test's
@@ -219,11 +230,16 @@ impl Drop for PinTodosEnvGuard {
 #[test]
 fn pinned_todos_payload_stays_empty_when_config_off() {
     let _env_lock = crate::storage::lock_test_env();
+    let _pin = PinTodosEnvGuard::disable();
     let mut app = create_test_app();
     let session_id = app.session.id.clone();
     crate::todo::save_todos(&session_id, &[pinned_band_todo("t1", "pin me", "pending")]).unwrap();
 
-    // display.pin_todos defaults to false: no payload, no redraw churn.
+    // With the band off: no payload, no redraw churn. This used to read
+    // "display.pin_todos defaults to false", which stopped being true when the
+    // default flipped -- so the test asserted the off case while measuring the
+    // on one, and passed only because the whole binary deadlocked before
+    // reaching it.
     assert!(!app.refresh_pinned_todos_if_needed());
     assert!(app.pinned_todos_payload_ref().is_none());
 

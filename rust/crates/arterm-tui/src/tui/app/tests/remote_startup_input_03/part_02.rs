@@ -1,5 +1,11 @@
 #[test]
 fn test_new_for_remote_restored_soft_interrupt_resend_triggers_dispatch_state() {
+    // Reload/catalog state lives under the arterm home, and sibling tests swap
+    // `ARTERM_HOME` while holding the test-env lock. Without a home of its own
+    // this test wrote one home and read another whenever it happened to run
+    // beside one of them -- a failure that appeared roughly once per parallel
+    // run and never twice on the same test.
+    with_temp_arterm_home(|| {
     let mut app = create_test_app();
     let session_id = format!("test-remote-soft-interrupt-dispatch-{}", std::process::id());
 
@@ -39,6 +45,7 @@ fn test_new_for_remote_restored_soft_interrupt_resend_triggers_dispatch_state() 
             .iter()
             .any(|message| message.role == "user" && message.content == "sent interrupt")
     );
+    })
 }
 
 #[test]

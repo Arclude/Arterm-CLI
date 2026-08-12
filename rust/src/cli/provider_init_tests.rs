@@ -215,7 +215,14 @@ fn test_init_provider_arterm_delegates_runtime_profile_to_wrapper() {
         .block_on(init_provider(&ProviderChoice::Arterm, None))
         .expect("init arterm provider");
 
-    assert_eq!(provider.name(), "Arterm Hosted Models");
+    // Read the identity from the constant rather than re-spelling it: this
+    // assertion was the last "Hosted Models" left in the tree after the runtime
+    // was renamed, and a second spelling does not fail loudly, it just stops
+    // matching. The constant's own docstring is the rule it must satisfy.
+    assert_eq!(
+        provider.name(),
+        crate::subscription_catalog::ARTERM_PROVIDER_DISPLAY_NAME
+    );
     assert!(crate::subscription_catalog::is_runtime_mode_enabled());
     assert_eq!(
         std::env::var("ARTERM_OPENROUTER_MODEL").ok().as_deref(),

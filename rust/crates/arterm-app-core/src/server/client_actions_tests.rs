@@ -238,6 +238,12 @@ async fn enabling_swarm_does_not_auto_elect_coordinator() {
 
     assert!(swarm_enabled);
     assert!(swarm_coordinators.read().await.is_empty());
+    // The swarm is scoped to the SESSION, not to its working directory. This
+    // used to assert the member's `working_dir`, which is the behavior
+    // `swarm_id_for_session` deliberately replaced -- a directory-derived id
+    // put every unrelated session opened in one repository into one swarm,
+    // sharing a plan. `ARTERM_SWARM_ID` is the remaining way to opt in to a
+    // shared one.
     assert_eq!(
         swarm_members
             .read()
@@ -245,7 +251,7 @@ async fn enabling_swarm_does_not_auto_elect_coordinator() {
             .get(session_id)
             .and_then(|member| member.swarm_id.clone())
             .as_deref(),
-        Some("/tmp/arterm-passive-swarm")
+        Some(format!("session:{session_id}").as_str())
     );
     assert_eq!(
         swarm_members

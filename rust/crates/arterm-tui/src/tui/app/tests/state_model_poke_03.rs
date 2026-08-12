@@ -1703,6 +1703,12 @@ fn test_local_model_picker_openrouter_bare_openai_route_uses_openai_catalog_pref
 
 #[test]
 fn test_agent_model_picker_openrouter_bare_openai_route_saves_openai_catalog_prefix() {
+    // Reload/catalog state lives under the arterm home, and sibling tests swap
+    // `ARTERM_HOME` while holding the test-env lock. Without a home of its own
+    // this test wrote one home and read another whenever it happened to run
+    // beside one of them -- a failure that appeared roughly once per parallel
+    // run and never twice on the same test.
+    with_temp_arterm_home(|| {
     let (mut app, _set_model_calls) = create_openrouter_spec_capture_test_app();
 
     app.open_agent_model_picker(crate::tui::AgentModelTarget::Swarm);
@@ -1733,6 +1739,7 @@ fn test_agent_model_picker_openrouter_bare_openai_route_saves_openai_catalog_pre
         "message should show normalized saved spec, got: {}",
         last.content
     );
+    })
 }
 
 #[test]

@@ -143,6 +143,10 @@ fn test_disconnected_key_handler_runs_effort_locally() {
 
 #[test]
 fn test_disconnected_key_handler_runs_model_picker_locally() {
+    // The picker is built from the model catalog cached under the arterm home,
+    // so which entry is "current" depends on what a previous run left there.
+    // Make the home, do not inherit it.
+    with_temp_arterm_home(|| {
     let mut app = create_test_app();
     configure_test_remote_models(&mut app);
     // OpenAI models are effort-expanded into one entry per reasoning effort,
@@ -163,6 +167,7 @@ fn test_disconnected_key_handler_runs_model_picker_locally() {
     let selected = &picker.entries[picker.selected];
     assert_eq!(selected.name, "gpt-5.3-codex (high)");
     assert!(selected.is_current, "current model should be preselected");
+    })
 }
 
 #[test]

@@ -7,6 +7,11 @@ async fn communicate_list_and_await_members_work_end_to_end() {
     let _runtime = EnvGuard::set("ARTERM_RUNTIME_DIR", runtime_dir.path());
     let _socket = EnvGuard::set("ARTERM_SOCKET", &socket_path);
     let _debug = EnvGuard::set("ARTERM_DEBUG_CONTROL", "1");
+    // Two independently-connected clients are NOT in one swarm by default:
+    // `swarm_id_for_session` gives each root session its own, so that unrelated
+    // sessions opened in one repository do not share a plan. `ARTERM_SWARM_ID`
+    // is the documented opt-in, and this test needs the peer to be a member.
+    let _swarm = EnvGuard::set("ARTERM_SWARM_ID", "test-swarm-list-await");
 
     let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
         delay: Duration::from_millis(300),
@@ -135,6 +140,11 @@ async fn communicate_await_members_background_returns_immediately_and_notifies()
     let _runtime = EnvGuard::set("ARTERM_RUNTIME_DIR", runtime_dir.path());
     let _socket = EnvGuard::set("ARTERM_SOCKET", &socket_path);
     let _debug = EnvGuard::set("ARTERM_DEBUG_CONTROL", "1");
+    // Two independently-connected clients are NOT in one swarm by default:
+    // `swarm_id_for_session` gives each root session its own, so that unrelated
+    // sessions opened in one repository do not share a plan. `ARTERM_SWARM_ID`
+    // is the documented opt-in, and this test needs the peer to be a member.
+    let _swarm = EnvGuard::set("ARTERM_SWARM_ID", "test-swarm-await-background");
 
     let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
         delay: Duration::from_millis(300),
@@ -293,6 +303,11 @@ async fn communicate_status_returns_busy_snapshot_for_running_member() {
     let _runtime = EnvGuard::set("ARTERM_RUNTIME_DIR", runtime_dir.path());
     let _socket = EnvGuard::set("ARTERM_SOCKET", &socket_path);
     let _debug = EnvGuard::set("ARTERM_DEBUG_CONTROL", "1");
+    // Two independently-connected clients are NOT in one swarm by default:
+    // `swarm_id_for_session` gives each root session its own, so that unrelated
+    // sessions opened in one repository do not share a plan. `ARTERM_SWARM_ID`
+    // is the documented opt-in, and this test needs the peer to be a member.
+    let _swarm = EnvGuard::set("ARTERM_SWARM_ID", "test-swarm-status-busy");
 
     let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
         delay: Duration::from_millis(300),
@@ -555,6 +570,11 @@ async fn communicate_message_routes_as_dm_while_broadcast_targets_swarm() {
     let _runtime = EnvGuard::set("ARTERM_RUNTIME_DIR", runtime_dir.path());
     let _socket = EnvGuard::set("ARTERM_SOCKET", &socket_path);
     let _debug = EnvGuard::set("ARTERM_DEBUG_CONTROL", "1");
+    // Two independently-connected clients are NOT in one swarm by default:
+    // `swarm_id_for_session` gives each root session its own, so that unrelated
+    // sessions opened in one repository do not share a plan. `ARTERM_SWARM_ID`
+    // is the documented opt-in, and this test needs the peer to be a member.
+    let _swarm = EnvGuard::set("ARTERM_SWARM_ID", "test-swarm-dm-broadcast");
 
     let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
         delay: Duration::from_millis(100),

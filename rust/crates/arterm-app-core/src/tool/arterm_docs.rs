@@ -50,7 +50,11 @@ impl Tool for ArtermDocsTool {
     }
 
     fn description(&self) -> &str {
-        "Search bundled, version-matched Arterm documentation. Use this first for questions about Arterm features, configuration, architecture, tools, or behavior."
+        // Kept under the 20-token description cap (see `tool::tests`): the
+        // second sentence enumerated what counts as an Arterm question, which
+        // the model can infer, and every tool description is billed on every
+        // request for the life of the session.
+        "Search the bundled Arterm docs. Use this first for questions about Arterm."
     }
 
     fn parameters_schema(&self) -> Value {
