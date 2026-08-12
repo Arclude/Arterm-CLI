@@ -65,12 +65,21 @@ jobs:
 
       # These must exist before the main package is published. npm selects only
       # the package matching the consumer's os/cpu from optionalDependencies.
+      # NODE_AUTH_TOKEN is what the .npmrc written by setup-node's
+      # `registry-url` reads. Nothing set it, so every publish here 401'd --
+      # and `id-token: write` does not substitute for it, because npm trusted
+      # publishing is configured per package and none of the @arclude packages
+      # exist yet. The scope has to be claimed on npm before the first run.
       - name: Publish platform runtime packages
         working-directory: ${{ github.workspace }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for package in sdk/npm/*; do
             npm publish "$package" --access public --provenance
           done
 
       - name: Publish with npm provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance

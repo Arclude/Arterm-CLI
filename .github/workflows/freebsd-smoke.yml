@@ -17,6 +17,11 @@ on:
         default: false
         type: boolean
   push:
+    # Branches only. A `push` trigger with a `paths` filter and no ref
+    # filter also matches TAG pushes, so cutting a release started a
+    # second FreeBSD VM build alongside the release job's own.
+    branches:
+      - '**'
     paths:
       - '.github/workflows/freebsd-smoke.yml'
   schedule:

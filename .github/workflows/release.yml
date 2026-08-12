@@ -86,14 +86,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
           submodules: recursive
           fetch-depth: 0
 
-      - name: Configure SSH for cargo git dependencies
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -355,12 +350,17 @@ jobs:
           $configured = -not ($requiredValues | Where-Object { [string]::IsNullOrWhiteSpace($_) })
           "enabled=$($configured.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-          $signingRequired = $env:WINDOWS_SIGNING_REQUIRED -ne 'false'
+          # Opt IN, not opt out. An unset repository variable renders as an
+          # empty string, and '' -ne 'false' is TRUE in PowerShell -- so the
+          # old default made signing mandatory on a repository that has never
+          # had an Azure signing profile, and the job threw before producing a
+          # single Windows asset. Requiring it is a deliberate act now.
+          $signingRequired = $env:WINDOWS_SIGNING_REQUIRED -eq 'true'
           if (-not $configured -and $signingRequired) {
-            throw 'Windows signing is required, but Azure Artifact Signing configuration is incomplete. See docs/WINDOWS.md.'
+            throw 'Windows signing is required (WINDOWS_SIGNING_REQUIRED=true), but Azure Artifact Signing configuration is incomplete. See docs/WINDOWS.md.'
           }
           if (-not $configured) {
-            Write-Warning 'Publishing unsigned Windows assets because WINDOWS_SIGNING_REQUIRED=false. This override is not suitable for an official Windows release.'
+            Write-Warning 'Publishing UNSIGNED Windows assets: no Azure Artifact Signing configuration. Set the repository variable WINDOWS_SIGNING_REQUIRED=true once the profile exists, to make this a hard failure.'
           }
 
       - name: Azure login with GitHub OIDC
@@ -510,8 +510,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      # Declaring any permission sets every scope not listed here to `none`.
+      # `issues` is needed by "Close issues included in the published
+      # release", which runs under `set -euo pipefail` and would 403.
       actions: write
       contents: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -523,15 +527,28 @@ jobs:
           path: artifacts
           pattern: arterm-*
 
-      - name: Validate complete platform asset set
+      - name: Validate required platform asset set
         shell: bash
         run: |
           set -euo pipefail
-          expected=(
+          # REQUIRED is what this release promises: the four tarballs
+          # `scripts/install.sh` resolves and the Homebrew formula points at.
+          # Everything else is reported, not required.
+          #
+          # All nine used to be mandatory, which is why nothing could ever
+          # publish: Windows needs an Azure signing profile this repository
+          # does not have and FreeBSD builds in a VM that fails independently,
+          # so one absent optional platform kept the whole release in draft
+          # forever -- no public assets, and `curl | bash` resolving an older
+          # tag. It also contradicted this job's own availability report below,
+          # which exists precisely to record a platform as unavailable.
+          required=(
             artifacts/arterm-linux-x86_64/arterm-linux-x86_64.tar.gz
             artifacts/arterm-linux-aarch64/arterm-linux-aarch64.tar.gz
             artifacts/arterm-macos-aarch64/arterm-macos-aarch64.tar.gz
             artifacts/arterm-macos-x86_64/arterm-macos-x86_64.tar.gz
+          )
+          optional=(
             artifacts/arterm-windows-x86_64/arterm-windows-x86_64.exe
             artifacts/arterm-windows-x86_64/arterm-windows-x86_64.tar.gz
             artifacts/arterm-windows-aarch64/arterm-windows-aarch64.exe
@@ -540,16 +557,22 @@ jobs:
           )
 
           missing=()
-          for asset in "${expected[@]}"; do
+          for asset in "${required[@]}"; do
             if [ ! -f "$asset" ]; then
               missing+=("$asset")
             fi
           done
           if [ "${#missing[@]}" -ne 0 ]; then
-            printf 'Missing required release asset: %s\n' "${missing[@]}" >&2
-            echo "Keeping the release as a draft until every platform succeeds" >&2
+            printf 'Missing REQUIRED release asset: %s\n' "${missing[@]}" >&2
+            echo "Keeping the release as a draft: Linux and macOS must both ship" >&2
             exit 1
           fi
+
+          for asset in "${optional[@]}"; do
+            if [ ! -f "$asset" ]; then
+              echo "note: optional asset not built for this release: $asset"
+            fi
+          done
 
       # Build jobs normally attach their own assets to the draft. Upload them
       # again here so a late per-platform upload failure cannot leave a built
@@ -844,7 +867,7 @@ jobs:
           git remote set-url origin ssh://aur@aur.archlinux.org/arterm-bin.git
 
           cat > PKGBUILD << 'PKGBUILD_END'
-          # Maintainer: Jeremy Huang <jeremyhuang55555@gmail.com>
+          # Maintainer: Arclude <info@arclude.com>
           pkgname=arterm-bin
           pkgver=VERSION_PLACEHOLDER
           pkgrel=1
@@ -890,8 +913,11 @@ jobs:
           printf '\tsha256sums = %s\n' "${LINUX_SHA}" >> .SRCINFO
           printf '\npkgname = arterm-bin\n' >> .SRCINFO
 
-          git config user.name "Jeremy Huang"
-          git config user.email "jeremyhuang55555@gmail.com"
+          # Commits pushed to the AUR carry an identity. It was the upstream
+          # author's, so every release this project published would have been
+          # attributed to a person who had nothing to do with it.
+          git config user.name "Arclude"
+          git config user.email "info@arclude.com"
           git add PKGBUILD .SRCINFO
           git commit -m "Update to ${VERSION}" || echo "No changes"
           retry 3 5 git push origin master
@@ -914,5 +940,9 @@ jobs:
       - name: Report Discord announcement queue failure
         if: always() && steps.discord_announcement.outcome == 'failure'
         run: |
-          echo "The release was published, but its Discord announcement could not be queued." >&2
-          exit 1
+          # A warning, not a failure. The release is already public by
+          # this point, so failing here marks a successful release red
+          # and tells nobody anything actionable -- and it fires by
+          # default, since the dispatch targets the default branch and
+          # the announcement workflow may not be there yet.
+          echo "::warning::The release was published, but its Discord announcement could not be queued."

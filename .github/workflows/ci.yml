@@ -22,13 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
           submodules: recursive
 
-      - name: Configure SSH for cargo git dependencies
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -68,7 +63,17 @@ jobs:
         # commit passes 8 of 9 CI jobs and fails Windows at "Build release
         # binary", skipping all of its validation steps. This catches it in
         # seconds, on the job that already owns dependency hygiene.
-        run: cargo metadata --locked --format-version 1 > /dev/null
+        #
+        # `--locked` alone could not do that. It is satisfied by a lockfile
+        # sitting in the working directory, and an earlier step in this job
+        # (`cargo check --all-targets`) regenerates one -- so this step passed
+        # on the commit that removed Cargo.lock from the repository entirely,
+        # while the release's `cargo build --locked` in a fresh FreeBSD VM
+        # would have failed outright. Assert it is TRACKED first.
+        run: |
+          set -euo pipefail
+          git ls-files --error-unmatch Cargo.lock > /dev/null
+          cargo metadata --locked --format-version 1 > /dev/null
 
       - name: Enforce warning budget
         shell: bash
@@ -171,13 +176,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
           submodules: recursive
 
-      - name: Configure SSH for cargo git dependencies
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -409,13 +409,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
           submodules: recursive
 
-      - name: Configure SSH for cargo git dependencies
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -662,13 +657,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
           submodules: recursive
 
-      - name: Configure SSH for cargo git dependencies
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
