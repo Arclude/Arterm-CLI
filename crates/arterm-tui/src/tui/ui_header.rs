@@ -907,8 +907,21 @@ fn build_header_lines_with_auth(
     }
 
     if let Some(dir) = app.working_dir() {
-        let display_dir = abbreviate_home(&dir);
-        let mut text = display_dir;
+        // A deep path is the one header line that can outgrow its column: it
+        // wrapped onto a second row on a narrow terminal, and in centered mode
+        // it was the widest line, so it decided the block's padding and pinned
+        // the whole header to the left edge. Fall back to the elided label
+        // (`…/b/c`) used elsewhere when space is tight, then hard-truncate if
+        // even that does not fit.
+        let mut text = abbreviate_home(&dir);
+        if text.chars().count() > w
+            && let Some(short) = crate::tui::session_facts::dir_label_short(&dir)
+        {
+            text = short;
+        }
+        if text.chars().count() > w {
+            text = format!("…{}", tail_chars(&text, w.saturating_sub(1)));
+        }
         if let Some(branch) = app.git_branch() {
             let with_branch = format!("{} ({})", text, branch);
             if with_branch.chars().count() <= w {
@@ -918,6 +931,13 @@ fn build_header_lines_with_auth(
         lines.push(
             Line::from(Span::styled(text, Style::default().fg(dim_color()))).alignment(align),
         );
+    }
+
+    /// The last `max` characters of `text`, so a truncated path keeps the part
+    /// that identifies it.
+    fn tail_chars(text: &str, max: usize) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        chars[chars.len().saturating_sub(max)..].iter().collect()
     }
 
     // "Where we left off here" belongs to the header rather than to the empty

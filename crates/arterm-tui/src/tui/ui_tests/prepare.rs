@@ -1434,3 +1434,81 @@ fn centered_mode_centers_the_header_block_too() {
         "centered mode must pad the header like the transcript (indent={centered})"
     );
 }
+
+/// Centered mode has to survive a small window. The first version capped the
+/// header at a flat 96 columns, which centers on a wide terminal and collapses
+/// to the left edge on a narrow one -- centered mode that un-centers as the
+/// window shrinks.
+#[test]
+fn the_centered_header_keeps_a_margin_at_every_width() {
+    fn indent(width: u16) -> usize {
+        let state = TestState {
+            centered_mode: true,
+            working_dir: Some("/home/toygar/Belgeler/Arterm-CLI".to_string()),
+            ..Default::default()
+        };
+        prepare::prepare_messages(&state, width, 40)
+            .materialize_all_lines()
+            .iter()
+            .map(extract_line_text)
+            .find(|line| line.contains("Arterm-CLI"))
+            .map(|line| line.len() - line.trim_start().len())
+            .expect("the header should name the working directory")
+    }
+
+    for width in [80u16, 100, 120, 160, 200] {
+        let pad = indent(width);
+        assert!(
+            pad > 0,
+            "a {width}-column terminal should still center the header (indent={pad})"
+        );
+        assert!(
+            pad < width as usize / 2,
+            "the header must not be pushed past the middle (width={width}, indent={pad})"
+        );
+    }
+}
+
+/// A deep working directory is the one header line that could outgrow its
+/// column: it wrapped onto a second row on a narrow terminal, and in centered
+/// mode it was the widest line, so it set the padding for the whole block and
+/// pinned the header to the left edge.
+#[test]
+fn a_long_working_directory_is_elided_rather_than_wrapped() {
+    fn header_rows(dir: &str, width: u16) -> Vec<String> {
+        let state = TestState {
+            working_dir: Some(dir.to_string()),
+            ..Default::default()
+        };
+        prepare::prepare_messages(&state, width, 40)
+            .materialize_all_lines()
+            .iter()
+            .map(extract_line_text)
+            .collect()
+    }
+
+    let long = "/tmp/claude-1000/-home-toygar-Belgeler-Arterm-CLI/5576df05-5f17-44e4-87ee-fadce3934d45/scratchpad";
+    let short = "/tmp/work";
+    let width = 80;
+
+    let long_rows = header_rows(long, width);
+    let short_rows = header_rows(short, width);
+
+    assert!(
+        long_rows.iter().all(|line| line.chars().count() <= width as usize),
+        "no header line may exceed the terminal width"
+    );
+    assert!(
+        !long_rows.iter().any(|line| line.contains(long)),
+        "the full path should not be printed at this width"
+    );
+    assert!(
+        long_rows.iter().any(|line| line.contains("scratchpad")),
+        "the elided label must keep the part that identifies the directory: {long_rows:?}"
+    );
+    assert_eq!(
+        long_rows.iter().filter(|l| !l.trim().is_empty()).count(),
+        short_rows.iter().filter(|l| !l.trim().is_empty()).count(),
+        "a long path must not cost an extra wrapped row"
+    );
+}

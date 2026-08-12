@@ -645,6 +645,21 @@ fn prepare_active_batch_progress(
     wrap_lines_with_map(lines, &[], &[], &[], &[], &[], width, &[], &[], &[])
 }
 
+/// The column a centered header is built and centered in.
+///
+/// `None` of this applies when centering is off: the header uses the whole
+/// terminal, as it always has.
+fn centered_header_width(width: u16, centered: bool) -> u16 {
+    if !centered {
+        return width;
+    }
+    // Four fifths leaves a tenth of the screen on each side, which is enough to
+    // read as centered at 80 columns and still generous at 200; the absolute
+    // cap keeps a very wide terminal from stretching the header into a banner.
+    let proportional = (width as u32 * 4 / 5) as u16;
+    proportional.min(96).max(40).min(width)
+}
+
 /// Hash of the startup screen's notes, for the prepared-frame cache key.
 ///
 /// Cheap because it is computed per frame and the notes are at most a handful
@@ -1107,7 +1122,21 @@ fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
 
 fn prepare_header_cached(app: &dyn TuiState, width: u16) -> Arc<PreparedMessages> {
     let build = || {
-        let (mut all_header_lines, secondary_lines) = header::build_header_sections(app, width);
+        // Build to a column, not to the terminal. Centering pads by half of
+        // whatever a block leaves over, so a header built full-width has
+        // nothing left to pad with: its `skills:` line fills the screen and the
+        // block does not move.
+        //
+        // The cap is proportional as well as absolute. A flat 96 centers on a
+        // wide terminal and collapses back to the left edge on a 100-column
+        // one, which is what a narrow window looked like: centered mode that
+        // un-centers as the window shrinks. Keeping a margin on both sides at
+        // every size costs some truncation on the widest line (the skills list
+        // already ends in "+N more") and buys a header that stays where the
+        // rest of the screen is.
+        let header_width = centered_header_width(width, app.centered_mode());
+        let (mut all_header_lines, secondary_lines) =
+            header::build_header_sections(app, header_width);
         all_header_lines.extend(secondary_lines);
         // Centered mode centers the transcript as a block, by padding every
         // line by the same amount. The header is built left-aligned and has to
