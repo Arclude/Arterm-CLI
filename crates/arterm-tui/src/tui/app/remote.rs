@@ -174,6 +174,10 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
         if let Some(target_session) = app.workspace_client.take_pending_resume_session() {
             match remote.resume_session(&target_session).await {
                 Ok(()) => {
+                    // A switch is not a startup, so nothing else reads a
+                    // submission staged for this session. The manager's
+                    // composer stages exactly that.
+                    app.adopt_staged_submission(&target_session);
                     let label = crate::id::extract_session_name(&target_session)
                         .map(|name| name.to_string())
                         .unwrap_or(target_session);

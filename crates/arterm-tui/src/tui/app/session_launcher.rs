@@ -45,6 +45,23 @@ impl App {
         }]);
     }
 
+    /// Adopt a submission staged for a session this client just switched to.
+    ///
+    /// Staging is read at client startup, and an in-place switch never goes
+    /// through startup: it asks the server to re-attach this same client
+    /// (`RemoteConnection::resume_session`). Without this step the task written
+    /// by the manager's composer sat unread on disk while the user watched an
+    /// empty session -- the session existed, the prompt did not.
+    pub(in crate::tui) fn adopt_staged_submission(&mut self, session_id: &str) {
+        let Some(restored) = Self::restore_input_for_reload(session_id) else {
+            return;
+        };
+        crate::logging::info(&format!(
+            "Adopted a staged submission for {session_id} after switching in place"
+        ));
+        self.apply_restored_reload_input(restored);
+    }
+
     /// The disk side: an empty session that inherits where and how this one
     /// runs, with the task staged as its first submission.
     fn create_session_for_task(&self, task: &str) -> anyhow::Result<String> {

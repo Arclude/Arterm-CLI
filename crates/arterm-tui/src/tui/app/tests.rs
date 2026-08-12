@@ -36,6 +36,7 @@ include!("tests/scroll_copy_02/part_02.rs");
 include!("tests/scroll_copy_03.rs");
 include!("tests/input_copy_selection.rs");
 include!("tests/terminal_color_reply_filter.rs");
+include!("tests/session_launcher.rs");
 include!("tests/onboarding_flow.rs");
 include!("tests/onboarding_golden.rs");
 include!("tests/onboarding_eval.rs");
