@@ -241,6 +241,28 @@ pub fn display_settings() -> &'static [Setting] {
             },
         },
         Setting {
+            key: "active_sessions_manager",
+            help: "Left arrow on an empty prompt opens the live sessions manager.",
+            values: BOOL,
+            read: |c| bool_str(c.display.active_sessions_manager),
+            write: |c, v| {
+                parse_bool(v)
+                    .map(|b| c.display.active_sessions_manager = b)
+                    .is_some()
+            },
+        },
+        Setting {
+            key: "external_sessions",
+            help: "List transcripts from other agent CLIs in the session picker.",
+            values: BOOL,
+            read: |c| bool_str(c.display.external_sessions),
+            write: |c, v| {
+                parse_bool(v)
+                    .map(|b| c.display.external_sessions = b)
+                    .is_some()
+            },
+        },
+        Setting {
             key: "recent_notes",
             help: "How many \"where we left off\" lines the startup screen shows.",
             values: COUNT_0_5,
