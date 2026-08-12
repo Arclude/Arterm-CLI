@@ -1439,6 +1439,15 @@ pub fn last_layout_snapshot() -> Option<LayoutSnapshot> {
 /// lock, which serialized nothing between them and produced failures that
 /// appeared only under parallelism (same root cause as issue #593). Both now
 /// delegate here.
+///
+/// **A test that holds both this lock and `storage::lock_test_env()` must take
+/// the ENV lock first.** `create_test_app()` acquires this one implicitly (via
+/// `clear_test_render_state_for_tests`) and is routinely called inside a
+/// `with_temp_arterm_home` closure, so env-then-render is the order the suite
+/// already has in dozens of places. Two tests took them the other way round,
+/// and the resulting cycle hung the entire `arterm-tui` binary: every thread
+/// parked in `futex_wait` at 0% CPU with no failing test to point at, and only
+/// under the full run, since a targeted run never has both in flight.
 #[cfg(test)]
 pub(crate) fn render_state_test_lock() -> RenderStateTestGuard {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
