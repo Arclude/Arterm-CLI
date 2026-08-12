@@ -1,5 +1,8 @@
 /target
-Cargo.lock
+# Cargo.lock IS committed: this workspace ships a binary, and the release
+# builds with `--locked`. It was ignored here (upstream's rule for a library)
+# and the flatten silently dropped it from tracking, which would have failed
+# the FreeBSD release job at `cargo build --locked`.
 __pycache__/
 ios_simulator_screenshot.png
 /.wrangler/
