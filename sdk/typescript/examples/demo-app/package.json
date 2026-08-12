@@ -7,7 +7,7 @@
     "start": "node index.mjs"
   },
   "dependencies": {
-    "@1jehuang/arterm-sdk": "^1.0.0"
+    "@arclude/arterm-sdk": "^1.0.0"
   },
   "engines": {
     "node": ">=20"

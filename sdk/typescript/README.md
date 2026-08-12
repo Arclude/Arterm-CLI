@@ -1,4 +1,4 @@
-# @1jehuang/arterm-sdk
+# @arclude/arterm-sdk
 
 TypeScript SDK for the **arterm harness API** (protocol v1) — the stable,
 versioned boundary between the arterm agent runtime and any client.
@@ -13,7 +13,7 @@ Full documentation: **[arterm.sh/sdk](https://arterm.sh/sdk)**
 ## Install
 
 ```bash
-npm install @1jehuang/arterm-sdk
+npm install @arclude/arterm-sdk
 ```
 
 From a source checkout:
@@ -92,10 +92,10 @@ Swap `launch` for `connect` to drive the user's own arterm instead of a private
 instance; everything after that line is identical.
 
 A complete runnable application is available in
-[`examples/demo-app`](https://github.com/1jehuang/jcode/tree/master/sdk/typescript/examples/demo-app).
+[`examples/demo-app`](https://github.com/Arclude/Arterm-CLI/tree/master/sdk/typescript/examples/demo-app).
 
 ```ts
-import { ArtermClient } from "@1jehuang/arterm-sdk";
+import { ArtermClient } from "@arclude/arterm-sdk";
 
 const client = await ArtermClient.launch({ workingDir: process.cwd() });
 
@@ -342,7 +342,7 @@ JavaScript errors (for example, an OS filesystem error) can still surface from
 the platform.
 
 ```ts
-import { HarnessError, StructuredOutputError } from "@1jehuang/arterm-sdk";
+import { HarnessError, StructuredOutputError } from "@arclude/arterm-sdk";
 
 try {
   await client.run(sessionId, prompt);

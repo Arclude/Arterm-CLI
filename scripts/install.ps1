@@ -48,7 +48,7 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     exit 1
 }
 
-$Repo = "1jehuang/arterm"
+$Repo = "Arclude/Arterm-CLI"
 $ReleaseMetadataBase = if ($env:ARTERM_RELEASE_METADATA_BASE) {
     $env:ARTERM_RELEASE_METADATA_BASE.TrimEnd('/')
 } else {

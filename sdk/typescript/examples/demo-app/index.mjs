@@ -1,4 +1,4 @@
-import { ArtermClient } from "@1jehuang/arterm-sdk";
+import { ArtermClient } from "@arclude/arterm-sdk";
 
 const prompt = process.argv.slice(2).join(" ") || "Describe this directory in one sentence.";
 

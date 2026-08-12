@@ -7,7 +7,7 @@
     By default user data under %USERPROFILE%\.arterm is kept.
 
     One-liner uninstall:
-      irm https://raw.githubusercontent.com/1jehuang/arterm/master/scripts/uninstall.ps1 | iex
+      irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/master/scripts/uninstall.ps1 | iex
 .PARAMETER InstallDir
     Override the launcher directory (default: $env:LOCALAPPDATA\arterm\bin)
 .PARAMETER Purge

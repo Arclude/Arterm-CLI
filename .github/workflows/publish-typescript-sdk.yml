@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish @1jehuang/arterm-sdk
+    name: Publish @arclude/arterm-sdk
     runs-on: ubuntu-latest
     permissions:
       contents: read

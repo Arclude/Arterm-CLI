@@ -1,5 +1,5 @@
 {
-  "name": "@1jehuang/arterm-sdk",
+  "name": "@arclude/arterm-sdk",
   "version": "1.2.0",
   "description": "TypeScript SDK for the arterm harness API (protocol v1)",
   "license": "MIT",
@@ -42,12 +42,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/1jehuang/jcode.git",
+    "url": "git+https://github.com/Arclude/Arterm-CLI.git",
     "directory": "sdk/typescript"
   },
-  "homepage": "https://github.com/1jehuang/jcode/tree/main/sdk/typescript#readme",
+  "homepage": "https://github.com/Arclude/Arterm-CLI/tree/main/sdk/typescript#readme",
   "bugs": {
-    "url": "https://github.com/1jehuang/jcode/issues"
+    "url": "https://github.com/Arclude/Arterm-CLI/issues"
   },
   "author": "Jeremy Huang",
   "sideEffects": false,
@@ -58,11 +58,11 @@
     "ajv": "^8.20.0"
   },
   "optionalDependencies": {
-    "@1jehuang/arterm-darwin-arm64": "1.2.0",
-    "@1jehuang/arterm-darwin-x64": "1.2.0",
-    "@1jehuang/arterm-linux-arm64": "1.2.0",
-    "@1jehuang/arterm-linux-x64": "1.2.0",
-    "@1jehuang/arterm-win32-arm64": "1.2.0",
-    "@1jehuang/arterm-win32-x64": "1.2.0"
+    "@arclude/arterm-darwin-arm64": "1.2.0",
+    "@arclude/arterm-darwin-x64": "1.2.0",
+    "@arclude/arterm-linux-arm64": "1.2.0",
+    "@arclude/arterm-linux-x64": "1.2.0",
+    "@arclude/arterm-win32-arm64": "1.2.0",
+    "@arclude/arterm-win32-x64": "1.2.0"
   }
 }

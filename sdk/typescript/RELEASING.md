@@ -1,4 +1,4 @@
-# Releasing `@1jehuang/arterm-sdk`
+# Releasing `@arclude/arterm-sdk`
 
 Everything except the two decisions only you can make is automated and checked
 in CI. This document exists so the release is a short command list rather than
@@ -6,7 +6,7 @@ a research exercise.
 
 ## Package ownership
 
-The package is published as `@1jehuang/arterm-sdk`. The `1jehuang` user scope is owned
+The package is published as `@arclude/arterm-sdk`. The `1jehuang` user scope is owned
 by the maintainer account and does not require an npm organization. The shorter
 `@arterm` scope belongs to someone else and must not be used in package metadata
 or documentation.
@@ -40,9 +40,9 @@ confirm with `npm pack --dry-run`.
 ```bash
 cd "$(mktemp -d)"
 npm init -y >/dev/null
-npm install @1jehuang/arterm-sdk
+npm install @arclude/arterm-sdk
 node --input-type=module -e '
-  import { ArtermClient } from "@1jehuang/arterm-sdk";
+  import { ArtermClient } from "@arclude/arterm-sdk";
   const client = await ArtermClient.launch({ workingDir: process.cwd() });
   const session = await client.createSession();
   console.log((await client.run(session.session_id, "say hello")).text);

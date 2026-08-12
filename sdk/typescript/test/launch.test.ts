@@ -7,9 +7,9 @@ import { inheritCredentials, userArtermHome } from "../dist/index.js";
 
 test("platform runtime packages map to npm platform conventions", async () => {
   const { platformBinaryPackage } = await import("../dist/index.js");
-  assert.equal(platformBinaryPackage("linux", "x64"), "@1jehuang/arterm-linux-x64");
-  assert.equal(platformBinaryPackage("darwin", "arm64"), "@1jehuang/arterm-darwin-arm64");
-  assert.equal(platformBinaryPackage("win32", "x64"), "@1jehuang/arterm-win32-x64");
+  assert.equal(platformBinaryPackage("linux", "x64"), "@arclude/arterm-linux-x64");
+  assert.equal(platformBinaryPackage("darwin", "arm64"), "@arclude/arterm-darwin-arm64");
+  assert.equal(platformBinaryPackage("win32", "x64"), "@arclude/arterm-win32-x64");
   assert.equal(platformBinaryPackage("freebsd", "x64"), undefined);
 });
 

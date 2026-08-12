@@ -532,7 +532,7 @@ pub(crate) enum Command {
 
     /// Serve the stable harness API on a Unix socket, for SDK clients.
     ///
-    /// This is the endpoint the TypeScript SDK (`@1jehuang/arterm-sdk`) connects to. It
+    /// This is the endpoint the TypeScript SDK (`@arclude/arterm-sdk`) connects to. It
     /// ships in the released binary on purpose: the API is only "generally
     /// available" if reaching it does not require a Rust toolchain and a
     /// source checkout.

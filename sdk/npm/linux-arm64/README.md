@@ -1,3 +1,3 @@
-# @1jehuang/arterm-linux-arm64
+# @arclude/arterm-linux-arm64
 
-Platform runtime used by `@1jehuang/arterm-sdk`. Install the SDK rather than this package directly.
+Platform runtime used by `@arclude/arterm-sdk`. Install the SDK rather than this package directly.

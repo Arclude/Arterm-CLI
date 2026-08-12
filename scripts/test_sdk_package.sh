@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the *published* @1jehuang/arterm-sdk tarball, not just its source.
+# Verify the *published* @arclude/arterm-sdk tarball, not just its source.
 #
 # `npm run check` compiles src/ and runs tests against it. A consumer never
 # sees src/: they see whatever `files`, `exports`, `main`, and `types` let out
@@ -53,7 +53,7 @@ fi
 
 echo "== ESM import =="
 node --input-type=module -e '
-import { ArtermClient, HarnessError, API_VERSION_MAJOR } from "@1jehuang/arterm-sdk";
+import { ArtermClient, HarnessError, API_VERSION_MAJOR } from "@arclude/arterm-sdk";
 if (typeof ArtermClient !== "function") throw new Error("ArtermClient missing");
 if (typeof HarnessError !== "function") throw new Error("HarnessError missing");
 if (API_VERSION_MAJOR !== 1) throw new Error("unexpected protocol version");
@@ -63,9 +63,9 @@ console.log("esm ok");
 if [ -n "$runtime_tarball" ]; then
   echo "== bundled runtime resolution =="
   node --input-type=module -e '
-  import { bundledArtermBinary } from "@1jehuang/arterm-sdk";
+  import { bundledArtermBinary } from "@arclude/arterm-sdk";
   const binary = bundledArtermBinary();
-  if (!binary || !binary.includes("@1jehuang/arterm-linux-")) {
+  if (!binary || !binary.includes("@arclude/arterm-linux-")) {
     throw new Error(`platform runtime was not resolved: ${binary}`);
   }
   console.log(`runtime ok: ${binary}`);
@@ -74,7 +74,7 @@ fi
 
 echo "== CJS require =="
 node --input-type=commonjs -e '
-const sdk = require("@1jehuang/arterm-sdk");
+const sdk = require("@arclude/arterm-sdk");
 if (typeof sdk.ArtermClient !== "function") throw new Error("ArtermClient missing under require");
 console.log("cjs ok");
 '
@@ -95,7 +95,7 @@ cat > tsconfig.json <<'JSON'
 }
 JSON
 cat > consumer.ts <<'TS'
-import { ArtermClient, HarnessError, type TurnResult, type ApiEvent } from "@1jehuang/arterm-sdk";
+import { ArtermClient, HarnessError, type TurnResult, type ApiEvent } from "@arclude/arterm-sdk";
 
 export async function demo(prompt: string): Promise<TurnResult> {
   const client = await ArtermClient.connect({ clientName: "package-test/1.0" });
@@ -121,7 +121,7 @@ TS
 # and every field came back `unknown`. That compiles fine inside the repo and
 # only bites consumers, so assert it from a consumer.
 cat > narrowing.ts <<'TS'
-import { isKnownEvent, type AnyApiEvent, type ApiEvent } from "@1jehuang/arterm-sdk";
+import { isKnownEvent, type AnyApiEvent, type ApiEvent } from "@arclude/arterm-sdk";
 
 export function summarize(event: ApiEvent): string {
   switch (event.ev) {
@@ -155,7 +155,7 @@ echo "types ok"
 if command -v arterm >/dev/null 2>&1; then
   echo "== launching a private instance as a consumer would =="
   cat > launch-consumer.mjs <<'JS'
-import { ArtermClient } from "@1jehuang/arterm-sdk";
+import { ArtermClient } from "@arclude/arterm-sdk";
 import fs from "node:fs";
 
 // No `binary` option: use the platform npm package, exactly like a consumer.

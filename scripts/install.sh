@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="1jehuang/arterm"
+REPO="Arclude/Arterm-CLI"
 RELEASE_METADATA_BASE="${ARTERM_RELEASE_METADATA_BASE:-https://arterm.sh/releases}"
 IS_WINDOWS=false
 IS_TERMUX=false

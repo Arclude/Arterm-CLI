@@ -4,7 +4,7 @@
 
 This tree is a fork of **jcode**.
 
-- Source: https://github.com/1jehuang/jcode
+- Source: https://github.com/Arclude/Arterm-CLI
 - Version forked: 0.75.0
 - Copyright (c) 2025 Jeremy Huang
 - License: MIT — see [LICENSE](./LICENSE)

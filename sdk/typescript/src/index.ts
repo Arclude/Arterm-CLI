@@ -2,7 +2,7 @@
  * TypeScript SDK for the arterm harness API.
  *
  * ```ts
- * import { ArtermClient } from "@1jehuang/arterm-sdk";
+ * import { ArtermClient } from "@arclude/arterm-sdk";
  * const client = await ArtermClient.connect({ clientName: "my-app/1.0" });
  * const session = await client.createSession(process.cwd());
  * const turn = await client.run(session.session_id, "hello");
