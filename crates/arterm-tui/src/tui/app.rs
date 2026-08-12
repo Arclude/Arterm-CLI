@@ -89,6 +89,7 @@ mod remote;
 mod remote_notifications;
 mod replay;
 pub(crate) mod run_shell;
+mod settings_overlay;
 mod startup_notes;
 mod runtime_memory;
 mod shortcut_hints;
@@ -1622,6 +1623,8 @@ pub struct App {
     model_status_content: String,
     /// Session picker overlay (None = not visible)
     session_picker_overlay: Option<RefCell<super::session_picker::SessionPicker>>,
+    /// `/config` display-settings overlay (None = not visible).
+    pub(crate) settings_overlay: Option<super::settings_overlay::SettingsOverlay>,
     session_picker_mode: SessionPickerMode,
     pending_session_picker_load: Option<PendingSessionPickerLoad>,
     /// "Where we left off" lines for the startup screen, and the read that

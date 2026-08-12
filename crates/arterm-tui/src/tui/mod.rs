@@ -44,6 +44,8 @@ mod remote_diff;
 pub mod screenshot;
 pub(crate) mod session_facts;
 pub mod session_picker;
+pub mod settings_catalog;
+pub mod settings_overlay;
 pub mod startup_notes;
 mod stream_buffer;
 pub mod terminal_reply_filter;
@@ -632,6 +634,10 @@ pub trait TuiState {
     /// a directory with no history.
     fn startup_notes(&self) -> &[startup_notes::StartupNote] {
         &[]
+    }
+    /// The `/config` display-settings overlay, when it is open.
+    fn settings_overlay(&self) -> Option<&settings_overlay::SettingsOverlay> {
+        None
     }
     /// Whether anyone has said anything yet in this session.
     ///

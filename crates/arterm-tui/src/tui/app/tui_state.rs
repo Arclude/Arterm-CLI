@@ -1975,6 +1975,10 @@ impl crate::tui::TuiState for App {
         &self.startup_notes
     }
 
+    fn settings_overlay(&self) -> Option<&crate::tui::settings_overlay::SettingsOverlay> {
+        self.settings_overlay.as_ref()
+    }
+
     fn conversation_started(&self) -> bool {
         App::conversation_started(self)
     }

@@ -3451,7 +3451,15 @@ pub(super) fn handle_config_command(app: &mut App, trimmed: &str) -> bool {
         return true;
     }
 
+    // `/config` on its own opens the interactive display settings; the text
+    // dump it used to print is still one word away as `/config show`, because
+    // pasting it into an issue is a different job from changing a setting.
     if trimmed == "/config" {
+        app.open_settings_overlay();
+        return true;
+    }
+
+    if trimmed == "/config show" || trimmed == "/config list" {
         use crate::config::config;
         app.push_display_message(DisplayMessage {
             role: "system".to_string(),
@@ -3553,7 +3561,7 @@ pub(super) fn handle_config_command(app: &mut App, trimmed: &str) -> bool {
 
     if trimmed.starts_with("/config ") {
         app.push_display_message(DisplayMessage::error(
-            "Usage: /config (show), /config init (create), /config edit (open in editor)"
+            "Usage: /config (edit display settings), /config show (print the whole config), /config init (create), /config edit (open in editor)"
                 .to_string(),
         ));
         return true;

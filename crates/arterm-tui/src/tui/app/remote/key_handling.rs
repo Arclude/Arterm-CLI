@@ -302,6 +302,11 @@ async fn handle_remote_key_internal(
         return app.handle_help_key(code);
     }
 
+    if app.settings_overlay.is_some() {
+        app.handle_settings_overlay_key(code, modifiers);
+        return Ok(());
+    }
+
     if app.session_picker_overlay.is_some() {
         return app.handle_session_picker_key(code, modifiers);
     }
