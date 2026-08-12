@@ -2293,6 +2293,7 @@ impl App {
         picker.set_current_dir(current_dir);
         picker.set_current_session_id(Some(super::commands::active_session_id(self)));
         picker.activate_active_filter();
+        picker.enable_new_session_composer();
         self.session_picker_overlay = Some(RefCell::new(picker));
         self.session_picker_mode = SessionPickerMode::ActiveSessions;
         self.set_status_notice(status);
@@ -2406,6 +2407,7 @@ impl App {
                 picker.set_current_dir(self.session.working_dir.clone());
                 picker.set_current_session_id(Some(super::commands::active_session_id(self)));
                 picker.activate_active_filter();
+                picker.enable_new_session_composer();
                 self.session_picker_overlay = Some(RefCell::new(picker));
                 self.set_status_notice("Active sessions loaded");
                 true
@@ -2895,6 +2897,9 @@ impl App {
                         return Ok(());
                     }
                     PickerResult::RestoreCrashedGroup(_) => Vec::new(),
+                    // Only the sessions manager offers a composer; onboarding
+                    // has no such row.
+                    PickerResult::NewSessionWithPrompt(_) => Vec::new(),
                     PickerResult::StartNewSession => {
                         // User explicitly chose to start fresh; close the picker
                         // and show the onboarding suggestion cards.
@@ -2936,6 +2941,9 @@ impl App {
                 } else {
                     self.handle_session_picker_current_terminal_selection(&ids);
                 }
+            }
+            OverlayAction::Selected(PickerResult::NewSessionWithPrompt(task)) => {
+                self.start_session_with_task(task);
             }
             OverlayAction::Selected(PickerResult::TakeOverClaude(target)) => {
                 let _ = self.handle_live_claude_takeover(&target);

@@ -2463,3 +2463,113 @@ fn preview_without_search_has_no_highlight_and_scrolls_to_bottom() {
         "no search means no highlight color in preview"
     );
 }
+
+/// The manager's composer: typing a task must never be mistaken for the
+/// search filter, and Enter must hand the task back for a new session.
+mod new_session_composer {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    fn manager() -> SessionPicker {
+        let mut picker = SessionPicker::new(Vec::new());
+        picker.enable_new_session_composer();
+        picker
+    }
+
+    fn press(picker: &mut SessionPicker, code: KeyCode) -> OverlayAction {
+        picker
+            .handle_overlay_key(code, KeyModifiers::empty())
+            .expect("overlay key")
+    }
+
+    fn type_text(picker: &mut SessionPicker, text: &str) {
+        for c in text.chars() {
+            press(picker, KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn a_picker_without_the_composer_has_none() {
+        let picker = SessionPicker::new(Vec::new());
+        assert!(picker.new_session_prompt().is_none());
+        assert!(!picker.composer_focused());
+    }
+
+    #[test]
+    fn tab_focuses_the_composer_and_typing_goes_into_it() {
+        let mut picker = manager();
+        assert!(!picker.composer_focused());
+        press(&mut picker, KeyCode::Tab);
+        assert!(picker.composer_focused());
+
+        type_text(&mut picker, "fix the parser");
+        assert_eq!(picker.new_session_prompt(), Some("fix the parser"));
+    }
+
+    #[test]
+    fn enter_hands_back_the_task_and_clears_the_row() {
+        let mut picker = manager();
+        press(&mut picker, KeyCode::Tab);
+        type_text(&mut picker, "  wire the release workflow  ");
+
+        let action = press(&mut picker, KeyCode::Enter);
+        match action {
+            OverlayAction::Selected(PickerResult::NewSessionWithPrompt(task)) => {
+                assert_eq!(task, "wire the release workflow", "the task is trimmed");
+            }
+            other => panic!("expected a new-session request, got {other:?}"),
+        }
+        assert_eq!(picker.new_session_prompt(), Some(""));
+        assert!(!picker.composer_focused(), "focus returns to the list");
+    }
+
+    #[test]
+    fn enter_on_an_empty_composer_starts_nothing() {
+        let mut picker = manager();
+        press(&mut picker, KeyCode::Tab);
+        let action = press(&mut picker, KeyCode::Enter);
+        assert!(matches!(action, OverlayAction::Continue));
+        assert!(picker.composer_focused(), "and stays where the user was");
+    }
+
+    #[test]
+    fn esc_leaves_the_composer_but_keeps_the_text() {
+        let mut picker = manager();
+        press(&mut picker, KeyCode::Tab);
+        type_text(&mut picker, "half a thought");
+
+        let action = press(&mut picker, KeyCode::Esc);
+        assert!(matches!(action, OverlayAction::Continue), "esc must not close the picker here");
+        assert!(!picker.composer_focused());
+        assert_eq!(
+            picker.new_session_prompt(),
+            Some("half a thought"),
+            "a stray esc must not throw away a typed task"
+        );
+    }
+
+    #[test]
+    fn backspace_and_ctrl_u_edit_the_task() {
+        let mut picker = manager();
+        press(&mut picker, KeyCode::Tab);
+        type_text(&mut picker, "abc");
+        press(&mut picker, KeyCode::Backspace);
+        assert_eq!(picker.new_session_prompt(), Some("ab"));
+
+        picker
+            .handle_overlay_key(KeyCode::Char('u'), KeyModifiers::CONTROL)
+            .expect("overlay key");
+        assert_eq!(picker.new_session_prompt(), Some(""));
+    }
+
+    #[test]
+    fn typing_without_focus_still_filters() {
+        let mut picker = manager();
+        type_text(&mut picker, "abc");
+        assert_eq!(
+            picker.new_session_prompt(),
+            Some(""),
+            "unfocused typing belongs to the filter, not the composer"
+        );
+    }
+}

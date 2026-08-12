@@ -49,6 +49,8 @@ pub enum PickerResult {
     Selected(Vec<ResumeTarget>),
     SelectedInCurrentTerminal(Vec<ResumeTarget>),
     SelectedInNewTerminal(Vec<ResumeTarget>),
+    /// A task typed into the manager's composer: start a fresh session with it.
+    NewSessionWithPrompt(String),
     /// The user explicitly confirmed handing a live Claude Code process over
     /// to Arterm. This is never emitted by ordinary Enter/resume behavior.
     TakeOverClaude(ResumeTarget),
@@ -217,6 +219,12 @@ struct PreviewRenderCache {
 }
 
 pub struct SessionPicker {
+    /// The manager's composer: a task typed here starts a fresh session.
+    /// `None` when this picker is not the live sessions manager, so `/resume`
+    /// keeps its whole height for the list.
+    new_session_prompt: Option<String>,
+    /// Whether typing goes to the composer instead of the search filter.
+    composer_focused: bool,
     /// Flat list of items (headers and sessions)
     items: Vec<PickerItem>,
     /// References into the backing session collections for the filtered view.
@@ -309,6 +317,8 @@ impl SessionPicker {
 
         let mut picker = Self {
             items: Vec::new(),
+            new_session_prompt: None,
+            composer_focused: false,
             visible_sessions: Vec::new(),
             all_sessions: sessions,
             all_server_groups: Vec::new(),
@@ -354,6 +364,8 @@ impl SessionPicker {
     pub fn loading() -> Self {
         Self {
             items: Vec::new(),
+            new_session_prompt: None,
+            composer_focused: false,
             visible_sessions: Vec::new(),
             all_sessions: Vec::new(),
             all_server_groups: Vec::new(),
@@ -431,6 +443,8 @@ impl SessionPicker {
 
         let mut picker = Self {
             items: Vec::new(),
+            new_session_prompt: None,
+            composer_focused: false,
             visible_sessions: Vec::new(),
             all_sessions,
             all_server_groups: server_groups,
@@ -1202,8 +1216,19 @@ impl SessionPicker {
             };
         }
 
+        // The composer owns every key while it has focus, including plain
+        // characters, so a typed task is never mistaken for a filter.
+        if let Some(action) = self.handle_composer_key(code, modifiers) {
+            return Ok(action);
+        }
+
         if self.search_active {
             return self.handle_search_key(code, modifiers);
+        }
+
+        if code == KeyCode::Tab && self.new_session_prompt.is_some() {
+            self.composer_focused = true;
+            return Ok(OverlayAction::Continue);
         }
 
         match code {
@@ -1264,6 +1289,73 @@ impl SessionPicker {
             return Ok(OverlayAction::Continue);
         }
         Ok(OverlayAction::Continue)
+    }
+
+    /// Turn this picker into the live sessions manager: a composer at the
+    /// bottom that starts a fresh session from a typed task.
+    ///
+    /// Opt-in per picker rather than always on, because `/resume` is a place to
+    /// find an old conversation, not to start one, and the composer would take
+    /// two rows off its list for a button it never needs.
+    pub fn enable_new_session_composer(&mut self) {
+        self.new_session_prompt = Some(String::new());
+    }
+
+    /// The composer's text, when this picker has one.
+    pub fn new_session_prompt(&self) -> Option<&str> {
+        self.new_session_prompt.as_deref()
+    }
+
+    pub fn composer_focused(&self) -> bool {
+        self.composer_focused && self.new_session_prompt.is_some()
+    }
+
+    /// Handle a key while the composer has focus. Returns the overlay action,
+    /// or `None` when the key is not the composer's business.
+    fn handle_composer_key(
+        &mut self,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+    ) -> Option<OverlayAction> {
+        if !self.composer_focused() {
+            return None;
+        }
+        let prompt = self.new_session_prompt.as_mut()?;
+        match code {
+            KeyCode::Esc => {
+                // Esc leaves the composer rather than the picker: the text is
+                // kept, so a stray Esc does not throw away a typed task.
+                self.composer_focused = false;
+                Some(OverlayAction::Continue)
+            }
+            KeyCode::Enter => {
+                let task = prompt.trim().to_string();
+                if task.is_empty() {
+                    return Some(OverlayAction::Continue);
+                }
+                prompt.clear();
+                self.composer_focused = false;
+                Some(OverlayAction::Selected(PickerResult::NewSessionWithPrompt(
+                    task,
+                )))
+            }
+            KeyCode::Backspace => {
+                prompt.pop();
+                Some(OverlayAction::Continue)
+            }
+            KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                prompt.clear();
+                Some(OverlayAction::Continue)
+            }
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(OverlayAction::Close)
+            }
+            KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                prompt.push(c);
+                Some(OverlayAction::Continue)
+            }
+            _ => Some(OverlayAction::Continue),
+        }
     }
 
     fn selection_result_for_enter(
@@ -2205,6 +2297,11 @@ impl SessionPicker {
             v_constraints.push(Constraint::Length(1));
         }
         v_constraints.push(Constraint::Min(8));
+        // The composer sits under the list: a task line plus its hint.
+        let has_composer = self.new_session_prompt.is_some();
+        if has_composer {
+            v_constraints.push(Constraint::Length(2));
+        }
 
         let v_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -2264,7 +2361,63 @@ impl SessionPicker {
 
         self.render_session_list(frame, chunks[0]);
         self.render_preview(frame, chunks[1]);
+        if has_composer {
+            self.render_new_session_composer(frame, v_chunks[chunk_idx + 1]);
+        }
         self.render_claude_takeover_confirmation(frame);
+    }
+
+    /// The "describe a task for a new session" row and its hint.
+    fn render_new_session_composer(&self, frame: &mut Frame, area: Rect) {
+        let Some(prompt) = self.new_session_prompt.as_deref() else {
+            return;
+        };
+        if area.height == 0 {
+            return;
+        }
+        let focused = self.composer_focused;
+        let accent = rgb(186, 139, 255);
+        let dim = rgb(90, 90, 100);
+
+        let mut spans = vec![Span::styled(
+            " ❯ ",
+            Style::default().fg(if focused { accent } else { dim }),
+        )];
+        if prompt.is_empty() && !focused {
+            spans.push(Span::styled(
+                "tab: describe a task for a new session",
+                Style::default().fg(dim),
+            ));
+        } else {
+            spans.push(Span::styled(
+                prompt.to_string(),
+                Style::default().fg(Color::White),
+            ));
+            if focused {
+                spans.push(Span::styled("▎", Style::default().fg(accent)));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(rgb(25, 25, 30))),
+            Rect { height: 1, ..area },
+        );
+
+        if area.height < 2 {
+            return;
+        }
+        let hint = if focused {
+            "   enter starts it here · esc back to the list · ctrl+u clears"
+        } else {
+            "   tab to type a task · enter opens the selected session"
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(dim)))),
+            Rect {
+                y: area.y + 1,
+                height: 1,
+                ..area
+            },
+        );
     }
 
     fn render_claude_takeover_confirmation(&self, frame: &mut Frame) {

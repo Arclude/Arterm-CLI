@@ -746,6 +746,13 @@ pub fn list_sessions() -> Result<()> {
             eprintln!("No session selected.");
             Ok(())
         }
+        // The composer belongs to the in-TUI sessions manager; the standalone
+        // picker never enables it, so this cannot happen. Say so rather than
+        // silently doing nothing that looks like a lost task.
+        Some(tui::session_picker::PickerResult::NewSessionWithPrompt(_)) => {
+            eprintln!("Starting a session from a task needs the in-app manager (press Left, or /active).");
+            Ok(())
+        }
     }
 }
 

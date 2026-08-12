@@ -89,6 +89,7 @@ mod remote;
 mod remote_notifications;
 mod replay;
 pub(crate) mod run_shell;
+mod session_launcher;
 mod settings_overlay;
 mod startup_notes;
 mod runtime_memory;
