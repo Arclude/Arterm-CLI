@@ -2577,6 +2577,20 @@ fn right_fact_cell_is_blank(cell: &ratatui::buffer::Cell) -> bool {
         && !cell.skip
 }
 
+/// Where a centered input line starts on screen.
+///
+/// This has to be ratatui's own arithmetic, not merely equivalent-looking
+/// arithmetic. `Paragraph` centers a line at `(area_width / 2) - (line_width /
+/// 2)`, which is NOT `(area_width - line_width) / 2`: the two disagree by one
+/// cell whenever the widths differ in parity. Computing the caret with the
+/// second form put the cursor one column left of the text on every other
+/// keystroke, and made a mouse click in centered mode land on the neighbouring
+/// character.
+fn centered_line_offset(area_width: u16, line_width: usize) -> usize {
+    let line_width = line_width.min(u16::MAX as usize) as u16;
+    ((area_width / 2).saturating_sub(line_width / 2)) as usize
+}
+
 pub(super) fn draw_input(
     frame: &mut Frame,
     app: &dyn TuiState,
@@ -2703,7 +2717,7 @@ pub(super) fn draw_input(
                     .unwrap_or(0);
                 let mut margin = prompt_len;
                 if centered {
-                    margin += (area.width as usize).saturating_sub(prompt_len + text_width) / 2;
+                    margin += centered_line_offset(area.width, prompt_len + text_width);
                 }
                 margin.min(area.width as usize) as u16
             })
@@ -2780,7 +2794,7 @@ pub(super) fn draw_input(
             .get(cursor_screen_line)
             .map(|l| l.width())
             .unwrap_or(prompt_len);
-        let center_offset = (area.width as usize).saturating_sub(actual_line_width) / 2;
+        let center_offset = centered_line_offset(area.width, actual_line_width);
         let cursor_offset = prompt_len + cursor_col;
         area.x + center_offset as u16 + cursor_offset as u16
     } else {
@@ -3014,7 +3028,7 @@ pub(crate) fn input_cursor_pos_from_screen(
 
     let actual_line_width = prompt_len + segment.display_width;
     let text_start_x = if app.centered_mode() {
-        let center_offset = (area.width as usize).saturating_sub(actual_line_width) / 2;
+        let center_offset = centered_line_offset(area.width, actual_line_width);
         area.x as usize + center_offset + prompt_len
     } else {
         area.x as usize + prompt_len

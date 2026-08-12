@@ -521,6 +521,8 @@ fn reset_prompt_viewport_state_for_test() {
 
 #[path = "basic.rs"]
 mod basic;
+#[path = "centered_caret.rs"]
+mod centered_caret;
 #[path = "diagrams.rs"]
 mod diagrams;
 #[path = "inline_picker.rs"]
