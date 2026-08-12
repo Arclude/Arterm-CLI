@@ -1345,3 +1345,60 @@ fn startup_screen_is_unchanged_when_there_are_no_notes() {
     assert!(!rendered.contains("Where we left off"), "rendered={rendered}");
     assert!(rendered.contains("Build a small CLI tool"), "rendered={rendered}");
 }
+
+
+/// A launch routinely pushes a system notice (a configured hotkey, a recovered
+/// session) before the first prompt. That is not a conversation, and it must not
+/// take the notes away -- the bug the first version of this shipped with.
+#[test]
+fn a_startup_system_notice_does_not_hide_the_notes() {
+    use crate::tui::startup_notes::StartupNote;
+
+    let state = TestState {
+        display_messages: vec![DisplayMessage::system(
+            "Configured Arterm launch hotkeys (KDE Plasma): Super+;".to_string(),
+        )],
+        startup_notes: vec![StartupNote {
+            when: chrono::Utc::now() - chrono::Duration::hours(2),
+            label: "wire the release workflow to the tap".to_string(),
+        }],
+        ..Default::default()
+    };
+
+    let rendered = prepare::prepare_messages(&state, 110, 40)
+        .materialize_all_lines()
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("Where we left off here"), "rendered={rendered}");
+    assert!(
+        rendered.contains("wire the release workflow to the tap"),
+        "rendered={rendered}"
+    );
+}
+
+/// Once someone actually says something, the notes retire.
+#[test]
+fn the_notes_go_away_when_the_conversation_starts() {
+    use crate::tui::startup_notes::StartupNote;
+
+    let state = TestState {
+        display_messages: vec![DisplayMessage::user("fix the parser".to_string())],
+        startup_notes: vec![StartupNote {
+            when: chrono::Utc::now() - chrono::Duration::hours(2),
+            label: "wire the release workflow to the tap".to_string(),
+        }],
+        ..Default::default()
+    };
+
+    let rendered = prepare::prepare_messages(&state, 110, 40)
+        .materialize_all_lines()
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(!rendered.contains("Where we left off"), "rendered={rendered}");
+}

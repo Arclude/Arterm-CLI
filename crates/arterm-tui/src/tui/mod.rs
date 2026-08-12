@@ -633,6 +633,15 @@ pub trait TuiState {
     fn startup_notes(&self) -> &[startup_notes::StartupNote] {
         &[]
     }
+    /// Whether anyone has said anything yet in this session.
+    ///
+    /// Distinct from "the transcript is empty": a launch routinely pushes
+    /// system notices before the first prompt, and those are not a
+    /// conversation. Startup-only affordances key off this so one notice does
+    /// not retire them.
+    fn conversation_started(&self) -> bool {
+        false
+    }
     /// Cache TTL status - shows whether the prompt cache is warm/cold based on idle time
     fn cache_ttl_status(&self) -> Option<CacheTtlInfo>;
     /// Whether the notification line has content to show

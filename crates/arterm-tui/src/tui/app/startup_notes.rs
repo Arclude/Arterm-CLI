@@ -15,12 +15,21 @@ use crate::tui::session_picker;
 use crate::tui::startup_notes::notes_from_sessions;
 
 impl App {
+    /// Whether anyone has said anything yet in this session.
+    ///
+    /// System notices — a configured hotkey, a recovered session, an available
+    /// update — are pushed before the first prompt and are not a conversation.
+    /// Treating them as one is what hid the startup notes on a real machine.
+    pub(in crate::tui) fn conversation_started(&self) -> bool {
+        crate::tui::startup_notes::conversation_started(&self.display_messages)
+    }
+
     /// Kick off the background session-store read, once per launch.
     pub(super) fn start_startup_notes_load(&mut self) {
         if self.startup_notes_limit() == 0 {
             return;
         }
-        if !self.display_messages.is_empty() {
+        if self.conversation_started() {
             return;
         }
         if self.pending_startup_notes_load.is_some() || !self.startup_notes.is_empty() {
@@ -56,9 +65,10 @@ impl App {
             }
         };
 
-        // The startup screen is gone the moment a turn starts; notes arriving
-        // after that would push the conversation down for nothing.
-        if !self.display_messages.is_empty() {
+        // A turn that started while the read was in flight has already answered
+        // "where were we"; notes arriving now would push the conversation down
+        // for nothing. A system notice is not a turn.
+        if self.conversation_started() {
             return false;
         }
 

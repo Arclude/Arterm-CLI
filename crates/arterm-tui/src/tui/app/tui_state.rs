@@ -1975,6 +1975,10 @@ impl crate::tui::TuiState for App {
         &self.startup_notes
     }
 
+    fn conversation_started(&self) -> bool {
+        App::conversation_started(self)
+    }
+
     fn cache_ttl_status(&self) -> Option<crate::tui::CacheTtlInfo> {
         let last_completed = self.last_api_completed?;
         let provider = self.provider_name();

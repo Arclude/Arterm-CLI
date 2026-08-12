@@ -496,6 +496,9 @@ impl crate::tui::TuiState for TestState {
     fn startup_notes(&self) -> &[crate::tui::startup_notes::StartupNote] {
         &self.startup_notes
     }
+    fn conversation_started(&self) -> bool {
+        crate::tui::startup_notes::conversation_started(&self.display_messages)
+    }
     fn onboarding_preview_mode(&self) -> bool {
         self.onboarding_preview
     }

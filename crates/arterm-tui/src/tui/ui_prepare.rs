@@ -871,16 +871,9 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
         };
         let mut wrapped_lines = header_prepared.wrapped_lines.clone();
 
-        // "Where we left off", above the suggestions: what this directory was
-        // last used for is more use than a generic prompt idea, and it reads in
-        // the same glance as the header.
-        wrapped_lines.extend(crate::tui::startup_notes::render_lines(
-            app.startup_notes(),
-            chrono::Utc::now(),
-            if is_centered { "" } else { "  " },
-            suggestion_align,
-        ));
-
+        // The "where we left off" notes are part of the header (see
+        // `ui_header::build_header_lines_with_auth`), which these lines start
+        // from, so they are already here.
         if !suggestions.is_empty() {
             wrapped_lines.push(Line::from(""));
             for (i, (label, prompt)) in suggestions.iter().enumerate() {
@@ -1091,6 +1084,10 @@ fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
     app.connected_clients().hash(&mut hasher);
     app.server_sessions().len().hash(&mut hasher);
     app.working_dir().hash(&mut hasher);
+    // The "where we left off" notes live in the header and arrive from a
+    // background read after the first frame, so the header built without them
+    // must not be served for the rest of the launch.
+    startup_notes_signature(app).hash(&mut hasher);
     // Credential changes alter the auth inventory lines. Hashing the auth
     // generation (cheap atomic load) means `/login` and account edits repaint
     // the header on the very next frame instead of waiting out the TTL, which

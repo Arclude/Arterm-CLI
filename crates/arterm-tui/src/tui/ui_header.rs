@@ -920,6 +920,21 @@ fn build_header_lines_with_auth(
         );
     }
 
+    // "Where we left off here" belongs to the header rather than to the empty
+    // transcript: a launch commonly pushes a system notice (a configured
+    // hotkey, an update, a recovered session), and hanging the notes off an
+    // empty transcript hid them behind the first such line. The header is
+    // always the top of the screen and scrolls away once work starts, which is
+    // exactly the lifetime these notes want.
+    if !app.conversation_started() {
+        lines.extend(crate::tui::startup_notes::render_lines(
+            app.startup_notes(),
+            chrono::Utc::now(),
+            "",
+            align,
+        ));
+    }
+
     lines.push(Line::from(""));
     lines
 }

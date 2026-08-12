@@ -39,6 +39,18 @@ pub struct StartupNote {
 /// bound here keeps a pasted wall of text out of the struct in the first place.
 const MAX_LABEL_CHARS: usize = 120;
 
+/// Whether anyone has said anything yet, given the transcript.
+///
+/// A launch pushes system notices before the first prompt — a configured
+/// hotkey, a recovered session, an available update — and those are not a
+/// conversation. Keying startup affordances off "the transcript is empty"
+/// instead is what hid these notes behind the first such line.
+pub fn conversation_started(messages: &[arterm_tui_messages::DisplayMessage]) -> bool {
+    messages
+        .iter()
+        .any(|message| message.role == "user" || message.role == "assistant")
+}
+
 /// Pick the notes for `cwd` out of a loaded session list, newest first.
 ///
 /// `current_session_id` is excluded: the session being started has nothing to
