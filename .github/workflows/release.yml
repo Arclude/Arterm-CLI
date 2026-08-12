@@ -735,10 +735,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run discord-release.yml --ref "$DEFAULT_BRANCH" -f "tag=${GITHUB_REF_NAME}"
 
+      # Pushes over HTTPS with a token rather than an SSH deploy key: the
+      # Arclude organization has `deploy_keys_enabled_for_repositories: false`,
+      # and turning that on would relax a security setting across every
+      # repository in the org to serve one job. A fine-grained token scoped to
+      # Arclude/homebrew-arterm with Contents: read and write is narrower than
+      # a deploy key anyway -- it expires, it is revocable on its own, and its
+      # use is auditable.
       - name: Update Homebrew formula
         env:
-          HOMEBREW_DEPLOY_KEY: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
-        if: env.HOMEBREW_DEPLOY_KEY != '' && env.HOMEBREW_READY == 'true'
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        if: env.HOMEBREW_TAP_TOKEN != '' && env.HOMEBREW_READY == 'true'
         run: |
           VERSION="${GITHUB_REF_NAME}"
           VERSION_NUM="${VERSION#v}"
@@ -748,12 +755,14 @@ jobs:
           MACOS_ARM_SHA=$(sha256sum artifacts/arterm-macos-aarch64/arterm-macos-aarch64.tar.gz | cut -d' ' -f1)
           MACOS_INTEL_SHA=$(sha256sum artifacts/arterm-macos-x86_64/arterm-macos-x86_64.tar.gz | cut -d' ' -f1)
 
-          mkdir -p ~/.ssh
-          echo "$HOMEBREW_DEPLOY_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          export GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
+          # The token is in the remote URL, so keep it out of the log.
+          git clone --quiet \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Arclude/homebrew-arterm.git" \
+            /tmp/homebrew-arterm
 
-          git clone git@github.com:Arclude/homebrew-arterm.git /tmp/homebrew-arterm
+          # A tap created from the GitHub UI has no Formula/ directory, and the
+          # redirect below does not create one.
+          mkdir -p /tmp/homebrew-arterm/Formula
 
           cat > /tmp/homebrew-arterm/Formula/arterm.rb << FORMULA
           class Arterm < Formula
@@ -820,7 +829,7 @@ jobs:
           git config user.email "release@arterm.dev"
           git add Formula/arterm.rb
           git commit -m "Update to ${VERSION}" || echo "No changes"
-          git push
+          git push --quiet
 
       - name: Update AUR package
         env:
