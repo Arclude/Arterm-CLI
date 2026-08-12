@@ -44,6 +44,7 @@ mod remote_diff;
 pub mod screenshot;
 pub(crate) mod session_facts;
 pub mod session_picker;
+pub mod startup_notes;
 mod stream_buffer;
 pub mod terminal_reply_filter;
 pub mod terminal_setup;
@@ -626,6 +627,12 @@ pub trait TuiState {
     /// Suggestion prompts for new users (shown in initial empty state).
     /// Returns (label, prompt_text) pairs. Empty if user is experienced or not authenticated.
     fn suggestion_prompts(&self) -> Vec<(String, String)>;
+    /// "Where we left off" lines for the startup screen: the last few sessions
+    /// in this directory. Empty until the background read lands, and empty for
+    /// a directory with no history.
+    fn startup_notes(&self) -> &[startup_notes::StartupNote] {
+        &[]
+    }
     /// Cache TTL status - shows whether the prompt cache is warm/cold based on idle time
     fn cache_ttl_status(&self) -> Option<CacheTtlInfo>;
     /// Whether the notification line has content to show

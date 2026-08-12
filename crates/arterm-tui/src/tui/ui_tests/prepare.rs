@@ -1283,3 +1283,65 @@ fn test_prepare_messages_renders_anchored_reasoning_message_in_flow() {
         joined[reasoning_idx]
     );
 }
+
+/// The startup screen carries "where we left off" lines when the background
+/// session read has landed, and says nothing when it has not.
+#[test]
+fn startup_screen_shows_where_we_left_off() {
+    use crate::tui::startup_notes::StartupNote;
+
+    let state = TestState {
+        suggestions: vec![("Build a small CLI tool".to_string(), "build".to_string())],
+        startup_notes: vec![
+            StartupNote {
+                when: chrono::Utc::now() - chrono::Duration::hours(2),
+                label: "wire the release workflow to the tap".to_string(),
+            },
+            StartupNote {
+                when: chrono::Utc::now() - chrono::Duration::days(1),
+                label: "why does the parser drop the last token".to_string(),
+            },
+        ],
+        ..Default::default()
+    };
+
+    let rendered = prepare::prepare_messages(&state, 110, 40)
+        .materialize_all_lines()
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        rendered.contains("Where we left off here"),
+        "rendered={rendered}"
+    );
+    assert!(
+        rendered.contains("wire the release workflow to the tap"),
+        "rendered={rendered}"
+    );
+    assert!(rendered.contains("2h ago"), "rendered={rendered}");
+    assert!(rendered.contains("yesterday"), "rendered={rendered}");
+    assert!(
+        rendered.contains("Build a small CLI tool"),
+        "the suggestions must survive beside the notes: rendered={rendered}"
+    );
+}
+
+#[test]
+fn startup_screen_is_unchanged_when_there_are_no_notes() {
+    let state = TestState {
+        suggestions: vec![("Build a small CLI tool".to_string(), "build".to_string())],
+        ..Default::default()
+    };
+
+    let rendered = prepare::prepare_messages(&state, 110, 40)
+        .materialize_all_lines()
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(!rendered.contains("Where we left off"), "rendered={rendered}");
+    assert!(rendered.contains("Build a small CLI tool"), "rendered={rendered}");
+}

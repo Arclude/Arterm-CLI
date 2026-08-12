@@ -674,6 +674,16 @@ fn welcome_body_lines(app: &dyn TuiState) -> Vec<Line<'static>> {
         OnboardingWelcomeKind::Suggestions => {}
     }
 
+    // This screen is what a launch into an empty transcript actually shows, so
+    // the "where we left off" notes belong here as much as on the plain empty
+    // screen underneath it. A first run has none and loses nothing.
+    lines.extend(crate::tui::startup_notes::render_lines(
+        app.startup_notes(),
+        chrono::Utc::now(),
+        "",
+        align,
+    ));
+
     let suggestions = app.suggestion_prompts();
     if !suggestions.is_empty() {
         lines.push(Line::from(""));

@@ -89,6 +89,7 @@ mod remote;
 mod remote_notifications;
 mod replay;
 pub(crate) mod run_shell;
+mod startup_notes;
 mod runtime_memory;
 mod shortcut_hints;
 mod split_view;
@@ -274,6 +275,13 @@ struct PendingSessionPickerLoad {
             Vec<super::session_picker::SessionInfo>,
         )>,
     >,
+}
+
+/// In-flight background read of the session store for the startup screen's
+/// "where we left off" notes. Off the first-frame path on purpose: the store
+/// holds every session ever opened, and the notes are worth none of that wait.
+struct PendingStartupNotesLoad {
+    receiver: mpsc::Receiver<anyhow::Result<Vec<super::session_picker::SessionInfo>>>,
 }
 
 struct PendingModelPickerLoad {
@@ -1616,6 +1624,11 @@ pub struct App {
     session_picker_overlay: Option<RefCell<super::session_picker::SessionPicker>>,
     session_picker_mode: SessionPickerMode,
     pending_session_picker_load: Option<PendingSessionPickerLoad>,
+    /// "Where we left off" lines for the startup screen, and the read that
+    /// fills them. Empty until the background read lands, which is also what
+    /// they look like in a directory with no history.
+    pending_startup_notes_load: Option<PendingStartupNotesLoad>,
+    startup_notes: Vec<super::startup_notes::StartupNote>,
     catchup_return_stack: Vec<String>,
     pending_catchup_resume: Option<PendingCatchupResume>,
     in_flight_catchup_resume: Option<PendingCatchupResume>,

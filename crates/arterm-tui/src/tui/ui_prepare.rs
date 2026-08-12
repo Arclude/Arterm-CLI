@@ -645,6 +645,28 @@ fn prepare_active_batch_progress(
     wrap_lines_with_map(lines, &[], &[], &[], &[], &[], width, &[], &[], &[])
 }
 
+/// Hash of the startup screen's notes, for the prepared-frame cache key.
+///
+/// Cheap because it is computed per frame and the notes are at most a handful
+/// of short lines; zero when there are none, which is the common case for every
+/// frame after the transcript starts.
+fn startup_notes_signature(app: &dyn TuiState) -> u64 {
+    let notes = app.startup_notes();
+    if notes.is_empty() {
+        return 0;
+    }
+    let mut hash = notes.len() as u64;
+    for note in notes {
+        hash = hash
+            .wrapping_mul(31)
+            .wrapping_add(super::hash_text_for_cache(&note.label));
+        hash = hash
+            .wrapping_mul(31)
+            .wrapping_add(note.when.timestamp() as u64);
+    }
+    hash
+}
+
 pub(super) fn prepare_messages(
     app: &dyn TuiState,
     width: u16,
@@ -687,6 +709,7 @@ pub(super) fn prepare_messages(
         inline_images_visible: app.inline_images_visible(),
         expanded_images_version: app.expanded_images_version(),
         swarm_members_signature: swarm_members_signature(&app.swarm_members_for_transcript()),
+        startup_notes_signature: startup_notes_signature(app),
     };
 
     super::note_full_prep_request();
@@ -836,6 +859,7 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
             && !app.is_processing()
             && app.streaming_text().is_empty());
 
+
     if is_initial_empty {
         let compose_start = Instant::now();
         let suggestions = app.suggestion_prompts();
@@ -846,6 +870,16 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
             ratatui::layout::Alignment::Left
         };
         let mut wrapped_lines = header_prepared.wrapped_lines.clone();
+
+        // "Where we left off", above the suggestions: what this directory was
+        // last used for is more use than a generic prompt idea, and it reads in
+        // the same glance as the header.
+        wrapped_lines.extend(crate::tui::startup_notes::render_lines(
+            app.startup_notes(),
+            chrono::Utc::now(),
+            if is_centered { "" } else { "  " },
+            suggestion_align,
+        ));
 
         if !suggestions.is_empty() {
             wrapped_lines.push(Line::from(""));

@@ -108,3 +108,30 @@ fn onboarding_welcome_centers_within_tall_area() {
         "content should be vertically padded from the top:\n{text}"
     );
 }
+
+/// The welcome screen replaces the whole message area whenever the transcript
+/// is empty and there are suggestions, so it is the screen a launch actually
+/// shows. The notes have to be on it, not only on the plain empty screen.
+#[test]
+fn welcome_screen_carries_the_where_we_left_off_notes() {
+    use crate::tui::startup_notes::StartupNote;
+
+    let mut state = onboarding_state();
+    state.startup_notes = vec![StartupNote {
+        when: chrono::Utc::now() - chrono::Duration::hours(3),
+        label: "wire the release workflow to the tap".to_string(),
+    }];
+
+    let text = render_onboarding(&state, 100, 40);
+
+    assert!(text.contains("Where we left off here"), "text={text}");
+    assert!(
+        text.contains("wire the release workflow to the tap"),
+        "text={text}"
+    );
+    assert!(text.contains("3h ago"), "text={text}");
+    assert!(
+        text.contains("Log in to get started"),
+        "the welcome screen's own content must survive: text={text}"
+    );
+}

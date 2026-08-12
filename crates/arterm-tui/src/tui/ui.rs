@@ -1197,6 +1197,11 @@ struct FullPrepCacheKey {
     expanded_images_version: u64,
     /// Signature of live swarm member cards embedded beneath spawn tool calls.
     swarm_members_signature: u64,
+    /// The startup screen's "where we left off" lines. They arrive from a
+    /// background read a moment after the first frame, so without them in the
+    /// key the frame prepared before they landed is served forever and the
+    /// notes never appear.
+    startup_notes_signature: u64,
 }
 
 #[derive(Clone)]

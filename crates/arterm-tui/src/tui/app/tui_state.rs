@@ -1971,6 +1971,10 @@ impl crate::tui::TuiState for App {
         App::suggestion_prompts(self)
     }
 
+    fn startup_notes(&self) -> &[crate::tui::startup_notes::StartupNote] {
+        &self.startup_notes
+    }
+
     fn cache_ttl_status(&self) -> Option<crate::tui::CacheTtlInfo> {
         let last_completed = self.last_api_completed?;
         let provider = self.provider_name();

@@ -120,6 +120,16 @@ pub struct DisplayConfig {
     /// reveal when scrolling past the bottom, "on" keeps it always visible.
     #[serde(default, deserialize_with = "crate::serde_lenient::lenient_enum")]
     pub overscroll_status: OverscrollStatusMode,
+    /// How many "where we left off" lines to show on the startup screen: the
+    /// most recent sessions in this directory, newest first (default: 3, 0
+    /// disables). They are read from the session store in the background, so
+    /// they never delay the first frame.
+    #[serde(default = "default_recent_notes")]
+    pub recent_notes: usize,
+}
+
+fn default_recent_notes() -> usize {
+    3
 }
 impl Default for DisplayConfig {
     fn default() -> Self {
@@ -158,6 +168,7 @@ impl Default for DisplayConfig {
             active_sessions_manager: false,
             external_sessions: true,
             overscroll_status: OverscrollStatusMode::default(),
+            recent_notes: default_recent_notes(),
         }
     }
 }
