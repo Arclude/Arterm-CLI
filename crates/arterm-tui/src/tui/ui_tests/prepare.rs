@@ -1512,3 +1512,39 @@ fn a_long_working_directory_is_elided_rather_than_wrapped() {
         "a long path must not cost an extra wrapped row"
     );
 }
+
+/// The "Updates" box renders in the padding above the header, through its own
+/// path. Centering the header alone left the box in the corner of an otherwise
+/// centered screen.
+#[test]
+fn centered_mode_moves_the_updates_box_with_the_header() {
+    use crate::tui::ui::header::set_unseen_changelog_entries_override_for_tests;
+
+    set_unseen_changelog_entries_override_for_tests(Some(vec![
+        "tui: centered mode stays centered when the window shrinks".to_string(),
+    ]));
+
+    let indent = |centered: bool| -> usize {
+        let state = TestState {
+            centered_mode: centered,
+            ..Default::default()
+        };
+        prepare::prepare_messages(&state, 120, 40)
+            .materialize_all_lines()
+            .iter()
+            .map(extract_line_text)
+            .find(|line| line.contains("Updates"))
+            .map(|line| line.len() - line.trim_start().len())
+            .expect("the updates box should be on screen")
+    };
+
+    let left = indent(false);
+    let centered = indent(true);
+    set_unseen_changelog_entries_override_for_tests(None);
+
+    assert_eq!(left, 0, "left-aligned mode keeps the box at the edge");
+    assert!(
+        centered > 0,
+        "centered mode must move the box with the header (indent={centered})"
+    );
+}

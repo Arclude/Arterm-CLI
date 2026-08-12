@@ -787,14 +787,21 @@ fn initial_header_pad_top(height: u16, header_lines: usize) -> usize {
 /// leftover space stays at the top. With no unseen updates this is just blank
 /// padding. The returned vec is always exactly `pad_top` lines tall so the
 /// header position never shifts.
-fn build_top_pad_lines(width: u16, pad_top: usize) -> Vec<Line<'static>> {
+fn build_top_pad_lines(width: u16, pad_top: usize, centered: bool) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(pad_top);
     if pad_top == 0 {
         return lines;
     }
     // Leave one blank line between the box and the header.
     let box_budget = pad_top.saturating_sub(1);
-    let boxed = header::build_updates_box_lines(width, box_budget);
+    // The box sits directly above the header, so it belongs to the header's
+    // column: built to the same width and padded as a block. Left where it was,
+    // it stayed in the corner while everything under it moved to the middle.
+    let mut boxed =
+        header::build_updates_box_lines(centered_header_width(width, centered), box_budget);
+    if centered {
+        arterm_tui_messages::left_pad_lines_for_centered_mode(&mut boxed, width);
+    }
     let blanks = pad_top.saturating_sub(boxed.len() + usize::from(!boxed.is_empty()));
     for _ in 0..blanks {
         lines.push(Line::from(""));
@@ -941,7 +948,7 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
         // arrives; the padding then simply scrolls away as the transcript
         // grows instead of vanishing in one jump.
         let pad_top = initial_header_pad_top(height, header_prepared.wrapped_lines.len());
-        let mut centered = build_top_pad_lines(width, pad_top);
+        let mut centered = build_top_pad_lines(width, pad_top, app.centered_mode());
         centered.reserve(wrapped_lines.len());
         centered.extend(wrapped_lines);
         let wrapped_lines = centered;
@@ -980,7 +987,7 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
     // anything. The pad scrolls off naturally as the transcript grows.
     let pad_top = initial_header_pad_top(height, header_prepared.wrapped_lines.len());
     let padded_header = if pad_top > 0 {
-        let mut lines = build_top_pad_lines(width, pad_top);
+        let mut lines = build_top_pad_lines(width, pad_top, app.centered_mode());
         lines.reserve(header_prepared.wrapped_lines.len());
         lines.extend(header_prepared.wrapped_lines.iter().cloned());
         let count = lines.len();
