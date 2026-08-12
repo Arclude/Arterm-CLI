@@ -3,6 +3,8 @@ name = "arterm"
 version = "9.1.0"
 description = "Possibly the greatest coding agent ever built — blazing-fast TUI, multi-model, swarm coordination, 30+ tools"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/Arclude/Arterm-CLI"
 autobins = false
 
 [workspace]

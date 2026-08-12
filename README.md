@@ -10,10 +10,9 @@ because the reasoning behind its controls is the part that was expensive.
 ## Provenance
 
 This is a fork of **[jcode](https://github.com/1jehuang/jcode)** by Jeremy
-Huang, used under the MIT license. Upstream's notice is carried verbatim in
-[LICENSE-jcode](./LICENSE-jcode), beside this project's own
-[LICENSE](./LICENSE); see [ATTRIBUTION.md](./ATTRIBUTION.md) for what was taken
-and what has since been changed.
+Huang, used under the MIT license. [LICENSE](./LICENSE) names both copyright
+holders, upstream's first; see [ATTRIBUTION.md](./ATTRIBUTION.md) for what was
+taken and what has since been changed.
 
 The upstream project's own README is kept at
 [docs/UPSTREAM_README.md](./docs/UPSTREAM_README.md). It is preserved for

@@ -7,20 +7,29 @@ This tree is a fork of **jcode**.
 - Source: https://github.com/1jehuang/jcode
 - Version forked: 0.75.0
 - Copyright (c) 2025 Jeremy Huang
-- License: MIT — see [LICENSE-jcode](./LICENSE-jcode)
+- License: MIT — see [LICENSE](./LICENSE)
 
 The MIT license permits use, modification and redistribution, and requires
 that the copyright notice and permission notice survive in copies and
-substantial portions. Upstream's notice is therefore carried **verbatim** in
-`LICENSE-jcode` and is excluded from every rebranding pass, as are the links
-back to the upstream repository: those are provenance, not branding, and
-rewriting them would point a reader at a URL that does not exist.
+substantial portions. `LICENSE` therefore lists **both** copyright holders,
+upstream's first:
 
-It sits beside `LICENSE`, which is Arclude's own MIT notice for this project.
-Two files rather than one edited file, because the requirement is that
-upstream's notice survive unchanged — appending a second copyright line to
-somebody else's notice is precisely the edit MIT does not permit. Both apply:
-this tree is a derivative work.
+```
+Copyright (c) 2025 Jeremy Huang
+Copyright (c) 2026 Arclude
+```
+
+That is what the license asks for — the original notice is included, unchanged,
+and a second holder is named beside it because this tree is a derivative work
+with its own authorship. A separate `LICENSE-jcode` was tried first, on the
+reasoning that adding a line to somebody else's notice is an edit MIT forbids.
+It is not: MIT requires the notice be *included*, not that it stand alone, and
+one file listing every holder is both the convention and the form license
+detectors read.
+
+The links back to the upstream repository are excluded from every rebranding
+pass for the same reason the notice is: those are provenance, not branding, and
+rewriting them would point a reader at a URL that does not exist.
 
 ## What was taken
 
