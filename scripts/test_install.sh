@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# End-to-end checks for scripts/install.sh against a faked network: the
+# platform/arch it resolves, the URL it downloads, the checksum it verifies,
+# and that a failed lookup or a bad checksum exits non-zero.
+#
+# It used to assert install-funnel telemetry as well -- a conversion id file
+# and `installer_start`/`installer_finish` events. That phone-home was removed
+# from the installer on purpose (commit 2adf0b6); the assertions outlived it
+# and failed CI ever since, describing a behaviour the product no longer has.
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -30,7 +38,13 @@ while [ "$#" -gt 0 ]; do
 done
 [ -z "${DOWNLOAD_URL_LOG:-}" ] || printf '%s\n' "$url" >> "$DOWNLOAD_URL_LOG"
 case "$url" in
-  *telemetry.arterm.dev*) printf '%s\n' "$payload" >> "$INSTALL_TELEMETRY_LOG" ;;
+  # The version lookup GitHub actually serves: a redirect from
+  # /releases/latest to /releases/tag/<version>, read with -w url_effective.
+  */releases/latest)
+    [ "${FAIL_RELEASE:-0}" != "1" ] || exit 22
+    [ "${FAIL_GITHUB_RELEASE:-0}" != "1" ] || exit 22
+    printf 'https://github.com/Arclude/Arterm-CLI/releases/tag/v1.2.3\n'
+    ;;
   *arterm.dev/releases/latest/version)
     [ "${FAIL_RELEASE:-0}" != "1" ] || exit 22
     [ "${FAIL_METADATA_RELEASE:-0}" != "1" ] || exit 22
@@ -89,22 +103,15 @@ chmod +x "$dest/$artifact"
 EOF
 chmod +x "$tmp/bin/uname" "$tmp/bin/curl" "$tmp/bin/tar"
 
-conversion_id="11111111-2222-4333-8444-555555555555"
-telemetry_log="$tmp/telemetry.jsonl"
 hotkey_setup_log="$tmp/hotkey-setup.log"
 PATH="$tmp/bin:$PATH" \
 HOME="$tmp/home" \
 ARTERM_HOME="$tmp/home/.arterm" \
 ARTERM_INSTALL_DIR="$tmp/install" \
-ARTERM_INSTALL_CONVERSION_ID="$conversion_id" \
 ARTERM_SKIP_SERVER_RELOAD=1 \
-INSTALL_TELEMETRY_LOG="$telemetry_log" \
 HOTKEY_SETUP_LOG="$hotkey_setup_log" \
 bash "$repo_dir/scripts/install.sh" >/dev/null
 
-test "$(cat "$tmp/home/.arterm/install_conversion_id")" = "$conversion_id"
-grep -q '"stage":"installer_start".*"outcome":"success"' "$telemetry_log"
-grep -q '"stage":"installer_finish".*"outcome":"success"' "$telemetry_log"
 test "$(cat "$hotkey_setup_log")" = "setup-hotkey"
 
 # If GitHub's release page is blocked, the static arterm.dev version endpoint
@@ -114,7 +121,7 @@ HOME="$tmp/home-metadata-fallback" \
 ARTERM_HOME="$tmp/home-metadata-fallback/.arterm" \
 ARTERM_INSTALL_DIR="$tmp/install-metadata-fallback" \
 ARTERM_SKIP_SERVER_RELOAD=1 \
-ARTERM_NO_TELEMETRY=1 \
+ARTERM_RELEASE_METADATA_BASE="https://arterm.dev/releases" \
 FAIL_GITHUB_RELEASE=1 \
 bash "$repo_dir/scripts/install.sh" >/dev/null
 test -x "$tmp/install-metadata-fallback/arterm"
@@ -126,7 +133,6 @@ HOME="$tmp/home-checksum-fallback" \
 ARTERM_HOME="$tmp/home-checksum-fallback/.arterm" \
 ARTERM_INSTALL_DIR="$tmp/install-checksum-fallback" \
 ARTERM_SKIP_SERVER_RELOAD=1 \
-ARTERM_NO_TELEMETRY=1 \
 METADATA_CHECKSUM_HTML=1 \
 bash "$repo_dir/scripts/install.sh" >/dev/null
 test -x "$tmp/install-checksum-fallback/arterm"
@@ -140,7 +146,6 @@ LOCALAPPDATA="$tmp/localappdata-windows-arm64" \
 ARTERM_HOME="$tmp/home-windows-arm64/.arterm" \
 ARTERM_INSTALL_DIR="$tmp/install-windows-arm64" \
 ARTERM_SKIP_SERVER_RELOAD=1 \
-ARTERM_NO_TELEMETRY=1 \
 TEST_UNAME_S=MINGW64_NT-10.0 \
 TEST_UNAME_M=x86_64 \
 PROCESSOR_ARCHITECTURE=AMD64 \
@@ -152,52 +157,38 @@ bash "$repo_dir/scripts/install.sh" >/dev/null
 grep -q '/arterm-windows-aarch64.tar.gz$' "$windows_url_log"
 test -x "$tmp/install-windows-arm64/arterm.exe"
 
-failure_log="$tmp/failure.jsonl"
 if PATH="$tmp/bin:$PATH" \
   HOME="$tmp/home-failure" \
   ARTERM_HOME="$tmp/home-failure/.arterm" \
   ARTERM_INSTALL_DIR="$tmp/install-failure" \
-  ARTERM_INSTALL_CONVERSION_ID="$conversion_id" \
   ARTERM_SKIP_SERVER_RELOAD=1 \
-  INSTALL_TELEMETRY_LOG="$failure_log" \
   FAIL_RELEASE=1 \
   bash "$repo_dir/scripts/install.sh" >/dev/null 2>&1; then
   echo "expected release lookup failure" >&2
   exit 1
 fi
-grep -q '"stage":"installer_finish".*"outcome":"failure".*"failure_stage":"release_lookup"' "$failure_log"
 
-checksum_failure_log="$tmp/checksum-failure.jsonl"
 if PATH="$tmp/bin:$PATH" \
   HOME="$tmp/home-checksum-failure" \
   ARTERM_HOME="$tmp/home-checksum-failure/.arterm" \
   ARTERM_INSTALL_DIR="$tmp/install-checksum-failure" \
-  ARTERM_INSTALL_CONVERSION_ID="$conversion_id" \
   ARTERM_SKIP_SERVER_RELOAD=1 \
-  INSTALL_TELEMETRY_LOG="$checksum_failure_log" \
   BAD_CHECKSUM=1 \
   bash "$repo_dir/scripts/install.sh" >/dev/null 2>&1; then
   echo "expected checksum verification failure" >&2
   exit 1
 fi
-grep -q '"stage":"installer_finish".*"outcome":"failure".*"failure_stage":"artifact_verification"' "$checksum_failure_log"
 
 if grep -q 'api.github.com' "$windows_url_log"; then
   echo "installer must not depend on the rate-limited unauthenticated GitHub API" >&2
   exit 1
 fi
 
-privacy_log="$tmp/privacy.jsonl"
 PATH="$tmp/bin:$PATH" \
 HOME="$tmp/home-private" \
 ARTERM_HOME="$tmp/home-private/.arterm" \
 ARTERM_INSTALL_DIR="$tmp/install-private" \
-ARTERM_INSTALL_CONVERSION_ID="$conversion_id" \
 ARTERM_SKIP_SERVER_RELOAD=1 \
-ARTERM_NO_TELEMETRY=1 \
-INSTALL_TELEMETRY_LOG="$privacy_log" \
 bash "$repo_dir/scripts/install.sh" >/dev/null
-test ! -e "$privacy_log"
-test ! -e "$tmp/home-private/.arterm/install_conversion_id"
 
-echo "installer conversion telemetry tests passed"
+echo "installer behaviour tests passed"

@@ -15,11 +15,11 @@
 //!   ↑↓ setting   ←→ value   ⏎ apply   esc close
 //! ```
 
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::config::Config;
 use crate::tui::settings_catalog::{self, Setting};
@@ -188,7 +188,10 @@ impl SettingsOverlay {
         };
         let row = &self.rows[row_index];
         if !row.is_dirty() {
-            self.status = Some(format!("{} is already {}", row.key, row.values[row.current]));
+            self.status = Some(format!(
+                "{} is already {}",
+                row.key, row.values[row.current]
+            ));
             return;
         }
         let key = row.key;
@@ -252,7 +255,13 @@ impl SettingsOverlay {
         // the window is derived from the selection every frame.
         let body_height = inner.height.saturating_sub(4) as usize;
         let start = self.selected.saturating_sub(body_height.saturating_sub(1));
-        for (offset, row_index) in self.filtered.iter().skip(start).take(body_height).enumerate() {
+        for (offset, row_index) in self
+            .filtered
+            .iter()
+            .skip(start)
+            .take(body_height)
+            .enumerate()
+        {
             let row = &self.rows[*row_index];
             let is_selected = start + offset == self.selected;
             let mut spans = vec![Span::styled(
@@ -377,7 +386,11 @@ mod tests {
         let count = o.filtered.len();
         assert!(count > 1);
         o.handle_key(KeyCode::Up, key(KeyCode::Up));
-        assert_eq!(o.selected, count - 1, "up from the first row wraps to the last");
+        assert_eq!(
+            o.selected,
+            count - 1,
+            "up from the first row wraps to the last"
+        );
         o.handle_key(KeyCode::Down, key(KeyCode::Down));
         assert_eq!(o.selected, 0);
     }

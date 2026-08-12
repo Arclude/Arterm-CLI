@@ -627,8 +627,8 @@ jobs:
       - name: Install probe shells
         run: sudo apt-get update && sudo apt-get install -y fish zsh
 
-      - name: Installer conversion telemetry tests
-        run: bash scripts/test_install_conversion.sh
+      - name: Installer behaviour tests
+        run: bash scripts/test_install.sh
 
       - name: Setup friction scorecard
         run: bash scripts/setup_friction_eval.sh

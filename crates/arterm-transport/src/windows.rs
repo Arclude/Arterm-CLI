@@ -381,9 +381,9 @@ mod tests {
         for (path, expected) in [
             (
                 r"C:\Users\jeremy\AppData\Local\arterm\run\arterm-api.sock",
-                r"\\.\pipe\arterm-api-5e00c01702e8cfe4",
+                r"\\.\pipe\arterm-api-637007233891e38e",
             ),
-            (r"C:\a\b\arterm.sock", r"\\.\pipe\arterm-52dfdb00b2f35a71"),
+            (r"C:\a\b\arterm.sock", r"\\.\pipe\arterm-73fa1ca68234bbfc"),
         ] {
             assert_eq!(
                 path_to_pipe_name(Path::new(path)),

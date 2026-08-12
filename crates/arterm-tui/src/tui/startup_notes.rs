@@ -356,7 +356,12 @@ mod tests {
 
     #[test]
     fn a_multi_line_prompt_becomes_one_line() {
-        let sessions = vec![session("a", "/w", "fix this:\n\n  line one\n  line two", at(5))];
+        let sessions = vec![session(
+            "a",
+            "/w",
+            "fix this:\n\n  line one\n  line two",
+            at(5),
+        )];
         let notes = notes_from_sessions(&sessions, "/w", "current", 3);
         assert_eq!(notes[0].label, "fix this: line one line two");
     }

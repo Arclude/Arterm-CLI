@@ -115,7 +115,11 @@ pub fn display_settings() -> &'static [Setting] {
                     return false;
                 }
                 // "auto" is the empty string on disk: the config's own default.
-                c.display.theme = if v == "auto" { String::new() } else { v.to_string() };
+                c.display.theme = if v == "auto" {
+                    String::new()
+                } else {
+                    v.to_string()
+                };
                 true
             },
         },
@@ -294,21 +298,33 @@ pub fn display_settings() -> &'static [Setting] {
             help: "Show each tool call's technical detail instead of a summary.",
             values: BOOL,
             read: |c| bool_str(c.display.tool_call_details),
-            write: |c, v| parse_bool(v).map(|b| c.display.tool_call_details = b).is_some(),
+            write: |c, v| {
+                parse_bool(v)
+                    .map(|b| c.display.tool_call_details = b)
+                    .is_some()
+            },
         },
         Setting {
             key: "keybinding_hints",
             help: "Show the shortcut hints under the composer.",
             values: BOOL,
             read: |c| bool_str(c.display.keybinding_hints),
-            write: |c, v| parse_bool(v).map(|b| c.display.keybinding_hints = b).is_some(),
+            write: |c, v| {
+                parse_bool(v)
+                    .map(|b| c.display.keybinding_hints = b)
+                    .is_some()
+            },
         },
         Setting {
             key: "prompt_preview",
             help: "Keep the previous prompt visible while its answer streams.",
             values: BOOL,
             read: |c| bool_str(c.display.prompt_preview),
-            write: |c, v| parse_bool(v).map(|b| c.display.prompt_preview = b).is_some(),
+            write: |c, v| {
+                parse_bool(v)
+                    .map(|b| c.display.prompt_preview = b)
+                    .is_some()
+            },
         },
         Setting {
             key: "compact_notifications",
@@ -326,7 +342,11 @@ pub fn display_settings() -> &'static [Setting] {
             help: "Animate the idle indicator between turns.",
             values: BOOL,
             read: |c| bool_str(c.display.idle_animation),
-            write: |c, v| parse_bool(v).map(|b| c.display.idle_animation = b).is_some(),
+            write: |c, v| {
+                parse_bool(v)
+                    .map(|b| c.display.idle_animation = b)
+                    .is_some()
+            },
         },
         Setting {
             key: "emoji",

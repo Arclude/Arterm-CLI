@@ -28,9 +28,9 @@ test("the Windows pipe name matches arterm-transport exactly", () => {
   for (const [socketPath, expected] of [
     [
       "C:\\Users\\jeremy\\AppData\\Local\\arterm\\run\\arterm-api.sock",
-      "\\\\.\\pipe\\arterm-api-5e00c01702e8cfe4",
+      "\\\\.\\pipe\\arterm-api-637007233891e38e",
     ],
-    ["C:\\a\\b\\arterm.sock", "\\\\.\\pipe\\arterm-52dfdb00b2f35a71"],
+    ["C:\\a\\b\\arterm.sock", "\\\\.\\pipe\\arterm-73fa1ca68234bbfc"],
   ] as const) {
     assert.equal(
       derivePipeName(socketPath, path.win32),
