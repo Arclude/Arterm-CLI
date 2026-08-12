@@ -5,10 +5,10 @@
     Downloads the latest arterm release and installs it to %LOCALAPPDATA%\arterm\bin.
 
     One-liner install:
-      irm https://arterm.sh/install.ps1 | iex
+      irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1 | iex
 
     Or download and run (allows parameters):
-      & ([scriptblock]::Create((irm https://arterm.sh/install.ps1)))
+      & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1)))
 .PARAMETER InstallDir
     Override the installation directory (default: $env:LOCALAPPDATA\arterm\bin)
 .PARAMETER Version
@@ -52,7 +52,10 @@ $Repo = "Arclude/Arterm-CLI"
 $ReleaseMetadataBase = if ($env:ARTERM_RELEASE_METADATA_BASE) {
     $env:ARTERM_RELEASE_METADATA_BASE.TrimEnd('/')
 } else {
-    "https://arterm.sh/releases"
+    # No default. arterm.sh has no DNS record, and querying it first
+    # cost every install three failed lookups before GitHub -- which is
+    # what serves the assets -- was tried at all.
+    ""
 }
 
 if (-not $InstallDir) {
@@ -106,11 +109,13 @@ function Get-LatestArtermReleaseTag {
     # Avoid api.github.com here. Its unauthenticated limit is only 60 requests
     # per public IP per hour, so installs are unreliable behind shared NAT/VPNs.
     $metadataTag = $null
-    try {
-        $metadataResponse = Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseMetadataBase/latest/version"
-        $candidate = (ConvertFrom-ArtermWebContent -Content $metadataResponse.Content).Trim()
-        if (Test-ArtermReleaseTag $candidate) { $metadataTag = $candidate }
-    } catch {}
+    if ($ReleaseMetadataBase) {
+        try {
+            $metadataResponse = Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseMetadataBase/latest/version"
+            $candidate = (ConvertFrom-ArtermWebContent -Content $metadataResponse.Content).Trim()
+            if (Test-ArtermReleaseTag $candidate) { $metadataTag = $candidate }
+        } catch {}
+    }
 
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/$Repo/releases/latest"
@@ -140,7 +145,7 @@ function Get-LatestArtermReleaseTag {
     }
 
     if ($metadataTag) {
-        Write-Warn "GitHub release lookup unavailable; using cached arterm.sh metadata ($metadataTag)."
+        Write-Warn "GitHub release lookup unavailable; using the configured mirror ($metadataTag)."
         return $metadataTag
     }
     Write-Err "Failed to determine latest version"
@@ -148,7 +153,8 @@ function Get-LatestArtermReleaseTag {
 
 function Get-ArtermReleaseDownloadBases([string]$ReleaseTag) {
     $bases = New-Object System.Collections.Generic.List[string]
-    try {
+    if ($ReleaseMetadataBase) {
+      try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseMetadataBase/$ReleaseTag/download-bases"
         foreach ($line in ((ConvertFrom-ArtermWebContent -Content $response.Content) -split "`r?`n")) {
             $candidate = $line.Trim().TrimEnd('/')
@@ -156,7 +162,8 @@ function Get-ArtermReleaseDownloadBases([string]$ReleaseTag) {
                 $bases.Add($candidate)
             }
         }
-    } catch {}
+      } catch {}
+    }
 
     $githubBase = "https://github.com/$Repo/releases/download/$ReleaseTag"
     if (-not $bases.Contains($githubBase)) { $bases.Add($githubBase) }
@@ -183,10 +190,10 @@ function Get-ArtermSha256FromManifest {
 
 function Get-ReleaseChecksum([string]$ReleaseTag, [string]$AssetName) {
     $lastError = $null
-    foreach ($checksumUrl in @(
-        "$ReleaseMetadataBase/$ReleaseTag/SHA256SUMS",
-        "https://github.com/$Repo/releases/download/$ReleaseTag/SHA256SUMS"
-    )) {
+    $checksumUrls = New-Object System.Collections.Generic.List[string]
+    if ($ReleaseMetadataBase) { $checksumUrls.Add("$ReleaseMetadataBase/$ReleaseTag/SHA256SUMS") }
+    $checksumUrls.Add("https://github.com/$Repo/releases/download/$ReleaseTag/SHA256SUMS")
+    foreach ($checksumUrl in $checksumUrls) {
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl
             $expected = Get-ArtermSha256FromManifest -ManifestText (ConvertFrom-ArtermWebContent -Content $response.Content) -AssetName $AssetName

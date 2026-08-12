@@ -2,7 +2,11 @@
 set -euo pipefail
 
 REPO="Arclude/Arterm-CLI"
-RELEASE_METADATA_BASE="${ARTERM_RELEASE_METADATA_BASE:-https://arterm.sh/releases}"
+# No default host. This was https://arterm.sh/releases, which has no DNS
+# record, so every install burned three failed lookups before falling back to
+# GitHub -- which is what serves the assets. Set ARTERM_RELEASE_METADATA_BASE
+# to opt into a mirror.
+RELEASE_METADATA_BASE="${ARTERM_RELEASE_METADATA_BASE:-}"
 IS_WINDOWS=false
 IS_TERMUX=false
 INSTALL_STAGE="startup"
@@ -32,57 +36,11 @@ sha256_file() {
   fi
 }
 
-valid_conversion_id() {
-  printf '%s' "${ARTERM_INSTALL_CONVERSION_ID:-}" |
-    grep -Eiq '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-}
-
-telemetry_value() {
-  printf '%s' "$1" | tr -cd '[:alnum:]_. -' | cut -c1-100
-}
-
-report_install_funnel() {
-  stage="$1"
-  outcome="$2"
-  failure_stage="${3:-}"
-  [ "${ARTERM_NO_TELEMETRY:-}" != "1" ] || return 0
-  [ "${DO_NOT_TRACK:-}" != "1" ] || return 0
-  valid_conversion_id || return 0
-
-  payload=$(printf '{"id":"%s","event":"install_funnel","version":"%s","os":"%s","arch":"%s","conversion_id":"%s","stage":"%s","outcome":"%s","source":"installer","install_method":"shell","failure_stage":"%s"}' \
-    "$ARTERM_INSTALL_CONVERSION_ID" \
-    "$(telemetry_value "$INSTALL_VERSION")" \
-    "$(telemetry_value "$INSTALL_OS")" \
-    "$(telemetry_value "$INSTALL_ARCH")" \
-    "$ARTERM_INSTALL_CONVERSION_ID" \
-    "$(telemetry_value "$stage")" \
-    "$(telemetry_value "$outcome")" \
-    "$(telemetry_value "$failure_stage")")
-  curl -fsS --max-time 2 -H 'Content-Type: application/json' \
-    --data "$payload" https://telemetry.arterm.sh/v1/event >/dev/null 2>&1 || true
-}
-
-persist_install_conversion_id() {
-  [ "${ARTERM_NO_TELEMETRY:-}" != "1" ] || return 0
-  [ "${DO_NOT_TRACK:-}" != "1" ] || return 0
-  valid_conversion_id || return 0
-  arterm_home="${ARTERM_HOME:-$HOME/.arterm}"
-  mkdir -p "$arterm_home" 2>/dev/null || return 0
-  (umask 077; printf '%s\n' "$ARTERM_INSTALL_CONVERSION_ID" > "$arterm_home/install_conversion_id") \
-    2>/dev/null || return 0
-  chmod 600 "$arterm_home/install_conversion_id" 2>/dev/null || true
-}
-
 install_exit() {
   status=$?
   trap - EXIT
   set +e
   [ -z "$tmpdir" ] || rm -rf "$tmpdir"
-  if [ "$INSTALL_SUCCEEDED" = "1" ] && [ "$status" = "0" ]; then
-    report_install_funnel "installer_finish" "success" ""
-  else
-    report_install_funnel "installer_finish" "failure" "$INSTALL_STAGE"
-  fi
   exit "$status"
 }
 trap install_exit EXIT
@@ -140,7 +98,6 @@ case "$OS" in
     ;;
 esac
 
-report_install_funnel "installer_start" "success" ""
 
 if [ "$IS_WINDOWS" = true ]; then
   INSTALL_DIR="${ARTERM_INSTALL_DIR:-$LOCALAPPDATA/arterm/bin}"
@@ -148,15 +105,19 @@ else
   INSTALL_DIR="${ARTERM_INSTALL_DIR:-$HOME/.local/bin}"
 fi
 
-# Prefer GitHub's stable redirect when it is reachable so publication changes
-# are visible immediately. arterm.sh keeps a static copy of the latest published
-# tag as an independent fallback for GitHub outages, blocks, and shared-network
-# throttling. Neither path uses the rate-limited unauthenticated GitHub API.
+# GitHub's stable redirect is the source of truth, so publication changes are
+# visible immediately, and it does not use the rate-limited unauthenticated
+# API. A mirror named by ARTERM_RELEASE_METADATA_BASE is consulted only if that
+# fails -- and only if one was named, since querying a host that does not exist
+# is three DNS failures per install, not a fallback.
 INSTALL_STAGE="release_lookup"
 VERSION="${ARTERM_VERSION:-}"
 if [ -z "$VERSION" ]; then
-  METADATA_VERSION=$(curl -fsSL --retry 2 --connect-timeout 10 \
-    "$RELEASE_METADATA_BASE/latest/version" 2>/dev/null | tr -d '\r\n' || true)
+  METADATA_VERSION=""
+  if [ -n "$RELEASE_METADATA_BASE" ]; then
+    METADATA_VERSION=$(curl -fsSL --retry 2 --connect-timeout 10 \
+      "${RELEASE_METADATA_BASE%/}/latest/version" 2>/dev/null | tr -d '\r\n' || true)
+  fi
   LATEST_RELEASE_URL=$(curl -fsSIL --retry 2 --connect-timeout 10 \
     -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null || true)
   case "$LATEST_RELEASE_URL" in
@@ -167,7 +128,7 @@ if [ -z "$VERSION" ]; then
     VERSION="$GITHUB_VERSION"
   elif valid_release_tag "$METADATA_VERSION"; then
     VERSION="$METADATA_VERSION"
-    info "GitHub release lookup unavailable; using cached arterm.sh metadata ($VERSION)."
+    info "GitHub release lookup unavailable; using the configured mirror ($VERSION)."
   fi
 fi
 valid_release_tag "$VERSION" || err "Failed to determine latest version"
@@ -273,6 +234,12 @@ if [ "$download_mode" = "tar" ]; then
 elif [ "$download_mode" = "bin" ]; then
   mv "$tmpdir/arterm.download" "$dest_version_dir/$bin_name"
 else
+  # Building from source is opt-in. Falling into it silently meant a user whose
+  # platform simply had no asset in this release waited through a full compile
+  # to be told "cargo build failed" -- and if the resolved tag predates the
+  # current layout, that build cannot succeed at all.
+  [ "${ARTERM_BUILD_FROM_SOURCE:-}" = "1" ] || err \
+    "No prebuilt $ARTIFACT asset in $VERSION. Re-run with ARTERM_BUILD_FROM_SOURCE=1 to compile it locally (needs git and cargo), or install a release that publishes this platform."
   info "No prebuilt asset found for $ARTIFACT in $VERSION; building from source..."
   command -v git >/dev/null 2>&1 || err "git is required to build from source"
   command -v cargo >/dev/null 2>&1 || err "cargo is required to build from source"
@@ -530,6 +497,5 @@ else
   fi
 fi
 
-persist_install_conversion_id
 INSTALL_STAGE="complete"
 INSTALL_SUCCEEDED=1

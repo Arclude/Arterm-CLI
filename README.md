@@ -7,6 +7,23 @@ agent loop, tool registry and session server all in-process. It runs local and
 hosted models through one provider layer, and it is built to be driven
 unattended as readily as interactively.
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1 | iex
+```
+
+The installer resolves the latest release, verifies the download against the
+release's `SHA256SUMS`, and puts the binary in `~/.local/bin` (no sudo). Set
+`ARTERM_INSTALL_DIR` to put it somewhere else, or `ARTERM_VERSION=v9.1.0` to
+pin a release. Uninstall with `scripts/uninstall.sh`.
+
 ## Building
 
 ```bash
