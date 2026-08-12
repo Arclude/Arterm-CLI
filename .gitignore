@@ -1,19 +1,30 @@
-node_modules/
-dist/
-.next/
-web/out/
-next-env.d.ts
-*.tsbuildinfo
-.DS_Store
-*.log
-.arterm/
-coverage/
-.plugins-fixtures/
+/target
+Cargo.lock
+__pycache__/
+ios_simulator_screenshot.png
+/.wrangler/
+/tmp/
+# Local onboarding sandbox + auth fixtures. May contain REAL OAuth tokens copied
+# from $HOME (see scripts/onboarding_sandbox.sh seed-real-logins). Never commit.
+/.tmp/
+/.arterm/generated-images/
+/telemetry-worker/backups/
+target-ttest/
+target-ttest*/
 
-# Harbor benchmark: the venv it is installed into, and one directory of run
-# artifacts per sweep. Both are outputs of measuring the tree, not part of it.
-.venv-bench/
-jobs/
+# Offscreen frames written by `arterm-desktop2 --capture`. These are review
+# artefacts for a single change, not committed baselines.
+captures/
 
-# Understand-Anything analysis artifacts
-.understand-anything/
+# Benchmark run outputs (one directory per trial: config, log, result). These
+# are local measurements, not repository content. They were covered by the
+# removed TypeScript tree's .gitignore, and without this line the first
+# `git add -A` after the restructure staged 304 of them.
+/jobs/
+
+# Stray experiment/debug artifacts at the repo root. Real assets live under
+# assets/, docs/, ios/, and tests/ and are committed explicitly.
+/*.log
+/*.avif
+/*.mp4
+/*.png

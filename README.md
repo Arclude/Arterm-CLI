@@ -1,504 +1,89 @@
-# Arterm-CLI
+# Arterm
 
-A terminal AI coding agent that runs **local models first** — connect to a
-running [Ollama](https://ollama.com) server, point it at any
-**OpenAI-compatible** endpoint (LM Studio, vLLM, llama.cpp server, …), or load a
-`.gguf` file directly in-process via
-[`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp), with no cloud
-and no API keys required. Hosted providers are also supported when you want
-them: Claude (API key or subscription login), OpenAI, Gemini, and more, with
-keys stored encrypted. Arterm streams chat into a rich
-[Ink](https://github.com/vadimdemedes/ink) TUI and can read, search, and edit
-your files and run shell commands through a permission-gated tool set.
+A terminal AI coding agent, written in Rust.
 
-```
-▌ARTERM v0.9.1  │  ● idle  │  ollama/qwen2.5:7b  │  ctx ██░░░░░░░░ 12%/32k  │  ↑1.2k ↓340
-📁 my-project  │  ⎇ main  │  🔧 7 tools  │  ⏱ 15:45:27  │  ASK
-Enter send   ? help   Alt+P models   Esc cancel   ^C quit
-```
+There was a TypeScript implementation; it was removed when this tree became the
+product. What was worth keeping from it is archived under
+[docs/legacy-typescript/](./docs/legacy-typescript/) — documents, not code,
+because the reasoning behind its controls is the part that was expensive.
 
-## Features
+## Provenance
 
-- **Rich Ink TUI** — colored message blocks, live token-by-token streaming, tool
-  rows with timing/size metadata, a per-turn stats line, and a multi-segment
-  status bar (provider, model, context gauge, token counts, branch, clock).
-- **Interactive model picker** — press **Alt+P** (or `/model`) for an arrow-key
-  selectable list of available models with sizes; `?` opens help.
-- **File, code & shell tools** — `read`, `ls`, `glob`, `grep`, `write`, `edit`,
-  `multi_edit`, `web_fetch`, `web_search`, `git`/`git_commit`,
-  `test`/`lint`/`format`, `search` (BM25), `symbols`, `tool_search`, `batch`,
-  and `bash`.
-  The file tools are sandboxed to the working directory; `bash` runs real shell
-  commands, confined by default to this directory plus the temp dir with network
-  egress on an allowlist, and guarded by the permission prompt on top of that.
-- **Permission system** — read-only tools auto-allow; tools that mutate state or
-  run commands prompt before each call, with an "always allow" that persists.
-  Four modes (`ask`/`auto`/`plan`/`yolo`) cycle with **Shift+Tab**.
-- **Multiple providers** — local: Ollama over HTTP, any OpenAI-compatible
-  server, or a GGUF loaded directly with `node-llama-cpp`. Hosted: Anthropic
-  (API key or `arterm login` subscription OAuth), OpenAI, Gemini, xAI, DeepSeek,
-  Groq, OpenRouter, Mistral.
-- **Autonomy & sub-agents** — `/goal` runs a decide→act→reflect loop;
-  `/autonomy` modes (`once`/`eternal`/`parallel`/`phased`) and `/sdd`
-  spec-driven fleets delegate to sub-agents in isolated git worktrees.
-- **Persistent memory** — a claude-mem-style pipeline captures observations per
-  project and recalls them into new sessions (`arterm memory serve` to browse).
-- **Agent teams** — `/team <task>` has a leader assemble named specialist
-  members (from your `.arterm/agents/*.md` definitions, or ad-hoc), run them in
-  parallel git worktrees with a live member board, and auto-apply their patches.
-  Definitions load from the project (`.arterm/agents/`) and globally
-  (`~/.arterm/agents/`), in the TUI and headless alike, and double as `spawn`
-  roles beside the built-in five.
-- **Background sessions** — `←` opens the session dashboard: live counts
-  (awaiting approval · working · completed), one row per session with its last
-  result and age, and a composer that starts a NEW session working in the
-  background — type the task, press Enter, stay where you are. `Enter` opens a
-  row, `Ctrl+←/→` cycles sessions, `Ctrl+X` closes one.
-- **Headless mode** — `arterm --print "prompt"` (or piped stdin) for scripts;
-  `--json` for structured output; `--resume`/`--continue` to pick up a session.
-- **Native + JSON-fallback tool-calling** — uses a backend's native
-  function-calling API when the model supports it, and falls back to a
-  model-agnostic JSON protocol parsed from the text when it doesn't.
+This is a fork of **[jcode](https://github.com/1jehuang/jcode)** by Jeremy
+Huang, used under the MIT license. Upstream's notice is carried verbatim in
+[LICENSE-jcode](./LICENSE-jcode), beside this project's own
+[LICENSE](./LICENSE); see [ATTRIBUTION.md](./ATTRIBUTION.md) for what was taken
+and what has since been changed.
 
-## Install
+The upstream project's own README is kept at
+[docs/UPSTREAM_README.md](./docs/UPSTREAM_README.md). It is preserved for
+reference and **its claims belong to jcode, not to this fork**: the benchmark
+tables, RAM measurements and feature demos there were measured against
+upstream, and nothing in them has been re-measured here. Treat that file as a
+document about another project until a number in it has been reproduced.
 
-Requires **Node.js >= 22**.
+## Building
 
 ```bash
-# Global install
-npm install -g arterm-cli
-
-# …or run without installing
-npx arterm-cli
+cargo build --bin arterm          # debug
+cargo check --workspace           # fast whole-tree check
+cargo test --workspace            # the suite: 119 binaries, 8,521 tests
 ```
 
-Then start the chat TUI from any project directory:
+## Testing
+
+Three layers, and one thing to know about each.
 
 ```bash
-arterm
+cargo test -p arterm-command-risk   # one crate, ~2s -- the everyday loop
+cargo test -p arterm-tui --lib      # one big crate, ~40s
+cargo test --workspace              # everything, ~6min
 ```
 
-You also need a model backend running — the simplest is Ollama:
+`.cargo/config.toml` gives every test binary an isolated `ARTERM_HOME` under
+`target/` and runs them one at a time. Both are load-bearing rather than
+tidiness: the suite has already written the developer's real `~/.arterm` by
+accident, and `ARTERM_HOME` is process-global, so tests that swap it cannot run
+beside tests that read it. An exported `ARTERM_HOME` still wins, so
+`scripts/dev-run.sh` is unaffected.
+
+The end-to-end path needs no API key, no network and no spend:
 
 ```bash
-# https://ollama.com
-ollama serve            # start the server
-ollama pull qwen2.5:7b  # a tool-capable model is recommended
-arterm --model qwen2.5:7b
+scripts/dev-run.sh --fake -- run "say hello in two words"
 ```
 
-## Usage
+That starts a fake OpenAI-compatible server, points a throwaway home at it, and
+runs one real turn through the real binary. `--zai` runs the same thing against
+z.ai's GLM instead. Without arguments it opens the TUI.
 
-```bash
-arterm                       # start the interactive chat TUI (default)
-arterm --model qwen2.5:7b    # pick a model for this session
-arterm --provider ollama     # pick a provider
-arterm --yolo                # skip permission prompts
-arterm models                # list models across configured providers
-arterm pull <model>          # download a model via Ollama
-```
+CI additionally runs the guardrail scripts in `scripts/` — code-size, panic and
+swallowed-error ratchets, crate dependency boundaries — which are not tests and
+fail independently of them.
 
-### Global flags
+## Layout
 
-| Flag                  | Description                                            |
-| --------------------- | ----------------------------------------------------- |
-| `-p, --provider <id>` | Provider: `ollama`, `llamacpp`, `openai-compat`, `anthropic`, or a hosted preset (`openai`, `gemini`, `xai`, `deepseek`, `groq`, `openrouter`, `mistral`). |
-| `-m, --model <name>`  | Model name (Ollama tag) or `.gguf` filename.          |
-| `--yolo`              | Skip all permission prompts for the session.          |
-| `--sandbox` / `--no-sandbox` | Confine shell commands to this directory and an egress allowlist. On by default; `--no-sandbox` runs unconfined, even under `--autonomous`. |
-| `--print <prompt>`    | Headless: run one prompt, print the reply, exit (add `--json` for structured output). |
-| `--resume <id>` / `--continue` | Resume a recorded session / the most recent one. |
-| `--goal <text>`       | Start in autonomy mode with this goal.                |
-
-### Inside the TUI
-
-| Key / command          | Action                                            |
-| ---------------------- | ------------------------------------------------- |
-| `Enter`                | Send the message.                                 |
-| `@`                    | Attach a file — opens a picker over this project.  |
-| `?`                    | Show help.                                         |
-| `Alt+P` / `/model`     | Open the interactive model picker.                |
-| `/model <name\|N>`     | Switch model directly (by name or list number).   |
-| `/models`              | Open the model picker.                            |
-| `/clear`               | Reset the conversation.                           |
-| `/exit`                | Quit (also `/quit` or `Ctrl+C`).                  |
-| `Esc`                  | Cancel the running turn.                          |
-
-When a tool wants to write, edit, or run a shell command, Arterm shows a
-permission prompt: `[y]` allow once · `[a]` always allow this tool · `[n]` deny.
-
-Typing `@` opens a file picker over the project — `↑↓` to choose, `⇥` or `Enter`
-to insert, `Esc` to dismiss. The list shows eight rows and scrolls through the
-rest, with `3/47` saying where you are in it; the file's contents ride out with the message,
-so you can ask about a file without spending a turn on the model reading it. The
-path stays in your sentence, which is how you say which file you mean when you
-attach several. Files git ignores are not offered but can still be typed in
-full, and a file that is too large is attached as an excerpt that says so.
-Dragging an image onto the prompt, or `Ctrl+V` with one on the clipboard,
-attaches it the same way.
-
-## Providers
-
-| Provider        | Config / flag             | Notes                                                  |
-| --------------- | ------------------------- | ------------------------------------------------------ |
-| `ollama`        | `--provider ollama`       | Talks to a running Ollama server over HTTP.            |
-| `openai-compat` | `--provider openai-compat`| Any OpenAI `/v1` endpoint (LM Studio, vLLM, …).        |
-| `llamacpp`      | `--provider llamacpp`     | Loads a `.gguf` in-process via `node-llama-cpp`.       |
-| `anthropic`     | `--provider anthropic`    | Claude via the native API. `arterm auth set anthropic`. |
-| `openai`        | `--provider openai`       | ChatGPT models via `api.openai.com`. `arterm auth set openai`. |
-| `gemini`        | `--provider gemini`       | Google Gemini (OpenAI-compat endpoint). `arterm auth set gemini`. |
-| `xai`           | `--provider xai`          | xAI Grok. `arterm auth set xai`.                       |
-| `deepseek`      | `--provider deepseek`     | DeepSeek. `arterm auth set deepseek`.                  |
-| `groq`          | `--provider groq`         | Groq. `arterm auth set groq`.                          |
-| `openrouter`    | `--provider openrouter`   | OpenRouter. `arterm auth set openrouter`.              |
-| `mistral`       | `--provider mistral`      | Mistral. `arterm auth set mistral`.                    |
-
-### Signing in to a cloud provider
-
-Hosted providers need an API key. Store it once (encrypted, AES-256-GCM) and
-Arterm uses it automatically:
-
-```bash
-arterm auth set openai       # paste the key when prompted (read from stdin)
-arterm auth set gemini --value "$GEMINI_API_KEY"
-arterm auth list             # show stored key names
-arterm auth remove xai       # delete one
-
-arterm --provider openai --model gpt-4o
-arterm --provider gemini --model gemini-2.0-flash
-```
-
-The key name is the provider id. As a fallback, each provider also reads its
-conventional env var (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`,
-`DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY`,
-`ANTHROPIC_API_KEY`).
-
-`node-llama-cpp` is **optional** and not installed by default (its native
-binaries are large). The `llamacpp` provider imports it lazily and prints a clear
-error if it is missing. Install it and drop GGUF files into `~/.arterm/models/`:
-
-```bash
-npm install -g node-llama-cpp
-arterm --provider llamacpp --model <file.gguf>
-```
-
-## Security
-
-Arterm runs models that can read your files and execute shell commands, so it is
-built to be safe by default. [SECURITY.md](./SECURITY.md) is the full statement —
-including what these controls do **not** cover, and how to report a
-vulnerability. The short version:
-
-- **Directory sandbox (file tools)** — `read`, `write`, `edit`, `ls`, `glob`,
-  and `grep` are confined to the working directory; paths and glob patterns that
-  escape it (absolute paths, `..` segments, symlinks) are refused — even the
-  auto-allowed search tools cannot read e.g. `~/.ssh` or `/etc`.
-- **Execution sandbox (on by default; `--no-sandbox` opts out)** — confines
-  shell commands to the working directory plus the temp dir, and restricts
-  network egress to an allowlist (package registries and source hosts by
-  default; SSH denied). Writes anywhere else fail with "read-only file system"
-  and a connection to an unlisted host is refused by the proxy. Arterm's own
-  key material is denied outright, whatever else a command is granted. The
-  session says at startup which boundary is in force.
-  This is also the control `--autonomous` needs, because that mode turns the
-  permission prompt off — so the two differ in what happens when the boundary
-  cannot be established on a host: an unattended run refuses to start, while an
-  attended one warns and continues unconfined rather than refusing to open. Set
-  `sandbox.allowedDomains` to `[]` for no network at all, `sandbox.allowWrite`
-  for extra writable paths, or `sandbox.enabled: false` to turn it off.
-- **The permission prompt sits on top of it**, and answers a different question:
-  the prompt decides whether a command runs at all, the sandbox decides what a
-  command that IS allowed can then reach. Treat "always allow" and `--yolo` as
-  giving up the first of the two, not both.
-- **Permission prompts** — `write`, `edit`, and `bash` ask before every call
-  unless you opt out per-tool ("always allow") or globally (`--yolo`). Even
-  under `--yolo`, tools marked `deny` and calls the risk arbiter classifies as
-  critical are still blocked (fail-closed).
-- **Dangerous-command guard** — a few obviously destructive `bash` patterns
-  (`rm -rf /`, `mkfs`, fork bombs, …) are refused outright. This is
-  defense-in-depth only and is bypassable; the permission prompt is the real
-  guard.
-- **Unreadable commands are escalated** — a command that assembles itself at
-  runtime (`… | base64 -d | sh`, `eval "$(…)"`, `powershell -EncodedCommand …`)
-  can't be screened by any pattern, so it is treated as high-risk on that basis
-  alone: a prompt when someone is watching, a refusal when nobody is.
-- **Credential env hygiene** — shell commands do **not** inherit variables whose
-  names say they hold a credential (`*_API_KEY`, `*_TOKEN`, `*_SECRET`,
-  `*_PASSWORD`, `ARTERM_SECRET`, …). Without this, one `env` puts your provider
-  keys into the transcript — which is then sent to the model, written to the
-  session log, and quoted into sub-agent prompts. On by default in every mode;
-  pass specific names through with `credentials.allow`, or switch it off with
-  `credentials.scrub: false`. Names your toolchain needs that merely sound
-  secret (`SSH_AUTH_SOCK`, `XDG_SESSION_*`) are never withheld.
-- **Local by default** — no telemetry and no network calls beyond the model
-  backend you configure.
-
-> Tools see whatever is in the working directory, including secrets in files like
-> `.env`. Run Arterm from a project directory you trust, and prefer the default
-> (prompting) mode over `--yolo` on untrusted code.
-
-## Config
-
-Configuration lives in `~/.arterm/` and is created on demand.
-`~/.arterm/config.json` fields:
-
-| Field              | Description                                          | Default                  |
-| ------------------ | ---------------------------------------------------- | ------------------------ |
-| `provider`         | Active provider id.                                  | `"ollama"`               |
-| `model`            | Active model (Ollama tag or `.gguf` filename).       | `"llama3.2"`             |
-| `ollamaHost`       | Ollama server URL (env `OLLAMA_HOST` overrides).     | `http://127.0.0.1:11434` |
-| `openaiCompatHost` | OpenAI-compatible base URL (incl. `/v1`).            | `http://localhost:1234/v1` |
-| `modelsDir`        | Directory of `.gguf` files for `llamacpp`.           | `~/.arterm/models`       |
-| `fallbackModels`   | Models to try, in order, when the active one is rate-limited or down. | `[]`    |
-| `temperature`      | Sampling temperature.                                | `0.7`                    |
-| `permissions`      | Per-tool overrides, persisted by "always allow".     | `{}`                     |
-| `budget.maxIterations` | Tool round-trips allowed in one turn.            | `50`                     |
-| `budget.turnTokens`| Per-turn token cap (unset = none).                   | —                        |
-| `sandbox.enabled`  | Confine `bash` to the working directory + an egress allowlist. | `true`                   |
-| `sandbox.allowedDomains` | Hosts `bash` may reach; `[]` means no network.  | registries + source hosts |
-| `sandbox.allowWrite` | Extra writable paths beyond the working dir and temp dir. | `[]`             |
-| `credentials.scrub` | Withhold credential-named env vars from `bash`.       | `true`                   |
-| `credentials.allow` | Names handed to `bash` anyway (e.g. `GITHUB_TOKEN` for `gh`). | `[]`            |
-| `credentials.deny`  | Extra names always withheld (e.g. `DATABASE_URL`).    | `[]`                     |
-| `retention.spoolDays` | Days to keep spooled tool output (`tool-output/`). | `7`                      |
-| `retention.chronicleDays` | Days to keep chronicle ledgers.               | `90`                     |
-| `telemetry.enabled`| Export OpenTelemetry GenAI spans/metrics over OTLP.   | `false`                  |
-| `telemetry.endpoint` | OTLP/HTTP base URL (or `OTEL_EXPORTER_OTLP_ENDPOINT`). | —                    |
-
-### Inspecting the permission policy
-
-Inside a session, `/permissions [mode] [outcome]` prints the same table for the
-tools that session actually loaded — including whatever MCP servers and plugins
-came up in this run — and evaluates against the mode you are really in, so
-`--yolo` and Shift+Tab are reflected rather than the config's default.
-
-From the shell, `arterm permissions list` answers the same question — every tool,
-its effective level, and what the policy resolves to:
-
-```bash
-arterm permissions list                      # the whole surface, under your config
-arterm permissions list --mode plan          # what a read-only session could do
-arterm permissions list --only prompt        # just the tools that will interrupt you
-arterm permissions list --json               # machine-readable rows
-```
+83 crates, layered so that high-churn orchestration depends on stable
+contracts and never the reverse:
 
 ```
-mode: auto   19 tools
-
-  ✓ runs*  bash         execute ask    risk:destructive
-  ✓ runs   grep         read    allow
-  ✓ runs*  write        edit    ask    risk:caution
-  ? prompts  deploy     execute ask    override plugin
-
-  note: * the arbiter judges these from the actual arguments, and every row here was
-          evaluated with none — a `runs*` tool can still be escalated or denied per call
-          (`rm -rf /` never runs). `arterm permissions explain <tool> --args '{…}'` for one.
+arterm (bin + cli dispatch)
+ └─ arterm-tui               presentation
+     └─ arterm-app-core      agent loop, tools, server
+         └─ arterm-base      providers, config, session, auth, memory
+             └─ contracts    arterm-provider-core, arterm-tool-core,
+                             arterm-protocol, arterm-*-types
 ```
 
-`arterm permissions explain` answers the follow-up — "what would happen if the
-agent called *this* tool with *these* arguments?" — without calling it:
+[ARCHITECTURE.md](./ARCHITECTURE.md) records why the layers sit that way, and
+which upstream designs are deliberately *not* being carried over.
 
-```bash
-arterm permissions explain bash --args '{"command":"rm -rf /"}'
-arterm permissions explain write --args '{"path":".env"}' --mode auto
-arterm permissions explain read --json          # machine-readable trace
-```
+## Status
 
-```
-bash  →  ✗ blocked
-  blocked by arbiter (critical risk): destructive command: rm -rf /
-
-  mode: ask   category: execute   level: ask   risk: destructive   source: built-in
-
-  · tool-level           level "ask" — not a hard deny, so the ladder continues
-  ▸ arbiter              deny — blocked by arbiter (critical risk): destructive command: rm -rf /
-```
-
-Both run the real policy — the same one a session builds from your config, and
-the same evaluation the agent loop consults — so they cannot drift from actual
-behavior. Nothing is executed and no override is written. `--mode` tries a
-different mode without changing your config; MCP and plugin tools are included
-unless you pass `--builtins-only`. `explain` exits 1 when the call would be
-blocked, so it works as a check in a script; `list` is an inventory and always
-exits 0.
-
-### Result verification
-
-Every completion claim an autonomous run makes — a finished goal, a phase, a
-round, an `/sdd` task — passes through one gate with two parts:
-
-1. **A deterministic command**, when the work declares one. Put a line reading
-   exactly `verify: <command>` in a goal, a phase's done-criteria, or a task's
-   description, and that command must exit 0. Nothing else in the text is ever
-   run as a command.
-2. **An independent reviewer**, in a fresh context with read-only tools. It
-   inspects the repository and reports a structured verdict; a rejection comes
-   back with concrete items, which are fed to the next attempt.
-
-```
-✓ verified (command) — build is green
-✗ verification failed (judge) phase, attempt 1 — no test covers the parser
-  • add a case for nested arrays in parser.test.ts
-⚠ verification unavailable — accepting the claim (no reviewer verdict arrived)
-```
-
-The third line is the important one. The reviewer **fails open**: an unreachable
-model, a dead key, or one too small to answer in the required form all accept the
-claim and say so, rather than rejecting finished work over an infrastructure
-problem. The command gate is the half that blocks. That is why this is on by
-default — it can catch a bad result, but it cannot break a working setup.
-
-```json
-{
-  "verify": { "enabled": true, "judge": true, "model": "qwen2.5-coder:14b", "attempts": 2 }
-}
-```
-
-`judge: false` keeps the free command gate without the model call; `model` points
-the reviewer at something better than the working model, which is worth doing if
-your main model is small. `enabled: false` turns the whole layer off.
-
-An autonomous run is scriptable — add `--print` to keep it out of the TUI:
-
-```bash
-arterm --print --goal "$(cat <<'EOF'
-port the parser to the new AST
-verify: pnpm -r test --filter core
-EOF
-)"
-```
-
-```
-▸ step 1
-✗ verification failed (command) — verification failed (exit 1): pnpm -r test --filter core
-  • `pnpm -r test --filter core` must exit 0 — it exited 1
-▸ step 2
-✓ verified (command)
-■ goal complete
-```
-
-Lifecycle goes to stderr and the final summary to stdout, so `--print --goal … 2>/dev/null`
-gives you just the answer. `--json` emits the run plus every verdict as one object,
-which is what you want in CI — including a `usage` block (input/output/cache
-tokens and USD) that is present whether or not a budget ceiling was set, with
-`reported: false` when the backend counted nothing, so an unmetered local model
-never reads as a free run.
-
-### Observability
-
-With `telemetry.enabled`, every run exports OpenTelemetry **GenAI** signals to
-any OTLP backend — `invoke_agent` spans per turn, `chat` per model call
-(carrying `gen_ai.usage.*`), `execute_tool` per tool, plus the
-`gen_ai.client.token.usage` and `gen_ai.client.operation.duration` histograms.
-That is the same vocabulary Copilot, Codex and Claude Code emit, so Arterm runs
-land in the same dashboards instead of needing their own.
-
-```json
-{ "telemetry": { "enabled": true, "endpoint": "http://localhost:4318" } }
-```
-
-The GenAI conventions are still pre-stable, so the attribute names are pinned to
-one semconv release and every export states which: the resource carries
-`gen_ai.semconv.version`. Telemetry never fails a run — an unreachable collector
-or a missing package degrades to one line on stderr.
-
-### Benchmarking
-
-`bench/harbor/` runs Arterm under [Harbor](https://www.harborframework.com) /
-Terminal-Bench 2.x — an adapter file, no fork of the harness:
-
-```bash
-bash bench/harbor/pack.sh
-harbor run -d terminal-bench@2.0 --agent bench.harbor.arterm_agent:ArtermAgent \
-  --model anthropic/claude-opus-4-5 -k 5
-```
-
-Every run writes a `harness.json` next to its result, because the same model
-scores 46% vs 80% across scaffolds — a number without its harness is not
-comparable to anyone else's. See `bench/harbor/README.md`.
-
-### Spec-driven runs (`/sdd`)
-
-`/sdd` turns a brief into a spec document and a task DAG, then runs the graph
-wave by wave: every task whose dependencies are done is dispatched concurrently
-to its own sub-agent.
-
-Every worker gets two things beyond its own task:
-
-- **The spec**, so it follows the same decisions as the tasks running alongside
-  it. A task description is a sentence; the design is in the document.
-- **What its dependencies actually produced**, not just their titles — which is
-  what makes a chain like *read the logs → analyze → fix* work at all. Each
-  worker is a fresh sub-agent with no memory of the previous wave, and under
-  worktree isolation it cannot even read the files that wave wrote, so those
-  outputs are the only channel between the two.
-
-```json
-{ "sdd": { "maxQuestions": 4, "maxTasks": 12, "specChars": 6000, "handoffChars": 12000 } }
-```
-
-`specChars` budgets the spec quoted into each prompt; `handoffChars` budgets the
-dependency outputs, split evenly among them. Anything too long for its share
-keeps its head and its tail — a report's conclusion is at the bottom, so trimming
-from the end is the one thing that must not happen. `0` on either omits that
-part, which is how you get the old title-and-description-only dispatch.
-
-### Fallback models
-
-When the active model fails with something a retry can't fix quickly — rate
-limit, overload, provider outage, dropped connection — Arterm can move down an
-ordered list instead of ending the turn:
-
-```json
-{
-  "fallbackModels": [
-    { "model": "llama3.2" },
-    { "provider": "anthropic", "model": "claude-haiku-4-5" }
-  ]
-}
-```
-
-`provider` defaults to the active one, so the first entry is a same-provider
-fallback and the second crosses vendors (and needs its own credentials). Two
-rules bound it: the chain only moves on a **retryable** failure — a rejected API
-key or a malformed request is reported immediately, since every target would
-reject it too — and only **before any output**, because switching models
-mid-answer would splice two different replies together. Each switch prints a
-`↪` line naming the model that took over, and the status bar keeps showing
-`configured↪answering` (e.g. `openai-compat/fake↪backup`) for as long as the
-chain is off your primary — the transcript line scrolls away, the footer doesn't.
-
-The chain also doesn't wait out a rate limit to reach it. When a server answers
-with `Retry-After` longer than 30 seconds, retrying is abandoned on the spot: a
-one-hour limit does not clear because we waited 30 seconds three times, and those
-90 seconds are pure delay before the fallback that would have worked. With no
-fallback configured you get the same benefit as a faster, more specific error —
-"rate limited, 58m to go" immediately, instead of after a minute and a half of
-silence.
-
-## Development
-
-A pnpm + TypeScript (ESM) monorepo. The dependency direction is one-way:
-everything depends on `core`, which owns the shared interfaces.
-
-| Package             | Responsibility                                                            |
-| ------------------- | ------------------------------------------------------------------------ |
-| `@arterm/core`      | Shared types, the agent loop, config, event bus, permissions, tool protocol. |
-| `@arterm/providers` | `OllamaProvider`, `OpenAICompatProvider`, `LlamaCppProvider` + registry.  |
-| `@arterm/tools`     | The file & shell tools and their registry.                               |
-| `@arterm/tui`       | The Ink terminal UI: chat, status bar, model picker, permission prompts.  |
-| `@arterm/memory`    | Persistent project memory (observation capture, digest, recall, search).  |
-| `arterm-cli`        | The published `arterm` binary (commander + session wiring).              |
-
-```bash
-pnpm install
-pnpm -r build      # build every package
-pnpm -r test       # run the test suites
-node packages/cli/dist/main.js   # run the locally-built CLI
-```
-
-See [CLAUDE.md](./CLAUDE.md) for the contributor guide.
-
-## License
-
-[MIT](./LICENSE) © Arclude
+The suite is green and the binary completes real turns against a live provider.
+The open work is the safety layer: this tree has no sandbox and no per-tool
+permission prompt, which the removed TypeScript implementation did have — its
+design notes are in `docs/legacy-typescript/CLAUDE.md`, and
+`SECURITY.md` was archived rather than carried forward for exactly that reason.
+What is already better here is `arterm-command-risk`, which classifies commands
+by blast radius rather than by name.
