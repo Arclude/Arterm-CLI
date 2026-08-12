@@ -129,7 +129,7 @@ enable provenance tagging or coarse usage metering.
 
 ## 4. Implement browse, select, and catalog suggestions
 
-The default client sends `GET https://api.arterm.sh/v1/discovery` with a
+The default client sends `GET https://api.arterm.dev/v1/discovery` with a
 three-second timeout and a 64 KiB maximum response. It sends a
 `User-Agent: arterm/<version>` header and a random
 `x-arterm-discovery-request-id` correlation header.

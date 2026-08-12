@@ -11,7 +11,7 @@
 #   --yes       Skip the confirmation prompt.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/uninstall.sh | bash
+#   curl -fsSL https://arterm.dev/uninstall | bash
 #   bash scripts/uninstall.sh --purge
 set -euo pipefail
 
@@ -165,7 +165,7 @@ esac
 
 info "arterm uninstalled."
 if [ "$PURGE" = false ]; then
-  info "Reinstall with: curl -fsSL https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.sh | bash"
+  info "Reinstall with: curl -fsSL https://arterm.dev/install | bash"
 else
-  info "All arterm data wiped. Reinstall with: curl -fsSL https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.sh | bash"
+  info "All arterm data wiped. Reinstall with: curl -fsSL https://arterm.dev/install | bash"
 fi

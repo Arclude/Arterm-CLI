@@ -941,7 +941,7 @@ impl Default for CredentialsConfig {
 /// `discovery_endpoint_note` warns about it. A second spelling that drifts
 /// does not fail loudly; it just stops matching, and every one of those
 /// readers then quietly decides the opposite of what it should.
-pub const DEFAULT_DISCOVERY_ENDPOINT: &str = "https://api.arterm.sh/v1/discovery";
+pub const DEFAULT_DISCOVERY_ENDPOINT: &str = "https://api.arterm.dev/v1/discovery";
 
 /// The pre-rebrand spelling of the same upstream service.
 pub const LEGACY_DISCOVERY_ENDPOINT: &str = "https://api.solosystems.dev/v1/discovery";

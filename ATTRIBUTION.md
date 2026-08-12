@@ -108,7 +108,7 @@ shared infrastructure and have no build dependency here:
 1. **Rebranding.** `jcode` → `arterm` across 1,263 text files: 83 crate names,
    the binary, environment variables (`JCODE_*` → `ARTERM_*`) and the state
    directory (`~/.jcode` → `~/.arterm`). The transformation is kept as
-   `scripts/rebrand_to_arterm.sh` so it stays auditable.
+   `scripts/rebrand_to_arterm.dev` so it stays auditable.
 
 2. **The README.** Upstream's README was carried for a while and is now
    removed. It could never have served as this project's README: a mechanical

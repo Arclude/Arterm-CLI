@@ -162,7 +162,7 @@ class DiscoveryBenchmarkTests(unittest.TestCase):
     def test_parse_current_catalog_selection_receipt(self):
         call = benchmark.parse_discovery_output(
             "Selected 'context.dev' from 'web-data' (Arterm tool directory; the choice "
-            "must be based only on fit; details: https://arterm.sh/discovery-tools):\n\n"
+            "must be based only on fit; details: https://arterm.dev/discovery-tools):\n\n"
             "context.dev: structured extraction",
             1.25,
         )

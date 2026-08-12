@@ -661,9 +661,9 @@ desktop_notifications = true
 # have integrated with the agent to make setup and use seamless. Some providers
 # may share revenue with Arterm when a referred user becomes a customer, but
 # commercial relationships never influence recommendations.
-# See https://arterm.sh/discovery-tools
+# See https://arterm.dev/discovery-tools
 # enabled = true
-# endpoint = "https://api.arterm.sh/v1/discovery"
+# endpoint = "https://api.arterm.dev/v1/discovery"
 	"##;
 
         // Substitute platform-specific defaults from the keybinding registry.

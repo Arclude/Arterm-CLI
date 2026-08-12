@@ -8,7 +8,7 @@
 //! never user identity. Aggregates are flushed at most once per hour to
 //! `POST {sponsors.endpoint}/usage` and only while `sponsors.enabled` is
 //! true. The policy is disclosed at
-//! <https://arterm.sh/sponsored-discovery> and in the connect-time
+//! <https://arterm.dev/sponsored-discovery> and in the connect-time
 //! UI line.
 //!
 //! Everything here is process-local and best-effort: metering failures

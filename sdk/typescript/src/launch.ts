@@ -702,8 +702,8 @@ export async function launchInstance(options: LaunchOptions = {}): Promise<Launc
           ? `could not run \`${binaryName}\`: arterm is not installed, or not on PATH. ` +
             (platformPackage
               ? `The bundled runtime package (${platformPackage}) is missing. Reinstall without ` +
-                "--omit=optional, install arterm from https://arterm.sh, or pass `binary` with its full path."
-              : "Install arterm from https://arterm.sh, or pass `binary` with its full path.")
+                "--omit=optional, install arterm from https://arterm.dev, or pass `binary` with its full path."
+              : "Install arterm from https://arterm.dev, or pass `binary` with its full path.")
           : `could not run \`${binaryName}\`: ${spawnError.message}`,
       );
     }

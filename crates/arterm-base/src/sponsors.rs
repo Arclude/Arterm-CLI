@@ -6,7 +6,7 @@
 //! system prompt.
 //! Some providers may share revenue with Arterm when users choose their tools.
 //! Partnership status never influences recommendations. The relationship is
-//! disclosed in the UI with a link to <https://arterm.sh/discovery-tools>.
+//! disclosed in the UI with a link to <https://arterm.dev/discovery-tools>.
 //!
 //! Design constraints (see the discovery-tools page for the public
 //! version of this policy):
@@ -27,7 +27,7 @@
 //!   never session content.
 
 /// Public URL explaining Arterm's tool-provider partnerships.
-pub const DISCOVERY_PARTNERS_URL: &str = "https://arterm.sh/discovery-tools";
+pub const DISCOVERY_PARTNERS_URL: &str = "https://arterm.dev/discovery-tools";
 
 pub use arterm_config_types::{DEFAULT_DISCOVERY_ENDPOINT, LEGACY_DISCOVERY_ENDPOINT};
 

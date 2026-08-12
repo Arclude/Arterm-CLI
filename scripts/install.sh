@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="Arclude/Arterm-CLI"
-# No default host. This was https://arterm.sh/releases, which has no DNS
+# No default host. This was https://arterm.dev/releases, which has no DNS
 # record, so every install burned three failed lookups before falling back to
 # GitHub -- which is what serves the assets. Set ARTERM_RELEASE_METADATA_BASE
 # to opt into a mirror.
@@ -169,8 +169,11 @@ tmpdir=$(mktemp -d)
 INSTALL_STAGE="artifact_download"
 download_mode=""
 downloaded_asset=""
-DOWNLOAD_BASES=$(curl -fsSL --retry 2 --connect-timeout 10 \
-  "$RELEASE_METADATA_BASE/$VERSION/download-bases" 2>/dev/null || true)
+DOWNLOAD_BASES=""
+if [ -n "$RELEASE_METADATA_BASE" ]; then
+  DOWNLOAD_BASES=$(curl -fsSL --retry 2 --connect-timeout 10 \
+    "${RELEASE_METADATA_BASE%/}/$VERSION/download-bases" 2>/dev/null || true)
+fi
 DOWNLOAD_BASES=$(printf '%s\n%s\n' "$DOWNLOAD_BASES" "$GITHUB_RELEASE_BASE" |
   awk '/^https:\/\/[^[:space:]]+$/ && !seen[$0]++')
 
@@ -194,9 +197,11 @@ done
 if [ -n "$download_mode" ]; then
   INSTALL_STAGE="artifact_verification"
   EXPECTED_SHA256=""
-  for checksum_url in \
-    "$RELEASE_METADATA_BASE/$VERSION/SHA256SUMS" \
-    "$GITHUB_RELEASE_BASE/SHA256SUMS"; do
+  checksum_urls="$GITHUB_RELEASE_BASE/SHA256SUMS"
+  if [ -n "$RELEASE_METADATA_BASE" ]; then
+    checksum_urls="${RELEASE_METADATA_BASE%/}/$VERSION/SHA256SUMS $checksum_urls"
+  fi
+  for checksum_url in $checksum_urls; do
     CHECKSUMS=$(curl -fsSL --retry 2 --connect-timeout 10 \
       "$checksum_url" 2>/dev/null || true)
     EXPECTED_SHA256=$(printf '%s\n' "$CHECKSUMS" |

@@ -65,7 +65,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPONSORS = REPO_ROOT / "scripts" / "attribution_benchmark_sponsors.json"
 DEFAULT_OUTPUT = REPO_ROOT / "target" / "attribution-benchmark" / "latest.json"
-DEFAULT_ENDPOINT = "https://api.arterm.sh/v1/discovery"
+DEFAULT_ENDPOINT = "https://api.arterm.dev/v1/discovery"
 BENCHMARK_HEADER = "x-arterm-discovery-benchmark"
 
 # The check that decides whether agent-driven (CLI) signups are credited to us.

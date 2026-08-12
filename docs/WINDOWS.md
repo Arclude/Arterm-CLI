@@ -21,7 +21,7 @@ PowerShell 5.1 or later is required by the installer. The x64 build is the defau
 Open PowerShell and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1 | iex
+irm https://arterm.dev/install.ps1 | iex
 ```
 
 The installer:
@@ -35,7 +35,7 @@ The installer:
 Alacritty installation and the global launch hotkey are optional and are no longer installed automatically. To request both explicitly:
 
 ```powershell
-$script = [scriptblock]::Create((irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1))
+$script = [scriptblock]::Create((irm https://arterm.dev/install.ps1))
 & $script -ConfigureAlacritty -ConfigureHotkey
 ```
 
@@ -46,7 +46,7 @@ fails with an actionable message rather than silently starting a long build.
 To explicitly allow a source build:
 
 ```powershell
-$script = [scriptblock]::Create((irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1))
+$script = [scriptblock]::Create((irm https://arterm.dev/install.ps1))
 & $script -BuildFromSource
 ```
 

@@ -5,7 +5,7 @@ reply, reports tool calls, and cleans up the private instance on exit.
 
 ## Run it
 
-Install [arterm](https://arterm.sh), sign in to at least one model provider, then:
+Install [arterm](https://arterm.dev), sign in to at least one model provider, then:
 
 ```bash
 npm install

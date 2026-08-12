@@ -109,7 +109,7 @@ fn public_manage_url(candidate: Option<&str>) -> &str {
                         // This allowlist decides which server-supplied URL the
                         // binary will open in the user's browser, so a host
                         // that is not ours is a redirect we cannot vouch for.
-                        && matches!(parsed.host_str(), Some("arterm.sh" | "www.arterm.sh"))
+                        && matches!(parsed.host_str(), Some("arterm.dev" | "www.arterm.dev"))
                         && parsed.username().is_empty()
                         && parsed.password().is_none()
             )
@@ -124,15 +124,15 @@ mod tests {
     #[test]
     fn manage_url_accepts_only_public_allowlisted_https_origins() {
         assert_eq!(
-            public_manage_url(Some("https://arterm.sh/account")),
-            "https://arterm.sh/account"
+            public_manage_url(Some("https://arterm.dev/account")),
+            "https://arterm.dev/account"
         );
         assert_eq!(
             public_manage_url(Some("https://evil.example/?key=jck_live_secret")),
             crate::subscription_catalog::ARTERM_ACCOUNT_URL
         );
         assert_eq!(
-            public_manage_url(Some("https://user:pass@arterm.sh/account")),
+            public_manage_url(Some("https://user:pass@arterm.dev/account")),
             crate::subscription_catalog::ARTERM_ACCOUNT_URL
         );
     }

@@ -227,7 +227,7 @@ fn record_discovery_telemetry(
 ///
 /// Disclosure contract: some integration providers may share revenue with Arterm, but
 /// commercial relationships never influence recommendations. The policy is
-/// disclosed in the tool schema and at <https://arterm.sh/discovery-tools>.
+/// disclosed in the tool schema and at <https://arterm.dev/discovery-tools>.
 /// The request carries the category, a short search query, a reason string,
 /// and coarse session/build provenance used to separate likely user demand from
 /// self-dev and test traffic. It never includes transcript content, file paths,
@@ -1494,7 +1494,7 @@ mod tests {
     fn discovery_requests_attach_only_the_ephemeral_session_correlation_id() {
         let correlation_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
         let request = header_test_provenance(Some(correlation_id))
-            .apply(reqwest::Client::new().get("https://api.arterm.sh/v1/discovery"))
+            .apply(reqwest::Client::new().get("https://api.arterm.dev/v1/discovery"))
             .build()
             .unwrap();
         assert_eq!(
@@ -1509,7 +1509,7 @@ mod tests {
     #[test]
     fn discovery_requests_omit_correlation_header_when_telemetry_has_no_id() {
         let request = header_test_provenance(None)
-            .apply(reqwest::Client::new().get("https://api.arterm.sh/v1/discovery"))
+            .apply(reqwest::Client::new().get("https://api.arterm.dev/v1/discovery"))
             .build()
             .unwrap();
         assert!(
@@ -1741,7 +1741,7 @@ mod tests {
                 "url": "https://www.agentmail.to/?via=arterm-discovery",
                 "setup": concat!(
                     "POST https://api.agentmail.to/v0/agent/sign-up with JSON ",
-                    "{\"source\":\"arterm\",\"referrer\":\"https://arterm.sh/discovery-tools\"}. ",
+                    "{\"source\":\"arterm\",\"referrer\":\"https://arterm.dev/discovery-tools\"}. ",
                     "Then connect with npx -y agentmail-mcp@1.0.0."
                 ),
                 "mcp": {
@@ -1754,7 +1754,7 @@ mod tests {
         let rendered = render_selection("email-messaging", "agentmail", &listing).unwrap();
         assert!(rendered.contains("Selected 'agentmail'"));
         assert!(rendered.contains("\"source\":\"arterm\""));
-        assert!(rendered.contains("\"referrer\":\"https://arterm.sh/discovery-tools\""));
+        assert!(rendered.contains("\"referrer\":\"https://arterm.dev/discovery-tools\""));
         assert!(rendered.contains("agentmail-mcp@1.0.0"));
         assert!(rendered.contains("setup is provided through a Arterm integration"));
 

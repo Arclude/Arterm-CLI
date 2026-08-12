@@ -212,7 +212,7 @@ pub fn launch_instance(options: &LaunchOptions) -> Result<LaunchedInstance> {
             cleanup_on_error();
             let message = if cause.kind() == std::io::ErrorKind::NotFound {
                 format!(
-                    "could not run `{}`: arterm is not installed, or not on PATH. Install it from https://arterm.sh, or pass `binary` with its full path.",
+                    "could not run `{}`: arterm is not installed, or not on PATH. Install it from https://arterm.dev, or pass `binary` with its full path.",
                     binary.display()
                 )
             } else {

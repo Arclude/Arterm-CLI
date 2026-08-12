@@ -23,13 +23,13 @@ use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const TELEMETRY_ENDPOINT: &str = "https://telemetry.arterm.sh/v1/event";
+const TELEMETRY_ENDPOINT: &str = "https://telemetry.arterm.dev/v1/event";
 const ASYNC_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const BACKGROUND_QUEUE_CAPACITY: usize = 2048;
 const BLOCKING_INSTALL_TIMEOUT: Duration = Duration::from_millis(1200);
 const BLOCKING_LIFECYCLE_TIMEOUT: Duration = Duration::from_millis(800);
 const TELEMETRY_SCHEMA_VERSION: u32 = 6;
-const DEFAULT_DISCOVERY_ENDPOINT: &str = "https://api.arterm.sh/v1/discovery";
+const DEFAULT_DISCOVERY_ENDPOINT: &str = "https://api.arterm.dev/v1/discovery";
 static TELEMETRY_PERMANENTLY_REJECTED: AtomicBool = AtomicBool::new(false);
 static TELEMETRY_QUEUE_OVERFLOW_WARNED: AtomicBool = AtomicBool::new(false);
 static TELEMETRY_BACKGROUND_SENDER: OnceLock<SyncSender<Value>> = OnceLock::new();

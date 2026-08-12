@@ -12,7 +12,7 @@ Cloud access is bundled into paid Arterm subscriptions rather than sold as a sec
 ### User journey
 
 1. Run `/remote` on desktop or select **Arterm Cloud** in a client.
-2. Browser opens `https://arterm.sh/account`. During early access, the account
+2. Browser opens `https://arterm.dev/account`. During early access, the account
    page handles sign-in and plan management but does not yet provision a host.
 3. Sign in with the existing Arterm device/account identity. If needed, subscribe or upgrade.
 4. Pick the nearest supported region. Defaults are automatic and reversible.
@@ -82,7 +82,7 @@ Exact included hours must be set from measured AWS cost plus support and model m
 
 ## API contract
 
-Authenticated endpoints under the existing `api.arterm.sh/v1` origin:
+Authenticated endpoints under the existing `api.arterm.dev/v1` origin:
 
 - `GET /cloud` returns entitlement, desired/actual host state, region, limits, client endpoint, and pending operation.
 - `POST /cloud/activate` creates the desired host idempotently.

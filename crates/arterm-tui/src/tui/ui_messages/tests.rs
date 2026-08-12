@@ -2315,7 +2315,7 @@ fn discovery_message(content: &str, input: serde_json::Value) -> DisplayMessage 
 #[test]
 fn render_tool_message_shows_discovery_browse_results_and_rationale() {
     let msg = discovery_message(
-        "Discoverable tools in 'payments' (Arterm tool directory; recommendations must be based only on fit; details: https://arterm.sh/discovery-tools):\n\n- agentcard: prepaid virtual Visa cards for AI agents (https://agentcard.sh/?via=arterm-discovery)\n\nSearch request ID: `11111111-2222-4333-8444-555555555555`",
+        "Discoverable tools in 'payments' (Arterm tool directory; recommendations must be based only on fit; details: https://arterm.dev/discovery-tools):\n\n- agentcard: prepaid virtual Visa cards for AI agents (https://agentcard.sh/?via=arterm-discovery)\n\nSearch request ID: `11111111-2222-4333-8444-555555555555`",
         serde_json::json!({
             "action": "search",
             "category": "payments",
@@ -2376,7 +2376,7 @@ fn render_tool_message_shows_discovery_browse_results_and_rationale() {
 fn batched_discovery_renders_without_disclosure_notice() {
     let msg = DisplayMessage {
         role: "tool".to_string(),
-        content: "--- [1] integration_tools ---\nAvailable integrations in 'payments' (Arterm tool directory; recommendations must be based only on fit; details: https://arterm.sh/discovery-tools):\n\n- agentcard: prepaid virtual Visa cards for AI agents (https://agentcard.sh/?via=arterm-discovery)\n\nSearch request ID: `11111111-2222-4333-8444-555555555555`\n\nCompleted: 1 succeeded, 0 failed".to_string(),
+        content: "--- [1] integration_tools ---\nAvailable integrations in 'payments' (Arterm tool directory; recommendations must be based only on fit; details: https://arterm.dev/discovery-tools):\n\n- agentcard: prepaid virtual Visa cards for AI agents (https://agentcard.sh/?via=arterm-discovery)\n\nSearch request ID: `11111111-2222-4333-8444-555555555555`\n\nCompleted: 1 succeeded, 0 failed".to_string(),
         tool_calls: Vec::new(),
         duration_secs: None,
         title: None,
@@ -2426,7 +2426,7 @@ fn batched_discovery_renders_without_disclosure_notice() {
 #[test]
 fn render_tool_message_shows_selected_discovery_setup() {
     let msg = discovery_message(
-        "Selected 'agentcard' from 'payments' (Arterm tool directory; selection must be based only on fit; details: https://arterm.sh/discovery-tools):\n\nagentcard: prepaid virtual Visa cards for AI agents (https://agentcard.sh/?via=arterm-discovery)\n\nSetup: Run `npx -y agentcard-mcp@1.2.3`, then connect the resulting MCP server.\n\nConsequential actions (signups, spending) must note the partnership in the confirmation shown to the user.",
+        "Selected 'agentcard' from 'payments' (Arterm tool directory; selection must be based only on fit; details: https://arterm.dev/discovery-tools):\n\nagentcard: prepaid virtual Visa cards for AI agents (https://agentcard.sh/?via=arterm-discovery)\n\nSetup: Run `npx -y agentcard-mcp@1.2.3`, then connect the resulting MCP server.\n\nConsequential actions (signups, spending) must note the partnership in the confirmation shown to the user.",
         serde_json::json!({
             "action": "select",
             "category": "payments",

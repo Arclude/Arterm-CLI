@@ -8,9 +8,9 @@ pub const ARTERM_TIER_ENV: &str = "ARTERM_TIER";
 pub const ARTERM_ENV_FILE: &str = "arterm-subscription.env";
 pub const ARTERM_CACHE_NAMESPACE: &str = "arterm-subscription";
 pub const ARTERM_SUBSCRIPTION_ACTIVE_ENV: &str = "ARTERM_SUBSCRIPTION_ACTIVE";
-pub const DEFAULT_ARTERM_API_BASE: &str = "https://api.arterm.sh/v1";
-pub const ARTERM_PRICING_URL: &str = "https://arterm.sh/pricing";
-pub const ARTERM_ACCOUNT_URL: &str = "https://arterm.sh/account";
+pub const DEFAULT_ARTERM_API_BASE: &str = "https://api.arterm.dev/v1";
+pub const ARTERM_PRICING_URL: &str = "https://arterm.dev/pricing";
+pub const ARTERM_ACCOUNT_URL: &str = "https://arterm.dev/account";
 /// User-facing runtime identity. Keep "Subscription" in the name so picker,
 /// header, status, and diagnostics never resemble a generic model host.
 pub const ARTERM_PROVIDER_DISPLAY_NAME: &str = "Arterm Subscription";

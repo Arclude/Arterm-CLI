@@ -10,13 +10,13 @@ unattended as readily as interactively.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.sh | bash
+curl -fsSL https://arterm.dev/install | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1 | iex
+irm https://arterm.dev/install.ps1 | iex
 ```
 
 The installer resolves the latest release, verifies the download against the

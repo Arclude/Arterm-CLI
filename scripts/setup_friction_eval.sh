@@ -86,9 +86,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$url" in
-  *telemetry.arterm.sh*) ;;
-  *arterm.sh/releases/latest/version) printf 'v%s\n' "${EVAL_VERSION:-1.2.3}" ;;
-  *arterm.sh/releases/v*/download-bases)
+  *telemetry.arterm.dev*) ;;
+  *arterm.dev/releases/latest/version) printf 'v%s\n' "${EVAL_VERSION:-1.2.3}" ;;
+  *arterm.dev/releases/v*/download-bases)
     printf 'https://github.com/Arclude/Arterm-CLI/releases/download/v%s\n' "${EVAL_VERSION:-1.2.3}"
     ;;
   *SHA256SUMS)

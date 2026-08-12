@@ -5,10 +5,10 @@
     Downloads the latest arterm release and installs it to %LOCALAPPDATA%\arterm\bin.
 
     One-liner install:
-      irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1 | iex
+      irm https://arterm.dev/install.ps1 | iex
 
     Or download and run (allows parameters):
-      & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Arclude/Arterm-CLI/main/scripts/install.ps1)))
+      & ([scriptblock]::Create((irm https://arterm.dev/install.ps1)))
 .PARAMETER InstallDir
     Override the installation directory (default: $env:LOCALAPPDATA\arterm\bin)
 .PARAMETER Version
@@ -52,7 +52,7 @@ $Repo = "Arclude/Arterm-CLI"
 $ReleaseMetadataBase = if ($env:ARTERM_RELEASE_METADATA_BASE) {
     $env:ARTERM_RELEASE_METADATA_BASE.TrimEnd('/')
 } else {
-    # No default. arterm.sh has no DNS record, and querying it first
+    # No default. arterm.dev has no DNS record, and querying it first
     # cost every install three failed lookups before GitHub -- which is
     # what serves the assets -- was tried at all.
     ""
@@ -83,7 +83,7 @@ function ConvertFrom-ArtermWebContent($Content) {
     if ($null -eq $Content) { return "" }
 
     # Windows PowerShell 5.1 returns Byte[] for some text responses when the
-    # server uses application/octet-stream (including arterm.sh metadata and
+    # server uses application/octet-stream (including arterm.dev metadata and
     # GitHub release checksum manifests). Casting Byte[] directly to [string]
     # produces a space-separated list of decimal bytes instead of the text.
     if ($Content -is [byte[]]) {

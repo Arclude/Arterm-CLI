@@ -158,7 +158,7 @@ try {
         Assert-Equal $false (Test-ArtermReleaseTag 'latest') 'unversioned release labels should not validate'
         $scriptText = Get-Content -LiteralPath $installScript -Raw
         Assert-NotContains $scriptText 'api.github.com/repos/$Repo/releases/latest' 'installer should not use the rate-limited unauthenticated GitHub API'
-        Assert-Contains $scriptText 'arterm.sh/releases' 'installer should include independent static release metadata'
+        Assert-Contains $scriptText 'arterm.dev/releases' 'installer should include independent static release metadata'
 
         $script:releaseLookupRequests = @()
         function Invoke-WebRequest {
@@ -169,10 +169,10 @@ try {
                 [string]$OutFile
             )
             $script:releaseLookupRequests += $Uri
-            if ($Uri -eq 'https://arterm.sh/releases/latest/version') {
+            if ($Uri -eq 'https://arterm.dev/releases/latest/version') {
                 return [pscustomobject]@{ Content = "v1.2.3`n" }
             }
-            if ($Uri -eq 'https://arterm.sh/releases/v1.2.3/download-bases') {
+            if ($Uri -eq 'https://arterm.dev/releases/v1.2.3/download-bases') {
                 return [pscustomobject]@{ Content = "https://mirror.example/releases/v1.2.3`n" }
             }
             if ($Uri -eq 'https://github.com/Arclude/Arterm-CLI/releases/latest') {

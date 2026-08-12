@@ -1243,7 +1243,7 @@ fn machine_written_sponsors_optout_is_left_alone() {
     // `enabled` + a known default endpoint, nothing else. Loading must not
     // touch it. Silently re-enabling a disabled third-party endpoint is the
     // one thing an opt-out has to survive.
-    let raw = "[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.sh/v1/discovery\"\n";
+    let raw = "[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.dev/v1/discovery\"\n";
     let config: Config = toml::from_str(raw).expect("parse");
     assert!(
         !config.sponsors.enabled,
@@ -1257,7 +1257,7 @@ fn sponsors_opt_in_is_preserved_rather_than_repaired_away() {
     // a `true` we did not write is indistinguishable from one the user meant,
     // so loading leaves it alone in this direction too. `discovery_endpoint_note`
     // is what reports an enabled default endpoint at boot.
-    let raw = "[sponsors]\nenabled = true\nendpoint = \"https://api.arterm.sh/v1/discovery\"\n";
+    let raw = "[sponsors]\nenabled = true\nendpoint = \"https://api.arterm.dev/v1/discovery\"\n";
     let config: Config = toml::from_str(raw).expect("parse");
     assert!(config.sponsors.enabled, "an explicit opt-in must survive");
 
@@ -1284,7 +1284,7 @@ fn sponsors_optout_survives_a_real_config_round_trip() {
     std::fs::create_dir_all(path.parent().expect("config parent")).expect("create config parent");
     std::fs::write(
         &path,
-        "[display]\ncentered = false\n\n[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.sh/v1/discovery\"\n",
+        "[display]\ncentered = false\n\n[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.dev/v1/discovery\"\n",
     )
     .expect("write frozen config");
 
@@ -1321,7 +1321,7 @@ fn every_spelling_of_a_sponsors_optout_is_respected() {
     for raw in [
         "[sponsors]\nenabled = false\n",
         "[sponsors]\nenabled = false\nendpoint = \"https://discovery.internal/v1\"\n",
-        "[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.sh/v1/discovery\"\n",
+        "[sponsors]\nenabled = false\nendpoint = \"https://api.arterm.dev/v1/discovery\"\n",
         "[sponsors]\nenabled = false\nendpoint = \"https://api.solosystems.dev/v1/discovery\"\n",
     ] {
         let config: Config = toml::from_str(raw).expect("parse");
