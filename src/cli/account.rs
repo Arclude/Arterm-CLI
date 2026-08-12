@@ -106,7 +106,10 @@ fn public_manage_url(candidate: Option<&str>) -> &str {
                 reqwest::Url::parse(url),
                 Ok(parsed)
                     if parsed.scheme() == "https"
-                        && matches!(parsed.host_str(), Some("arterm.sh" | "www.arterm.sh" | "solosystems.dev"))
+                        // This allowlist decides which server-supplied URL the
+                        // binary will open in the user's browser, so a host
+                        // that is not ours is a redirect we cannot vouch for.
+                        && matches!(parsed.host_str(), Some("arterm.sh" | "www.arterm.sh"))
                         && parsed.username().is_empty()
                         && parsed.password().is_none()
             )

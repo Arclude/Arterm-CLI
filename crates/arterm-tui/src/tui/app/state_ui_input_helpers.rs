@@ -1490,16 +1490,11 @@ impl App {
             ),
         ];
 
-        // macOS-only: offer to install ScrollWM, a scrolling window manager for
-        // macOS. The web installer downloads the latest release, strips the
-        // Gatekeeper quarantine, installs to ~/Applications, and launches it,
-        // with no sudo and no system files touched.
-        if cfg!(target_os = "macos") {
-            prompts.push((
-                "Install ScrollWM (scrolling window manager for macOS)".to_string(),
-                "Install ScrollWM, the scrolling window manager for macOS, by running its official one-line installer: `curl -fsSL https://raw.githubusercontent.com/1jehuang/scrollwm/main/scripts/web-install.sh | bash`. It downloads the latest release, removes the Gatekeeper quarantine, installs to ~/Applications, and launches it (no sudo, no system files touched). Run the command for me and report whether it succeeded.".to_string(),
-            ));
-        }
+        // A suggested prompt that told the agent to pipe a stranger's install
+        // script into bash used to sit here, offered to every new macOS user.
+        // Whatever the script does, shipping `curl … | bash` against a third
+        // party as a one-click suggestion is not something this project can
+        // stand behind, and it was upstream's project rather than ours.
 
         prompts.push((
             "Continue my last Codex CLI / Claude Code session".to_string(),

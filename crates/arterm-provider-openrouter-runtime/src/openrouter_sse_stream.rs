@@ -184,7 +184,9 @@ async fn stream_response(
 
     if send_openrouter_headers {
         req = req
-            .header("HTTP-Referer", "https://github.com/arterm")
+            // OpenRouter attributes usage to this URL. It was
+            // `github.com/arterm`, an account that exists and is not ours.
+            .header("HTTP-Referer", "https://github.com/Arclude/Arterm-CLI")
             .header("X-Title", "arterm");
     }
 
