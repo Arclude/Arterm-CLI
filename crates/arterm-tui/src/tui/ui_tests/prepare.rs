@@ -1402,3 +1402,35 @@ fn the_notes_go_away_when_the_conversation_starts() {
 
     assert!(!rendered.contains("Where we left off"), "rendered={rendered}");
 }
+
+/// Centered mode centers the transcript; the header has to travel with it.
+/// It is built left-aligned, and leaving it that way put the banner, provider
+/// list and cwd in the top-left corner of an otherwise centered screen.
+#[test]
+fn centered_mode_centers_the_header_block_too() {
+    fn header_indent(centered: bool) -> usize {
+        let state = TestState {
+            centered_mode: centered,
+            working_dir: Some("/home/toygar/Belgeler/Arterm-CLI".to_string()),
+            ..Default::default()
+        };
+        let rendered = prepare::prepare_messages(&state, 120, 40)
+            .materialize_all_lines()
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>();
+        rendered
+            .iter()
+            .find(|line| line.contains("Arterm-CLI"))
+            .map(|line| line.len() - line.trim_start().len())
+            .expect("the header should name the working directory")
+    }
+
+    let left = header_indent(false);
+    let centered = header_indent(true);
+    assert_eq!(left, 0, "left-aligned mode must not indent the header");
+    assert!(
+        centered > 0,
+        "centered mode must pad the header like the transcript (indent={centered})"
+    );
+}

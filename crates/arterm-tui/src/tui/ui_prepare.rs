@@ -1084,6 +1084,9 @@ fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
     app.connected_clients().hash(&mut hasher);
     app.server_sessions().len().hash(&mut hasher);
     app.working_dir().hash(&mut hasher);
+    // Centering pads the whole block, so the same header at the same width is
+    // a different set of lines in each mode.
+    app.centered_mode().hash(&mut hasher);
     // The "where we left off" notes live in the header and arrive from a
     // background read after the first frame, so the header built without them
     // must not be served for the rest of the launch.
@@ -1106,6 +1109,17 @@ fn prepare_header_cached(app: &dyn TuiState, width: u16) -> Arc<PreparedMessages
     let build = || {
         let (mut all_header_lines, secondary_lines) = header::build_header_sections(app, width);
         all_header_lines.extend(secondary_lines);
+        // Centered mode centers the transcript as a block, by padding every
+        // line by the same amount. The header is built left-aligned and has to
+        // be centered the same way rather than line by line: its provider list
+        // and status rows are a column, and centering each row on its own width
+        // would scatter them.
+        if app.centered_mode() {
+            arterm_tui_messages::left_pad_lines_for_centered_mode(
+                &mut all_header_lines,
+                width,
+            );
+        }
         Arc::new(wrap_lines(all_header_lines, &[], &[], &[], width))
     };
 
