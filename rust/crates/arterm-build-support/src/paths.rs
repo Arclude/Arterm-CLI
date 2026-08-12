@@ -599,6 +599,20 @@ pub fn preferred_reload_candidate(is_selfdev_session: bool) -> Option<(PathBuf, 
     }
 }
 
+/// True when `dir` or any ancestor holds a `.git` entry (a directory, or the
+/// file a worktree leaves).
+///
+/// The marker does not have to sit in the same directory as the workspace
+/// manifest. This tree is vendored as `rust/` inside a larger repository, so
+/// the manifest and `.git` are one level apart -- and requiring both in one
+/// directory did not fail loudly, it just answered "not a repository" to
+/// everything: self-dev builds, `selfdev reload`, and the dev_cargo wrapper
+/// `bash` puts in front of `cargo` all resolve the repo through here.
+fn has_git_marker(dir: &Path) -> bool {
+    dir.ancestors()
+        .any(|ancestor| ancestor.join(".git").exists())
+}
+
 /// Check if a directory is the arterm repository
 pub fn is_arterm_repo(dir: &Path) -> bool {
     // Check for Cargo.toml with name = "arterm"
@@ -608,7 +622,7 @@ pub fn is_arterm_repo(dir: &Path) -> bool {
     }
 
     // Check for a .git directory or gitdir file (worktrees use a file).
-    if !dir.join(".git").exists() {
+    if !has_git_marker(dir) {
         return false;
     }
 
@@ -763,6 +777,43 @@ mod tests {
     fn is_arterm_repo_accepts_git_file_for_worktree() {
         let repo = repo_fixture(true);
         assert!(is_arterm_repo(repo.path()));
+    }
+
+    /// The workspace manifest and `.git` need not share a directory: this tree
+    /// is vendored as a subdirectory of a larger repository, which is the real
+    /// layout every self-dev path had to work in and none of them did.
+    #[test]
+    fn is_arterm_repo_accepts_a_workspace_nested_under_the_git_root() {
+        let outer = tempfile::TempDir::new().expect("temp repo");
+        std::fs::create_dir_all(outer.path().join(".git")).expect("git dir");
+        let workspace = outer.path().join("rust");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        std::fs::write(
+            workspace.join("Cargo.toml"),
+            "[package]\nname = \"arterm\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("Cargo.toml");
+
+        assert!(is_arterm_repo(&workspace));
+        assert_eq!(
+            find_repo_in_ancestors(&workspace.join("crates").join("arterm-base")).as_deref(),
+            Some(workspace.as_path()),
+            "the workspace is the repo, not the git root above it"
+        );
+    }
+
+    /// A tree with no `.git` anywhere above it is not a source checkout, and the
+    /// ancestor walk must not turn that into a yes.
+    #[test]
+    fn is_arterm_repo_rejects_a_manifest_with_no_git_anywhere_above_it() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        std::fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"arterm\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("Cargo.toml");
+
+        assert!(!is_arterm_repo(temp.path()));
     }
 
     /// Build a release-style install dir: `arterm` wrapper script + payload.
