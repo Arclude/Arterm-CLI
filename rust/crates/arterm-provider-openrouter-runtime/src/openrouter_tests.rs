@@ -56,19 +56,34 @@ impl Drop for EnvVarGuard {
     }
 }
 
+/// Point every config-dir lookup in the process at `dir`.
+///
+/// `XDG_CONFIG_HOME` alone is not isolation. `storage::app_config_dir()`
+/// consults `ARTERM_HOME` FIRST and only falls back to the platform config dir,
+/// so a test that redirects XDG while some `ARTERM_HOME` is set writes and
+/// reads a directory it does not own -- shared with every other test in the
+/// binary, and surviving between runs. The workspace `.cargo/config.toml` sets
+/// one for every test binary, and so does any developer who exports it.
+fn isolate_config_dir(dir: &std::path::Path) -> [EnvVarGuard; 2] {
+    [
+        EnvVarGuard::set("XDG_CONFIG_HOME", dir),
+        EnvVarGuard::set("ARTERM_HOME", dir),
+    ]
+}
+
 fn test_config_dir(temp: &TempDir) -> std::path::PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        temp.path().join("Library").join("Application Support")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        temp.path().join("AppData").join("Roaming")
-    }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        temp.path().to_path_buf()
-    }
+    // With `ARTERM_HOME` redirected by `isolate_config_dir`, the config dir is
+    // `$ARTERM_HOME/config/arterm` on every platform, so the OS-specific
+    // branches this used to carry no longer apply. The assertion is what keeps
+    // the two spellings from drifting into a test that writes a key nothing
+    // reads -- and it fails loudly for a caller that skipped the isolation.
+    let dir = temp.path().join("config");
+    assert_eq!(
+        arterm_base::storage::app_config_dir().expect("app config dir"),
+        dir.join("arterm"),
+        "test_config_dir requires isolate_config_dir to have redirected ARTERM_HOME"
+    );
+    dir
 }
 
 fn write_test_api_key(temp: &TempDir, env_file: &str, env_key: &str, value: &str) {
@@ -1014,7 +1029,7 @@ fn test_configured_api_base_rejects_insecure_http_remote() {
 fn autodetects_single_saved_openai_compatible_profile() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
-    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _config_home = isolate_config_dir(temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _env = isolate_openrouter_autodetect_env();
@@ -1039,7 +1054,7 @@ fn autodetects_single_saved_openai_compatible_profile() {
 fn autodetects_single_saved_local_openai_compatible_profile() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
-    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _config_home = isolate_config_dir(temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _env = isolate_openrouter_autodetect_env();
@@ -1072,7 +1087,7 @@ fn openrouter_transport_state_distinguishes_runtime_identities() {
     // autodetect tests do, so this test does not read whatever provider
     // profile happens to be configured on the host machine.
     let temp = TempDir::new().expect("create temp dir");
-    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _config_home = isolate_config_dir(temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _env = isolate_openrouter_autodetect_env();
@@ -1135,7 +1150,7 @@ fn openrouter_transport_state_distinguishes_runtime_identities() {
 fn does_not_guess_when_multiple_saved_openai_compatible_profiles_exist() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
-    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _config_home = isolate_config_dir(temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _env = isolate_openrouter_autodetect_env();
@@ -1169,7 +1184,7 @@ fn does_not_guess_when_multiple_saved_openai_compatible_profiles_exist() {
 fn autodetected_profile_seeds_default_model_and_cache_namespace() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
-    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _config_home = isolate_config_dir(temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _env = isolate_openrouter_autodetect_env();
@@ -1987,7 +2002,7 @@ fn named_profile_context_window_survives_provider_qualified_model() {
 fn named_openai_compatible_loads_api_key_from_env_file() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
-    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _config_home = isolate_config_dir(temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _namespace = EnvVarGuard::remove("ARTERM_OPENROUTER_CACHE_NAMESPACE");

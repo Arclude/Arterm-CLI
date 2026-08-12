@@ -16,3 +16,44 @@
 # memory-safe on a ~15 GiB machine while staying parallel. The adaptive
 # dev_cargo.sh path uses more cores when memory allows.
 jobs = 4
+
+# The developer's own `~/.arterm` is not a scratch directory, and this fork
+# SHARES it with the TypeScript CLI installed on the same machine. It has
+# already been written by accident: on 2026-08-11 the real home came back
+# holding `telemetry_id`, `telemetry_active_sessions/` and two
+# `telemetry_session_starts_*.txt`, mtimes 20:20-20:21, left by a test run.
+#
+# Tests set `ARTERM_HOME` one at a time, so the redirect is only as good as the
+# next test that remembers it. Cargo's `[env]` is the one place that covers
+# every test binary at once -- and `cargo run` with it, which is the same
+# hazard with a person driving.
+#
+# `force` is deliberately absent (defaults to false): an explicitly exported
+# `ARTERM_HOME` still wins, so `scripts/dev-run.sh` and a deliberate run
+# against the real home are both unaffected.
+#
+# This is NOT a complete redirect, and the gap is worth stating rather than
+# assuming: ~66 call sites build their paths from `dirs::home_dir()` directly
+# instead of `arterm_storage::arterm_dir()`, and nothing here reaches those.
+# `ARTERM_RUNTIME_DIR` is left alone on purpose -- the runtime dir holds a unix
+# socket, and a path under `target/` is long enough to trip SUN_LEN (108).
+[env]
+ARTERM_HOME = { value = "target/test-home", relative = true }
+
+# One test at a time.
+#
+# `ARTERM_HOME` is a process-global environment variable, and a large part of
+# this suite reads state under it while a smaller part SWAPS it to a temp dir
+# for the duration of a test. Those two groups cannot run at the same time: the
+# readers write one home and read another, which surfaced as roughly two
+# failures per run of `arterm-tui`, never the same two, and never reproducible
+# on the failing test alone. The suite already gives most of that parallelism
+# back anyway -- `storage::lock_test_env()` exists precisely because these tests
+# serialize on the environment -- so the measured cost is small: arterm-tui 19s
+# -> 39s, arterm-app-core 24s -> 33s, for a suite that now says the same thing
+# twice in a row.
+#
+# This is a harness property, not a product one: nothing runs eight App
+# instances in one process outside libtest. `RUST_TEST_THREADS=8 cargo test`
+# still overrides it, since `force` is absent here too.
+RUST_TEST_THREADS = "1"

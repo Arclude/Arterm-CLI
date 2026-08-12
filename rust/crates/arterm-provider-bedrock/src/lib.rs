@@ -1556,11 +1556,27 @@ mod tests {
         }
     }
 
+    /// Point every config-dir lookup in the process at `dir`.
+    ///
+    /// `XDG_CONFIG_HOME` alone is not isolation: the provider env file is
+    /// resolved through `storage::app_config_dir()`, which consults
+    /// `ARTERM_HOME` FIRST and only then the platform config dir. With one set
+    /// -- the workspace `.cargo/config.toml` sets one for every test binary --
+    /// these tests wrote `bedrock.env` into a directory shared with every other
+    /// test and surviving between runs, so `has_credentials()` was answering
+    /// about the leftovers of an earlier test.
+    fn isolate_config_dir(dir: &std::path::Path) -> [EnvVarGuard; 2] {
+        [
+            EnvVarGuard::set("XDG_CONFIG_HOME", dir),
+            EnvVarGuard::set("ARTERM_HOME", dir),
+        ]
+    }
+
     #[test]
     fn detects_env_credentials_requires_region_and_credential_hint() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let _removed = [
             "ARTERM_BEDROCK_ENABLE",
             API_KEY_ENV,
@@ -1593,7 +1609,7 @@ mod tests {
     fn detects_bedrock_login_env_file_credentials() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         for key in [
             "ARTERM_BEDROCK_ENABLE",
             API_KEY_ENV,
@@ -1632,7 +1648,7 @@ mod tests {
     fn configured_profile_from_bedrock_env_overrides_stale_bearer_token() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let _removed = [
             "ARTERM_BEDROCK_ENABLE",
             API_KEY_ENV,
@@ -1687,7 +1703,7 @@ mod tests {
     fn maps_profile_required_foundation_model_to_inference_profile() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let p = BedrockProvider::new();
         p.profile_required_models
             .write()
@@ -1707,7 +1723,7 @@ mod tests {
     fn maps_foundation_model_from_stale_cached_profile_list() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let p = BedrockProvider::new();
         *p.fetched_inference_profiles.write().unwrap() = vec![
             "global.amazon.nova-2-lite-v1:0".to_string(),
@@ -1723,7 +1739,7 @@ mod tests {
     fn hides_profile_required_foundation_model_when_profile_route_exists() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let p = BedrockProvider::new();
         *p.fetched_models.write().unwrap() = vec!["amazon.nova-2-lite-v1:0".to_string()];
         *p.fetched_inference_profiles.write().unwrap() =
@@ -1755,7 +1771,7 @@ mod tests {
     fn hides_foundation_model_when_profile_route_exists() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let p = BedrockProvider::new();
         *p.fetched_models.write().unwrap() = vec!["amazon.nova-2-lite-v1:0".to_string()];
         *p.fetched_inference_profiles.write().unwrap() =
@@ -1783,7 +1799,7 @@ mod tests {
     fn profile_required_foundation_model_without_profile_route_is_disabled() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let p = BedrockProvider::new();
         *p.fetched_models.write().unwrap() = vec!["amazon.nova-2-lite-v1:0".to_string()];
         p.profile_required_models
@@ -1827,7 +1843,7 @@ mod tests {
     fn ignores_persisted_bedrock_catalog_from_different_region() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         {
             let _region = EnvVarGuard::set(REGION_ENV, "us-east-1");
             BedrockProvider::persist_catalog(
@@ -1944,7 +1960,7 @@ mod tests {
     fn legacy_model_route_is_unavailable_with_reason() {
         let _guard = lock_test_env();
         let temp = tempfile::tempdir().unwrap();
-        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
+        let _config_home = isolate_config_dir(temp.path());
         let p = BedrockProvider::new();
         *p.fetched_models.write().unwrap() =
             vec!["anthropic.claude-3-haiku-20240307-v1:0".to_string()];
