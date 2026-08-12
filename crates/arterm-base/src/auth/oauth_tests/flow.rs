@@ -645,12 +645,9 @@ fn openai_docs_reference_current_callback_uri() -> Result<()> {
         .find(|dir| dir.join("OAUTH.md").exists() && dir.join("README.md").exists())
         .unwrap_or(manifest_dir);
     let expected = openai::default_redirect_uri();
-    // README.md was upstream's product page and documented the login flow; this
-    // fork's README documents the fork and says nothing about OAuth, so it can
-    // no longer answer this question. Upstream's own README is kept verbatim at
-    // `docs/UPSTREAM_README.md` and is deliberately NOT checked: it is a frozen
-    // document about another project, and making our redirect URI a reason to
-    // edit it would defeat the point of preserving it.
+    // README.md documented the login flow when it was upstream's product page.
+    // This project's README says nothing about OAuth, so it can no longer
+    // answer this question, and OAUTH.md is the document that can.
     for relative in ["OAUTH.md"] {
         let content = std::fs::read_to_string(repo_root.join(relative))?;
         assert!(

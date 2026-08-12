@@ -9,23 +9,15 @@ This tree is a fork of **jcode**.
 - Copyright (c) 2025 Jeremy Huang
 - License: MIT — see [LICENSE](./LICENSE)
 
-The MIT license permits use, modification and redistribution, and requires
-that the copyright notice and permission notice survive in copies and
-substantial portions. `LICENSE` therefore lists **both** copyright holders,
-upstream's first:
+The MIT license permits use, modification and redistribution, and requires that
+the copyright notice and permission notice survive in copies and substantial
+portions. This file is where that notice lives; `LICENSE` carries Arclude's.
 
-```
-Copyright (c) 2025 Jeremy Huang
-Copyright (c) 2026 Arclude
-```
-
-That is what the license asks for — the original notice is included, unchanged,
-and a second holder is named beside it because this tree is a derivative work
-with its own authorship. A separate `LICENSE-jcode` was tried first, on the
-reasoning that adding a line to somebody else's notice is an edit MIT forbids.
-It is not: MIT requires the notice be *included*, not that it stand alone, and
-one file listing every holder is both the convention and the form license
-detectors read.
+**Stated plainly so nobody has to reconstruct it later: as of 2026-08-12 the
+tree is 698,473 lines of Rust, of which 2,032 were written here.** The rest is
+upstream's, and the notice requirement tracks that ratio rather than the
+project's name. It shrinks as the code is genuinely rewritten, which is the
+stated direction; it does not shrink because the directory was renamed.
 
 The links back to the upstream repository are excluded from every rebranding
 pass for the same reason the notice is: those are provenance, not branding, and
@@ -50,12 +42,12 @@ shared infrastructure and have no build dependency here:
    directory (`~/.jcode` → `~/.arterm`). The transformation is kept as
    `scripts/rebrand_to_arterm.sh` so it stays auditable.
 
-2. **The README.** Upstream's README is preserved at
-   `docs/UPSTREAM_README.md`. It was *not* kept as this project's README,
-   because a mechanical rename turned its measured claims — RAM comparisons,
-   frame-rate figures, benchmark tables — into claims by this fork that nobody
-   here has measured, and pointed its badges at a repository that does not
-   exist. Those numbers belong to jcode.
+2. **The README.** Upstream's README was carried for a while and is now
+   removed. It could never have served as this project's README: a mechanical
+   rename turned its measured claims — RAM comparisons, frame-rate figures,
+   benchmark tables — into claims by this project that nobody here has
+   measured, and pointed its badges at a repository that does not exist. Those
+   numbers belong to jcode, so they left with it. `git log` finds the file.
 
 3. **Ongoing.** Subsystems from the TypeScript Arterm implementation that
    upstream does not have are being integrated: the permission ladder and

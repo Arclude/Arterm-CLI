@@ -2,24 +2,10 @@
 
 A terminal AI coding agent, written in Rust.
 
-There was a TypeScript implementation; it was removed when this tree became the
-product. What was worth keeping from it is archived under
-[docs/legacy-typescript/](./docs/legacy-typescript/) — documents, not code,
-because the reasoning behind its controls is the part that was expensive.
-
-## Provenance
-
-This is a fork of **[jcode](https://github.com/1jehuang/jcode)** by Jeremy
-Huang, used under the MIT license. [LICENSE](./LICENSE) names both copyright
-holders, upstream's first; see [ATTRIBUTION.md](./ATTRIBUTION.md) for what was
-taken and what has since been changed.
-
-The upstream project's own README is kept at
-[docs/UPSTREAM_README.md](./docs/UPSTREAM_README.md). It is preserved for
-reference and **its claims belong to jcode, not to this fork**: the benchmark
-tables, RAM measurements and feature demos there were measured against
-upstream, and nothing in them has been re-measured here. Treat that file as a
-document about another project until a number in it has been reproduced.
+83 crates, a real TUI, multi-model routing and swarm coordination, with the
+agent loop, tool registry and session server all in-process. It runs local and
+hosted models through one provider layer, and it is built to be driven
+unattended as readily as interactively.
 
 ## Building
 
@@ -62,8 +48,8 @@ fail independently of them.
 
 ## Layout
 
-83 crates, layered so that high-churn orchestration depends on stable
-contracts and never the reverse:
+Layered so that high-churn orchestration depends on stable contracts and never
+the reverse:
 
 ```
 arterm (bin + cli dispatch)
@@ -74,15 +60,19 @@ arterm (bin + cli dispatch)
                              arterm-protocol, arterm-*-types
 ```
 
-[ARCHITECTURE.md](./ARCHITECTURE.md) records why the layers sit that way, and
-which upstream designs are deliberately *not* being carried over.
+[ARCHITECTURE.md](./ARCHITECTURE.md) records why the layers sit that way.
 
 ## Status
 
 The suite is green and the binary completes real turns against a live provider.
-The open work is the safety layer: this tree has no sandbox and no per-tool
-permission prompt, which the removed TypeScript implementation did have — its
-design notes are in `docs/legacy-typescript/CLAUDE.md`, and
-`SECURITY.md` was archived rather than carried forward for exactly that reason.
-What is already better here is `arterm-command-risk`, which classifies commands
-by blast radius rather than by name.
+The open work is the safety layer: there is no sandbox and no per-tool
+permission prompt yet. `arterm-command-risk` is the part that already works —
+it classifies commands by blast radius rather than by name, unwraps `sudo` /
+`xargs` / `timeout`, and recurses into `sh -c`. The design notes for the rest
+are in [docs/legacy-typescript/](./docs/legacy-typescript/), and `SECURITY.md`
+is deliberately not written yet: a security document that promises a control
+which is not there is worse than none.
+
+## License
+
+MIT — see [LICENSE](./LICENSE) and [ATTRIBUTION.md](./ATTRIBUTION.md).
