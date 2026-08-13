@@ -11,7 +11,7 @@
     "crates/arterm-app-core/src/server/comm_session.rs": 1434,
     "crates/arterm-app-core/src/server/debug_server_state.rs": 1257,
     "crates/arterm-app-core/src/server/jade_relay.rs": 1429,
-    "crates/arterm-app-core/src/server/provider_control.rs": 1600,
+    "crates/arterm-app-core/src/server/provider_control.rs": 1595,
     "crates/arterm-app-core/src/server/swarm.rs": 3170,
     "crates/arterm-app-core/src/tool/bash.rs": 1391,
     "crates/arterm-app-core/src/tool/communicate.rs": 3351,
@@ -22,7 +22,7 @@
     "crates/arterm-app-core/src/tool/todo.rs": 2472,
     "crates/arterm-app-core/src/update.rs": 1778,
     "crates/arterm-base/src/auth/lifecycle.rs": 2593,
-    "crates/arterm-base/src/auth/mod.rs": 1648,
+    "crates/arterm-base/src/auth/mod.rs": 1656,
     "crates/arterm-base/src/auth/oauth.rs": 1518,
     "crates/arterm-base/src/background.rs": 1465,
     "crates/arterm-base/src/compaction.rs": 1790,
@@ -58,7 +58,7 @@
     "crates/arterm-provider-openai-runtime/src/lib.rs": 1384,
     "crates/arterm-provider-openai-runtime/src/openai_provider_impl.rs": 1232,
     "crates/arterm-provider-openai-runtime/src/openai_stream_runtime.rs": 1658,
-    "crates/arterm-provider-openrouter-runtime/src/lib.rs": 2713,
+    "crates/arterm-provider-openrouter-runtime/src/lib.rs": 2683,
     "crates/arterm-render-core/src/math.rs": 1234,
     "crates/arterm-sdk/src/client.rs": 1384,
     "crates/arterm-setup-hints/src/lib.rs": 2681,
@@ -69,8 +69,8 @@
     "crates/arterm-tui-mermaid/src/mermaid_cache_render.rs": 1475,
     "crates/arterm-tui-mermaid/src/mermaid_viewport.rs": 1953,
     "crates/arterm-tui-render/src/swarm_gallery.rs": 3099,
-    "crates/arterm-tui/src/tui/app.rs": 2559,
-    "crates/arterm-tui/src/tui/app/auth.rs": 3434,
+    "crates/arterm-tui/src/tui/app.rs": 2560,
+    "crates/arterm-tui/src/tui/app/auth.rs": 3344,
     "crates/arterm-tui/src/tui/app/auth_account_commands.rs": 1202,
     "crates/arterm-tui/src/tui/app/auth_account_picker.rs": 1220,
     "crates/arterm-tui/src/tui/app/commands.rs": 3670,
@@ -111,8 +111,8 @@
     "src/cli/acp.rs": 2077,
     "src/cli/commands.rs": 3375,
     "src/cli/dispatch.rs": 1460,
-    "src/cli/login.rs": 1389,
-    "src/cli/provider_init.rs": 1859
+    "src/cli/login.rs": 1379,
+    "src/cli/provider_init.rs": 1869
   },
   "version": 1
 }

@@ -15,7 +15,9 @@ mod arterm_device;
 mod existing_key_notice;
 mod next_step;
 mod scriptable;
+mod xai_subscription;
 use scriptable::*;
+use xai_subscription::run_xai_subscription_login;
 
 #[derive(Debug, Clone, Default)]
 pub struct LoginOptions {
@@ -134,27 +136,6 @@ impl PendingScriptableLogin {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct ScriptableAuthPrompt {
-    status: &'static str,
-    provider: String,
-    auth_url: String,
-    input_kind: String,
-    pending_path: String,
-    user_code: Option<String>,
-    expires_at_ms: i64,
-    resume_command: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ScriptableAuthSuccess {
-    status: &'static str,
-    provider: String,
-    account_label: Option<String>,
-    credentials_path: Option<String>,
-    email: Option<String>,
-}
-
 #[allow(deprecated)]
 pub async fn run_login(
     choice: &ProviderChoice,
@@ -201,30 +182,6 @@ pub async fn run_login(
             }
         }
         _ => unreachable!("handled above"),
-    }
-    Ok(())
-}
-
-/// The xAI device-code login, end to end.
-///
-/// Device code rather than a loopback redirect: xAI's shared client is
-/// registered for one fixed port, so a busy port cannot be worked around by
-/// choosing another -- the authorization server would reject the redirect. The
-/// device flow has no redirect at all and works the same over SSH.
-async fn run_xai_subscription_login() -> Result<()> {
-    use crate::auth::xai;
-
-    let tokens = xai::login(xai::SURFACE_CLI, |instructions| {
-        println!("\n{instructions}")
-    })
-    .await?;
-
-    if tokens.has_subscription_access() {
-        println!("\nSigned in to xAI. Arterm will use your Grok subscription for xAI models.");
-    } else {
-        // The login worked; the plan is what did not. Said here rather than
-        // discovered as a 401 in the middle of a turn.
-        println!("\n{}", xai::missing_subscription_notice());
     }
     Ok(())
 }

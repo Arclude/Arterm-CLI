@@ -90,9 +90,8 @@ pub enum ProviderChoice {
     Minimax,
     #[value(alias = "x.ai", alias = "x-ai", alias = "grok")]
     Xai,
-    /// Sign in with a Grok subscription instead of a metered key. A separate
-    /// choice rather than a flag on `Xai`, because it is a different credential
-    /// with a different login flow -- and both can be configured at once.
+    /// A Grok subscription instead of a metered key; its own choice because it
+    /// is a different credential with a different login flow.
     #[value(alias = "grok-oauth", alias = "xai-grok", alias = "grok-login")]
     XaiOauth,
     #[value(alias = "nvidia", alias = "nim")]

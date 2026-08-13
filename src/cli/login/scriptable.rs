@@ -786,3 +786,25 @@ pub(super) fn emit_scriptable_auth_success(
     }
     Ok(())
 }
+
+// Moved from login.rs: the JSON shapes the scriptable flow prints.
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct ScriptableAuthPrompt {
+    status: &'static str,
+    provider: String,
+    auth_url: String,
+    input_kind: String,
+    pending_path: String,
+    user_code: Option<String>,
+    expires_at_ms: i64,
+    resume_command: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct ScriptableAuthSuccess {
+    status: &'static str,
+    provider: String,
+    account_label: Option<String>,
+    credentials_path: Option<String>,
+    email: Option<String>,
+}

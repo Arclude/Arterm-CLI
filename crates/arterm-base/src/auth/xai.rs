@@ -113,7 +113,7 @@ pub fn load_tokens() -> Result<XaiTokens> {
 }
 
 pub fn has_tokens() -> bool {
-    tokens_path().map(|path| path.exists()).unwrap_or(false)
+    tokens_path().is_ok_and(|path| path.exists())
 }
 
 pub fn save_tokens(tokens: &XaiTokens) -> Result<()> {
@@ -121,6 +121,34 @@ pub fn save_tokens(tokens: &XaiTokens) -> Result<()> {
     // The same owner-only writer every other credential file here uses; a
     // refresh token is a long-lived credential and must not land world-readable.
     crate::storage::write_json_secret(&path, tokens)
+}
+
+/// The stored login, or None -- with the two None cases kept distinct: a
+/// missing file is simply "not signed in", but a file that exists and does not
+/// parse is a broken credential store, and reading it as "not signed in" would
+/// silently log the user out. That case warns.
+pub fn stored_tokens() -> Option<XaiTokens> {
+    if !has_tokens() {
+        return None;
+    }
+    match load_tokens() {
+        Ok(tokens) => Some(tokens),
+        Err(error) => {
+            arterm_logging::warn(&format!(
+                "xAI credentials file exists but could not be read: {error}"
+            ));
+            None
+        }
+    }
+}
+
+/// The login state as the auth inventory reports it.
+pub fn auth_state() -> crate::auth::AuthState {
+    if has_tokens() {
+        crate::auth::AuthState::Available
+    } else {
+        crate::auth::AuthState::NotConfigured
+    }
 }
 
 pub fn logout() -> Result<bool> {
@@ -217,7 +245,8 @@ pub fn classify_token_response(status: u16, body: &str, now: i64) -> Result<Poll
             expires_at: now + parsed.expires_in.max(0),
             scopes: parsed
                 .scope
-                .unwrap_or_default()
+                .as_deref()
+                .unwrap_or("")
                 .split_whitespace()
                 .map(str::to_string)
                 .collect(),
@@ -238,10 +267,10 @@ pub fn classify_token_response(status: u16, body: &str, now: i64) -> Result<Poll
         ),
         other => bail!(
             "xAI login failed: {other}{}",
-            parsed
-                .error_description
-                .map(|detail| format!(" ({detail})"))
-                .unwrap_or_default()
+            match parsed.error_description {
+                Some(detail) => format!(" ({detail})"),
+                None => String::new(),
+            }
         ),
     })
 }
@@ -266,7 +295,10 @@ pub async fn request_device_code(surface: &'static str) -> Result<DeviceCodeGran
         .context("Could not reach xAI to start the login")?;
 
     let status = response.status().as_u16();
-    let body = response.text().await.unwrap_or_default();
+    let body = response
+        .text()
+        .await
+        .context("Could not read xAI's device-code response")?;
     if status == 404 {
         bail!(
             "xAI's device login is not enabled for this client. Set XAI_API_KEY to use a metered key instead."
@@ -318,7 +350,10 @@ pub async fn poll_for_tokens(grant: &DeviceCodeGrant) -> Result<XaiTokens> {
             .context("Lost contact with xAI while waiting for approval")?;
 
         let status = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
+        let body = response
+            .text()
+            .await
+            .context("Lost contact with xAI while reading the poll response")?;
         match classify_token_response(status, &body, now_unix())? {
             PollOutcome::Pending => {}
             PollOutcome::SlowDown => interval += Duration::from_secs(5),
@@ -353,7 +388,10 @@ pub async fn refresh_tokens(current: &XaiTokens) -> Result<XaiTokens> {
         .context("Could not reach xAI to refresh the login")?;
 
     let status = response.status().as_u16();
-    let body = response.text().await.unwrap_or_default();
+    let body = response
+        .text()
+        .await
+        .context("Could not read xAI's refresh response")?;
     let PollOutcome::Approved(mut refreshed) = classify_token_response(status, &body, now_unix())?
     else {
         bail!("xAI would not refresh this login; sign in again with `arterm login xai`.");

@@ -605,24 +605,16 @@ fn apply_set_route(
         ],
     );
 
-    if let Some(current) = model_switching_unavailable_current(agent) {
-        crate::logging::event_warn(
-            "server_set_route_unavailable",
-            vec![
-                ("id", id.to_string()),
-                ("requested_model", selection.model.clone()),
-                ("requested_provider", selection.provider_label.clone()),
-                ("current_model", current.clone()),
-            ],
-        );
-        let _ = client_event_tx.send(ServerEvent::ModelChanged {
-            id,
-            model: current,
-            provider_name: None,
-            error: Some("Model switching is not available for this provider.".to_string()),
-        });
-        return;
-    }
+    // No `model_switching_unavailable_current` guard here, deliberately. A
+    // route selection names its complete destination -- provider, method and
+    // model -- and asks nothing of the current provider, so "the current
+    // provider has no models" is not a reason to refuse it. It is the reason
+    // to GRANT it: a session that lands on a credential-less provider (a
+    // default model whose login lapsed, a failover that failed) has an empty
+    // model list, and with this guard every such session was a locked room --
+    // /model named a perfectly valid xAI route and was refused, three times in
+    // one night. `set_route_selection` still fails properly when the
+    // destination itself cannot be built.
 
     let current = agent.provider_model();
     let result = {
@@ -1241,6 +1233,9 @@ pub(super) async fn handle_notify_auth_changed(
     let _ = client_event_tx.send(ServerEvent::Done { id });
 }
 
+#[cfg(test)]
+#[path = "provider_control_route_tests.rs"]
+mod provider_control_route_tests;
 #[cfg(test)]
 #[path = "provider_control_tests.rs"]
 mod provider_control_tests;
