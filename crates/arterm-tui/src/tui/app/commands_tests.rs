@@ -415,6 +415,32 @@ mod colors {
             });
         }
 
+        /// The look is recorded, not inferred: editing one color with
+        /// `/colors` must not put the screen's shape back to the other theme.
+        #[test]
+        fn the_look_is_recorded_and_survives_a_hand_edited_color() {
+            with_clean_config(|| {
+                let mut app = create_test_app();
+                assert_eq!(theme_presets::current_look(), theme_presets::Look::Arterm);
+
+                assert!(dispatch_local_command(&mut app, "/theme classic"));
+                assert_eq!(
+                    crate::config::Config::load().display.look,
+                    theme_presets::Look::Classic.key()
+                );
+
+                assert!(dispatch_local_command(&mut app, "/colors user #ffffff"));
+                assert_eq!(
+                    crate::config::Config::load().display.look,
+                    theme_presets::Look::Classic.key(),
+                    "a color edit is not a change of look"
+                );
+
+                assert!(dispatch_local_command(&mut app, "/theme arterm"));
+                assert!(crate::config::Config::load().display.look.is_empty());
+            });
+        }
+
         #[test]
         fn an_unknown_theme_is_refused_without_touching_the_config() {
             with_clean_config(|| {

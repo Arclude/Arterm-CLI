@@ -2591,7 +2591,61 @@ fn centered_line_offset(area_width: u16, line_width: usize) -> usize {
     ((area_width / 2).saturating_sub(line_width / 2)) as usize
 }
 
+/// Draw the composer, framed or bare depending on the selected look.
+///
+/// The frame is a decoration around the same body renderer rather than a second
+/// composer: caret placement, click-to-character mapping and selection margins
+/// are the hard-won part and there is no version of this worth having two of.
+/// The body is simply given the area inside the rails, and the caret position it
+/// returns is already in frame coordinates.
 pub(super) fn draw_input(
+    frame: &mut Frame,
+    app: &dyn TuiState,
+    area: Rect,
+    next_prompt: usize,
+    debug_capture: &mut Option<FrameCaptureBuilder>,
+) -> Option<Position> {
+    use crate::tui::composer_frame;
+    use crate::tui::theme_presets::{Look, current_look};
+
+    if current_look() == Look::Classic && composer_frame::fits(area) {
+        let status = app.is_processing().then(|| {
+            let secs = app.elapsed().map(|d| d.as_secs_f32()).unwrap_or(0.0);
+            composer_frame::status_label(super::activity_indicator(secs, 12.5), secs)
+        });
+        let inner = composer_frame::draw(
+            frame,
+            area,
+            status.as_deref(),
+            &classic_hint(app),
+            queued_color(),
+        );
+        return draw_input_body(frame, app, inner, next_prompt, debug_capture);
+    }
+    draw_input_body(frame, app, area, next_prompt, debug_capture)
+}
+
+/// What the bottom rail says: the same conditions the bare look prints on a row
+/// of its own, which is how the frame costs two rows and gives one back.
+fn classic_hint(app: &dyn TuiState) -> String {
+    let mode = composer_mode(app.input(), app.is_remote_mode());
+    if let Some(shell_hint) = shell_mode_hint(mode) {
+        return shell_hint.trim().to_string();
+    }
+    if app.next_prompt_new_session_armed() {
+        return "↗ Next prompt opens a new session".to_string();
+    }
+    if app.is_processing() && !app.input().is_empty() {
+        return if app.queue_mode() {
+            "Ctrl/Cmd+Enter to send now".to_string()
+        } else {
+            "Ctrl/Cmd+Enter to queue".to_string()
+        };
+    }
+    crate::tui::composer_frame::DEFAULT_HINT.to_string()
+}
+
+fn draw_input_body(
     frame: &mut Frame,
     app: &dyn TuiState,
     area: Rect,

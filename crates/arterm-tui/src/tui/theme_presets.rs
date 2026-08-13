@@ -22,12 +22,47 @@
 use arterm_tui_style::palette::{ALL_ROLES, Role};
 use std::collections::BTreeMap;
 
+/// The screen shape a theme selects, separately from its colors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Look {
+    /// The built-in arterm screen.
+    #[default]
+    Arterm,
+    /// The shape the TypeScript CLI drew: a composer framed by text rails.
+    Classic,
+}
+
+impl Look {
+    /// The value stored in `[display] look`. The default is the empty string so
+    /// a config written before this key existed reads as the built-in look.
+    pub fn key(self) -> &'static str {
+        match self {
+            Look::Arterm => "",
+            Look::Classic => "classic",
+        }
+    }
+
+    fn from_key(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "classic" => Look::Classic,
+            _ => Look::Arterm,
+        }
+    }
+}
+
+/// The look the config selects. Cheap: the config itself is cached.
+pub fn current_look() -> Look {
+    Look::from_key(&crate::config::config().display.look)
+}
+
 /// One selectable look.
 pub struct ThemePreset {
     pub name: &'static str,
     pub summary: &'static str,
     /// `(role key, #rrggbb)`. Empty means "the built-in defaults".
     pub colors: &'static [(&'static str, &'static str)],
+    /// The screen shape this theme draws.
+    pub look: Look,
 }
 
 /// The built-in look: every role at its compiled-in default.
@@ -35,6 +70,7 @@ const ARTERM: ThemePreset = ThemePreset {
     name: "arterm",
     summary: "The built-in look: cool blues and greens on your terminal's own background.",
     colors: &[],
+    look: Look::Arterm,
 };
 
 /// The TypeScript CLI's palette, ported token for token.
@@ -73,6 +109,7 @@ const CLASSIC: ThemePreset = ThemePreset {
         ("asap", "#89dceb"),
         ("pending", "#585b70"),
     ],
+    look: Look::Classic,
 };
 
 pub const PRESETS: &[ThemePreset] = &[ARTERM, CLASSIC];

@@ -40,11 +40,19 @@ pub(super) fn theme_usage() -> &'static str {
 
 fn show_themes(app: &mut App) {
     let configured = crate::config::config().display.colors.clone();
-    let active = theme_presets::active(&configured);
+    // The selected theme is what `[display] look` records; the color map only
+    // says whether it is still wearing that theme's palette. Reading identity
+    // out of the colors instead would mean one `/colors set` silently put the
+    // screen's shape back.
+    let look = theme_presets::current_look();
+    let selected = theme_presets::PRESETS
+        .iter()
+        .find(|preset| preset.look == look);
+    let palette_is_untouched = theme_presets::active(&configured).is_some();
 
     let mut lines = vec!["Themes:".to_string(), String::new()];
     for preset in theme_presets::PRESETS {
-        let marker = if active.is_some_and(|found| found.name == preset.name) {
+        let marker = if selected.is_some_and(|found| found.name == preset.name) {
             "●"
         } else {
             "○"
@@ -52,10 +60,10 @@ fn show_themes(app: &mut App) {
         lines.push(format!("{marker} {:<9} {}", preset.name, preset.summary));
     }
 
-    if active.is_none() {
+    if !palette_is_untouched {
         lines.push(String::new());
         lines.push(format!(
-            "● (your own)  {} role{} edited by hand; /theme <name> replaces them.",
+            "  (your own)  {} role{} edited by hand; /theme <name> replaces them.",
             configured.len(),
             if configured.len() == 1 { "" } else { "s" }
         ));
@@ -109,6 +117,7 @@ fn applied_notice(preset: &ThemePreset) -> String {
 fn install(preset: &ThemePreset) -> anyhow::Result<()> {
     let mut config = crate::config::Config::load();
     config.display.colors = theme_presets::color_map(preset);
+    config.display.look = preset.look.key().to_string();
     config.save()?;
     crate::tui::theme_detect::init_palette();
     Ok(())
