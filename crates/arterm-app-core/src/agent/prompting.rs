@@ -121,6 +121,22 @@ impl Agent {
             self.provider.reasoning_effort().as_deref(),
         );
 
+        // Plan Mode: inject reminder so the agent knows write tools are blocked.
+        if crate::tool::is_plan_mode(&self.session.id) {
+            if !split.dynamic_part.is_empty() {
+                split.dynamic_part.push_str("\n\n");
+            }
+            split.dynamic_part.push_str(
+                "# Plan Mode Active\n\n\
+                You are in Plan Mode. Write tools (edit, write, multiedit, patch, apply_patch, bash, open) are blocked.\n\
+                Do NOT attempt to make changes. Instead:\n\
+                1. Explore the codebase using read-only tools (read, ls, agentgrep, websearch, etc.)\n\
+                2. Present a clear, structured plan to the user\n\
+                3. Wait for the user to approve the plan\n\
+                The user will disable Plan Mode (via /planmode) when they are ready for you to execute.",
+            );
+        }
+
         split
     }
 

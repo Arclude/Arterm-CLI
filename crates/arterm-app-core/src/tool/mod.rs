@@ -70,6 +70,59 @@ struct SessionToolPolicy {
 static SESSION_TOOL_POLICIES: LazyLock<StdRwLock<HashMap<String, SessionToolPolicy>>> =
     LazyLock::new(|| StdRwLock::new(HashMap::new()));
 
+// ─── Plan Mode ────────────────────────────────────────────────────────────
+
+/// Tools that are blocked in Plan Mode.
+const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
+    "edit",
+    "write",
+    "multiedit",
+    "patch",
+    "apply_patch",
+    "bash",
+    "open",
+];
+
+/// Per-session Plan Mode state.
+static SESSION_PLAN_MODE: LazyLock<StdRwLock<HashMap<String, bool>>> =
+    LazyLock::new(|| StdRwLock::new(HashMap::new()));
+
+/// Enable or disable Plan Mode for a session.
+pub fn set_plan_mode(session_id: &str, enabled: bool) {
+    let mut modes = SESSION_PLAN_MODE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if enabled {
+        modes.insert(session_id.to_string(), true);
+    } else {
+        modes.remove(session_id);
+    }
+}
+
+/// Check whether Plan Mode is active for a session.
+pub fn is_plan_mode(session_id: &str) -> bool {
+    SESSION_PLAN_MODE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(session_id)
+        .copied()
+        .unwrap_or(false)
+}
+
+/// Check if a tool is blocked by Plan Mode, returning an error message if so.
+fn check_plan_mode(session_id: &str, tool_name: &str) -> Result<(), String> {
+    if is_plan_mode(session_id) {
+        let resolved = arterm_tool_types::resolve_tool_name(tool_name);
+        if PLAN_MODE_BLOCKED_TOOLS.contains(&resolved) {
+            return Err(format!(
+                "Plan Mode is active: '{}' is blocked. Present your plan and wait for the user to approve before making changes. Read-only tools (read, ls, agentgrep, websearch, webfetch, etc.) are still available.",
+                resolved
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn set_session_tool_policy(
     session_id: &str,
     allowed_tools: Option<HashSet<String>>,
@@ -643,6 +696,12 @@ impl Registry {
         let _in_flight = inflight::mark_tool_in_flight(&ctx.tool_call_id);
         let tools = self.tools.read().await;
         let resolved_name = Self::resolve_tool_name(name);
+
+        // Plan Mode: block write tools during read-only exploration.
+        if let Err(msg) = check_plan_mode(&ctx.session_id, resolved_name) {
+            return Err(anyhow::anyhow!(msg));
+        }
+
         if let Some(policy) = session_tool_policy(&ctx.session_id) {
             if let Some(allowed) = policy.allowed_tools.as_ref()
                 && !tool_name_is_allowed(allowed, resolved_name)

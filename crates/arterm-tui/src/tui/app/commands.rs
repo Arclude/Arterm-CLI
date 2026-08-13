@@ -1649,6 +1649,27 @@ pub(super) fn handle_git_status_completed(app: &mut App, completed: GitStatusCom
     }
 }
 
+/// Handle /planmode toggle: enables or disables Plan Mode for the current session.
+fn handle_planmode_command(app: &mut App, trimmed: &str) -> bool {
+    if !matches!(trimmed, "/planmode" | "/plan-mode" | "/plan_mode") {
+        return false;
+    }
+    let session_id = app.session_id().to_string();
+    if session_id.is_empty() {
+        app.set_status_notice("No active session");
+        return true;
+    }
+    let currently_active = arterm_app_core::tool::is_plan_mode(&session_id);
+    if currently_active {
+        arterm_app_core::tool::set_plan_mode(&session_id, false);
+        app.set_status_notice("Plan Mode OFF — write tools restored");
+    } else {
+        arterm_app_core::tool::set_plan_mode(&session_id, true);
+        app.set_status_notice("Plan Mode ON — write tools blocked (edit, write, bash, etc.)");
+    }
+    true
+}
+
 pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
     if handle_subagent_model_command(app, trimmed)
         || app.handle_hotkeys_command(trimmed)
@@ -1669,6 +1690,7 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
         || handle_review_command_local(app, trimmed)
         || handle_judge_command_local(app, trimmed)
         || handle_selfdev_command(app, trimmed)
+        || handle_planmode_command(app, trimmed)
     {
         return true;
     }
