@@ -220,6 +220,7 @@ async fn test_batch_resolves_function_namespaced_tools() {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
 
     let result = registry
@@ -255,6 +256,7 @@ async fn test_batch_rejects_function_namespaced_batch_recursion() {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
 
     let error = registry
@@ -285,6 +287,7 @@ async fn test_batch_resolves_oauth_names() {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
 
     let result = registry
@@ -309,6 +312,7 @@ async fn registry_execute_enforces_session_tool_policy_after_alias_resolution() 
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
 
     let result = registry
@@ -359,6 +363,7 @@ async fn registry_execute_pre_tool_hook_blocks_and_allows() {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
 
     let blocked = registry
@@ -965,6 +970,7 @@ async fn unknown_tool_error_lists_available_tools_and_suggestions() {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
     let err = registry
         .execute("ToolSearch", serde_json::json!({}), ctx)
@@ -1196,6 +1202,7 @@ async fn execute_big_output(input: Value) -> String {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
 
     registry
@@ -1348,6 +1355,7 @@ async fn test_batch_guards_both_its_subcalls_and_its_own_aggregate() {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
     let calls = serde_json::json!([
         { "tool": "big_output", "intent": "one" },
@@ -1613,4 +1621,115 @@ async fn only_the_known_open_world_tools_are_ineligible_for_openai_strict_mode()
         "the set of strict-ineligible built-in tools changed; a new name means an \
          eligibility rule is too aggressive, a missing name means this list is stale"
     );
+}
+
+// ─── Plan Mode tests ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn plan_mode_toggle_works() {
+    let session = "test-planmode-toggle";
+    assert!(!super::is_plan_mode(session), "off by default");
+    super::set_plan_mode(session, true);
+    assert!(super::is_plan_mode(session), "on after set");
+    super::set_plan_mode(session, false);
+    assert!(!super::is_plan_mode(session), "off after unset");
+}
+
+#[tokio::test]
+async fn plan_mode_blocks_edit_tool() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let session = "test-planmode-blocks-edit";
+    super::set_plan_mode(session, true);
+
+    let ctx = ToolContext {
+        session_id: session.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
+    };
+
+    let result = registry
+        .execute("edit", serde_json::json!({"file_path": "/tmp/nx.txt", "old_string": "a", "new_string": "b"}), ctx)
+        .await;
+    assert!(result.is_err(), "edit should be blocked");
+    assert!(result.unwrap_err().to_string().contains("Plan Mode is active"));
+    super::set_plan_mode(session, false);
+}
+
+#[tokio::test]
+async fn plan_mode_blocks_bash_tool() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let session = "test-planmode-blocks-bash";
+    super::set_plan_mode(session, true);
+
+    let ctx = ToolContext {
+        session_id: session.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
+    };
+
+    let result = registry.execute("bash", serde_json::json!({"command": "echo hi"}), ctx).await;
+    assert!(result.is_err(), "bash should be blocked");
+    assert!(result.unwrap_err().to_string().contains("Plan Mode is active"));
+    super::set_plan_mode(session, false);
+}
+
+#[tokio::test]
+async fn plan_mode_allows_read_only_tools() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let session = "test-planmode-allows-read";
+    super::set_plan_mode(session, true);
+
+    let ctx = ToolContext {
+        session_id: session.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
+    };
+
+    let result = registry.execute("ls", serde_json::json!({}), ctx).await;
+    if let Err(ref e) = result {
+        assert!(!e.to_string().contains("Plan Mode is active"), "ls should not be blocked");
+    }
+    super::set_plan_mode(session, false);
+}
+
+#[tokio::test]
+async fn plan_mode_off_allows_all_tools() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let session = "test-planmode-off";
+    super::set_plan_mode(session, false);
+
+    let ctx = ToolContext {
+        session_id: session.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
+    };
+
+    let result = registry.execute("edit", serde_json::json!({"file_path": "/tmp/nx.txt", "old_string": "a", "new_string": "b"}), ctx).await;
+    if let Err(ref e) = result {
+        assert!(!e.to_string().contains("Plan Mode is active"), "edit should not be blocked when off");
+    }
 }

@@ -185,6 +185,7 @@ fn format_members_includes_status_and_detail() {
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
     };
 
     let output = format_members(
