@@ -52,13 +52,13 @@ pub mod terminal_reply_filter;
 pub mod terminal_setup;
 pub mod test_harness;
 pub mod theme_detect;
+pub mod theme_presets;
 mod ui;
 mod ui_diff;
 pub mod usage_overlay;
 pub mod visual_debug;
 pub mod workspace_client;
-pub use arterm_tui_workspace::workspace_map;
-pub use arterm_tui_workspace::workspace_map_widget;
+pub use arterm_tui_workspace::{workspace_map, workspace_map_widget};
 
 pub use crate::generated_image::{
     generated_image_side_panel_markdown, generated_image_side_panel_page_id,

@@ -359,4 +359,90 @@ mod colors {
             "/colorscheme must not be claimed by /colors"
         );
     }
+
+    /// `/theme` writes the same `[display.colors]` map, so it belongs under the
+    /// same lock and the same cleanup as `/colors`.
+    mod theme {
+        use super::{create_test_app, dispatch_local_command, last_message, with_clean_config};
+        use crate::tui::theme_presets;
+
+        /// A handler nobody calls is dead code that reads as a feature. Twice
+        /// this session a change worked in its own test and did nothing in the
+        /// product because the line that reaches it was never added.
+        #[test]
+        fn the_command_is_reachable_through_the_shared_dispatch_table() {
+            with_clean_config(|| {
+                let mut app = create_test_app();
+                assert!(
+                    dispatch_local_command(&mut app, "/theme"),
+                    "/theme should be claimed by the shared dispatch table"
+                );
+                let output = last_message(&app);
+                for preset in theme_presets::PRESETS {
+                    assert!(
+                        output.contains(preset.name),
+                        "the listing should name {}: {output}",
+                        preset.name
+                    );
+                }
+            });
+        }
+
+        #[test]
+        fn applying_a_theme_writes_its_whole_palette_and_switching_back_clears_it() {
+            with_clean_config(|| {
+                let mut app = create_test_app();
+                let classic = theme_presets::find("classic").expect("ported theme");
+
+                assert!(dispatch_local_command(&mut app, "/theme classic"));
+                let written = crate::config::Config::load().display.colors;
+                assert_eq!(
+                    written,
+                    theme_presets::color_map(classic),
+                    "the config should hold exactly the preset: {written:?}"
+                );
+                assert_eq!(
+                    theme_presets::active(&written).map(|p| p.name),
+                    Some("classic")
+                );
+
+                // Replace, not merge: the previous theme must not show through.
+                assert!(dispatch_local_command(&mut app, "/theme arterm"));
+                assert!(
+                    crate::config::Config::load().display.colors.is_empty(),
+                    "the built-in look is the empty set"
+                );
+            });
+        }
+
+        #[test]
+        fn an_unknown_theme_is_refused_without_touching_the_config() {
+            with_clean_config(|| {
+                let mut app = create_test_app();
+                assert!(dispatch_local_command(&mut app, "/theme dracula"));
+                let output = last_message(&app);
+                assert!(output.contains("Unknown theme"), "{output}");
+                assert!(output.contains("classic"), "it should list what it knows");
+                assert!(
+                    crate::config::Config::load().display.colors.is_empty(),
+                    "a rejected name must not write anything"
+                );
+            });
+        }
+
+        /// The listing tells the truth about a palette the user has since
+        /// edited, rather than still claiming the preset's name.
+        #[test]
+        fn a_hand_edited_palette_reports_itself_as_the_users_own() {
+            with_clean_config(|| {
+                let mut app = create_test_app();
+                assert!(dispatch_local_command(&mut app, "/theme classic"));
+                assert!(dispatch_local_command(&mut app, "/colors user #ffffff"));
+
+                assert!(dispatch_local_command(&mut app, "/theme"));
+                let output = last_message(&app);
+                assert!(output.contains("(your own)"), "{output}");
+            });
+        }
+    }
 }

@@ -63,6 +63,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/ssh", "Connect to a remote machine using system SSH"),
     RegisteredCommand::public("/git", "Show git status for the session working directory"),
     RegisteredCommand::public("/colors", "List, configure, and score every TUI color"),
+    RegisteredCommand::public("/theme", "Switch between named looks"),
     RegisteredCommand::hidden("/color", "Alias for /colors"),
     RegisteredCommand::public("/hotkeys", "List hotkeys with your personal usage"),
     RegisteredCommand::public("/terminal-setup", "Fix Shift+Enter newlines"),
