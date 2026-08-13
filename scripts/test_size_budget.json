@@ -38,7 +38,7 @@
     "crates/arterm-tui/src/tui/session_picker/loading_tests.rs": 1401,
     "crates/arterm-tui/src/tui/session_picker_tests.rs": 2578,
     "crates/arterm-tui/src/tui/ui_messages/tests.rs": 3151,
-    "crates/arterm-tui/src/tui/ui_tests/prepare.rs": 1563,
+    "crates/arterm-tui/src/tui/ui_tests/prepare.rs": 1415,
     "crates/arterm-tui/src/tui/ui_tests/tools.rs": 1352,
     "src/cli/commands_tests.rs": 1283,
     "tests/e2e/test_support/mod.rs": 1425

@@ -97,7 +97,7 @@
     "crates/arterm-tui/src/tui/session_picker/loading.rs": 2983,
     "crates/arterm-tui/src/tui/ui.rs": 3710,
     "crates/arterm-tui/src/tui/ui_frame_metrics.rs": 1437,
-    "crates/arterm-tui/src/tui/ui_header.rs": 1794,
+    "crates/arterm-tui/src/tui/ui_header.rs": 1793,
     "crates/arterm-tui/src/tui/ui_inline_image.rs": 1726,
     "crates/arterm-tui/src/tui/ui_inline_interactive.rs": 1268,
     "crates/arterm-tui/src/tui/ui_input.rs": 3202,

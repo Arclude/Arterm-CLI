@@ -186,6 +186,10 @@ pub fn relative_age(when: DateTime<Utc>, now: DateTime<Utc>) -> String {
     format!("{}y ago", months / 12)
 }
 
+/// Least room a note needs after its age prefix before it is worth printing.
+/// Under this it would be an ellipsis with a word in front of it.
+const MIN_LABEL_CHARS: usize = 8;
+
 /// The block as it appears on the startup screen, or nothing when there are no
 /// notes.
 ///
@@ -193,35 +197,59 @@ pub fn relative_age(when: DateTime<Utc>, now: DateTime<Utc>) -> String {
 /// welcome screen (which takes over the message area whenever the transcript is
 /// empty and there are starter suggestions) and the plain empty transcript
 /// underneath it. Rendering it in one place is what keeps them from drifting.
+///
+/// `max_width` is the column the caller is building for, and every line is cut
+/// to it. A note is a sentence somebody typed, so it is the one line here that
+/// can be arbitrarily long: unbounded, it wrapped onto a second row, and in
+/// centered mode it became the widest line in the header block -- which is what
+/// decides the block's padding -- and pinned the whole header to the left edge.
 pub fn render_lines(
     notes: &[StartupNote],
     now: DateTime<Utc>,
     pad: &str,
     align: Alignment,
+    max_width: usize,
 ) -> Vec<Line<'static>> {
     if notes.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("{pad}Where we left off here"),
-            Style::default().fg(dim_color()),
-        ))
-        .alignment(align),
-    ];
+
+    let mut note_lines: Vec<Line<'static>> = Vec::new();
     for note in notes {
-        lines.push(
+        // The age prefix is short and fixed, so it is kept whole and the label
+        // absorbs the cut: "· 11h ago  Diagrams, Info Widgets, rende…" still
+        // says when and roughly what.
+        let prefix = format!("{pad}· {}  ", relative_age(note.when, now));
+        let room = max_width.saturating_sub(prefix.chars().count());
+        if room < MIN_LABEL_CHARS {
+            continue;
+        }
+        note_lines.push(
             Line::from(vec![
+                Span::styled(prefix, Style::default().fg(dim_color())),
                 Span::styled(
-                    format!("{pad}· {}  ", relative_age(note.when, now)),
-                    Style::default().fg(dim_color()),
+                    truncate_chars(&note.label, room),
+                    Style::default().fg(rgb(200, 200, 200)),
                 ),
-                Span::styled(note.label.clone(), Style::default().fg(rgb(200, 200, 200))),
             ])
             .alignment(align),
         );
     }
+
+    // A heading over nothing is worse than silence.
+    if note_lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            truncate_chars(&format!("{pad}Where we left off here"), max_width),
+            Style::default().fg(dim_color()),
+        ))
+        .alignment(align),
+    ];
+    lines.extend(note_lines);
     lines
 }
 
@@ -379,6 +407,54 @@ mod tests {
     fn a_zero_limit_disables_the_notes() {
         let sessions = vec![session("a", "/w", "work", at(5))];
         assert!(notes_from_sessions(&sessions, "/w", "current", 0).is_empty());
+    }
+
+    /// A note is a sentence somebody typed, so it is the one line on the startup
+    /// screen with no natural length. Left unbounded it wrapped onto a second row
+    /// and, in centered mode, became the widest line in the header block -- which
+    /// is what sets the block's padding -- pushing the whole header to the edge.
+    #[test]
+    fn a_note_is_cut_to_the_column_it_is_built_for() {
+        let note = StartupNote {
+            when: at(-60 * 11),
+            label: "Diagrams, Info Widgets, rendering, scrolling, alignment: how do we test all of \
+                    this without a real terminal"
+                .to_string(),
+        };
+        let width = 40;
+        let lines = render_lines(&[note], at(0), "", Alignment::Left, width);
+
+        assert!(!lines.is_empty(), "a note at 40 columns still has room");
+        for line in &lines {
+            assert!(
+                line.width() <= width,
+                "every line must fit the column: {:?} ({} wide)",
+                line,
+                line.width()
+            );
+        }
+        let note_line: String = lines
+            .last()
+            .expect("the note line")
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(
+            note_line.starts_with("· 11h ago  "),
+            "the age prefix is kept whole and the label absorbs the cut: {note_line:?}"
+        );
+        assert!(note_line.ends_with('…'), "{note_line:?}");
+    }
+
+    /// A heading over nothing is worse than silence.
+    #[test]
+    fn a_column_with_no_room_shows_nothing_at_all() {
+        let note = StartupNote {
+            when: at(-60 * 11),
+            label: "rewrite the release notes".to_string(),
+        };
+        assert!(render_lines(&[note], at(0), "", Alignment::Left, 14).is_empty());
     }
 
     #[test]

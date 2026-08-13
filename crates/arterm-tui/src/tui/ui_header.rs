@@ -914,10 +914,8 @@ fn build_header_lines_with_auth(
         // (`…/b/c`) used elsewhere when space is tight, then hard-truncate if
         // even that does not fit.
         let mut text = abbreviate_home(&dir);
-        if text.chars().count() > w
-            && let Some(short) = crate::tui::session_facts::dir_label_short(&dir)
-        {
-            text = short;
+        if text.chars().count() > w {
+            text = crate::tui::session_facts::dir_label_short(&dir).unwrap_or(text);
         }
         if text.chars().count() > w {
             text = format!("…{}", tail_chars(&text, w.saturating_sub(1)));
@@ -952,6 +950,7 @@ fn build_header_lines_with_auth(
             chrono::Utc::now(),
             "",
             align,
+            w,
         ));
     }
 

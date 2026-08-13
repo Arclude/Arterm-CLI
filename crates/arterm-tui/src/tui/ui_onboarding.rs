@@ -448,8 +448,14 @@ fn keyboard_hint_line() -> Line<'static> {
 
 /// The phase-specific body of the welcome screen (everything below the title and
 /// keyboard hint), so this no longer emits the title itself.
-fn welcome_body_lines(app: &dyn TuiState) -> Vec<Line<'static>> {
+///
+/// `width` is the area this will be drawn into. The caller sizes the body's
+/// layout slot from `lines.len()`, so a line that wraps costs a row nobody
+/// reserved; the one line here that can outgrow the screen is a "where we left
+/// off" note, and it is cut to fit.
+fn welcome_body_lines(app: &dyn TuiState, width: u16) -> Vec<Line<'static>> {
     let align = Alignment::Center;
+    let w = width as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     use crate::tui::OnboardingWelcomeKind;
@@ -681,6 +687,7 @@ fn welcome_body_lines(app: &dyn TuiState) -> Vec<Line<'static>> {
         chrono::Utc::now(),
         "",
         align,
+        w,
     ));
 
     let suggestions = app.suggestion_prompts();
@@ -735,13 +742,13 @@ pub(super) fn draw_onboarding_welcome(frame: &mut Frame, app: &dyn TuiState, are
     if area.width < 4 || area.height < 6 {
         // Too small for the full treatment: fall back to a minimal welcome.
         let mut lines = vec![welcome_title_line()];
-        lines.extend(welcome_body_lines(app));
+        lines.extend(welcome_body_lines(app, area.width));
         frame.render_widget(Paragraph::new(lines), area);
         return;
     }
 
     let telemetry = telemetry_header_lines(area.width, TelemetryLevel::current());
-    let body = welcome_body_lines(app);
+    let body = welcome_body_lines(app, area.width);
     let telemetry_h = (telemetry.len() as u16).min(TELEMETRY_LINES);
     let body_h = body.len() as u16;
     const TITLE_H: u16 = 1;
