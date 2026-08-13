@@ -357,6 +357,17 @@ impl Provider for OpenRouterProvider {
         if Self::profile_rejects_image_input(self.profile_id.as_deref()) {
             return false;
         }
+        // A coding endpoint takes text and nothing else. Z.AI's
+        // `/api/coding/paas` answers an image part with
+        // `messages.content.type is invalid, allowed values: ['text']`, and the
+        // rejection is the endpoint's, not the model's -- so it also survives
+        // every model switch, and it survives the *conversation*: once an image
+        // block is in the history it is resent with every later turn and the
+        // session can never succeed again. Substituting the placeholder here is
+        // what lets such a session keep working.
+        if crate::is_coding_agent_api_base(&self.api_base) {
+            return false;
+        }
 
         // Direct OpenAI-compatible local providers such as Ollama and LM Studio
         // document image content support on /v1/chat/completions. We already

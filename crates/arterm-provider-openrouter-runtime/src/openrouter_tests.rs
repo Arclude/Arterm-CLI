@@ -1,7 +1,7 @@
 use super::*;
+use arterm_provider_openrouter::stream::OpenRouterStream;
 use bytes::Bytes;
 use futures::StreamExt;
-use arterm_provider_openrouter::stream::OpenRouterStream;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -949,7 +949,10 @@ fn openai_compatible_profiles_with_unverified_live_catalogs_have_static_fallback
             "accounts/fireworks/routers/kimi-k2p5-turbo",
         ),
         (arterm_provider_metadata::XIAOMI_MIMO_PROFILE, "mimo-v2.5"),
-        (arterm_provider_metadata::META_MUSE_PROFILE, "muse-spark-1.2"),
+        (
+            arterm_provider_metadata::META_MUSE_PROFILE,
+            "muse-spark-1.2",
+        ),
         (
             arterm_provider_metadata::ALIBABA_CODING_PLAN_PROFILE,
             "qwen3-coder-plus",
@@ -957,7 +960,8 @@ fn openai_compatible_profiles_with_unverified_live_catalogs_have_static_fallback
     ];
 
     for (profile, expected_model) in cases {
-        let models = arterm_base::provider_catalog::openai_compatible_profile_static_models(profile);
+        let models =
+            arterm_base::provider_catalog::openai_compatible_profile_static_models(profile);
         assert!(
             models.iter().any(|model| model == expected_model),
             "{} should expose static fallback model {expected_model}; got {models:?}",
@@ -1119,7 +1123,9 @@ fn openrouter_transport_state_distinguishes_runtime_identities() {
         OpenRouterTransportState::from_current_env(Some("arterm")),
         OpenRouterTransportState::ArtermSubscription
     );
-    assert!(!OpenRouterTransportState::from_current_env(Some("arterm")).accrues_user_api_key_cost());
+    assert!(
+        !OpenRouterTransportState::from_current_env(Some("arterm")).accrues_user_api_key_cost()
+    );
 
     arterm_base::env::set_var("ARTERM_RUNTIME_PROVIDER", "openai-compatible");
     assert_eq!(
@@ -3192,4 +3198,59 @@ fn named_openai_compatible_provider_keeps_stable_name_and_profile_display_name()
     // User-facing identity: the profile the user configured.
     assert_eq!(provider.runtime_display_name(), "example-compat");
     assert_eq!(Provider::display_name(&provider), "example-compat");
+}
+
+/// A coding endpoint takes text and nothing else, and the rejection is the
+/// endpoint's rather than the model's: switching models does not help, and an
+/// image already in the transcript is resent with every later turn, so the
+/// session never recovers on its own. Images have to be left out before the
+/// request, not diagnosed after it.
+#[test]
+fn coding_endpoints_are_text_only() {
+    for base in [
+        "https://api.z.ai/api/coding/paas/v4",
+        "https://api.z.ai/api/coding/paas/v4/",
+        "https://api.kimi.com/coding/v1",
+        "https://coding.dashscope.aliyuncs.com/compatible-mode/v1",
+    ] {
+        assert!(
+            super::is_coding_agent_api_base(base),
+            "{base} should be recognized as a text-only coding endpoint"
+        );
+    }
+
+    for base in [
+        "https://api.z.ai/api/paas/v4",
+        "https://api.openai.com/v1",
+        "http://localhost:11434/v1",
+    ] {
+        assert!(
+            !super::is_coding_agent_api_base(base),
+            "{base} is an ordinary endpoint and must keep image support"
+        );
+    }
+}
+
+/// The wiring, not just the predicate: a profile pointed at a coding endpoint
+/// must report no image support, so `build_chat_messages` substitutes the
+/// placeholder instead of a content part the endpoint rejects.
+#[test]
+fn a_coding_endpoint_profile_reports_no_image_support() {
+    let _lock = ENV_LOCK.lock();
+    let _namespace = EnvVarGuard::remove("ARTERM_OPENROUTER_CACHE_NAMESPACE");
+
+    let profile = arterm_base::config::NamedProviderConfig {
+        base_url: "https://api.z.ai/api/coding/paas/v4".to_string(),
+        auth: arterm_base::config::NamedProviderAuth::None,
+        default_model: Some("glm-5.2".to_string()),
+        ..Default::default()
+    };
+
+    let provider = OpenRouterProvider::new_named_openai_compatible("zai-coding-test", &profile)
+        .expect("named profile should initialize");
+
+    assert!(
+        !provider.supports_image_input(),
+        "the coding endpoint answers an image part with HTTP 400, on every model"
+    );
 }

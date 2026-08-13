@@ -124,7 +124,8 @@ pub(super) async fn run_stream_with_retries(
                             e
                         ));
                     }
-                    next_retry_delay = arterm_provider_core::retry_after::retry_after_from_error(&e);
+                    next_retry_delay =
+                        arterm_provider_core::retry_after::retry_after_from_error(&e);
                     last_error = Some(e);
                     continue;
                 }

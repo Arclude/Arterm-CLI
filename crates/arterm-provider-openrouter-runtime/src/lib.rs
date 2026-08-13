@@ -17,8 +17,6 @@
 //! - Manual pinning: Set ARTERM_OPENROUTER_PROVIDER or use model@Provider syntax
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
-use futures::StreamExt;
 use arterm_base::provider_catalog::{
     OPENAI_COMPAT_PROFILE, is_safe_env_file_name, is_safe_env_key_name,
     load_api_key_from_env_or_config, load_env_value_from_env_or_config, normalize_api_base,
@@ -26,7 +24,9 @@ use arterm_base::provider_catalog::{
     openai_compatible_profile_static_context_limits, openai_compatible_profile_static_models,
     openai_compatible_profiles, resolve_openai_compatible_profile,
 };
-use arterm_message_types::{CacheControl, ContentBlock, Message, Role, StreamEvent, ToolDefinition};
+use arterm_message_types::{
+    CacheControl, ContentBlock, Message, Role, StreamEvent, ToolDefinition,
+};
 use arterm_provider_core::{EventStream, Provider};
 pub use arterm_provider_openrouter::{
     EndpointInfo, ModelInfo, ModelPricing, ModelTimestampIndex, ProviderRouting,
@@ -39,6 +39,8 @@ use arterm_provider_openrouter::{
     save_disk_cache_with_source, save_disk_cache_with_source_for_namespace,
     save_endpoints_disk_cache,
 };
+use async_trait::async_trait;
+use futures::StreamExt;
 use models_catalog_parse::parse_openai_compatible_models_response;
 use reqwest::Client;
 use reqwest::header::HeaderName;
