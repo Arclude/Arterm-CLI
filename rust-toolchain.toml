@@ -12,3 +12,9 @@
 [toolchain]
 channel = "1.97.1"
 components = ["rustfmt", "clippy"]
+# CI cross-checks the Windows targets from Linux with cargo-xwin. Pinning the
+# channel without naming them broke that job: the workflow's toolchain step
+# installs targets for whatever it selected, and this file then sends cargo to
+# a toolchain that has none. Naming them here makes rustup install them with
+# the channel, wherever it is set up.
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]

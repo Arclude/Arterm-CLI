@@ -158,7 +158,12 @@ try {
         Assert-Equal $false (Test-ArtermReleaseTag 'latest') 'unversioned release labels should not validate'
         $scriptText = Get-Content -LiteralPath $installScript -Raw
         Assert-NotContains $scriptText 'api.github.com/repos/$Repo/releases/latest' 'installer should not use the rate-limited unauthenticated GitHub API'
-        Assert-Contains $scriptText 'arterm.dev/releases' 'installer should include independent static release metadata'
+        # The installer used to hardcode a metadata mirror. It no longer does:
+        # the default was removed because a host with no DNS record cost every
+        # install three failed lookups before GitHub -- which serves the assets
+        # -- was tried at all. A mirror is honoured when one is configured, and
+        # that env var is the contract worth pinning.
+        Assert-Contains $scriptText 'ARTERM_RELEASE_METADATA_BASE' 'installer should honour a configured release metadata mirror'
 
         $script:releaseLookupRequests = @()
         function Invoke-WebRequest {
@@ -180,13 +185,21 @@ try {
             }
             throw "unexpected URI: $Uri"
         }
+        # `$ReleaseMetadataBase` is resolved when the installer is dot-sourced,
+        # so configure the mirror and re-source it before exercising the
+        # fallback that only exists when one is named.
+        $previousMetadataBase = $env:ARTERM_RELEASE_METADATA_BASE
+        $env:ARTERM_RELEASE_METADATA_BASE = 'https://arterm.dev/releases'
+        . $installScript -SkipAlacrittySetup -SkipHotkeySetup
         try {
-            Assert-Equal 'v1.2.3' (Get-LatestArtermReleaseTag) 'static metadata should cover a blocked GitHub release lookup'
+            Assert-Equal 'v1.2.3' (Get-LatestArtermReleaseTag) 'a configured mirror should cover a blocked GitHub release lookup'
             $bases = @(Get-ArtermReleaseDownloadBases 'v1.2.3')
             Assert-Equal 'https://mirror.example/releases/v1.2.3' $bases[0] 'configured mirror should be preferred'
             Assert-Equal 'https://github.com/Arclude/Arterm-CLI/releases/download/v1.2.3' $bases[1] 'GitHub should remain the final fallback'
         } finally {
             Remove-Item Function:\Invoke-WebRequest -ErrorAction SilentlyContinue
+            $env:ARTERM_RELEASE_METADATA_BASE = $previousMetadataBase
+            . $installScript -SkipAlacrittySetup -SkipHotkeySetup
         }
     }
 
