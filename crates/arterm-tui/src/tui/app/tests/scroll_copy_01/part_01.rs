@@ -638,6 +638,9 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
     let _lock = scroll_render_test_lock();
 
     let mut app = create_test_app();
+    // The one generated name of 156 whose capitalized form carries a 'Z'; pinned
+    // so CI, whose shorter header keeps the name on screen, always runs the case.
+    app.session.short_name = Some("zebra".to_string());
     let backend = ratatui::backend::TestBackend::new(120, 12);
     let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");
 
@@ -666,10 +669,14 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
         app.scroll_offset += 1;
         clean = render_and_snap(&app, &mut terminal);
     }
+    // The run, not the letter: a frame-wide search for 'Z' read the header's own
+    // session name as a ghost -- red on the 0.6% of runs named zebra, and green
+    // on those same runs had the ghost *not* survived the check below.
     assert!(
-        !clean.contains('Z'),
+        !clean.contains("ZZZZ"),
         "ghost marker must not be present before injection:\n{clean}"
     );
+    let markers_before = clean.matches('Z').count();
     let target_row = clean
         .lines()
         .position(|line| line.contains("read lines"))
@@ -694,8 +701,10 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
     app.scroll_offset += 1;
     let scrolled = render_and_snap(&app, &mut terminal);
 
+    // A scroll can only carry the name off screen, never onto it, so any count
+    // above the pre-injection one is the ghost that survived the repaint.
     assert!(
-        scrolled.contains('Z'),
+        scrolled.matches('Z').count() > markers_before,
         "expected an injected ghost marker to remain after scroll-like repaint:\n{scrolled}"
     );
 }

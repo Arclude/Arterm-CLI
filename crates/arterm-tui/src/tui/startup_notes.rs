@@ -417,9 +417,10 @@ mod tests {
     fn a_note_is_cut_to_the_column_it_is_built_for() {
         let note = StartupNote {
             when: at(-60 * 11),
-            label: "Diagrams, Info Widgets, rendering, scrolling, alignment: how do we test all of \
+            label:
+                "Diagrams, Info Widgets, rendering, scrolling, alignment: how do we test all of \
                     this without a real terminal"
-                .to_string(),
+                    .to_string(),
         };
         let width = 40;
         let lines = render_lines(&[note], at(0), "", Alignment::Left, width);
