@@ -355,6 +355,18 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("deepseek-v4-flash");
             push("qwen3.5-plus");
         }
+        // Read from this account's own `/v1/models` on 2026-08-14 rather than
+        // written from memory. That call also returned grok-4.3, three
+        // grok-4.20 variants and grok-build-0.1, plus the `grok-imagine-*`
+        // image and video endpoints. The imagine models are not chat
+        // completions and would break on selection; the rest are left out for a
+        // duller reason -- xAI's own catalog publishes no context window for
+        // them, and a listed model with a guessed window compacts at the wrong
+        // point. They stay reachable by typing the name.
+        "xai" => {
+            push("grok-4.6");
+            push("grok-4.5");
+        }
         "zai" => {
             push("glm-4.5");
             push("glm-4.7");
@@ -866,6 +878,16 @@ pub fn openai_compatible_profile_is_configured(profile: OpenAiCompatibleProfile)
 
     let resolved = resolve_openai_compatible_profile(profile);
     if load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file).is_some() {
+        return true;
+    }
+
+    // A Grok subscription signed in with `/login` is a credential too. This is
+    // the third place that answered "does xAI have credentials" by looking only
+    // for the API key -- the login dispatch and the status row were the other
+    // two -- and each one silently made the feature look absent: here, the
+    // profile's routes were never appended, so the picker showed one
+    // unavailable model under "no credentials" while a valid token sat on disk.
+    if resolved.api_key_env == "XAI_API_KEY" && crate::auth::xai::has_tokens() {
         return true;
     }
 

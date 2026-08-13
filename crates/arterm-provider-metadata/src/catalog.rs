@@ -323,7 +323,11 @@ pub const XAI_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "XAI_API_KEY",
     env_file: "xai.env",
     setup_url: "https://docs.x.ai/developers/quickstart",
-    default_model: Some("grok-code-fast-1"),
+    // `grok-code-fast-1` was the default until 2026-08-14, when a live
+    // `/v1/models` against a Grok subscription came back without it: the
+    // default named a model the account could not use, so the one row the
+    // picker showed was also the one row that would fail.
+    default_model: Some("grok-4.6"),
     requires_api_key: true,
 };
 
@@ -963,6 +967,26 @@ pub const XAI_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor 
     order: LoginProviderSurfaceOrder::new(Some(33), Some(33), Some(33), Some(33), Some(33)),
 };
 
+/// Signing in with a Grok subscription rather than a metered key.
+///
+/// Shares `XAI_PROFILE` with the API-key entry because it is the same endpoint
+/// and the same models; only the credential differs. Ordered just before the
+/// key entry so the subscription is the first thing offered to someone who has
+/// one, and `requires_api_key` stays true on the profile because that is a fact
+/// about the key path, not about this one.
+pub const XAI_OAUTH_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "xai-oauth",
+    display_name: "xAI (Grok subscription)",
+    auth_kind: LoginProviderAuthKind::DeviceCode,
+    auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
+    auth_status_method: "Grok subscription",
+    aliases: &["grok-oauth", "xai-grok", "grok-login"],
+    menu_detail: "Sign in with SuperGrok or X Premium+",
+    recommended: false,
+    target: LoginProviderTarget::OpenAiCompatible(XAI_PROFILE),
+    order: LoginProviderSurfaceOrder::new(Some(32), Some(32), None, None, Some(32)),
+};
+
 pub const NVIDIA_NIM_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "nvidia-nim",
     display_name: "NVIDIA NIM",
@@ -1137,7 +1161,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 49] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 50] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,
@@ -1173,6 +1197,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 49] = [
     DEEPINFRA_LOGIN_PROVIDER,
     FIREWORKS_LOGIN_PROVIDER,
     MINIMAX_LOGIN_PROVIDER,
+    XAI_OAUTH_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
     NVIDIA_NIM_LOGIN_PROVIDER,
     XIAOMI_MIMO_LOGIN_PROVIDER,

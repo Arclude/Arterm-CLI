@@ -46,6 +46,7 @@ pub(crate) enum PendingLogin {
     CursorApiKey,
     /// GitHub Copilot device flow in progress (polling in background)
     Copilot,
+    XaiSubscription,
     /// Waiting for the user to choose which external auth sources to import.
     AutoImportSelection {
         candidates: Vec<crate::external_auth::ExternalAuthReviewCandidate>,
@@ -53,17 +54,26 @@ pub(crate) enum PendingLogin {
     /// Waiting for Azure OpenAI endpoint.
     AzureEndpoint,
     /// Waiting for Azure OpenAI deployment/model name.
-    AzureModel { endpoint: String },
+    AzureModel {
+        endpoint: String,
+    },
     /// Waiting for Azure OpenAI auth method choice.
-    AzureAuthChoice { endpoint: String, model: String },
+    AzureAuthChoice {
+        endpoint: String,
+        model: String,
+    },
     /// Waiting for Azure OpenAI API key.
-    AzureApiKey { endpoint: String, model: String },
+    AzureApiKey {
+        endpoint: String,
+        model: String,
+    },
 }
 
 impl PendingLogin {
     pub(crate) fn telemetry_context(&self) -> Option<(String, String)> {
         match self {
             Self::ClaudeAccount { .. } => Some(("claude".to_string(), "oauth".to_string())),
+            Self::XaiSubscription => Some(("xai-oauth".to_string(), "device".to_string())),
             Self::OpenAiAccount { .. } => Some(("openai".to_string(), "oauth".to_string())),
             Self::Gemini { .. } => Some(("gemini".to_string(), "oauth".to_string())),
             Self::Antigravity { .. } => Some(("antigravity".to_string(), "oauth".to_string())),

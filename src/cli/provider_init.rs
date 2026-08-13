@@ -90,6 +90,11 @@ pub enum ProviderChoice {
     Minimax,
     #[value(alias = "x.ai", alias = "x-ai", alias = "grok")]
     Xai,
+    /// Sign in with a Grok subscription instead of a metered key. A separate
+    /// choice rather than a flag on `Xai`, because it is a different credential
+    /// with a different login flow -- and both can be configured at once.
+    #[value(alias = "grok-oauth", alias = "xai-grok", alias = "grok-login")]
+    XaiOauth,
     #[value(alias = "nvidia", alias = "nim")]
     NvidiaNim,
     #[value(alias = "xiaomi", alias = "mimo", alias = "xiaomi-mimo-api")]
@@ -171,6 +176,7 @@ impl ProviderChoice {
             Self::Fireworks => "fireworks",
             Self::Minimax => "minimax",
             Self::Xai => "xai",
+            Self::XaiOauth => "xai-oauth",
             Self::NvidiaNim => "nvidia-nim",
             Self::XiaomiMimo => "xiaomi-mimo",
             Self::MetaMuse => "meta-muse",
@@ -325,6 +331,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::Xai,
         crate::provider_catalog::XAI_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::XaiOauth,
+        crate::provider_catalog::XAI_OAUTH_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::NvidiaNim,
@@ -1549,6 +1559,7 @@ async fn init_provider_with_options(
         | ProviderChoice::Fireworks
         | ProviderChoice::Minimax
         | ProviderChoice::Xai
+        | ProviderChoice::XaiOauth
         | ProviderChoice::NvidiaNim
         | ProviderChoice::XiaomiMimo
         | ProviderChoice::MetaMuse

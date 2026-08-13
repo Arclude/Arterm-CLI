@@ -516,6 +516,15 @@ impl App {
                 ("auth_kind", provider.auth_kind.label().to_string()),
             ],
         );
+        // By id, not by target: this login shares xAI's endpoint and models with
+        // the API-key entry and only the credential differs, so it carries the
+        // same `OpenAiCompatible` target. Dispatching on the target alone would
+        // quietly hand a subscription login to the API-key prompt.
+        if provider.id == crate::provider_catalog::XAI_OAUTH_LOGIN_PROVIDER.id {
+            self.start_xai_subscription_login();
+            return;
+        }
+
         match provider.target {
             crate::provider_catalog::LoginProviderTarget::AutoImport => {
                 match crate::external_auth::pending_external_auth_review_candidates() {
@@ -1770,6 +1779,85 @@ impl App {
         ));
     }
 
+    /// The xAI device flow, streamed into the transcript.
+    ///
+    /// No browser is opened for the user: xAI's verification URL carries the
+    /// code, and launching a browser mid-session steals focus from a terminal
+    /// the user is reading. The URL and code are printed instead.
+    fn start_xai_subscription_login(&mut self) {
+        self.set_status_notice("Login: xAI device flow...");
+        self.begin_pending_login(PendingLogin::XaiSubscription);
+
+        tokio::spawn(async move {
+            let grant =
+                match crate::auth::xai::request_device_code(crate::auth::xai::SURFACE_UI).await {
+                    Ok(grant) => grant,
+                    Err(e) => {
+                        Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                            provider: "xai-oauth".to_string(),
+                            success: false,
+                            message: format!("xAI login could not start: {}", e),
+                        }));
+                        return;
+                    }
+                };
+
+            let clipboard_note = if copy_to_clipboard(&grant.user_code) {
+                " (copied to clipboard)"
+            } else {
+                ""
+            };
+            Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                provider: "xai_oauth_code".to_string(),
+                success: true,
+                message: format!(
+                    "{}\n\nYour code: {}{}\n\nType /cancel to abort.",
+                    crate::auth::xai::approval_instructions(&grant),
+                    grant.user_code,
+                    clipboard_note
+                ),
+            }));
+
+            let tokens = match crate::auth::xai::poll_for_tokens(&grant).await {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                        provider: "xai-oauth".to_string(),
+                        success: false,
+                        message: format!("xAI login failed: {}", e),
+                    }));
+                    return;
+                }
+            };
+
+            if let Err(e) = crate::auth::xai::save_tokens(&tokens) {
+                Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                    provider: "xai-oauth".to_string(),
+                    success: false,
+                    message: format!("Failed to save the xAI login: {}", e),
+                }));
+                return;
+            }
+
+            // A login that worked against a plan that does not include API
+            // access is reported here rather than as a 401 three prompts later.
+            let message = if tokens.has_subscription_access() {
+                "Signed in to xAI with your Grok subscription.".to_string()
+            } else {
+                crate::auth::xai::missing_subscription_notice().to_string()
+            };
+            Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                provider: "xai-oauth".to_string(),
+                success: tokens.has_subscription_access(),
+                message,
+            }));
+        });
+
+        self.push_display_message(DisplayMessage::system(
+            "xAI Login\n\nRequesting a device code from xAI... Type /cancel to abort.".to_string(),
+        ));
+    }
+
     fn start_antigravity_login(&mut self) {
         let (verifier, challenge) = crate::auth::oauth::generate_pkce_public();
         let expected_state = crate::auth::oauth::generate_state_public();
@@ -1980,6 +2068,11 @@ impl App {
         }
 
         match pending {
+            // The device flow reads nothing from the composer: approval happens
+            // in the browser and the polling task reports back on its own.
+            PendingLogin::XaiSubscription => {
+                self.pending_login = Some(PendingLogin::XaiSubscription);
+            }
             PendingLogin::ClaudeAccount {
                 verifier,
                 label,

@@ -24,6 +24,7 @@ mod status_types;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_sandbox;
 pub mod validation;
+pub mod xai;
 
 pub(crate) use commands::command_exists;
 #[cfg(test)]
@@ -478,6 +479,19 @@ impl AuthStatus {
     }
 
     pub fn state_for_provider(&self, provider: LoginProviderDescriptor) -> AuthState {
+        // The Grok subscription shares xAI's endpoint -- and so its target --
+        // with the API-key entry, and must report on its own credential alone.
+        // Reading the target here made it claim "configured" from an
+        // `XAI_API_KEY` the user set for the other path, which is the same
+        // borrowed-availability bug the ClaudeApiKey comment below describes.
+        if provider.id == crate::provider_catalog::XAI_OAUTH_LOGIN_PROVIDER.id {
+            return if crate::auth::xai::has_tokens() {
+                AuthState::Available
+            } else {
+                AuthState::NotConfigured
+            };
+        }
+
         match provider.target {
             crate::provider_catalog::LoginProviderTarget::AutoImport => {
                 if Self::has_any_untrusted_external_auth() {

@@ -205,6 +205,30 @@ pub async fn run_login(
     Ok(())
 }
 
+/// The xAI device-code login, end to end.
+///
+/// Device code rather than a loopback redirect: xAI's shared client is
+/// registered for one fixed port, so a busy port cannot be worked around by
+/// choosing another -- the authorization server would reject the redirect. The
+/// device flow has no redirect at all and works the same over SSH.
+async fn run_xai_subscription_login() -> Result<()> {
+    use crate::auth::xai;
+
+    let tokens = xai::login(xai::SURFACE_CLI, |instructions| {
+        println!("\n{instructions}")
+    })
+    .await?;
+
+    if tokens.has_subscription_access() {
+        println!("\nSigned in to xAI. Arterm will use your Grok subscription for xAI models.");
+    } else {
+        // The login worked; the plan is what did not. Said here rather than
+        // discovered as a 401 in the middle of a turn.
+        println!("\n{}", xai::missing_subscription_notice());
+    }
+    Ok(())
+}
+
 pub async fn run_login_provider(
     provider: LoginProviderDescriptor,
     account_label: Option<&str>,
@@ -212,6 +236,15 @@ pub async fn run_login_provider(
 ) -> Result<()> {
     crate::telemetry::record_provider_selected(provider.id);
     crate::telemetry::record_auth_started(provider.id, provider.auth_kind.label());
+
+    // Handled by id rather than by a `LoginProviderTarget` variant of its own.
+    // The target enum is matched in 180-odd places and this flow shares xAI's
+    // endpoint and models with the API-key entry -- only the credential differs.
+    // A variant would mean touching every one of those sites to say "same as
+    // xAI" 180 times.
+    if provider.id == crate::provider_catalog::XAI_OAUTH_LOGIN_PROVIDER.id {
+        return run_xai_subscription_login().await;
+    }
     let explicit_scriptable_flow = options.uses_scriptable_flow()?;
     let auto_scriptable_reason = if explicit_scriptable_flow {
         None

@@ -1081,3 +1081,60 @@ fn an_openai_compatible_key_alone_counts_as_a_login() {
         "the only configured provider is an OpenAI-compatible profile, and it is configured"
     );
 }
+
+/// The Grok subscription entry must not read as configured because an
+/// `XAI_API_KEY` exists for the other path: it is a different credential, and
+/// "configured" is what tells the user there is nothing left to do.
+#[test]
+fn the_grok_subscription_reports_only_its_own_credential() {
+    let _lock = crate::storage::lock_test_env();
+    let home = tempfile::tempdir().expect("temp home");
+    // Restore on the way out even if an assertion panics: the env is shared
+    // with every other test that takes this lock.
+    struct RestoreHome(Option<std::ffi::OsString>);
+    impl Drop for RestoreHome {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => crate::env::set_var("ARTERM_HOME", value),
+                None => crate::env::remove_var("ARTERM_HOME"),
+            }
+        }
+    }
+    let _restore = RestoreHome(std::env::var_os("ARTERM_HOME"));
+    crate::env::set_var("ARTERM_HOME", home.path());
+
+    let status = AuthStatus::default();
+    let provider = crate::provider_catalog::XAI_OAUTH_LOGIN_PROVIDER;
+
+    assert_eq!(
+        status.state_for_provider(provider),
+        AuthState::NotConfigured,
+        "no xAI login on disk means not configured, whatever any API key says"
+    );
+
+    assert!(
+        !crate::provider_catalog::openai_compatible_profile_is_configured(
+            crate::provider_catalog::XAI_PROFILE
+        ),
+        "no login and no key: the profile must not claim credentials"
+    );
+
+    crate::auth::xai::save_tokens(&crate::auth::xai::XaiTokens {
+        access_token: "token".to_string(),
+        ..Default::default()
+    })
+    .expect("write the login");
+    assert_eq!(
+        status.state_for_provider(provider),
+        AuthState::Available,
+        "a stored subscription login is what makes it configured"
+    );
+    // The route builder consults this to decide whether the profile's models
+    // appear in /model at all; a token without this is an invisible login.
+    assert!(
+        crate::provider_catalog::openai_compatible_profile_is_configured(
+            crate::provider_catalog::XAI_PROFILE
+        ),
+        "the subscription token must count as credentials for the model picker"
+    );
+}

@@ -510,6 +510,50 @@ fn add_cache_breakpoint(messages: &mut [Message]) -> bool {
     false
 }
 
+/// The credential an OpenAI-compatible profile should present.
+///
+/// xAI can be reached two ways: a metered key from console.x.ai, or a Grok
+/// subscription signed in with `/login`. The subscription wins when both exist,
+/// because it is the one somebody deliberately signed in to use -- and because
+/// the reverse order is what produced `Incorrect API key provided` from
+/// `/v1/models` while a perfectly good subscription token sat on disk.
+///
+/// The stored token is used as-is rather than refreshed here: this runs on a
+/// sync path, and an expired token surfaces as a 401 that the refresh path
+/// already handles. Better a stale token and a retry than a blocking refresh
+/// inside a catalog poll.
+/// The Grok-subscription bearer, when `api_key_env` is xAI's and a login is on
+/// disk. One function rather than a rule repeated at each construction site:
+/// five separate sites answered "does xAI have credentials" with an api-key
+/// lookup, and each one independently made a working login look absent.
+fn xai_subscription_auth(api_key_env: &str) -> Option<ProviderAuth> {
+    if api_key_env != "XAI_API_KEY" {
+        return None;
+    }
+    let tokens = arterm_base::auth::xai::load_tokens().ok()?;
+    if tokens.access_token.is_empty() {
+        return None;
+    }
+    Some(ProviderAuth::AuthorizationBearer {
+        token: tokens.access_token,
+        label: "Grok subscription".to_string(),
+    })
+}
+
+fn profile_auth(
+    resolved: &arterm_base::provider_catalog::ResolvedOpenAiCompatibleProfile,
+) -> Option<ProviderAuth> {
+    if let Some(auth) = xai_subscription_auth(&resolved.api_key_env) {
+        return Some(auth);
+    }
+    load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file).map(|key| {
+        ProviderAuth::AuthorizationBearer {
+            token: key,
+            label: resolved.api_key_env.clone(),
+        }
+    })
+}
+
 async fn fetch_models_from_api(
     client: Client,
     api_base: String,
@@ -698,13 +742,8 @@ pub fn maybe_schedule_openai_compatible_profile_catalog_refresh(
         finish_profile_catalog_refresh(&resolved.id);
         return false;
     };
-    let auth = if let Some(key) =
-        load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file)
-    {
-        ProviderAuth::AuthorizationBearer {
-            token: key,
-            label: resolved.api_key_env.clone(),
-        }
+    let auth = if let Some(auth) = profile_auth(&resolved) {
+        auth
     } else if !resolved.requires_api_key {
         ProviderAuth::None {
             label: "local endpoint (no auth)".to_string(),
@@ -1627,12 +1666,12 @@ impl OpenRouterProvider {
                 resolved.api_base
             )
         })?;
-        let auth = match load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file)
-        {
-            Some(token) => ProviderAuth::AuthorizationBearer {
-                token,
-                label: resolved.api_key_env.clone(),
-            },
+        // The fourth and last copy of "does this profile have credentials",
+        // routed through the same helper as the catalog fetch so the chat
+        // request and the model list can never disagree about which credential
+        // is in use.
+        let auth = match profile_auth(&resolved) {
+            Some(auth) => auth,
             None if !resolved.requires_api_key => ProviderAuth::None {
                 label: "local endpoint (no auth)".to_string(),
             },
@@ -2356,6 +2395,12 @@ impl OpenRouterProvider {
         }
 
         let key_name = configured_api_key_name();
+        // Same precedence as `profile_auth`: the signed-in subscription wins,
+        // so the chat path and the catalog path cannot resolve to different
+        // credentials for the same profile.
+        if let Some(auth) = xai_subscription_auth(&key_name) {
+            return Ok(auth);
+        }
         let api_key = Self::get_api_key().ok_or_else(|| {
             let env_file = configured_env_file_name();
             let path = arterm_base::storage::app_config_dir()

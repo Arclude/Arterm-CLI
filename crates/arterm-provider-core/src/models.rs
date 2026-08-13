@@ -320,6 +320,16 @@ pub fn context_limit_for_model_with_provider_and_cache(
 pub fn open_weight_family_context_limit(model: &str) -> Option<usize> {
     let m = model;
 
+    // --- xAI Grok family ---
+    //
+    // 500K for 4.5 and 4.6, read from xAI's own `default_models.json` rather
+    // than from a blog post. Nothing else in the family is listed there, so
+    // nothing else is claimed here: an invented window is worse than none,
+    // because the caller compacts against it.
+    if m.starts_with("grok-4.6") || m.starts_with("grok-4.5") {
+        return Some(500_000);
+    }
+
     // --- Z.AI GLM family ---
     if m.contains("glm") {
         // GLM-5.2: first GLM with a truly usable 1M-token context window.
