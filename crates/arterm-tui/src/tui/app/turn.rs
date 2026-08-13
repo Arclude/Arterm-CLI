@@ -978,6 +978,7 @@ impl App {
                                             stdin_request_tx: None,
                                             graceful_shutdown_signal: None,
                                             execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
+            sandbox_mode: crate::config::config().sandbox_mode.clone(),
                                         };
                                         let tool_result = self
                                             .registry
@@ -1263,6 +1264,7 @@ impl App {
                     stdin_request_tx: None,
                     graceful_shutdown_signal: None,
                     execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
+            sandbox_mode: crate::config::config().sandbox_mode.clone(),
                 };
 
                 Bus::global().publish(BusEvent::ToolUpdated(ToolEvent {

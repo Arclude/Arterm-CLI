@@ -703,6 +703,7 @@ fn launch_manual_subagent(app: &mut App, spec: ManualSubagentSpec) {
             stdin_request_tx: None,
             graceful_shutdown_signal: None,
             execution_mode: crate::tool::ToolExecutionMode::Direct,
+            sandbox_mode: crate::config::config().sandbox_mode.clone(),
         };
 
         let start = Instant::now();

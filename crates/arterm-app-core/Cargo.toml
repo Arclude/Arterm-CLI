@@ -88,6 +88,7 @@ arterm-build-meta = { path = "../arterm-build-meta" }
 # this crate controls arterm-base's optional features (see [features] below).
 arterm-base = { path = "../arterm-base", default-features = false }
 arterm-command-risk = { path = "../arterm-command-risk" }
+arterm-sandbox = { path = "../arterm-sandbox" }
 arterm-core = { path = "../arterm-core" }
 arterm-message-types = { path = "../arterm-message-types" }
 arterm-overnight-core = { path = "../arterm-overnight-core" }
