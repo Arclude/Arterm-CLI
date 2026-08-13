@@ -525,8 +525,6 @@ mod basic;
 mod centered_caret;
 #[path = "centered_header.rs"]
 mod centered_header;
-#[path = "composer_classic.rs"]
-mod composer_classic;
 #[path = "diagrams.rs"]
 mod diagrams;
 #[path = "inline_picker.rs"]

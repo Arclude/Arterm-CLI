@@ -103,14 +103,6 @@ pub struct DisplayConfig {
     /// roles and `/colors harmony` to score the result.
     #[serde(default)]
     pub colors: std::collections::BTreeMap<String, String>,
-    /// Named look: "" (the built-in arterm screen) or "classic" (the layout
-    /// the TypeScript CLI drew). Set by `/theme`.
-    ///
-    /// Recorded rather than inferred from `colors`, because a look is a layout
-    /// as well as a palette: editing one role with `/colors` must not silently
-    /// put the screen back to another shape.
-    #[serde(default)]
-    pub look: String,
     /// Opt-in active sessions manager: pressing Left arrow on an empty input
     /// opens a picker scoped to live (open) sessions, showing which are still
     /// working and which are ready for input (default: false). The `/active`
@@ -173,7 +165,6 @@ impl Default for DisplayConfig {
             keybinding_hints: true,
             theme: String::new(),
             colors: std::collections::BTreeMap::new(),
-            look: String::new(),
             active_sessions_manager: false,
             external_sessions: true,
             overscroll_status: OverscrollStatusMode::default(),

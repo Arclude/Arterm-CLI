@@ -60,7 +60,6 @@ mod commands_overnight;
 mod commands_plan;
 mod commands_remote;
 mod commands_review;
-mod commands_theme;
 mod conversation_state;
 mod copy_selection;
 mod debug;

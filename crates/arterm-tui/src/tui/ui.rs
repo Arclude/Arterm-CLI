@@ -2980,16 +2980,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     let hint_line_height = input_ui::input_hint_line_height(app);
     let inline_block_height: u16 = inline_ui_height(app);
     let inline_ui_gap_height: u16 = if inline_block_height > 0 { 1 } else { 0 };
-    // The classic look frames the composer in two text rails, and the hint it
-    // would otherwise print on its own row rides the bottom one -- so the frame
-    // costs two rows and gives one back.
-    let classic_composer =
-        crate::tui::theme_presets::current_look() == crate::tui::theme_presets::Look::Classic;
-    let input_height = crate::tui::composer_frame::layout_rows(
-        base_input_height,
-        hint_line_height,
-        classic_composer,
-    );
+    let input_height = base_input_height + hint_line_height;
 
     if let Some(ref mut capture) = debug_capture {
         capture.render_order.push("prepare_messages".to_string());
