@@ -215,9 +215,8 @@ fn telemetry_settings_lines(
     // nothing. That errs safe, and it is still the screen telling the user
     // something untrue about what they just chose.
     for note in [
-        env_forced_off.then_some(
-            "Your environment already disables telemetry (ARTERM_NO_TELEMETRY).",
-        ),
+        env_forced_off
+            .then_some("Your environment already disables telemetry (ARTERM_NO_TELEMETRY)."),
         (!env_forced_off && !crate::telemetry::opt_in_present()).then_some(
             "Saved, but inactive: telemetry also needs ARTERM_TELEMETRY=1 in your environment.",
         ),
@@ -841,7 +840,10 @@ mod telemetry_header_tests {
     fn content_sharing_is_stated_rather_than_summarized() {
         let everything = telemetry_header_text(TelemetryLevel::Everything).join(" ");
         assert!(everything.contains("CONTENT"), "{everything}");
-        assert!(everything.contains("prompts and transcripts"), "{everything}");
+        assert!(
+            everything.contains("prompts and transcripts"),
+            "{everything}"
+        );
 
         let no_content = telemetry_header_text(TelemetryLevel::NoContent).join(" ");
         assert!(

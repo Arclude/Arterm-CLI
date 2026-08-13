@@ -763,8 +763,11 @@ fn mcp_source_logs_explain_provenance_without_config_values() {
     assert!(live.contains("Loaded 2 server(s) live from Claude Code (~/.claude.json)"));
     assert!(live.contains("source values were not copied"));
 
-    let imported =
-        McpConfig::codex_import_log_message(1, 2, std::path::Path::new("/sandbox/.arterm/mcp.json"));
+    let imported = McpConfig::codex_import_log_message(
+        1,
+        2,
+        std::path::Path::new("/sandbox/.arterm/mcp.json"),
+    );
     assert!(imported.contains("One-time imported 1 server(s) from Codex CLI"));
     assert!(imported.contains("/sandbox/.arterm/mcp.json"));
     assert!(imported.contains("2 configured environment value(s)"));

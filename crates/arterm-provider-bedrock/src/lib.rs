@@ -1,6 +1,15 @@
 #[cfg(feature = "aws-sdk")]
 use anyhow::Context;
 use anyhow::Result;
+#[cfg(feature = "aws-sdk")]
+use arterm_message_types::{ContentBlock as JContentBlock, Role as JRole, StreamEvent};
+use arterm_message_types::{Message as JMessage, ToolDefinition};
+#[cfg(feature = "aws-sdk")]
+use arterm_provider_core::summarize_model_catalog_refresh;
+use arterm_provider_core::{
+    DEFAULT_CONTEXT_LIMIT, EventStream, ModelCatalogRefreshSummary, ModelRoute, Provider,
+    RouteCheapnessEstimate, RouteCostConfidence, RouteCostSource,
+};
 use async_trait::async_trait;
 #[cfg(feature = "aws-sdk")]
 use aws_config::BehaviorVersion;
@@ -23,15 +32,6 @@ use aws_smithy_types::Blob;
 use base64::Engine;
 #[cfg(feature = "aws-sdk")]
 use base64::engine::general_purpose::STANDARD as BASE64;
-#[cfg(feature = "aws-sdk")]
-use arterm_message_types::{ContentBlock as JContentBlock, Role as JRole, StreamEvent};
-use arterm_message_types::{Message as JMessage, ToolDefinition};
-#[cfg(feature = "aws-sdk")]
-use arterm_provider_core::summarize_model_catalog_refresh;
-use arterm_provider_core::{
-    DEFAULT_CONTEXT_LIMIT, EventStream, ModelCatalogRefreshSummary, ModelRoute, Provider,
-    RouteCheapnessEstimate, RouteCostConfidence, RouteCostSource,
-};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "aws-sdk")]
 use serde_json::{Value, json};

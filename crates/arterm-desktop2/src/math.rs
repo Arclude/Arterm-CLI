@@ -48,7 +48,10 @@ pub struct MathSystem {
 impl Default for MathSystem {
     fn default() -> Self {
         Self {
-            font: FontData::new(Blob::new(std::sync::Arc::new(arterm_math::STIX_TWO_MATH)), 0),
+            font: FontData::new(
+                Blob::new(std::sync::Arc::new(arterm_math::STIX_TWO_MATH)),
+                0,
+            ),
         }
     }
 }

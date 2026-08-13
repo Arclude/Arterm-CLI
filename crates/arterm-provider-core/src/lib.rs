@@ -58,11 +58,11 @@ pub use selection::{
 };
 
 use anyhow::Result;
-use async_trait::async_trait;
-use futures::Stream;
 use arterm_message_types::{
     ContentBlock, Message, Role, StreamEvent, ToolDefinition, messages_with_dynamic_system_context,
 };
+use async_trait::async_trait;
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;

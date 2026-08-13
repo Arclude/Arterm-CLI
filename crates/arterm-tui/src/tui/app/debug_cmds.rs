@@ -947,7 +947,8 @@ impl App {
             format!("OK: test bundle '{}' started", name)
         } else if cmd == "bundle-save" {
             use crate::tui::test_harness::TestBundle;
-            let name = std::env::var("ARTERM_TEST_BUNDLE").unwrap_or_else(|_| "unnamed".to_string());
+            let name =
+                std::env::var("ARTERM_TEST_BUNDLE").unwrap_or_else(|_| "unnamed".to_string());
             let bundle = TestBundle::new(&name);
             let path = TestBundle::default_path(&name);
             match bundle.save(&path) {

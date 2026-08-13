@@ -2997,7 +2997,8 @@ pub(super) fn handle_swarm_prompt_command(app: &mut App, trimmed: &str) -> bool 
             return true;
         }
     };
-    let path = match ensure_swarm_prompt_edit_path(app.session.working_dir.as_deref(), &arterm_dir) {
+    let path = match ensure_swarm_prompt_edit_path(app.session.working_dir.as_deref(), &arterm_dir)
+    {
         Ok(path) => path,
         Err(error) => {
             app.push_display_message(DisplayMessage::error(format!(

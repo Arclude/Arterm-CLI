@@ -286,8 +286,11 @@ mod tests {
         arterm_core::env::set_var("ARTERM_PROVIDER_ENV_TEST_KEY", "env-key");
 
         assert_eq!(
-            load_api_key_from_env_or_config("ARTERM_PROVIDER_ENV_TEST_KEY", "provider-env-test.env")
-                .as_deref(),
+            load_api_key_from_env_or_config(
+                "ARTERM_PROVIDER_ENV_TEST_KEY",
+                "provider-env-test.env"
+            )
+            .as_deref(),
             Some("env-key")
         );
     }

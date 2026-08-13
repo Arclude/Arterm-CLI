@@ -140,7 +140,10 @@ fn context_window_handles_dot_and_dash_names() {
         Some(128_000)
     );
     assert_eq!(
-        arterm_base::provider::context_limit_for_model_with_provider("gpt-5.4-pro", Some("copilot")),
+        arterm_base::provider::context_limit_for_model_with_provider(
+            "gpt-5.4-pro",
+            Some("copilot")
+        ),
         Some(128_000)
     );
     assert_eq!(

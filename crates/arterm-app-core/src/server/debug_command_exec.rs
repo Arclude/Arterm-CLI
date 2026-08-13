@@ -637,8 +637,8 @@ mod tests {
     use crate::provider::{EventStream, Provider};
     use crate::tool::Registry;
     use anyhow::Result;
-    use async_trait::async_trait;
     use arterm_agent_runtime::InterruptSignal;
+    use async_trait::async_trait;
     use std::collections::HashMap;
     use std::ffi::OsString;
     use std::sync::{Arc, Mutex, OnceLock};

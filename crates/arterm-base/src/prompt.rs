@@ -912,7 +912,8 @@ fn load_prompt_overlay_files_from_dir(working_dir: Option<&Path>) -> (Option<Str
         contents.push(content);
     }
 
-    if let Ok(global_overlay) = crate::storage::arterm_dir().map(|dir| dir.join("prompt-overlay.md"))
+    if let Ok(global_overlay) =
+        crate::storage::arterm_dir().map(|dir| dir.join("prompt-overlay.md"))
         && let Some((content, size)) = load_file(
             &global_overlay,
             "Global Prompt Overlay (~/.arterm/prompt-overlay.md)",

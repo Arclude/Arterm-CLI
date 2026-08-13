@@ -176,7 +176,10 @@ fn normalize_batch_input(mut input: Value) -> Value {
                     && let Some(params) = obj.get_mut("parameters").and_then(Value::as_object_mut)
                     && !params.contains_key(arterm_tool_core::ACCEPT_LARGE_OUTPUT_KEY)
                 {
-                    params.insert(arterm_tool_core::ACCEPT_LARGE_OUTPUT_KEY.to_string(), accept);
+                    params.insert(
+                        arterm_tool_core::ACCEPT_LARGE_OUTPUT_KEY.to_string(),
+                        accept,
+                    );
                 }
 
                 if !obj.contains_key("parameters") && obj.contains_key("tool") {

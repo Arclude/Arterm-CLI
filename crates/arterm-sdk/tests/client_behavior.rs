@@ -10,7 +10,7 @@ use arterm_harness_api::{
     API_VERSION_MAJOR, ApiEvent, ApiRequest, ClientFrame, ModelRouteInfo, ServerFrame, SessionInfo,
     TextMatch, read_frame, write_frame,
 };
-use arterm_sdk::{ConnectOptions, ArtermClient, SearchTextOptions, Transport};
+use arterm_sdk::{ArtermClient, ConnectOptions, SearchTextOptions, Transport};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::channel;
@@ -48,11 +48,8 @@ fn fake_harness(handle: impl Fn(&ClientFrame, &mut dyn Write) + Send + 'static) 
     std::thread::spawn(move || {
         let mut reader = BufReader::new(theirs.try_clone().expect("clone"));
         let mut writer = theirs;
-        loop {
-            let frame: ClientFrame = match read_frame(&mut reader) {
-                Ok(frame) => frame,
-                Err(_) => break,
-            };
+        while let Ok(frame) = read_frame(&mut reader) {
+            let frame: ClientFrame = frame;
             // The handshake is boilerplate every test would repeat.
             if let ApiRequest::Hello { .. } = frame.request {
                 let reply = ServerFrame {

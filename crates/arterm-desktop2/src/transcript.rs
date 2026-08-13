@@ -2115,7 +2115,9 @@ fn strip_leading_indent(
 /// nesting are kept: the block carries only one rule, so a quote inside a quote
 /// would otherwise render identically to the quote around it, and "who is being
 /// quoted here" is the whole content of that distinction.
-fn strip_quote_bar(spans: &[arterm_render_core::StyledSpan]) -> Vec<arterm_render_core::StyledSpan> {
+fn strip_quote_bar(
+    spans: &[arterm_render_core::StyledSpan],
+) -> Vec<arterm_render_core::StyledSpan> {
     let mut spans = spans.to_vec();
     if spans
         .first()

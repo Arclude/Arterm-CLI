@@ -1,7 +1,7 @@
-use futures::StreamExt;
 use arterm::message::{ContentBlock, Message, ToolDefinition};
 use arterm::provider::Provider;
 use arterm_provider_claude_cli_runtime::ClaudeProvider;
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

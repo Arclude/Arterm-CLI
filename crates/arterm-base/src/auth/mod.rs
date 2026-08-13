@@ -756,7 +756,11 @@ impl AuthStatus {
             crate::provider_catalog::LoginProviderTarget::OpenAiApiKey => {
                 let (source, detail) = summarize_sources(vec![
                     env_source("OPENAI_API_KEY"),
-                    config_source("OPENAI_API_KEY", "openai.env", "~/.config/arterm/openai.env"),
+                    config_source(
+                        "OPENAI_API_KEY",
+                        "openai.env",
+                        "~/.config/arterm/openai.env",
+                    ),
                     external_api_key_source("OPENAI_API_KEY"),
                 ]);
                 (
@@ -841,7 +845,11 @@ impl AuthStatus {
                 {
                     summarize_sources(vec![
                         env_source(&key_env),
-                        config_source(&key_env, &env_file, format!("~/.config/arterm/{}", env_file)),
+                        config_source(
+                            &key_env,
+                            &env_file,
+                            format!("~/.config/arterm/{}", env_file),
+                        ),
                         external_api_key_source(&key_env),
                     ])
                 } else {
@@ -1543,8 +1551,18 @@ fn cursor_source() -> Option<(AuthCredentialSource, String)> {
             format!("trusted Cursor app state ({})", path.display()),
         ));
     }
-    if config_source("CURSOR_API_KEY", "cursor.env", "~/.config/arterm/cursor.env").is_some() {
-        return config_source("CURSOR_API_KEY", "cursor.env", "~/.config/arterm/cursor.env");
+    if config_source(
+        "CURSOR_API_KEY",
+        "cursor.env",
+        "~/.config/arterm/cursor.env",
+    )
+    .is_some()
+    {
+        return config_source(
+            "CURSOR_API_KEY",
+            "cursor.env",
+            "~/.config/arterm/cursor.env",
+        );
     }
     None
 }

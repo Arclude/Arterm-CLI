@@ -17,8 +17,8 @@ use crate::server::{
 };
 use crate::tool::Registry;
 use anyhow::Result;
-use async_trait::async_trait;
 use arterm_agent_runtime::InterruptSignal;
+use async_trait::async_trait;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;

@@ -4,8 +4,8 @@ use super::{
     shared_server_binary_path, stable_binary_path,
 };
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use arterm_storage as storage;
+use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
@@ -719,7 +719,10 @@ mod tests {
         let cases: Vec<(Vec<&str>, SelfDevBuildTarget)> = vec![
             (vec![], SelfDevBuildTarget::Tui),
             (vec!["src/main.rs"], SelfDevBuildTarget::Tui),
-            (vec!["crates/arterm-tui/src/lib.rs"], SelfDevBuildTarget::Tui),
+            (
+                vec!["crates/arterm-tui/src/lib.rs"],
+                SelfDevBuildTarget::Tui,
+            ),
             (
                 vec!["crates/arterm-desktop2/src/main.rs"],
                 SelfDevBuildTarget::Desktop2,

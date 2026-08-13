@@ -19,7 +19,9 @@ pub mod source;
 pub mod terminal;
 
 pub use chord::KeyChord;
-pub use conflicts::{Conflict, ArtermBinding, conflict_signature, detect_conflicts, arterm_bindings};
+pub use conflicts::{
+    ArtermBinding, Conflict, arterm_bindings, conflict_signature, detect_conflicts,
+};
 pub use report::{render_report, render_status_line};
 pub use source::{DiscoveredBinding, KeySource};
 

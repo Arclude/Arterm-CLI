@@ -6,8 +6,6 @@
 //! at startup.
 
 use anyhow::Result;
-use async_trait::async_trait;
-use chrono::Utc;
 use arterm_base::auth::copilot as copilot_auth;
 use arterm_message_types::{
     ContentBlock, Message as ChatMessage, Role, StreamEvent, ToolDefinition,
@@ -22,6 +20,8 @@ use arterm_provider_copilot::{
 use arterm_provider_copilot::{DEFAULT_MODEL, FALLBACK_MODELS};
 pub use arterm_provider_core::PremiumMode;
 use arterm_provider_core::{EventStream, Provider};
+use async_trait::async_trait;
+use chrono::Utc;
 use serde_json::{Value, json};
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
@@ -1047,8 +1047,11 @@ impl Provider for CopilotApiProvider {
     }
 
     fn context_window(&self) -> usize {
-        arterm_provider_core::context_limit_for_model_with_provider(&self.model(), Some(self.name()))
-            .unwrap_or(128_000)
+        arterm_provider_core::context_limit_for_model_with_provider(
+            &self.model(),
+            Some(self.name()),
+        )
+        .unwrap_or(128_000)
     }
 
     fn fork(&self) -> Arc<dyn Provider> {

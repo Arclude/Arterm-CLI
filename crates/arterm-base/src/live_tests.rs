@@ -1119,7 +1119,11 @@ pub fn format_provider_test_coverage_report(
         "Tested with: arterm {} ({}){}\n\n",
         entry.arterm_version,
         entry.arterm_git_hash,
-        if entry.arterm_git_dirty { ", dirty" } else { "" }
+        if entry.arterm_git_dirty {
+            ", dirty"
+        } else {
+            ""
+        }
     ));
 
     out.push_str("## Checkpoints\n\n");

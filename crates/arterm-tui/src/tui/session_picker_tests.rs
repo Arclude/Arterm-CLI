@@ -2539,7 +2539,10 @@ mod new_session_composer {
         type_text(&mut picker, "half a thought");
 
         let action = press(&mut picker, KeyCode::Esc);
-        assert!(matches!(action, OverlayAction::Continue), "esc must not close the picker here");
+        assert!(
+            matches!(action, OverlayAction::Continue),
+            "esc must not close the picker here"
+        );
         assert!(!picker.composer_focused());
         assert_eq!(
             picker.new_session_prompt(),

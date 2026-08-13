@@ -159,7 +159,8 @@ pub(super) fn subscribe_pitch_markdown() -> String {
     message.push_str("  - Any remaining usage is billed at your limit or at month end\n");
     message.push_str("  - Funds Arterm development while the software stays open source\n");
 
-    message.push_str("\nStart: /login arterm (browser approval, no key pasted into the terminal)\n");
+    message
+        .push_str("\nStart: /login arterm (browser approval, no key pasted into the terminal)\n");
     message.push_str("Usage anytime: /usage");
     message
 }

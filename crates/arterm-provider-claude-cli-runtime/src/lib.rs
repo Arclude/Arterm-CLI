@@ -5,11 +5,11 @@
 //! `arterm_base::provider::external` at startup.
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use arterm_base::auth::{claude as claude_auth, oauth};
 use arterm_message_types::{ContentBlock, Message, Role, StreamEvent, ToolDefinition};
 use arterm_provider_core::NativeToolResultSender;
 use arterm_provider_core::{EventStream, Provider};
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashSet;

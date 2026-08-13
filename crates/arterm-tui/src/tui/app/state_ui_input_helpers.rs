@@ -2009,7 +2009,10 @@ mod external_cli_suggestion_tests {
         let candidate = suggestion_candidate_from_jsonl(&path, "Codex", SystemTime::UNIX_EPOCH)
             .expect("candidate");
         assert_eq!(candidate.session_id.as_deref(), Some("sid"));
-        assert_eq!(candidate.working_dir.as_deref(), Some("/home/jeremy/arterm"));
+        assert_eq!(
+            candidate.working_dir.as_deref(),
+            Some("/home/jeremy/arterm")
+        );
         assert_eq!(candidate.context.as_deref(), Some("check in on arterm"));
     }
 

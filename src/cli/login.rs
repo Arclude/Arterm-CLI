@@ -11,8 +11,8 @@ use crate::provider_catalog::{
 
 use super::provider_init::{ProviderChoice, login_provider_for_choice, save_named_api_key};
 
-mod existing_key_notice;
 mod arterm_device;
+mod existing_key_notice;
 mod next_step;
 mod scriptable;
 use scriptable::*;

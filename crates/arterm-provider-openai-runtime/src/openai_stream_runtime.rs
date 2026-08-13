@@ -752,7 +752,11 @@ pub(super) async fn try_persistent_ws_continuation(
     if let Err(e) = state.ws_stream.send(WsMessage::Text(request_text)).await {
         return PersistentWsResult::Failed(format!("send error: {}", e));
     }
-    emit_connection_phase(tx, arterm_message_types::ConnectionPhase::WaitingForResponse).await;
+    emit_connection_phase(
+        tx,
+        arterm_message_types::ConnectionPhase::WaitingForResponse,
+    )
+    .await;
     state.last_activity_at = Instant::now();
     arterm_base::logging::info(&format!(
         "Persistent WS continuation request sent in {}ms ({})",

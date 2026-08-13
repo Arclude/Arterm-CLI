@@ -9,8 +9,6 @@
 //! `arterm_base::provider::openai_request`.
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
-use futures::{FutureExt, SinkExt, StreamExt as FuturesStreamExt};
 use arterm_base::auth::codex::CodexCredentials;
 use arterm_base::auth::oauth;
 use arterm_base::provider::openai_request::{build_responses_input, build_tools};
@@ -18,6 +16,8 @@ use arterm_base::provider::openai_request::{build_responses_input, build_tools};
 use arterm_message_types::TOOL_OUTPUT_MISSING_TEXT;
 use arterm_message_types::{Message as ChatMessage, StreamEvent, ToolDefinition};
 use arterm_provider_core::{EventStream, Provider};
+use async_trait::async_trait;
+use futures::{FutureExt, SinkExt, StreamExt as FuturesStreamExt};
 
 #[cfg(test)]
 const OPENAI_API_BASE: &str = "https://api.openai.com/v1";

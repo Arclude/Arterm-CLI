@@ -928,7 +928,11 @@ fn skills_command_refreshes_registry_from_disk_before_listing() {
     // Point the session at a fresh project dir and add a project-local skill
     // after the app (and its skill snapshot) was created.
     let temp = tempfile::tempdir().expect("tempdir");
-    let skill_dir = temp.path().join(".arterm").join("skills").join("late-skill");
+    let skill_dir = temp
+        .path()
+        .join(".arterm")
+        .join("skills")
+        .join("late-skill");
     std::fs::create_dir_all(&skill_dir).expect("create skill dir");
     std::fs::write(
         skill_dir.join("SKILL.md"),

@@ -10,7 +10,7 @@
 //! shipping consumer, which is what keeps the SDK's shape honest instead of
 //! validated only by its own examples.
 
-use arterm_sdk::{ApiEvent, ConnectOptions, ArtermClient, LaunchOptions};
+use arterm_sdk::{ApiEvent, ArtermClient, ConnectOptions, LaunchOptions};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};

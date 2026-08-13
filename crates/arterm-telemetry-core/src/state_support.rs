@@ -1,6 +1,6 @@
 use super::{SESSION_STATE, sanitize_telemetry_label};
-use chrono::{DateTime, Datelike, Timelike, Utc};
 use arterm_storage as storage;
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 

@@ -447,7 +447,8 @@ pub fn launch_arterm_in_macos_terminal(extra_args: &[String]) -> Result<()> {
     let terminal = effective_macos_terminal();
     let exe = std::env::current_exe()?;
     let exe_path = exe.to_string_lossy().into_owned();
-    let shell_command = macos_terminal::paused_arterm_shell_command_with_args(&exe_path, extra_args);
+    let shell_command =
+        macos_terminal::paused_arterm_shell_command_with_args(&exe_path, extra_args);
 
     let command = match macos_terminal::no_automation_launch(terminal, &shell_command) {
         macos_terminal::NoAutomationLaunch::Shell(command) => command,
@@ -696,7 +697,9 @@ pub fn run_setup_hotkey(
                 eprintln!();
                 eprintln!("  Press these anywhere, system-wide:");
                 eprintln!("    \x1b[1mCmd+;\x1b[0m       new arterm in your home directory");
-                eprintln!("    \x1b[1mCmd+'\x1b[0m       new arterm in your last project directory");
+                eprintln!(
+                    "    \x1b[1mCmd+'\x1b[0m       new arterm in your last project directory"
+                );
                 eprintln!(
                     "    \x1b[1mCmd+Shift+'\x1b[0m new arterm self-dev session (last arterm repo)"
                 );
@@ -960,8 +963,8 @@ mod macos_run_loop {
 
 #[cfg(target_os = "macos")]
 fn run_macos_hotkey_listener() -> Result<()> {
-    use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
     use arterm_terminal_launch::{TerminalCommand, spawn_command_in_new_terminal_with};
+    use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
     // `global-hotkey` on macOS registers a Carbon hotkey (`RegisterEventHotKey`)
     // whose events are dispatched through the application's Carbon event target,
@@ -2555,8 +2558,11 @@ fn uninstall_macos_hotkey_listener() -> Result<()> {
     let _ = std::process::Command::new("launchctl")
         .args(["unload", plist_path.to_string_lossy().as_ref()])
         .status();
-    std::fs::remove_file(&plist_path).context("failed to remove arterm hotkey LaunchAgent plist")?;
-    arterm_logging::info("Removed macOS launch-hotkey LaunchAgent (launch_hotkeys.enabled = false)");
+    std::fs::remove_file(&plist_path)
+        .context("failed to remove arterm hotkey LaunchAgent plist")?;
+    arterm_logging::info(
+        "Removed macOS launch-hotkey LaunchAgent (launch_hotkeys.enabled = false)",
+    );
     Ok(())
 }
 

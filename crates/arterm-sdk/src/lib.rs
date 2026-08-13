@@ -31,9 +31,9 @@ mod structured;
 mod parity_tests;
 
 pub use client::{
-    ConnectOptions, EventStream, FileContent, FileStatus, GlobalEventStream, GlobalEventsOptions,
-    ArtermClient, RunOptions, RuntimeInfo, SearchTextOptions, ToolCall, Transport, TurnResult,
-    UnixTransport, Usage,
+    ArtermClient, ConnectOptions, EventStream, FileContent, FileStatus, GlobalEventStream,
+    GlobalEventsOptions, RunOptions, RuntimeInfo, SearchTextOptions, ToolCall, Transport,
+    TurnResult, UnixTransport, Usage,
 };
 pub use diagnostics::{SocketState, Stage, describe_disconnect, explain, human_duration};
 pub use errors::{Error, ErrorKind, Result};

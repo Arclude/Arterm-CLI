@@ -1515,7 +1515,8 @@ async fn tool_schemas_are_sendable_to_every_provider_dialect() {
             // Over-stripping is the hazard an allow-list introduces: a dialect
             // that forgot to list `description` would produce requests that
             // succeed while silently deleting every tool's prompt text.
-            for error in arterm_schema_dialect::must_preserve_meaning(&def.input_schema, &normalized)
+            for error in
+                arterm_schema_dialect::must_preserve_meaning(&def.input_schema, &normalized)
             {
                 failures.push(format!(
                     "[{}] tool `{}` lost meaning: {error}",

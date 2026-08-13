@@ -3,9 +3,9 @@
 //! Returns pre-scripted StreamEvent sequences for deterministic testing.
 
 use anyhow::Result;
-use async_stream::stream;
 use arterm::message::{Message, StreamEvent, ToolDefinition};
 use arterm::provider::{EventStream, Provider};
+use async_stream::stream;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 

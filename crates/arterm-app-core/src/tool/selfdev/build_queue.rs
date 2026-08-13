@@ -1041,7 +1041,8 @@ export -f cargo
         // reload path here would validate a stale `arterm` artefact and fail an
         // otherwise successful desktop build-reload.
         let desktop_only = build_request.as_ref().is_some_and(|request| {
-            request.command.contains("-p arterm-desktop2") && !request.command.contains("-p arterm ")
+            request.command.contains("-p arterm-desktop2")
+                && !request.command.contains("-p arterm ")
         });
         if desktop_only {
             let published_version = build_request

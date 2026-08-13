@@ -34,8 +34,8 @@
 //! image as JPEG and progressively downscale it until its base64 payload fits
 //! within budget.
 
-use base64::Engine as _;
 use arterm_message_types::{ContentBlock, Message};
+use base64::Engine as _;
 
 /// Build a request-safe copy of `messages` when the selected provider/model
 /// cannot accept image input. Replacing each image with a small textual marker
@@ -385,8 +385,8 @@ fn probe_dimensions(data: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{ImageFormat, RgbImage};
     use arterm_message_types::Role;
+    use image::{ImageFormat, RgbImage};
 
     fn encode_png(w: u32, h: u32) -> String {
         let img = RgbImage::from_pixel(w, h, image::Rgb([10, 20, 30]));

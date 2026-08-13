@@ -1,7 +1,7 @@
 use anyhow::Result;
+use arterm_message_types::StreamEvent;
 use bytes::Bytes;
 use futures::Stream;
-use arterm_message_types::StreamEvent;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::pin::Pin;

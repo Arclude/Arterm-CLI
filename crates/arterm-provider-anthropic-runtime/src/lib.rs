@@ -23,8 +23,6 @@ fn oauth_beta_headers(model: &str) -> &'static str {
 }
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
-use futures::StreamExt;
 use arterm_base::provider::anthropic::{
     AVAILABLE_MODELS, AnthropicCredentialMode, CLAUDE_CLI_USER_AGENT,
     apply_oauth_attribution_headers, is_cache_ttl_1h, load_anthropic_api_key,
@@ -44,6 +42,8 @@ use arterm_provider_core::{
     anthropic_map_tool_name_from_oauth as map_tool_name_from_oauth,
     anthropic_strip_1m_suffix as strip_1m_suffix,
 };
+use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -60,7 +60,8 @@ const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_URL_OAUTH: &str = "https://api.anthropic.com/v1/messages?beta=true";
 
 #[cfg(test)]
-pub(crate) const OAUTH_BETA_HEADERS_1M: &str = arterm_provider_core::ANTHROPIC_OAUTH_BETA_HEADERS_1M;
+pub(crate) const OAUTH_BETA_HEADERS_1M: &str =
+    arterm_provider_core::ANTHROPIC_OAUTH_BETA_HEADERS_1M;
 
 #[derive(Debug, Clone, Default)]
 struct OAuthClientMetadata {
@@ -1753,7 +1754,8 @@ async fn run_stream_with_retries(
                     } else {
                         arterm_base::logging::info(&format!("Transient error, will retry: {}", e));
                     }
-                    next_retry_delay = arterm_provider_core::retry_after::retry_after_from_error(&e);
+                    next_retry_delay =
+                        arterm_provider_core::retry_after::retry_after_from_error(&e);
                     last_error = Some(e);
                     continue;
                 }

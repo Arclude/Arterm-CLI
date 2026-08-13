@@ -17,8 +17,8 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::{KeyCode, KeyModifiers};
 use arterm_tui_core::keybind::format_binding;
+use crossterm::event::{KeyCode, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
 use super::App;

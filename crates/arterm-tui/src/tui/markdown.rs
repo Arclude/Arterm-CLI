@@ -14,8 +14,12 @@ fn to_markdown_diagram_mode(
 ) -> arterm_tui_markdown::DiagramDisplayMode {
     match mode {
         crate::config::DiagramDisplayMode::None => arterm_tui_markdown::DiagramDisplayMode::None,
-        crate::config::DiagramDisplayMode::Margin => arterm_tui_markdown::DiagramDisplayMode::Margin,
-        crate::config::DiagramDisplayMode::Pinned => arterm_tui_markdown::DiagramDisplayMode::Pinned,
+        crate::config::DiagramDisplayMode::Margin => {
+            arterm_tui_markdown::DiagramDisplayMode::Margin
+        }
+        crate::config::DiagramDisplayMode::Pinned => {
+            arterm_tui_markdown::DiagramDisplayMode::Pinned
+        }
     }
 }
 
@@ -24,8 +28,12 @@ fn from_markdown_diagram_mode(
 ) -> crate::config::DiagramDisplayMode {
     match mode {
         arterm_tui_markdown::DiagramDisplayMode::None => crate::config::DiagramDisplayMode::None,
-        arterm_tui_markdown::DiagramDisplayMode::Margin => crate::config::DiagramDisplayMode::Margin,
-        arterm_tui_markdown::DiagramDisplayMode::Pinned => crate::config::DiagramDisplayMode::Pinned,
+        arterm_tui_markdown::DiagramDisplayMode::Margin => {
+            crate::config::DiagramDisplayMode::Margin
+        }
+        arterm_tui_markdown::DiagramDisplayMode::Pinned => {
+            crate::config::DiagramDisplayMode::Pinned
+        }
     }
 }
 

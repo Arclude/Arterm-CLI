@@ -3299,8 +3299,9 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         }
     } else if swarm_page_active {
         let members = app.inline_swarm_members();
-        let spinner_frame =
-            (app.animation_elapsed() * arterm_tui_render::swarm_gallery::STRIP_SPINNER_FPS) as usize;
+        let spinner_frame = (app.animation_elapsed()
+            * arterm_tui_render::swarm_gallery::STRIP_SPINNER_FPS)
+            as usize;
         let lines = super::info_widget::swarm_gallery::render_swarm_page_lines(
             &members,
             app.swarm_panel_selected(),

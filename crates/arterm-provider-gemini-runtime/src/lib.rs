@@ -5,8 +5,6 @@
 //! `arterm_base::provider::external` at startup.
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
-use chrono::Utc;
 use arterm_base::auth::gemini as gemini_auth;
 use arterm_message_types::{ConnectionPhase, Message, StreamEvent, ToolDefinition};
 use arterm_provider_core::{EventStream, Provider};
@@ -24,6 +22,8 @@ pub use arterm_provider_gemini::{
     ineligible_or_project_error, is_gemini_model_id, load_code_assist_request,
     merge_gemini_model_lists, validate_load_code_assist_response,
 };
+use async_trait::async_trait;
+use chrono::Utc;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};

@@ -6,7 +6,6 @@
 use crate::message::{ContentBlock, Role};
 use crate::session::{Session, SessionStatus, StoredMessage};
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 pub use arterm_import_core::repo_ranking;
 use arterm_import_core::{
     ClaudeCodeContent, ClaudeCodeContentBlock, ClaudeCodeEntry, ClaudeCodeSessionInfo,
@@ -23,6 +22,7 @@ pub use arterm_import_core::{
     imported_claude_code_session_id, imported_codex_session_id, imported_cursor_session_id,
     imported_opencode_session_id, imported_pi_session_id, is_cursor_subagent_transcript,
 };
+use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -604,7 +604,9 @@ pub fn imported_session_id_for_target(
     target: &arterm_session_types::ResumeTarget,
 ) -> Option<String> {
     match target {
-        arterm_session_types::ResumeTarget::ArtermSession { session_id } => Some(session_id.clone()),
+        arterm_session_types::ResumeTarget::ArtermSession { session_id } => {
+            Some(session_id.clone())
+        }
         arterm_session_types::ResumeTarget::ClaudeCodeSession { session_id, .. } => {
             Some(imported_claude_code_session_id(session_id))
         }

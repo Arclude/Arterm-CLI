@@ -2,9 +2,9 @@
 
 use super::*;
 use anyhow::Result;
-use futures::{SinkExt, StreamExt};
 use arterm_base::auth::codex::CodexCredentials;
 use arterm_message_types::{ContentBlock, Role};
+use futures::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;

@@ -335,16 +335,18 @@ fn a_keyword_no_deny_list_has_ever_heard_of_reaches_no_provider() {
         "openai forwarded it: {openai}"
     );
 
-    let anthropic =
-        serde_json::to_value(arterm_provider_anthropic::format_tools(&novel, false, false))
-            .expect("serialize");
+    let anthropic = serde_json::to_value(arterm_provider_anthropic::format_tools(
+        &novel, false, false,
+    ))
+    .expect("serialize");
     assert!(
         !contains_key(&anthropic, NOVEL),
         "anthropic forwarded it: {anthropic}"
     );
 
-    let openrouter =
-        arterm_provider_openrouter::request::sanitize_tool_parameters_schema(&novel[0].input_schema);
+    let openrouter = arterm_provider_openrouter::request::sanitize_tool_parameters_schema(
+        &novel[0].input_schema,
+    );
     assert!(
         !contains_key(&openrouter, NOVEL),
         "openrouter forwarded it: {openrouter}"

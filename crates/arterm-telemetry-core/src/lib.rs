@@ -3,7 +3,6 @@ use arterm_storage as storage;
 mod lifecycle;
 pub mod onboarding_trace;
 mod state_support;
-use chrono::{DateTime, NaiveDate, Utc};
 use arterm_usage_types::{
     AuthEvent, DiscoveryEvent, ErrorCounts, FeedbackEvent, InstallEvent, OnboardingStepEvent,
     SessionLifecycleEvent, SessionStartEvent, TelemetryProjectProfile as ProjectProfile,
@@ -14,6 +13,7 @@ use arterm_usage_types::{
     telemetry_workflow_flags_from_counts,
 };
 pub use arterm_usage_types::{ErrorCategory, SessionEndReason};
+use chrono::{DateTime, NaiveDate, Utc};
 use lifecycle::emit_lifecycle_event;
 use serde_json::Value;
 use state_support::*;

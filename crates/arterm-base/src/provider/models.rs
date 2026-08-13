@@ -7,6 +7,12 @@ mod catalog;
 mod catalog_service;
 
 use anyhow::Result;
+use arterm_provider_core::{
+    ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, CHATGPT_WEB_MODEL, ModelCapabilities,
+    OPENAI_API_ONLY_PRO_MODELS, context_limit_for_model_with_provider_and_cache,
+    core_provider_for_model_with_hint, is_openai_api_only_pro_model, provider_key_from_hint,
+    shared_http_client,
+};
 #[cfg(test)]
 pub(crate) use catalog::parse_anthropic_model_catalog;
 pub use catalog::{
@@ -15,12 +21,6 @@ pub use catalog::{
     fetch_openai_api_key_model_catalog, fetch_openai_context_limits, fetch_openai_model_catalog,
 };
 use catalog_service::{ModelCatalogService, RuntimeModelUnavailability};
-use arterm_provider_core::{
-    ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, CHATGPT_WEB_MODEL, ModelCapabilities,
-    OPENAI_API_ONLY_PRO_MODELS, context_limit_for_model_with_provider_and_cache,
-    core_provider_for_model_with_hint, is_openai_api_only_pro_model, provider_key_from_hint,
-    shared_http_client,
-};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

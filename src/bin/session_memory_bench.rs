@@ -1,10 +1,10 @@
-use clap::{Parser, ValueEnum};
 use arterm::message::{ContentBlock, Role};
 use arterm::process_memory;
 use arterm::session::Session;
 use arterm::side_panel::{
     SidePanelPage, SidePanelPageFormat, SidePanelPageSource, SidePanelSnapshot,
 };
+use clap::{Parser, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(about = "Benchmark heavy-session memory attribution and process footprint")]

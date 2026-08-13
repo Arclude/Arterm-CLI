@@ -1074,7 +1074,8 @@ mod tests {
         }
 
         let path = TEST_HOME.get_or_init(|| {
-            let path = std::env::temp_dir().join(format!("arterm-test-home-{}", std::process::id()));
+            let path =
+                std::env::temp_dir().join(format!("arterm-test-home-{}", std::process::id()));
             let _ = std::fs::create_dir_all(&path);
             path
         });

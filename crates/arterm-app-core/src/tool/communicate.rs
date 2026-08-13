@@ -14,8 +14,8 @@ use crate::protocol::{
     latest_assistant_comm_report, resolve_optional_comm_target_session,
 };
 use anyhow::Result;
-use async_trait::async_trait;
 use arterm_swarm_core::validate_swarm_tldr;
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};

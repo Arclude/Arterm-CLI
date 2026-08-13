@@ -273,7 +273,10 @@ const FULL_PIPELINE_LABELS: &[(&str, &str)] = &[
     (checkpoints::TOOL_CALL_PARSE, "Tool-call parse"),
     (checkpoints::TOOL_EXECUTION_LOOP, "Tool execution loop"),
     (checkpoints::TOOL_RESULT_FOLLOWUP, "Tool-result followup"),
-    (checkpoints::REAL_ARTERM_TOOL_SMOKE, "Real Arterm tool smoke"),
+    (
+        checkpoints::REAL_ARTERM_TOOL_SMOKE,
+        "Real Arterm tool smoke",
+    ),
     (checkpoints::REASONING_CAPABILITY, "Reasoning capability"),
 ];
 
@@ -1480,7 +1483,9 @@ impl NativeProviderKind {
             Self::Bedrock => {
                 std::sync::Arc::new(arterm_base::provider::bedrock::BedrockProvider::new())
             }
-            Self::Arterm => std::sync::Arc::new(arterm_base::provider::arterm::ArtermProvider::new()),
+            Self::Arterm => {
+                std::sync::Arc::new(arterm_base::provider::arterm::ArtermProvider::new())
+            }
             Self::Azure => {
                 // Azure OpenAI is the OpenRouter transport configured via Azure
                 // env; apply that env (endpoint/key/header wiring) before building

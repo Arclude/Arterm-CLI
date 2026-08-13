@@ -2327,7 +2327,8 @@ impl App {
                         let model_hint = effective_default_model
                             .map(|m| format!("\nSuggested default model: {}", m))
                             .unwrap_or_default();
-                        let guidance = if key_name == crate::subscription_catalog::ARTERM_API_KEY_ENV
+                        let guidance = if key_name
+                            == crate::subscription_catalog::ARTERM_API_KEY_ENV
                         {
                             format!(
                                 "Use /login arterm to access curated models via your router. If the model list looks stale, run /refresh-model-list.\nDocs: {}",

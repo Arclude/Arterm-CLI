@@ -5,7 +5,6 @@
 //! [`AntigravityProvider`] with `arterm_base::provider::external` at startup.
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use arterm_base::auth::antigravity as antigravity_auth;
 use arterm_message_types::{ConnectionPhase, Message, StreamEvent, ToolDefinition};
 use arterm_provider_antigravity::{
@@ -24,6 +23,7 @@ use arterm_provider_gemini::{
     CodeAssistGenerateRequest, CodeAssistGenerateResponse, GeminiFunctionCallingConfig,
     GeminiToolConfig, VertexGenerateContentRequest,
 };
+use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
@@ -339,10 +339,11 @@ impl AntigravityProvider {
                     messages,
                     signature_policy,
                 ),
-                system_instruction: arterm_provider_gemini::build_system_instruction_with_tool_guard(
-                    system,
-                    !tools_is_empty,
-                ),
+                system_instruction:
+                    arterm_provider_gemini::build_system_instruction_with_tool_guard(
+                        system,
+                        !tools_is_empty,
+                    ),
                 tools,
                 tool_config: if tools_is_empty {
                     None
@@ -488,7 +489,8 @@ impl Provider for AntigravityProvider {
             // fields: on that specific error, retry once with tool calls
             // downgraded to plain text. Content is preserved, the turn completes,
             // and the model re-signs its new calls.
-            let mut signature_policy = arterm_provider_gemini::SignaturePolicy::ReplayCarriedForward;
+            let mut signature_policy =
+                arterm_provider_gemini::SignaturePolicy::ReplayCarriedForward;
             let response = match provider
                 .generate_content(
                     &model,
@@ -745,7 +747,9 @@ impl Provider for AntigravityProvider {
                         .finish_message
                         .as_deref()
                         .filter(|msg| !msg.trim().is_empty())
-                        .map(|msg| format!(": {}", arterm_base::util::truncate_str(msg.trim(), 300)))
+                        .map(|msg| {
+                            format!(": {}", arterm_base::util::truncate_str(msg.trim(), 300))
+                        })
                         .unwrap_or_default();
                     let _ = tx
                         .send(Err(anyhow::anyhow!(

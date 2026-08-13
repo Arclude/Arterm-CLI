@@ -1342,10 +1342,15 @@ fn startup_screen_is_unchanged_when_there_are_no_notes() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(!rendered.contains("Where we left off"), "rendered={rendered}");
-    assert!(rendered.contains("Build a small CLI tool"), "rendered={rendered}");
+    assert!(
+        !rendered.contains("Where we left off"),
+        "rendered={rendered}"
+    );
+    assert!(
+        rendered.contains("Build a small CLI tool"),
+        "rendered={rendered}"
+    );
 }
-
 
 /// A launch routinely pushes a system notice (a configured hotkey, a recovered
 /// session) before the first prompt. That is not a conversation, and it must not
@@ -1372,7 +1377,10 @@ fn a_startup_system_notice_does_not_hide_the_notes() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(rendered.contains("Where we left off here"), "rendered={rendered}");
+    assert!(
+        rendered.contains("Where we left off here"),
+        "rendered={rendered}"
+    );
     assert!(
         rendered.contains("wire the release workflow to the tap"),
         "rendered={rendered}"
@@ -1400,7 +1408,10 @@ fn the_notes_go_away_when_the_conversation_starts() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(!rendered.contains("Where we left off"), "rendered={rendered}");
+    assert!(
+        !rendered.contains("Where we left off"),
+        "rendered={rendered}"
+    );
 }
 
 /// Centered mode centers the transcript; the header has to travel with it.
@@ -1495,7 +1506,9 @@ fn a_long_working_directory_is_elided_rather_than_wrapped() {
     let short_rows = header_rows(short, width);
 
     assert!(
-        long_rows.iter().all(|line| line.chars().count() <= width as usize),
+        long_rows
+            .iter()
+            .all(|line| line.chars().count() <= width as usize),
         "no header line may exceed the terminal width"
     );
     assert!(

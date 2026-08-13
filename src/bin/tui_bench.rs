@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use clap::{Parser, ValueEnum};
 use arterm::message::{ContentBlock, Role, ToolCall};
 use arterm::perf::{SyntheticSystemProfile, TuiPerfPolicy, tui_policy_for};
 use arterm::prompt::ContextInfo;
@@ -8,6 +7,7 @@ use arterm::side_panel::{
     SidePanelPage, SidePanelPageFormat, SidePanelPageSource, SidePanelSnapshot,
 };
 use arterm::tui::{DisplayMessage, ProcessingStatus, TuiState, info_widget::InfoWidgetData};
+use clap::{Parser, ValueEnum};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use serde::Serialize;
@@ -1121,7 +1121,10 @@ impl TuiState for BenchState {
     }
 
     fn side_panel_native_scrollbar(&self) -> bool {
-        arterm::config::config().display.native_scrollbars.side_panel
+        arterm::config::config()
+            .display
+            .native_scrollbars
+            .side_panel
     }
 
     fn diff_line_wrap(&self) -> bool {

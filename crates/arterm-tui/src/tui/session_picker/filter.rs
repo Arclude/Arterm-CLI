@@ -151,7 +151,10 @@ impl SessionPicker {
     }
 
     pub(super) fn session_is_cursor(session: &SessionInfo) -> bool {
-        arterm_tui_session_picker::session_is_cursor(session.source, session.provider_key.as_deref())
+        arterm_tui_session_picker::session_is_cursor(
+            session.source,
+            session.provider_key.as_deref(),
+        )
     }
 
     fn session_matches_filter_mode(

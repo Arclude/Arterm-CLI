@@ -508,8 +508,8 @@ fn login_scriptable_flags_parse() {
 
 #[test]
 fn account_subcommands_parse() {
-    let login =
-        Args::try_parse_from(["arterm", "account", "login", "--no-browser"]).expect("account login");
+    let login = Args::try_parse_from(["arterm", "account", "login", "--no-browser"])
+        .expect("account login");
     assert!(matches!(
         login.command,
         Some(Command::Account {
@@ -783,7 +783,8 @@ fn api_bridge_socket_flags_do_not_collide() {
     ));
 
     // The bare form must resolve both paths from the environment.
-    let bare = Args::try_parse_from(["arterm", "api-bridge"]).expect("bare api-bridge should parse");
+    let bare =
+        Args::try_parse_from(["arterm", "api-bridge"]).expect("bare api-bridge should parse");
     assert!(matches!(
         bare.command,
         Some(Command::ApiBridge { api_socket: None })

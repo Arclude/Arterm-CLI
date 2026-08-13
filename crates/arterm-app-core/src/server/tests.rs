@@ -118,7 +118,8 @@ fn configured_server_name_normalizes_operator_labels() {
 fn server_identity_uses_configured_name() {
     let _guard = crate::storage::lock_test_env();
     let _server_name_guard = ScopedEnvVar::set("ARTERM_SERVER_NAME", "env-name");
-    let _server_display_name_guard = ScopedEnvVar::set("ARTERM_SERVER_DISPLAY_NAME", "display-name");
+    let _server_display_name_guard =
+        ScopedEnvVar::set("ARTERM_SERVER_DISPLAY_NAME", "display-name");
 
     let server = Server::new_with_name(
         Arc::new(StreamingMockProvider::default()),

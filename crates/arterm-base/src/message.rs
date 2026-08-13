@@ -1,8 +1,8 @@
 use crate::logging;
-use base64::Engine as _;
 use arterm_background_types::{
     BackgroundTaskCompleted, BackgroundTaskProgressEvent, BackgroundTaskStatus,
 };
+use base64::Engine as _;
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::Path;

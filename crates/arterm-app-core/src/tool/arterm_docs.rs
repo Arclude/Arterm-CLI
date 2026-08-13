@@ -173,7 +173,8 @@ fn search(query: &str, limit: Option<usize>) -> String {
     matches
         .sort_by_key(|(score, section)| (Reverse(*score), section.path, section.heading.clone()));
     let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    let mut output = format!("Arterm docs results for {query:?} (bundled with this Arterm build):\n");
+    let mut output =
+        format!("Arterm docs results for {query:?} (bundled with this Arterm build):\n");
     for (index, (_, section)) in matches.into_iter().take(limit).enumerate() {
         let excerpt = relevant_excerpt(&section.body, &terms);
         output.push_str(&format!(
@@ -266,7 +267,11 @@ mod tests {
     #[test]
     fn corpus_includes_current_docs_but_not_plans() {
         assert!(ARTERM_DOCS.iter().any(|(path, _)| *path == "README.md"));
-        assert!(ARTERM_DOCS.iter().any(|(path, _)| *path == "docs/README.md"));
+        assert!(
+            ARTERM_DOCS
+                .iter()
+                .any(|(path, _)| *path == "docs/README.md")
+        );
         assert!(
             !ARTERM_DOCS
                 .iter()

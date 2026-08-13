@@ -1503,7 +1503,10 @@ impl App {
         }
 
         fn route_matches_recent_auth(route_provider: &str, login_provider: &str) -> bool {
-            arterm_provider_core::model_route_provider_labels_related(route_provider, login_provider)
+            arterm_provider_core::model_route_provider_labels_related(
+                route_provider,
+                login_provider,
+            )
         }
 
         let timestamp_started = std::time::Instant::now();
@@ -2585,7 +2588,10 @@ impl App {
                     .unwrap_or("Pi session")
                     .to_string(),
                 ResumeTarget::OpenCodeSession { session_id, .. } => {
-                    format!("OpenCode {}", arterm_core::util::truncate_str(session_id, 8))
+                    format!(
+                        "OpenCode {}",
+                        arterm_core::util::truncate_str(session_id, 8)
+                    )
                 }
                 ResumeTarget::CursorSession { session_id, .. } => {
                     format!("Cursor {}", arterm_core::util::truncate_str(session_id, 8))
@@ -2690,7 +2696,10 @@ impl App {
                 .unwrap_or("Pi session")
                 .to_string(),
             ResumeTarget::OpenCodeSession { session_id, .. } => {
-                format!("OpenCode {}", arterm_core::util::truncate_str(session_id, 8))
+                format!(
+                    "OpenCode {}",
+                    arterm_core::util::truncate_str(session_id, 8)
+                )
             }
             ResumeTarget::CursorSession { session_id, .. } => {
                 format!("Cursor {}", arterm_core::util::truncate_str(session_id, 8))

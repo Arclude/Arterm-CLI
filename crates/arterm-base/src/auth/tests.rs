@@ -850,10 +850,15 @@ fn anthropic_api_provider_reports_api_key_independently_of_oauth() {
     let xdg = temp.path().join("xdg");
     std::fs::create_dir_all(&home).expect("create temp home");
     std::fs::create_dir_all(&xdg).expect("create temp xdg config");
-    let saved = ["ARTERM_HOME", "XDG_CONFIG_HOME", "HOME", "ANTHROPIC_API_KEY"]
-        .into_iter()
-        .map(|key| (key, std::env::var_os(key)))
-        .collect::<Vec<_>>();
+    let saved = [
+        "ARTERM_HOME",
+        "XDG_CONFIG_HOME",
+        "HOME",
+        "ANTHROPIC_API_KEY",
+    ]
+    .into_iter()
+    .map(|key| (key, std::env::var_os(key)))
+    .collect::<Vec<_>>();
 
     crate::env::set_var("ARTERM_HOME", temp.path().join("arterm-home"));
     crate::env::set_var("XDG_CONFIG_HOME", &xdg);
@@ -904,10 +909,15 @@ fn claude_oauth_provider_reports_oauth_independently_of_api_key() {
     let xdg = temp.path().join("xdg");
     std::fs::create_dir_all(&home).expect("create temp home");
     std::fs::create_dir_all(&xdg).expect("create temp xdg config");
-    let saved = ["ARTERM_HOME", "XDG_CONFIG_HOME", "HOME", "ANTHROPIC_API_KEY"]
-        .into_iter()
-        .map(|key| (key, std::env::var_os(key)))
-        .collect::<Vec<_>>();
+    let saved = [
+        "ARTERM_HOME",
+        "XDG_CONFIG_HOME",
+        "HOME",
+        "ANTHROPIC_API_KEY",
+    ]
+    .into_iter()
+    .map(|key| (key, std::env::var_os(key)))
+    .collect::<Vec<_>>();
 
     crate::env::set_var("ARTERM_HOME", temp.path().join("arterm-home"));
     crate::env::set_var("XDG_CONFIG_HOME", &xdg);

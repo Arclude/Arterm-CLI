@@ -19,6 +19,7 @@ use crate::skill::SkillRegistry;
 use crate::tool::selfdev::ReloadContext;
 use crate::tool::{Registry, ToolContext};
 use anyhow::Result;
+use arterm_tui_messages::DisplayMessage;
 use auth::PendingLogin;
 use crossterm::event::{
     Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
@@ -27,7 +28,6 @@ use crossterm::event::{
 use debug::DebugTrace;
 use futures::StreamExt;
 use helpers::*;
-use arterm_tui_messages::DisplayMessage;
 use ratatui::DefaultTerminal;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -89,12 +89,12 @@ mod remote;
 mod remote_notifications;
 mod replay;
 pub(crate) mod run_shell;
+mod runtime_memory;
 mod session_launcher;
 mod settings_overlay;
-mod startup_notes;
-mod runtime_memory;
 mod shortcut_hints;
 mod split_view;
+mod startup_notes;
 mod state_ui;
 mod state_ui_input_helpers;
 pub(crate) use state_ui_input_helpers::registered_command_entries;

@@ -3,6 +3,7 @@ mod account_failover;
 pub mod activation;
 pub mod anthropic;
 pub mod antigravity;
+pub mod arterm;
 pub mod bedrock;
 mod catalog_routes;
 pub mod catalog_scheduler;
@@ -15,7 +16,6 @@ mod failover;
 mod fingerprint;
 pub mod gemini;
 mod image_clamp;
-pub mod arterm;
 pub mod models;
 mod multi_provider;
 pub mod openai;
@@ -38,25 +38,19 @@ use account_failover::{
     set_account_override_for_provider,
 };
 use anyhow::{Result, anyhow};
-use async_trait::async_trait;
 #[cfg(test)]
 use arterm_provider_core::FailoverDecision;
+use async_trait::async_trait;
 use registry::ProviderRegistry;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
-pub use catalog_routes::{
-    append_simplified_anthropic_model_routes, remote_current_openai_compatible_route_for_model,
-    remote_model_is_server_copilot_only, remote_model_routes_fallback,
-    remote_model_routes_lightweight_fallback, remote_model_should_offer_copilot_route,
-    remote_openai_compatible_route_for_model, simplified_model_routes_for_picker,
-};
 pub use arterm_provider_core::attempt_tracker;
 pub use arterm_provider_core::cli_provider_arg_for_session_key;
 pub use arterm_provider_core::{
-    ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, CHATGPT_WEB_MODEL, CHEAPNESS_REFERENCE_INPUT_TOKENS,
-    CHEAPNESS_REFERENCE_OUTPUT_TOKENS, CredentialMode, DEFAULT_CONTEXT_LIMIT, EventStream,
-    ARTERM_USER_AGENT, ModelCapabilities, ModelCatalogRefreshSummary, ModelRoute,
+    ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, ARTERM_USER_AGENT, CHATGPT_WEB_MODEL,
+    CHEAPNESS_REFERENCE_INPUT_TOKENS, CHEAPNESS_REFERENCE_OUTPUT_TOKENS, CredentialMode,
+    DEFAULT_CONTEXT_LIMIT, EventStream, ModelCapabilities, ModelCatalogRefreshSummary, ModelRoute,
     ModelRouteApiMethod, NativeCompactionResult, NativeToolResult, NativeToolResultSender,
     PremiumMode, Provider, RouteBillingKind, RouteCheapnessEstimate, RouteCostConfidence,
     RouteCostSource, RouteSelection, RuntimeKey, dedupe_model_routes,
@@ -70,6 +64,12 @@ pub use arterm_provider_core::{
     pick_next_fallback_route_with_options,
 };
 pub use arterm_provider_core::{ProviderFailoverPrompt, parse_failover_prompt_message};
+pub use catalog_routes::{
+    append_simplified_anthropic_model_routes, remote_current_openai_compatible_route_for_model,
+    remote_model_is_server_copilot_only, remote_model_routes_fallback,
+    remote_model_routes_lightweight_fallback, remote_model_should_offer_copilot_route,
+    remote_openai_compatible_route_for_model, simplified_model_routes_for_picker,
+};
 pub use route_builders::{
     build_anthropic_oauth_route, build_chatgpt_web_route, build_copilot_route,
     build_openai_api_key_route, build_openai_oauth_route, build_openrouter_auto_route,

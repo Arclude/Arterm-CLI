@@ -1,6 +1,6 @@
-use chrono::{DateTime, Utc};
 use arterm_message_types::ToolCall;
 use arterm_session_types::SessionStatus;
+use chrono::{DateTime, Utc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

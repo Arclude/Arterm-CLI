@@ -1,9 +1,9 @@
 use anyhow::Result;
-use clap::Parser;
 use arterm::id::new_id;
 use arterm::message::{Message, ToolDefinition};
 use arterm::provider::{EventStream, Provider};
 use arterm::tool::{Registry, ToolContext, ToolExecutionMode};
+use clap::Parser;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;

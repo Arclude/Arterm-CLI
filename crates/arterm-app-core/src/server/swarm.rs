@@ -6,10 +6,10 @@ use crate::plan::{PlanItem, newly_ready_item_ids};
 use crate::protocol::{NotificationType, ServerEvent};
 use crate::session::Session;
 use anyhow::Result;
-use futures::future::try_join_all;
 use arterm_swarm_core::{
     completion_notification_message, normalize_completion_report, truncate_detail,
 };
+use futures::future::try_join_all;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

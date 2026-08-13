@@ -7,8 +7,8 @@ use super::color_support::rgb;
 use crate::session::{CrashedSessionsInfo, Session};
 use crate::tui::{DisplayMessage, markdown};
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use arterm_session_types::SessionStatus;
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},

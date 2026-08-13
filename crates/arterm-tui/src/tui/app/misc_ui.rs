@@ -183,8 +183,10 @@ impl App {
             pinned_anthropic,
             Some(arterm_provider_core::AuthMode::ApiKey)
         );
-        let is_explicit_anthropic_oauth =
-            matches!(pinned_anthropic, Some(arterm_provider_core::AuthMode::Oauth));
+        let is_explicit_anthropic_oauth = matches!(
+            pinned_anthropic,
+            Some(arterm_provider_core::AuthMode::Oauth)
+        );
         let is_explicit_openai_api =
             matches!(pinned_openai, Some(arterm_provider_core::AuthMode::ApiKey));
         let is_explicit_openai_oauth =

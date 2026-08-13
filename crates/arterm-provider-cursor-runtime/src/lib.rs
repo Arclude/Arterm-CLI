@@ -9,12 +9,12 @@
 //! without a runtime.
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
-use chrono::Utc;
 use arterm_base::auth::cursor as cursor_auth;
 use arterm_base::provider::cursor::{AVAILABLE_MODELS, DEFAULT_MODEL};
 use arterm_message_types::{ContentBlock, Message, Role, StreamEvent, ToolDefinition};
 use arterm_provider_core::{EventStream, Provider};
+use async_trait::async_trait;
+use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};

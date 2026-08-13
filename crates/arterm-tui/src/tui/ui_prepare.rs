@@ -657,7 +657,7 @@ fn centered_header_width(width: u16, centered: bool) -> u16 {
     // read as centered at 80 columns and still generous at 200; the absolute
     // cap keeps a very wide terminal from stretching the header into a banner.
     let proportional = (width as u32 * 4 / 5) as u16;
-    proportional.min(96).max(40).min(width)
+    proportional.clamp(40, 96).min(width)
 }
 
 /// Hash of the startup screen's notes, for the prepared-frame cache key.
@@ -880,7 +880,6 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
         || (app.display_messages().is_empty()
             && !app.is_processing()
             && app.streaming_text().is_empty());
-
 
     if is_initial_empty {
         let compose_start = Instant::now();
@@ -1151,10 +1150,7 @@ fn prepare_header_cached(app: &dyn TuiState, width: u16) -> Arc<PreparedMessages
         // and status rows are a column, and centering each row on its own width
         // would scatter them.
         if app.centered_mode() {
-            arterm_tui_messages::left_pad_lines_for_centered_mode(
-                &mut all_header_lines,
-                width,
-            );
+            arterm_tui_messages::left_pad_lines_for_centered_mode(&mut all_header_lines, width);
         }
         Arc::new(wrap_lines(all_header_lines, &[], &[], &[], width))
     };

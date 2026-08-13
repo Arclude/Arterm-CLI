@@ -1242,7 +1242,11 @@ mod tests {
         // project actually publishes.
         let previous = std::env::var("ARTERM_UPDATE_REPO").ok();
         crate::env::remove_var("ARTERM_UPDATE_REPO");
-        assert_eq!(update_repo(), None, "no repo configured must mean no updates");
+        assert_eq!(
+            update_repo(),
+            None,
+            "no repo configured must mean no updates"
+        );
 
         // Whitespace is not a repository name; without the filter it would
         // build a URL like `https://api.github.com/repos/ /releases/latest`.

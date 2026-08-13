@@ -81,7 +81,9 @@ pub(crate) async fn run_logout() -> Result<()> {
 
     match (api_key.is_some(), remote) {
         (false, _) => {
-            println!("No local Arterm account credential was present. Local account cache is clear.")
+            println!(
+                "No local Arterm account credential was present. Local account cache is clear."
+            )
         }
         (true, Ok(())) => println!(
             "Arterm account key revoked. Local credentials and account cache were securely cleared."

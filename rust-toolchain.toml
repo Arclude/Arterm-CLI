@@ -1,0 +1,14 @@
+# The toolchain the tree is formatted and checked with.
+#
+# Without this file, `cargo fmt --all -- --check` compares the tree against
+# whatever rustfmt each machine happens to have. That is how the repository
+# arrived with 124 files that no local run agreed with: the code was committed
+# by one rustfmt and verified in CI by another, and neither was wrong.
+#
+# Pinned rather than "stable" on purpose. A floating channel means the day a
+# new rustfmt lands with a different opinion, CI goes red on a commit that
+# changed nothing. Bumping this file is then a deliberate change with its own
+# reformat, instead of a surprise.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

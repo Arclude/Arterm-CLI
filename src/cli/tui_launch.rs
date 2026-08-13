@@ -640,7 +640,8 @@ pub fn list_sessions() -> Result<()> {
             let mut warned_no_terminal = false;
 
             for target in targets {
-                let resolved_target = match crate::import::resolve_resume_target_to_arterm(&target) {
+                let resolved_target = match crate::import::resolve_resume_target_to_arterm(&target)
+                {
                     Ok(target) => target,
                     Err(e) => {
                         eprintln!("Failed to import selected session: {}", e);
@@ -750,7 +751,9 @@ pub fn list_sessions() -> Result<()> {
         // picker never enables it, so this cannot happen. Say so rather than
         // silently doing nothing that looks like a lost task.
         Some(tui::session_picker::PickerResult::NewSessionWithPrompt(_)) => {
-            eprintln!("Starting a session from a task needs the in-app manager (press Left, or /active).");
+            eprintln!(
+                "Starting a session from a task needs the in-app manager (press Left, or /active)."
+            );
             Ok(())
         }
     }

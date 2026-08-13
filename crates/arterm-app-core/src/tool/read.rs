@@ -3,8 +3,8 @@
 use super::{Tool, ToolContext, ToolOutput};
 use crate::bus::{Bus, BusEvent, FileOp, FileTouch};
 use anyhow::Result;
-use async_trait::async_trait;
 use arterm_terminal_image::{ImageDisplayParams, ImageProtocol, display_image};
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;

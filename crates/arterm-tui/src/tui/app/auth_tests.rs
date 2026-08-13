@@ -149,7 +149,8 @@ fn tui_api_key_logout_clears_saved_key_and_process_env() -> anyhow::Result<()> {
 }
 
 #[test]
-fn tui_arterm_subscription_logout_clears_credentials_and_preserves_api_base() -> anyhow::Result<()> {
+fn tui_arterm_subscription_logout_clears_credentials_and_preserves_api_base() -> anyhow::Result<()>
+{
     with_temp_arterm_home(|| {
         crate::provider_catalog::save_env_value_to_env_file(
             crate::subscription_catalog::ARTERM_API_KEY_ENV,

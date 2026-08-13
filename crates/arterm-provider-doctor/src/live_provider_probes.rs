@@ -568,7 +568,8 @@ pub async fn run_live_openai_compatible_tool_smoke(
         .get("arguments")
         .and_then(|arguments| arguments.as_str())
         .context("live tool-call smoke response missing string arguments")?;
-    let parsed_arguments = arterm_base::message::ToolCall::parse_streamed_input_to_object(arguments);
+    let parsed_arguments =
+        arterm_base::message::ToolCall::parse_streamed_input_to_object(arguments);
     ensure!(
         parsed_arguments.is_object(),
         "{} live tool-call smoke returned non-object tool arguments: {:?}",
@@ -1947,11 +1948,13 @@ pub async fn run_live_native_provider_tool_smoke(
 /// Parse a streamed tool-call argument blob into a JSON object (empty object for
 /// a blank payload), shared by the native tool smoke probes.
 fn parse_tool_arguments(input_json: &str) -> serde_json::Value {
-    arterm_base::message::ToolCall::parse_streamed_input_to_object(if input_json.trim().is_empty() {
-        "{}"
-    } else {
-        input_json.trim()
-    })
+    arterm_base::message::ToolCall::parse_streamed_input_to_object(
+        if input_json.trim().is_empty() {
+            "{}"
+        } else {
+            input_json.trim()
+        },
+    )
 }
 
 /// Build the assistant `tool_use` replay block for a captured native tool call,

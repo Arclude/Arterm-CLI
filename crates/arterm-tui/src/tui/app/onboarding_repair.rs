@@ -156,9 +156,12 @@ during first-run onboarding. Please fix the login for the user.\n\n",
 
     brief.push_str("Diagnose (machine-readable, exit/JSON tells you what's wrong):\n");
     if provider_hint.is_some() {
-        brief.push_str(&format!("  arterm auth-test --provider {provider} --json\n",));
+        brief.push_str(&format!(
+            "  arterm auth-test --provider {provider} --json\n",
+        ));
     } else {
-        brief.push_str("  arterm auth-test --all-configured --json   # which provider is broken?\n");
+        brief
+            .push_str("  arterm auth-test --all-configured --json   # which provider is broken?\n");
     }
     brief.push_str("  arterm auth doctor   # human-readable, structured recovery steps\n\n");
 

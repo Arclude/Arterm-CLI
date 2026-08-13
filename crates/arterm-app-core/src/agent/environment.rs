@@ -1,4 +1,4 @@
-use super::{Agent, ARTERM_REPO_SOURCE_STATE, WORKING_GIT_STATE_CACHE};
+use super::{ARTERM_REPO_SOURCE_STATE, Agent, WORKING_GIT_STATE_CACHE};
 use crate::logging;
 use crate::session::{EnvSnapshot, GitState};
 use chrono::Utc;

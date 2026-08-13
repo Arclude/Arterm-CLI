@@ -5,8 +5,6 @@
 
 pub(crate) use crate::mock_provider::MockProvider;
 pub(crate) use anyhow::{Context, Result};
-pub(crate) use async_trait::async_trait;
-pub(crate) use futures::{SinkExt, StreamExt, stream};
 pub(crate) use arterm::agent::Agent;
 pub(crate) use arterm::message::{ContentBlock, Message, Role, StreamEvent, ToolDefinition};
 pub(crate) use arterm::protocol::{Request, ServerEvent};
@@ -14,6 +12,8 @@ pub(crate) use arterm::provider::{EventStream, Provider};
 pub(crate) use arterm::server;
 pub(crate) use arterm::session::{Session, StoredCompactionState};
 pub(crate) use arterm::tool::Registry;
+pub(crate) use async_trait::async_trait;
+pub(crate) use futures::{SinkExt, StreamExt, stream};
 pub(crate) use std::ffi::OsString;
 pub(crate) use std::io::Read;
 pub(crate) use std::net::TcpListener as StdTcpListener;

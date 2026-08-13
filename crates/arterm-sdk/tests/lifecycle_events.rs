@@ -6,7 +6,7 @@ use arterm_harness_api::{
     write_frame,
 };
 use arterm_sdk::{
-    ConnectOptions, GlobalEventsOptions, ArtermClient, LaunchOptions, inherit_credentials,
+    ArtermClient, ConnectOptions, GlobalEventsOptions, LaunchOptions, inherit_credentials,
 };
 use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};

@@ -667,7 +667,10 @@ pub(super) fn build_resume_command(
             let exe = launch_client_executable();
             let imported_id = crate::import::imported_codex_session_id(session_id);
             let args = resume_invocation_args(&imported_id, socket);
-            let title = format!("🧠 Codex {}", arterm_core::util::truncate_str(session_id, 8));
+            let title = format!(
+                "🧠 Codex {}",
+                arterm_core::util::truncate_str(session_id, 8)
+            );
             (exe, args, title)
         }
         ResumeTarget::PiSession { session_path } => {
@@ -697,7 +700,10 @@ pub(super) fn build_resume_command(
             let exe = launch_client_executable();
             let imported_id = crate::import::imported_cursor_session_id(session_id);
             let args = resume_invocation_args(&imported_id, socket);
-            let title = format!("▮ Cursor {}", arterm_core::util::truncate_str(session_id, 8));
+            let title = format!(
+                "▮ Cursor {}",
+                arterm_core::util::truncate_str(session_id, 8)
+            );
             (exe, args, title)
         }
     }

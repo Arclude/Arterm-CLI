@@ -1,7 +1,9 @@
 use arterm_harness_api::{
     API_VERSION_MAJOR, ApiEvent, ApiRequest, ClientFrame, ServerFrame, read_frame, write_frame,
 };
-use arterm_sdk::{ConnectOptions, ArtermClient, RunStructuredError, RunStructuredOptions, Transport};
+use arterm_sdk::{
+    ArtermClient, ConnectOptions, RunStructuredError, RunStructuredOptions, Transport,
+};
 use serde::Deserialize;
 use serde_json::json;
 use std::io::{BufRead, BufReader, Write};

@@ -924,7 +924,10 @@ impl Provider for StubExternalRuntime {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
-    fn set_credential_mode(&self, mode: arterm_provider_core::CredentialMode) -> anyhow::Result<()> {
+    fn set_credential_mode(
+        &self,
+        mode: arterm_provider_core::CredentialMode,
+    ) -> anyhow::Result<()> {
         *self
             .credential_mode
             .write()
@@ -978,8 +981,8 @@ fn register_test_external_runtimes() {
     // transport identities), so register the real factory like the binary's
     // composition root does. The dev-dependency cycle is test-only.
     external::register_openrouter_factory(|spec| {
-        use external::OpenRouterRuntimeSpec;
         use arterm_provider_openrouter_runtime::OpenRouterProvider;
+        use external::OpenRouterRuntimeSpec;
         let provider: Arc<dyn Provider> = match spec {
             OpenRouterRuntimeSpec::Default => Arc::new(OpenRouterProvider::new()?),
             OpenRouterRuntimeSpec::OpenRouterApiKey => {

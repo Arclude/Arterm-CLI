@@ -1,12 +1,16 @@
 {
-  "total": 77,
+  "total": 93,
   "tracked_files": {
+    "crates/arterm-app-core/build.rs": 4,
     "crates/arterm-app-core/src/session_launch.rs": 1,
     "crates/arterm-app-core/src/tool/communicate.rs": 1,
     "crates/arterm-app-core/src/tool/computer/win.rs": 3,
     "crates/arterm-base/src/auth/oauth.rs": 3,
+    "crates/arterm-base/src/credentials.rs": 2,
     "crates/arterm-base/src/hooks.rs": 1,
+    "crates/arterm-desktop2/build.rs": 7,
     "crates/arterm-desktop2/src/cli.rs": 1,
+    "crates/arterm-desktop2/src/hot_worker.rs": 3,
     "crates/arterm-desktop2/src/icons.rs": 2,
     "crates/arterm-desktop2/src/main.rs": 2,
     "crates/arterm-desktop2/src/scroll_bench.rs": 1,

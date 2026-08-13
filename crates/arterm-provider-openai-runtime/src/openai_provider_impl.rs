@@ -20,7 +20,10 @@ impl Provider for OpenAIProvider {
         self.credential_mode_snapshot()
     }
 
-    fn set_credential_mode(&self, mode: arterm_provider_core::CredentialMode) -> anyhow::Result<()> {
+    fn set_credential_mode(
+        &self,
+        mode: arterm_provider_core::CredentialMode,
+    ) -> anyhow::Result<()> {
         OpenAIProvider::set_credential_mode(self, mode)
     }
 

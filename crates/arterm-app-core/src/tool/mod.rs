@@ -1,6 +1,7 @@
 mod agentgrep;
 pub mod ambient;
 mod apply_patch;
+mod arterm_docs;
 mod bash;
 mod batch;
 mod bg;
@@ -18,7 +19,6 @@ mod gmail;
 mod goal;
 pub mod inflight;
 mod invalid;
-mod arterm_docs;
 mod ls;
 pub mod mcp;
 mod memory;
