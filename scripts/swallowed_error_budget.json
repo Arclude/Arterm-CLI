@@ -1,9 +1,9 @@
 {
-  "total": 3266,
+  "total": 3275,
   "totals_by_pattern": {
     "dot_ok": 1221,
-    "let_underscore": 1210,
-    "unwrap_or_default": 835
+    "let_underscore": 1217,
+    "unwrap_or_default": 837
   },
   "tracked_files": {
     "crates/arterm-app-core/src/agent.rs": {
@@ -168,7 +168,7 @@
     },
     "crates/arterm-app-core/src/server/client_session.rs": {
       "dot_ok": 8,
-      "let_underscore": 15,
+      "let_underscore": 21,
       "unwrap_or_default": 0
     },
     "crates/arterm-app-core/src/server/client_state.rs": {
@@ -478,7 +478,7 @@
     },
     "crates/arterm-app-core/src/tool/mcp.rs": {
       "dot_ok": 0,
-      "let_underscore": 0,
+      "let_underscore": 1,
       "unwrap_or_default": 2
     },
     "crates/arterm-app-core/src/tool/mod.rs": {
@@ -1910,6 +1910,11 @@
       "dot_ok": 0,
       "let_underscore": 2,
       "unwrap_or_default": 8
+    },
+    "crates/arterm-tui/src/tui/app/commands_mcp.rs": {
+      "dot_ok": 0,
+      "let_underscore": 0,
+      "unwrap_or_default": 2
     },
     "crates/arterm-tui/src/tui/app/commands_overnight.rs": {
       "dot_ok": 5,

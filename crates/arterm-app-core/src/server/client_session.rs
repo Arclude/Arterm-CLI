@@ -966,7 +966,9 @@ pub(super) async fn handle_mcp_action(
 
     // "tools" is a pure read: answer from the registered tool names.
     if action == "tools" {
-        let server_name = server.unwrap_or_default();
+        // Present by the guard above: only "reload" may omit the name, and an
+        // empty default would quietly answer with nobody's tool list.
+        let Some(server_name) = server else { return };
         let prefix = format!("mcp__{}__", server_name);
         let mut tools: Vec<String> = {
             let agent_guard = agent.lock().await;
