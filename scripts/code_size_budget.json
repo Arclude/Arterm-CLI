@@ -58,7 +58,7 @@
     "crates/arterm-provider-openai-runtime/src/lib.rs": 1384,
     "crates/arterm-provider-openai-runtime/src/openai_provider_impl.rs": 1232,
     "crates/arterm-provider-openai-runtime/src/openai_stream_runtime.rs": 1658,
-    "crates/arterm-provider-openrouter-runtime/src/lib.rs": 2670,
+    "crates/arterm-provider-openrouter-runtime/src/lib.rs": 2504,
     "crates/arterm-render-core/src/math.rs": 1234,
     "crates/arterm-sdk/src/client.rs": 1384,
     "crates/arterm-setup-hints/src/lib.rs": 2681,

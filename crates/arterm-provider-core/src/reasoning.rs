@@ -32,6 +32,21 @@ pub const OPENROUTER_SELECTABLE_EFFORTS: &[&str] = &[
     "swarm-deep",
 ];
 
+/// xAI Grok effort levels, followed by Arterm's swarm modes.
+///
+/// The set is what xAI's own models endpoint advertises for grok-4.x:
+/// low/medium/high/xhigh with a high default — no `minimal`, and `xhigh` is
+/// already the top rung, so there is no separate `max`.
+pub const GROK_SELECTABLE_EFFORTS: &[&str] = &[
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "swarm",
+    "swarm-deep",
+];
+
 /// Direct DeepSeek effort levels, followed by Arterm's swarm modes.
 pub const DEEPSEEK_SELECTABLE_EFFORTS: &[&str] = &[
     "none",

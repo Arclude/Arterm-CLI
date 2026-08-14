@@ -164,6 +164,21 @@ impl Provider for OpenRouterProvider {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
                 }
+            } else if self.supports_grok_reasoning_effort() {
+                // Grok's ladder tops out at xhigh (there is no max on the
+                // wire), so the swarm sentinels and any stale cross-family
+                // value clamp to the nearest real rung instead of 400ing.
+                let effort = if arterm_base::prompt::is_swarm_effort(effort) || effort == "max" {
+                    "xhigh"
+                } else if effort == "minimal" {
+                    "low"
+                } else {
+                    effort
+                };
+                if effort != "none" {
+                    request["reasoning_effort"] = serde_json::json!(effort);
+                    sent_reasoning_config = true;
+                }
             } else if Self::profile_supports_unified_reasoning(
                 self.profile_id.as_deref(),
                 self.send_openrouter_headers,
@@ -499,6 +514,8 @@ impl Provider for OpenRouterProvider {
             arterm_provider_core::DEEPSEEK_SELECTABLE_EFFORTS.to_vec()
         } else if self.supports_openai_reasoning_effort() {
             arterm_provider_core::OPENAI_SELECTABLE_EFFORTS.to_vec()
+        } else if self.supports_grok_reasoning_effort() {
+            arterm_provider_core::GROK_SELECTABLE_EFFORTS.to_vec()
         } else if Self::profile_supports_unified_reasoning(
             self.profile_id.as_deref(),
             self.send_openrouter_headers,
