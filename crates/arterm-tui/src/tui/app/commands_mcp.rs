@@ -40,7 +40,10 @@ fn build_mcp_report(live: &[(String, usize)]) -> String {
     } else {
         let mut live_sorted: Vec<&(String, usize)> = live.iter().collect();
         live_sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        lines.push(format!("Connected in this session ({}):", live_sorted.len()));
+        lines.push(format!(
+            "Connected in this session ({}):",
+            live_sorted.len()
+        ));
         for (name, tool_count) in live_sorted {
             let tools = match tool_count {
                 0 => "connecting...".to_string(),
@@ -168,7 +171,10 @@ mod tests {
     fn an_empty_state_points_at_the_add_command() {
         let _env = IsolatedHome::new();
         let report = build_mcp_report(&[]);
-        assert!(report.contains("Connected in this session: none"), "{report}");
+        assert!(
+            report.contains("Connected in this session: none"),
+            "{report}"
+        );
         assert!(report.contains("arterm mcp add <name>"), "{report}");
     }
 

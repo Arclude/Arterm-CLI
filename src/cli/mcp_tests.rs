@@ -78,10 +78,10 @@ fn add_demo_server(scope: McpScopeArg) {
     .expect("add server");
 }
 
-fn row_for<'a>(rows: &'a [serde_json::Value], name: &str) -> &'a serde_json::Value {
+fn row_for<'a>(rows: &'a [ListRow], name: &str) -> &'a ListRow {
     rows.iter()
-        .find(|row| row["name"] == name)
-        .unwrap_or_else(|| panic!("row for '{}' in {:?}", name, rows))
+        .find(|row| row.name == name)
+        .unwrap_or_else(|| panic!("no list row for '{}'", name))
 }
 
 #[test]
@@ -98,11 +98,15 @@ fn the_add_command_writes_the_user_file_and_list_attributes_it() {
 
     let rows = list_rows();
     let row = row_for(&rows, "demo");
-    assert_eq!(row["source"], "user (~/.arterm/mcp.json)");
-    assert_eq!(row["command"], "python3");
+    assert_eq!(row.source, "user (~/.arterm/mcp.json)");
+    assert_eq!(row.command, "python3");
     // Env values must never leak into list output; only key names appear.
-    assert_eq!(row["env_keys"], serde_json::json!(["DEMO_SECRET"]));
-    assert!(!serde_json::to_string(row).expect("serialize row").contains("shh"));
+    assert_eq!(row.env_keys, vec!["DEMO_SECRET"]);
+    assert!(
+        !serde_json::to_string(row)
+            .expect("serialize row")
+            .contains("shh")
+    );
 }
 
 #[test]
@@ -111,9 +115,12 @@ fn the_project_scope_writes_the_local_file_and_remove_finds_it_unscoped() {
     add_demo_server(McpScopeArg::Project);
 
     let local = Path::new(".arterm/mcp.json");
-    assert!(local.exists(), "project-scope add must write .arterm/mcp.json");
-    let row_source = row_for(&list_rows(), "demo")["source"].clone();
-    assert_eq!(row_source, "project (.arterm/mcp.json)");
+    assert!(
+        local.exists(),
+        "project-scope add must write .arterm/mcp.json"
+    );
+    let rows = list_rows();
+    assert_eq!(row_for(&rows, "demo").source, "project (.arterm/mcp.json)");
 
     run_remove("demo".to_string(), None).expect("unscoped remove searches project scope");
     let after = McpConfig::load_from_file(local).expect("parse after remove");
@@ -157,7 +164,8 @@ fn removing_an_unknown_or_imported_server_explains_itself() {
         r#"{"servers": {"imported": {"command": "bun"}}}"#,
     )
     .expect("write .mcp.json");
-    assert_eq!(row_for(&list_rows(), "imported")["source"], IMPORTED_SOURCE);
+    let rows = list_rows();
+    assert_eq!(row_for(&rows, "imported").source, IMPORTED_SOURCE);
     let imported = run_remove("imported".to_string(), None).expect_err("imported must not vanish");
     assert!(
         imported.to_string().contains("imported config"),

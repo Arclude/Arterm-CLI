@@ -52,8 +52,7 @@ fn load_file_or_empty(path: &std::path::Path) -> Result<McpConfig> {
     if !path.exists() {
         return Ok(McpConfig::default());
     }
-    McpConfig::load_from_file(path)
-        .with_context(|| format!("failed to parse {}", path.display()))
+    McpConfig::load_from_file(path).with_context(|| format!("failed to parse {}", path.display()))
 }
 
 /// The editable sources, lowest precedence first (matching
@@ -69,11 +68,24 @@ fn editable_sources() -> Vec<(McpScopeArg, PathBuf)> {
 
 const IMPORTED_SOURCE: &str = "imported (Claude Code/Codex config)";
 
+/// One effective server as `list` reports it. Env keys only: values may hold
+/// secrets and must never reach stdout.
+#[derive(serde::Serialize)]
+struct ListRow {
+    name: String,
+    command: String,
+    args: Vec<String>,
+    env_keys: Vec<String>,
+    enabled: bool,
+    shared: bool,
+    source: String,
+}
+
 /// One row per effective server (merged view, sorted by name), each attributed
 /// to the highest-precedence editable file defining it; anything else came
 /// from an imported source (~/.claude.json, ~/.claude/mcp.json, .mcp.json,
-/// .claude/mcp.json). Env keys only: values may hold secrets.
-fn list_rows() -> Vec<serde_json::Value> {
+/// .claude/mcp.json).
+fn list_rows() -> Vec<ListRow> {
     // The effective view a session will get for this directory (merged,
     // env-expanded, non-stdio entries dropped).
     let effective = McpConfig::load();
@@ -93,20 +105,20 @@ fn list_rows() -> Vec<serde_json::Value> {
         .into_iter()
         .map(|name| {
             let cfg = &effective.servers[name];
-            let mut env_keys: Vec<&String> = cfg.env.keys().collect();
+            let mut env_keys: Vec<String> = cfg.env.keys().cloned().collect();
             env_keys.sort();
-            serde_json::json!({
-                "name": name,
-                "command": cfg.command,
-                "args": cfg.args,
-                "env_keys": env_keys,
-                "enabled": cfg.is_enabled(),
-                "shared": cfg.shared,
-                "source": source_by_name
+            ListRow {
+                name: name.clone(),
+                command: cfg.command.clone(),
+                args: cfg.args.clone(),
+                env_keys,
+                enabled: cfg.is_enabled(),
+                shared: cfg.shared,
+                source: source_by_name
                     .get(name.as_str())
-                    .map(String::as_str)
-                    .unwrap_or(IMPORTED_SOURCE),
-            })
+                    .cloned()
+                    .unwrap_or_else(|| IMPORTED_SOURCE.to_string()),
+            }
         })
         .collect()
 }
@@ -131,33 +143,16 @@ fn run_list(json: bool) -> Result<()> {
     println!("MCP servers ({}):", rows.len());
     println!();
     for row in &rows {
-        let text = |key: &str| row[key].as_str().unwrap_or_default().to_string();
-        let strings = |key: &str| -> Vec<String> {
-            row[key]
-                .as_array()
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-        let state = if row["enabled"].as_bool().unwrap_or(true) {
-            ""
-        } else {
-            "  [disabled]"
-        };
-        println!("  {}{}", text("name"), state);
-        println!("    command: {} {}", text("command"), strings("args").join(" "));
-        let env_keys = strings("env_keys");
-        if !env_keys.is_empty() {
-            println!("    env: {}", env_keys.join(", "));
+        let state = if row.enabled { "" } else { "  [disabled]" };
+        println!("  {}{}", row.name, state);
+        println!("    command: {} {}", row.command, row.args.join(" "));
+        if !row.env_keys.is_empty() {
+            println!("    env: {}", row.env_keys.join(", "));
         }
-        if !row["shared"].as_bool().unwrap_or(true) {
+        if !row.shared {
             println!("    shared: no (one process per session)");
         }
-        println!("    source: {}", text("source"));
+        println!("    source: {}", row.source);
         println!();
     }
     println!("Tools appear to the model as mcp__<server>__<tool>.");
@@ -221,7 +216,10 @@ fn run_add(
     } else {
         println!("Added MCP server '{}' to {}", name, scope_label(scope));
     }
-    println!("Its tools will appear as mcp__{}__<tool> in new sessions.", name);
+    println!(
+        "Its tools will appear as mcp__{}__<tool> in new sessions.",
+        name
+    );
 
     // Everything after the server command is passed to the server verbatim,
     // including tokens that look like this command's own flags. That is what
@@ -258,7 +256,11 @@ fn run_remove(name: String, scope: Option<McpScopeArg>) -> Result<()> {
     }
 
     if !removed_from.is_empty() {
-        println!("Removed MCP server '{}' from {}", name, removed_from.join(" and "));
+        println!(
+            "Removed MCP server '{}' from {}",
+            name,
+            removed_from.join(" and ")
+        );
         return Ok(());
     }
 
