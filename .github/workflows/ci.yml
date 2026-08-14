@@ -2,13 +2,18 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    # Every branch, not just main: the landing flow is branch + green CI +
+    # fast-forward, so the gate must fire BEFORE the merge. [main, master]
+    # here means the first check runs after the merge it was meant to block.
+    branches: ["**"]
   pull_request:
     branches: [main, master]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A superseded branch push cancels its stale run; main is exempt so a
+  # landing's record is never cancelled by the next landing.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
