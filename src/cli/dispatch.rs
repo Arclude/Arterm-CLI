@@ -369,6 +369,9 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                 })?;
             }
         },
+        Some(Command::Mcp(subcmd)) => {
+            super::mcp::run_mcp_command(subcmd)?;
+        }
         Some(Command::Memory(subcmd)) => {
             commands::run_memory_command(map_memory_subcommand(subcmd))?;
         }

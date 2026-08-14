@@ -27,6 +27,7 @@ pub(crate) fn initial_title(args: &Args) -> String {
         Some(Command::Debug { .. }) => "arterm debug".to_string(),
         Some(Command::Auth(_)) => "arterm auth".to_string(),
         Some(Command::Provider(_)) => "arterm provider".to_string(),
+        Some(Command::Mcp(_)) => "arterm mcp".to_string(),
         Some(Command::Memory(_)) => "arterm memory".to_string(),
         Some(Command::Session(_)) => "arterm session".to_string(),
         Some(Command::Ambient(subcommand)) => match subcommand {

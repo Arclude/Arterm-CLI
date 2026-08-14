@@ -293,6 +293,10 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Provider(ProviderCommand),
 
+    /// Manage MCP (Model Context Protocol) servers
+    #[command(subcommand)]
+    Mcp(McpCommand),
+
     /// Memory management commands
     #[command(subcommand)]
     Memory(MemoryCommand),
@@ -568,6 +572,63 @@ pub(crate) enum AccountCommand {
     Manage,
     /// Revoke the current key when reachable, then securely clear local state
     Logout,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum McpCommand {
+    /// List configured MCP servers and where each one comes from
+    List {
+        /// Emit JSON instead of human-readable output
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Add (or replace) an MCP server in the config
+    ///
+    /// Flags must come before the server command, e.g.
+    /// `arterm mcp add --scope project time python3 /path/server.py --utc`.
+    Add {
+        /// Server name (tools appear to the model as mcp__<name>__<tool>)
+        name: String,
+
+        /// Environment variable for the server process, KEY=VALUE. Repeatable.
+        /// Values support `${VAR}` expansion at connect time, so secrets can
+        /// stay out of the config file: `--env TOKEN=${MY_TOKEN}`.
+        #[arg(long, value_name = "KEY=VALUE")]
+        env: Vec<String>,
+
+        /// Where to store the server: `user` (~/.arterm/mcp.json, all projects)
+        /// or `project` (.arterm/mcp.json in the current directory)
+        #[arg(long, value_enum, default_value_t = McpScopeArg::User)]
+        scope: McpScopeArg,
+
+        /// Do not share this server's process across sessions. Use for
+        /// stateful servers (e.g. a browser) that must stay per-session.
+        #[arg(long)]
+        no_share: bool,
+
+        /// Command that starts the server, followed by its arguments
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+
+    /// Remove an MCP server from the config
+    Remove {
+        /// Server name to remove
+        name: String,
+
+        /// Only look in this scope (default: user first, then project)
+        #[arg(long, value_enum)]
+        scope: Option<McpScopeArg>,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum McpScopeArg {
+    /// ~/.arterm/mcp.json — applies to every project
+    User,
+    /// .arterm/mcp.json — applies to the current project only
+    Project,
 }
 
 #[derive(Subcommand, Debug)]
