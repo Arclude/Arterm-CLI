@@ -1759,6 +1759,18 @@ fn render_message_into(
                 acc.push_auto(align_if_unset(line, align));
             }
         }
+        "mcp" => {
+            let content_width = width.saturating_sub(4);
+            let cached = get_cached_message_lines(
+                msg,
+                content_width,
+                app.diff_mode(),
+                render_mcp_status_message,
+            );
+            for line in cached {
+                acc.push_auto(align_if_unset(line, align));
+            }
+        }
         "overnight" => {
             let content_width = width.saturating_sub(4);
             let cached = get_cached_message_lines(

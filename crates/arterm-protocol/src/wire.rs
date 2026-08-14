@@ -1046,6 +1046,11 @@ pub enum ServerEvent {
     McpStatus {
         /// Server names with tool counts in "name:count" format
         servers: Vec<String>,
+        /// Enabled configured servers that are not connected in this session,
+        /// as "name" or "name — reason" display strings. Older peers omit the
+        /// field entirely, which deserializes as empty.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        not_connected: Vec<String>,
     },
 
     /// Client debug command forwarded from debug socket to TUI

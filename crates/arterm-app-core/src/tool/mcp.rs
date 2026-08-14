@@ -26,6 +26,11 @@ struct McpToolInput {
 pub struct McpManagementTool {
     manager: Arc<RwLock<McpManager>>,
     registry: Option<crate::tool::Registry>,
+    /// Session event sender. When present, successful connect/disconnect/reload
+    /// actions push a fresh `McpStatus` event so the client's header and /mcp
+    /// panel track model-driven changes instead of staying frozen on the
+    /// startup snapshot.
+    event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::protocol::ServerEvent>>,
 }
 
 impl McpManagementTool {
@@ -33,12 +38,60 @@ impl McpManagementTool {
         Self {
             manager,
             registry: None,
+            event_tx: None,
         }
     }
 
     pub fn with_registry(mut self, registry: crate::tool::Registry) -> Self {
         self.registry = Some(registry);
         self
+    }
+
+    pub fn with_event_tx(
+        mut self,
+        event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::protocol::ServerEvent>>,
+    ) -> Self {
+        self.event_tx = event_tx;
+        self
+    }
+
+    /// Push the current MCP status to the client: connected servers with tool
+    /// counts, plus enabled configured servers that are not connected (with
+    /// the connect failure from `failures` when one is known). Mirrors the
+    /// startup event from `Registry::register_mcp_tools_for_dir`.
+    async fn send_status_event(&self, failures: &[(String, String)]) {
+        let Some(tx) = &self.event_tx else { return };
+
+        let manager = self.manager.read().await;
+        let connected = manager.connected_servers().await;
+        let mut counts: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for (server, _) in manager.all_tools().await {
+            *counts.entry(server).or_default() += 1;
+        }
+        let failure_reasons: HashMap<&String, &String> =
+            failures.iter().map(|(name, error)| (name, error)).collect();
+        let mut not_connected: Vec<String> = manager
+            .config()
+            .servers
+            .iter()
+            .filter(|(name, cfg)| cfg.is_enabled() && !connected.contains(*name))
+            .map(|(name, _)| match failure_reasons.get(name) {
+                Some(reason) => format!("{name} — {reason}"),
+                None => name.clone(),
+            })
+            .collect();
+        drop(manager);
+        not_connected.sort();
+
+        let servers: Vec<String> = counts
+            .into_iter()
+            .map(|(name, count)| format!("{}:{}", name, count))
+            .collect();
+        let _ = tx.send(crate::protocol::ServerEvent::McpStatus {
+            servers,
+            not_connected,
+        });
     }
 }
 
@@ -298,6 +351,8 @@ impl McpManagementTool {
                     }
                 }
 
+                self.send_status_event(&[]).await;
+
                 Ok(ToolOutput::new(output).with_title(format!("MCP: Connected {}", server_name)))
             }
             Err(e) => {
@@ -359,6 +414,8 @@ impl McpManagementTool {
             );
         }
 
+        self.send_status_event(&[]).await;
+
         Ok(
             ToolOutput::new(format!("Disconnected from MCP server '{}'", server_name))
                 .with_title(format!("MCP: Disconnected {}", server_name)),
@@ -375,6 +432,7 @@ impl McpManagementTool {
             if let Some(ref registry) = self.registry {
                 registry.unregister_prefix("mcp__").await;
             }
+            self.send_status_event(&[]).await;
             return Ok(ToolOutput::new(
                 "No servers found in config.\n\n\
                 Add servers to ~/.arterm/mcp.json (global) or .arterm/mcp.json (project):\n\
@@ -454,6 +512,8 @@ impl McpManagementTool {
             }
             output.push('\n');
         }
+
+        self.send_status_event(&failures).await;
 
         Ok(ToolOutput::new(output).with_title("MCP: Reloaded"))
     }
@@ -569,6 +629,42 @@ mod tests {
 
         let result = tool.execute(input, ctx).await.unwrap();
         assert!(result.output.contains("No MCP servers connected"));
+    }
+
+    #[tokio::test]
+    async fn send_status_event_reports_not_connected_with_reasons() {
+        let mut config = crate::mcp::McpConfig::default();
+        config.servers.insert(
+            "ghost".to_string(),
+            McpServerConfig {
+                command: "true".to_string(),
+                args: vec![],
+                env: Default::default(),
+                shared: true,
+                transport: None,
+                url: None,
+                headers: std::collections::HashMap::new(),
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = Arc::new(RwLock::new(McpManager::with_config(config)));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let tool = McpManagementTool::new(manager).with_event_tx(Some(tx));
+
+        tool.send_status_event(&[("ghost".to_string(), "spawn failed".to_string())])
+            .await;
+
+        match rx.recv().await.expect("status event") {
+            crate::protocol::ServerEvent::McpStatus {
+                servers,
+                not_connected,
+            } => {
+                assert!(servers.is_empty());
+                assert_eq!(not_connected, vec!["ghost — spawn failed".to_string()]);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 
     #[tokio::test]

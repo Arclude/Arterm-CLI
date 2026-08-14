@@ -3149,3 +3149,54 @@ fn render_empty_todo_tool_result_collapses_to_compact_line() {
     assert!(!plain.contains("No tasks yet"), "{plain}");
     assert!(plain.contains("no tasks"), "{plain}");
 }
+
+#[test]
+fn render_mcp_status_message_colors_connection_states() {
+    let msg = DisplayMessage::mcp(
+        "+ agentcard — connected · 8 tools\n\
+         ~ warming — connecting…\n\
+         ! ida-pro-mcp — not connected: spawn failed\n\
+         Manage: arterm mcp add/list/remove",
+    )
+    .with_title("MCP servers");
+    let lines = render_mcp_status_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+
+    let color_for = |text: &str| {
+        lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref() == text)
+            .and_then(|span| span.style.fg)
+    };
+
+    assert_eq!(
+        color_for("agentcard — connected · 8 tools"),
+        Some(rgb(100, 220, 170))
+    );
+    assert_eq!(color_for("warming — connecting…"), Some(rgb(255, 200, 100)));
+    assert_eq!(
+        color_for("ida-pro-mcp — not connected: spawn failed"),
+        Some(Color::Red)
+    );
+    assert_eq!(
+        color_for("Manage: arterm mcp add/list/remove"),
+        Some(dim_color())
+    );
+    // The panel title lands on the rounded box border.
+    assert!(
+        lines
+            .iter()
+            .any(|line| extract_line_text(line).contains("MCP servers"))
+    );
+}
+
+#[test]
+fn render_mcp_status_message_empty_content_shows_placeholder() {
+    let msg = DisplayMessage::mcp("");
+    let lines = render_mcp_status_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+    assert!(
+        lines
+            .iter()
+            .any(|line| extract_line_text(line).contains("No MCP servers configured."))
+    );
+}

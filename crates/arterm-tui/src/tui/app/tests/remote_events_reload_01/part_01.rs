@@ -1798,11 +1798,16 @@ fn test_handle_server_event_mcp_status_updates_tools_without_status_notice() {
     app.handle_server_event(
         crate::protocol::ServerEvent::McpStatus {
             servers: vec!["agentcard:8".to_string()],
+            not_connected: vec!["ida-pro-mcp — spawn failed".to_string()],
         },
         &mut remote,
     );
 
     assert_eq!(app.mcp_server_names, vec![("agentcard".to_string(), 8)]);
+    assert_eq!(
+        app.mcp_not_connected,
+        vec!["ida-pro-mcp — spawn failed".to_string()]
+    );
     assert_eq!(app.status_notice(), None);
 }
 

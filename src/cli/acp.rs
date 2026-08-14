@@ -1501,7 +1501,7 @@ impl EventMapper {
                 "sessionUpdate": "session_info_update",
                 "title": display_title,
             })],
-            ServerEvent::McpStatus { servers } if self.profile.is_extended() => vec![json!({
+            ServerEvent::McpStatus { servers, .. } if self.profile.is_extended() => vec![json!({
                 "sessionUpdate": "agent_message_chunk",
                 "content": {
                     "type": "text",

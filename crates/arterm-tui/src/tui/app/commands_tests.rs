@@ -179,13 +179,14 @@ mod mcp {
             dispatch_local_command(&mut app, "/mcp"),
             "/mcp should be claimed by the shared dispatch table"
         );
-        let output = app
-            .display_messages
-            .last()
-            .map(|message| message.content.clone())
-            .unwrap_or_default();
-        assert!(output.contains("MCP servers"), "{output}");
-        assert!(output.contains("livedemo — 2 tools"), "{output}");
+        let message = app.display_messages.last().expect("missing /mcp response");
+        assert_eq!(message.role, "mcp", "renders through the colored mcp role");
+        assert_eq!(message.title.as_deref(), Some("MCP servers"));
+        assert!(
+            message.content.contains("+ livedemo — connected · 2 tools"),
+            "{}",
+            message.content
+        );
 
         assert!(
             !dispatch_local_command(&mut app, "/mcpsomething"),

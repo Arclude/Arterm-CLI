@@ -254,6 +254,21 @@ impl App {
                 // Cache server names with tool counts
                 let servers = manager.connected_servers().await;
                 let all_tools = manager.all_tools().await;
+                // Enabled configured servers that did not come up, with the
+                // connect failure when there is one (drives the /mcp panel).
+                let failure_reasons: std::collections::HashMap<&String, &String> =
+                    result.1.iter().map(|(name, error)| (name, error)).collect();
+                self.mcp_not_connected = manager
+                    .config()
+                    .servers
+                    .iter()
+                    .filter(|(name, cfg)| cfg.is_enabled() && !servers.contains(*name))
+                    .map(|(name, _)| match failure_reasons.get(name) {
+                        Some(reason) => format!("{name} — {reason}"),
+                        None => name.clone(),
+                    })
+                    .collect();
+                self.mcp_not_connected.sort();
                 self.mcp_server_names = servers
                     .into_iter()
                     .map(|name| {

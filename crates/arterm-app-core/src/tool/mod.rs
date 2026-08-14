@@ -930,9 +930,12 @@ impl Registry {
             Arc::new(RwLock::new(McpManager::new()))
         };
 
-        // Register MCP management tool immediately (with registry for dynamic tool registration)
-        let mcp_tool =
-            mcp::McpManagementTool::new(Arc::clone(&mcp_manager)).with_registry(self.clone());
+        // Register MCP management tool immediately (with registry for dynamic
+        // tool registration, and the session event sender so model-driven
+        // connect/disconnect/reload refresh the client's MCP status).
+        let mcp_tool = mcp::McpManagementTool::new(Arc::clone(&mcp_manager))
+            .with_registry(self.clone())
+            .with_event_tx(event_tx.clone());
         self.register("mcp".to_string(), Arc::new(mcp_tool) as Arc<dyn Tool>)
             .await;
 
@@ -975,6 +978,7 @@ impl Registry {
                 };
                 let _ = tx.send(crate::protocol::ServerEvent::McpStatus {
                     servers: server_names,
+                    not_connected: Vec::new(),
                 });
             }
 
@@ -1035,7 +1039,10 @@ impl Registry {
                             .into_iter()
                             .map(|(name, count)| format!("{}:{}", name, count))
                             .collect();
-                        let _ = tx.send(crate::protocol::ServerEvent::McpStatus { servers });
+                        let _ = tx.send(crate::protocol::ServerEvent::McpStatus {
+                            servers,
+                            not_connected: Vec::new(),
+                        });
                     }
                 }
             }
@@ -1131,13 +1138,43 @@ impl Registry {
                     }
                 }
 
-                // Notify client of MCP status
+                // Notify client of MCP status. Enabled configured servers that
+                // did not come up are reported explicitly (with the connect
+                // failure when there is one) so the client can render a
+                // truthful connected/not-connected panel instead of silently
+                // dropping them from the list.
                 if let Some(tx) = event_tx {
+                    let (configured_enabled, connected_names) = {
+                        let manager = mcp_manager.read().await;
+                        let configured: Vec<String> = manager
+                            .config()
+                            .servers
+                            .iter()
+                            .filter(|(_, cfg)| cfg.is_enabled())
+                            .map(|(name, _)| name.clone())
+                            .collect();
+                        (configured, manager.connected_servers().await)
+                    };
+                    let failure_reasons: std::collections::HashMap<&String, &String> =
+                        failures.iter().map(|(name, error)| (name, error)).collect();
+                    let mut not_connected: Vec<String> = configured_enabled
+                        .iter()
+                        .filter(|name| !connected_names.contains(*name))
+                        .map(|name| match failure_reasons.get(name) {
+                            Some(reason) => format!("{name} — {reason}"),
+                            None => name.clone(),
+                        })
+                        .collect();
+                    not_connected.sort();
+
                     let servers: Vec<String> = server_counts
                         .into_iter()
                         .map(|(name, count)| format!("{}:{}", name, count))
                         .collect();
-                    let _ = tx.send(crate::protocol::ServerEvent::McpStatus { servers });
+                    let _ = tx.send(crate::protocol::ServerEvent::McpStatus {
+                        servers,
+                        not_connected,
+                    });
                 }
             });
         }

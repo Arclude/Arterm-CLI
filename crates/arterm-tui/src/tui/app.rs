@@ -1014,6 +1014,9 @@ pub struct App {
     resize_redraw_pending: bool,
     // Cached MCP server names and tool counts (updated on connect/disconnect)
     mcp_server_names: Vec<(String, usize)>,
+    // Enabled configured MCP servers that are not connected in this session,
+    // as "name" or "name — reason" display strings (drives the /mcp panel).
+    mcp_not_connected: Vec<String>,
     // When the current connection phase (authenticating/connecting/waiting) began.
     // Reset on every phase change so the "suspiciously long" yellow status is
     // measured per-attempt instead of inheriting the whole-turn elapsed time

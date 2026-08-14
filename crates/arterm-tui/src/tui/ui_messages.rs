@@ -686,10 +686,37 @@ fn preserve_hard_line_breaks_for_markdown(content: &str) -> Cow<'_, str> {
 pub(crate) fn render_usage_message(
     msg: &DisplayMessage,
     width: u16,
+    diff_mode: crate::config::DiffDisplayMode,
+) -> Vec<Line<'static>> {
+    render_prefix_status_box(msg, width, diff_mode, "Usage", "No usage data available.")
+}
+
+/// `/mcp` panel: same prefix-styled box as usage cards (`+` green, `~` yellow,
+/// `!` red, `#` bold header, plain lines dim), so connection state is legible
+/// at a glance instead of one undifferentiated text color.
+pub(crate) fn render_mcp_status_message(
+    msg: &DisplayMessage,
+    width: u16,
+    diff_mode: crate::config::DiffDisplayMode,
+) -> Vec<Line<'static>> {
+    render_prefix_status_box(
+        msg,
+        width,
+        diff_mode,
+        "MCP servers",
+        "No MCP servers configured.",
+    )
+}
+
+fn render_prefix_status_box(
+    msg: &DisplayMessage,
+    width: u16,
     _diff_mode: crate::config::DiffDisplayMode,
+    default_title: &str,
+    empty_text: &str,
 ) -> Vec<Line<'static>> {
     let border_style = Style::default().fg(rgb(120, 140, 190));
-    let title = msg.title.as_deref().unwrap_or("Usage");
+    let title = msg.title.as_deref().unwrap_or(default_title);
     let inner_width = width.saturating_sub(8).max(24) as usize;
     let content_width = inner_width.min(96);
 
@@ -724,7 +751,7 @@ pub(crate) fn render_usage_message(
 
     if content.is_empty() {
         content.push(Line::from(Span::styled(
-            "No usage data available.",
+            empty_text.to_string(),
             Style::default().fg(dim_color()),
         )));
     }

@@ -41,6 +41,18 @@ impl DisplayMessage {
         }
     }
 
+    /// Create an MCP status panel message (dedicated colored card display).
+    pub fn mcp(content: impl Into<String>) -> Self {
+        Self {
+            role: "mcp".to_string(),
+            content: content.into(),
+            tool_calls: Vec::new(),
+            duration_secs: None,
+            title: None,
+            tool_data: None,
+        }
+    }
+
     /// Create a background task completion message (dedicated card display).
     pub fn background_task(content: impl Into<String>) -> Self {
         Self {
