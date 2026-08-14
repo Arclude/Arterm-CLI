@@ -307,6 +307,13 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    if app.mcp_picker_overlay.is_some() {
+        if let Some((action, server)) = app.handle_mcp_picker_key_outcome(code, modifiers) {
+            remote.mcp_action(action, server.as_deref()).await?;
+        }
+        return Ok(());
+    }
+
     if app.session_picker_overlay.is_some() {
         return app.handle_session_picker_key(code, modifiers);
     }

@@ -179,6 +179,16 @@ mod mcp {
             dispatch_local_command(&mut app, "/mcp"),
             "/mcp should be claimed by the shared dispatch table"
         );
+        assert!(
+            app.mcp_picker_overlay.is_some(),
+            "bare /mcp opens the interactive overlay"
+        );
+        app.mcp_picker_overlay = None;
+
+        assert!(
+            dispatch_local_command(&mut app, "/mcp status"),
+            "/mcp status should be claimed by the shared dispatch table"
+        );
         let message = app.display_messages.last().expect("missing /mcp response");
         assert_eq!(message.role, "mcp", "renders through the colored mcp role");
         assert_eq!(message.title.as_deref(), Some("MCP servers"));

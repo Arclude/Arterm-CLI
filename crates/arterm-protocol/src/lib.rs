@@ -584,6 +584,7 @@ impl Request {
             Request::NotifySession { id, .. } => *id,
             Request::Transcript { id, .. } => *id,
             Request::InputShell { id, .. } => *id,
+            Request::McpAction { id, .. } => *id,
             Request::CycleModel { id, .. } => *id,
             Request::RefreshModels { id } => *id,
             Request::SetModel { id, .. } => *id,

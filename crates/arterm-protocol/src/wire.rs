@@ -206,6 +206,20 @@ pub enum Request {
     #[serde(rename = "input_shell")]
     InputShell { id: u64, command: String },
 
+    /// Run an MCP management action from the client (/mcp overlay):
+    /// "connect", "disconnect", or "reload". Routed through the session's
+    /// `mcp` management tool so tool registration and `McpStatus` events stay
+    /// consistent with model-driven actions. Success is signaled by `Done`
+    /// (the refreshed state arrives as a separate `McpStatus` event); failure
+    /// by `Error`.
+    #[serde(rename = "mcp_action")]
+    McpAction {
+        id: u64,
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server: Option<String>,
+    },
+
     /// Cycle the active model (direction: 1 for next, -1 for previous)
     #[serde(rename = "cycle_model")]
     CycleModel {
@@ -1040,6 +1054,12 @@ pub enum ServerEvent {
     /// Response for debug command
     #[serde(rename = "debug_response")]
     DebugResponse { id: u64, ok: bool, output: String },
+
+    /// MCP tool names for one server, answering `McpAction { action: "tools" }`
+    /// from the /mcp overlay. Tool base names only; they appear to the model
+    /// as `mcp__<server>__<tool>`.
+    #[serde(rename = "mcp_tool_list")]
+    McpToolList { server: String, tools: Vec<String> },
 
     /// MCP status update (sent after background MCP connections complete)
     #[serde(rename = "mcp_status")]

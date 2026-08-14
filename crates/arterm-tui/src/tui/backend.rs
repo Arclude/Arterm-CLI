@@ -948,6 +948,20 @@ impl RemoteConnection {
             .await
     }
 
+    /// Run an MCP management action ("connect" | "reconnect" | "disconnect" |
+    /// "reload" | "tools") from the /mcp overlay. Results come back as
+    /// `McpStatus` / `McpToolList` events.
+    pub async fn mcp_action(&mut self, action: &str, server: Option<&str>) -> Result<()> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        self.send_request(Request::McpAction {
+            id,
+            action: action.to_string(),
+            server: server.map(str::to_string),
+        })
+        .await
+    }
+
     /// Notify the server that auth credentials changed (e.g., after login)
     pub async fn notify_auth_changed(&mut self) -> Result<()> {
         let id = self.next_request_id;

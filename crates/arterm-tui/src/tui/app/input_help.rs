@@ -29,7 +29,7 @@ impl App {
                 "/model\nOpen model picker.\n\n/model <name>\nSwitch model.\n\n/model <name>@<provider>\nPin OpenRouter routing (@auto clears pin)."
             }
             "mcp" => {
-                "/mcp\nShow MCP server status for this session: connected servers with tool counts (green), connecting (yellow), and configured-but-not-connected servers (red, with the connect failure when the session attempted one).\nManage servers with `arterm mcp add/list/remove`. To (re)connect without restarting, ask the model to run the mcp tool (action: reload), or use /restart."
+                "/mcp\nOpen the interactive MCP server panel: pick a server to see its status, command, config location, and tools, and run connect/reconnect/disconnect from a menu. `r` reloads the MCP config.\n\n/mcp status\nPush a one-shot colored status card into the transcript instead: connected (green, with tool count), connecting (yellow), not connected (red, with the connect failure when the session attempted one).\n\nManage servers with `arterm mcp add/list/remove` in a terminal."
             }
             "provider-test-coverage"
             | "provider test coverage"

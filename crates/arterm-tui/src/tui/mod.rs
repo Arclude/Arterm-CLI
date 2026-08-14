@@ -26,6 +26,7 @@ pub mod keybind;
 mod layout_utils;
 pub mod login_picker;
 pub mod markdown;
+pub mod mcp_picker;
 mod memory_profile;
 pub mod mermaid;
 pub mod permissions {
@@ -637,6 +638,10 @@ pub trait TuiState {
     }
     /// The `/config` display-settings overlay, when it is open.
     fn settings_overlay(&self) -> Option<&settings_overlay::SettingsOverlay> {
+        None
+    }
+    /// The `/mcp` server-status overlay, when it is open.
+    fn mcp_picker_overlay(&self) -> Option<&mcp_picker::McpPicker> {
         None
     }
     /// Whether anyone has said anything yet in this session.

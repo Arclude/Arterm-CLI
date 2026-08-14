@@ -269,6 +269,13 @@ impl App {
                     })
                     .collect();
                 self.mcp_not_connected.sort();
+                // Keep the names too: the /mcp overlay shows per-server tool
+                // lists, and a local session can answer that without a round
+                // trip.
+                self.mcp_tool_names = all_tools
+                    .iter()
+                    .map(|(server, tool)| (server.clone(), tool.name.clone()))
+                    .collect();
                 self.mcp_server_names = servers
                     .into_iter()
                     .map(|name| {

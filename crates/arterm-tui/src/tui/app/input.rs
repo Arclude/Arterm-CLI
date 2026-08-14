@@ -2531,6 +2531,13 @@ pub(super) fn handle_modal_key(
         return Ok(true);
     }
 
+    if app.mcp_picker_overlay.is_some() {
+        if let Some((action, server)) = app.handle_mcp_picker_key_outcome(code, modifiers) {
+            app.handle_mcp_picker_action_local(action, server);
+        }
+        return Ok(true);
+    }
+
     if app.session_picker_overlay.is_some() {
         app.handle_session_picker_key(code, modifiers)?;
         return Ok(true);

@@ -14,6 +14,8 @@
 //! connected/red, plain dim). The previous single-color system message made
 //! connected and not-connected indistinguishable at a glance.
 
+use crate::tui::mcp_picker::{McpPicker, McpPickerOutcome, McpServerRow, McpServerState};
+
 use super::{App, DisplayMessage};
 
 pub(super) fn handle_mcp_command(app: &mut App, trimmed: &str) -> bool {
@@ -24,17 +26,166 @@ pub(super) fn handle_mcp_command(app: &mut App, trimmed: &str) -> bool {
     if !rest.is_empty() && !rest.starts_with(' ') {
         return false;
     }
-    if !rest.trim().is_empty() {
-        app.push_display_message(DisplayMessage::error(
-            "Usage: /mcp (manage servers with `arterm mcp add/list/remove` in a terminal)"
-                .to_string(),
-        ));
-        return true;
+    match rest.trim() {
+        // The interactive overlay: list -> per-server detail -> actions.
+        "" => {
+            app.open_mcp_picker();
+            true
+        }
+        // The transcript card: colored one-shot status snapshot.
+        "status" => {
+            let report = build_mcp_report(&app.mcp_server_names, &app.mcp_not_connected);
+            app.push_display_message(DisplayMessage::mcp(report).with_title("MCP servers"));
+            true
+        }
+        _ => {
+            app.push_display_message(DisplayMessage::error(
+                "Usage: /mcp (interactive) or /mcp status (transcript card). Manage servers \
+                 with `arterm mcp add/list/remove` in a terminal."
+                    .to_string(),
+            ));
+            true
+        }
+    }
+}
+
+impl App {
+    /// Open the `/mcp` overlay from the current status cache + on-disk config.
+    pub(in crate::tui) fn open_mcp_picker(&mut self) {
+        let rows = self.build_mcp_server_rows();
+        self.mcp_picker_overlay = Some(McpPicker::new(rows));
+        self.request_full_redraw();
     }
 
-    let report = build_mcp_report(&app.mcp_server_names, &app.mcp_not_connected);
-    app.push_display_message(DisplayMessage::mcp(report).with_title("MCP servers"));
-    true
+    /// Feed one key to the `/mcp` overlay. Returns an action the caller must
+    /// route (remote: `Request::McpAction`; local: see
+    /// [`Self::handle_mcp_picker_action_local`]), closing the overlay when it
+    /// asks for that instead.
+    pub(in crate::tui) fn handle_mcp_picker_key_outcome(
+        &mut self,
+        code: crossterm::event::KeyCode,
+        modifiers: crossterm::event::KeyModifiers,
+    ) -> Option<(&'static str, Option<String>)> {
+        let picker = self.mcp_picker_overlay.as_mut()?;
+        let outcome = picker.handle_key(code, modifiers);
+        self.request_full_redraw();
+        match outcome {
+            McpPickerOutcome::Stay => None,
+            McpPickerOutcome::Close => {
+                self.mcp_picker_overlay = None;
+                None
+            }
+            McpPickerOutcome::Action { action, server } => Some((action, server)),
+        }
+    }
+
+    /// Local sessions own their MCP manager but the overlay's actions run
+    /// through the async server path; until that is wired for local mode, be
+    /// honest about it in the footer instead of silently doing nothing.
+    pub(in crate::tui) fn handle_mcp_picker_action_local(
+        &mut self,
+        action: &str,
+        _server: Option<String>,
+    ) {
+        if let Some(picker) = self.mcp_picker_overlay.as_mut() {
+            picker.set_status(format!(
+                "'{}' is not wired for local sessions yet — ask the model to use the mcp tool.",
+                action
+            ));
+        }
+        self.request_full_redraw();
+    }
+
+    /// Snapshot every configured/connected server for the overlay.
+    pub(in crate::tui) fn build_mcp_server_rows(&self) -> Vec<McpServerRow> {
+        let project_dir = self
+            .session
+            .working_dir
+            .as_ref()
+            .map(std::path::PathBuf::from);
+        let config = crate::mcp::McpConfig::load_for_dir(project_dir.as_deref());
+        let sources = crate::mcp::attribute_server_sources(project_dir.as_deref());
+
+        // "name" or "name — reason" entries from the server's connect pass.
+        let failure_reasons: std::collections::HashMap<&str, Option<&str>> = self
+            .mcp_not_connected
+            .iter()
+            .map(|entry| match entry.split_once(" — ") {
+                Some((name, reason)) => (name, Some(reason)),
+                None => (entry.as_str(), None),
+            })
+            .collect();
+        // Local sessions cache full tool names at init; remote sessions fetch
+        // on demand through the overlay.
+        let mut local_tools: std::collections::HashMap<&str, Vec<String>> =
+            std::collections::HashMap::new();
+        for (server, tool) in &self.mcp_tool_names {
+            local_tools
+                .entry(server.as_str())
+                .or_default()
+                .push(tool.clone());
+        }
+
+        let mut names: Vec<String> = config.servers.keys().cloned().collect();
+        for (name, _) in &self.mcp_server_names {
+            // Ad-hoc connected servers may not exist in any config file.
+            if !config.servers.contains_key(name) {
+                names.push(name.clone());
+            }
+        }
+        names.sort();
+        names.dedup();
+
+        names
+            .into_iter()
+            .map(|name| {
+                let cfg = config.servers.get(&name);
+                let live = self
+                    .mcp_server_names
+                    .iter()
+                    .find(|(live_name, _)| live_name == &name)
+                    .map(|(_, count)| *count);
+                let state = match live {
+                    Some(0) => McpServerState::Connecting,
+                    Some(tool_count) => McpServerState::Connected { tool_count },
+                    None if cfg.is_some_and(|cfg| !cfg.is_enabled()) => McpServerState::Disabled,
+                    None => McpServerState::NotConnected {
+                        reason: failure_reasons
+                            .get(name.as_str())
+                            .and_then(|reason| reason.map(str::to_string)),
+                    },
+                };
+                let tools = local_tools.get(name.as_str()).map(|tools| {
+                    let mut tools = tools.clone();
+                    tools.sort();
+                    tools
+                });
+                McpServerRow {
+                    state,
+                    command: cfg.map(|cfg| cfg.command.clone()).unwrap_or_default(),
+                    args: cfg.map(|cfg| cfg.args.clone()).unwrap_or_default(),
+                    source: sources
+                        .get(&name)
+                        .copied()
+                        .unwrap_or(crate::mcp::McpServerSource::Imported),
+                    shared: cfg.is_none_or(|cfg| cfg.shared),
+                    tools,
+                    name,
+                }
+            })
+            .collect()
+    }
+
+    /// Refresh the open `/mcp` overlay after an `McpStatus` event.
+    pub(in crate::tui) fn refresh_mcp_picker(&mut self) {
+        if self.mcp_picker_overlay.is_some() {
+            let rows = self.build_mcp_server_rows();
+            if let Some(picker) = self.mcp_picker_overlay.as_mut() {
+                picker.set_rows(rows);
+            }
+            self.request_full_redraw();
+        }
+    }
 }
 
 fn build_mcp_report(live: &[(String, usize)], not_connected: &[String]) -> String {

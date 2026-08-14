@@ -1017,6 +1017,10 @@ pub struct App {
     // Enabled configured MCP servers that are not connected in this session,
     // as "name" or "name — reason" display strings (drives the /mcp panel).
     mcp_not_connected: Vec<String>,
+    // (server, tool) names cached by local sessions at connect time so the
+    // /mcp overlay can show tool lists without a round trip. Remote sessions
+    // leave this empty and fetch tool names on demand.
+    mcp_tool_names: Vec<(String, String)>,
     // When the current connection phase (authenticating/connecting/waiting) began.
     // Reset on every phase change so the "suspiciously long" yellow status is
     // measured per-attempt instead of inheriting the whole-turn elapsed time
@@ -1631,6 +1635,8 @@ pub struct App {
     session_picker_overlay: Option<RefCell<super::session_picker::SessionPicker>>,
     /// `/config` display-settings overlay (None = not visible).
     pub(crate) settings_overlay: Option<super::settings_overlay::SettingsOverlay>,
+    /// The `/mcp` server-status overlay, when it is open.
+    pub(crate) mcp_picker_overlay: Option<super::mcp_picker::McpPicker>,
     session_picker_mode: SessionPickerMode,
     pending_session_picker_load: Option<PendingSessionPickerLoad>,
     /// "Where we left off" lines for the startup screen, and the read that

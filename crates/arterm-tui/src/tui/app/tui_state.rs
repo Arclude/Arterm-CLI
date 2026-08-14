@@ -1979,6 +1979,10 @@ impl crate::tui::TuiState for App {
         self.settings_overlay.as_ref()
     }
 
+    fn mcp_picker_overlay(&self) -> Option<&crate::tui::mcp_picker::McpPicker> {
+        self.mcp_picker_overlay.as_ref()
+    }
+
     fn conversation_started(&self) -> bool {
         App::conversation_started(self)
     }

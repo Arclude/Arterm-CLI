@@ -1212,6 +1212,16 @@ pub(in crate::tui::app) fn handle_server_event(
             retry_after_secs,
             ..
         } => {
+            // An MCP action launched from the open /mcp overlay failed; land
+            // the error in the overlay footer (where the "working..." note
+            // sits) instead of only in the transcript behind the modal.
+            if message.starts_with("MCP ")
+                && let Some(picker) = app.mcp_picker_overlay.as_mut()
+            {
+                picker.set_status(message.clone());
+                app.request_full_redraw();
+                return true;
+            }
             // The server rejects a Message request with this error while its
             // previous turn is still running. This typically happens when a
             // reload/reconnect raced the turn-end dispatch: the history
@@ -2204,6 +2214,13 @@ pub(in crate::tui::app) fn handle_server_event(
             app.set_status_notice("Plan proposal received");
             false
         }
+        ServerEvent::McpToolList { server, tools } => {
+            if let Some(picker) = app.mcp_picker_overlay.as_mut() {
+                picker.set_tools(&server, tools.clone());
+                app.request_full_redraw();
+            }
+            true
+        }
         ServerEvent::McpStatus {
             servers,
             not_connected,
@@ -2217,6 +2234,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 })
                 .collect();
             app.mcp_not_connected = not_connected.clone();
+            app.refresh_mcp_picker();
             // Keep MCP readiness non-intrusive. The footer/tool indicator reads
             // `mcp_server_names` directly, so avoid a transient status notice here:
             // status notices render near the prompt and can cover text while the
