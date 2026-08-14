@@ -132,12 +132,41 @@ impl McpManager {
             .filter(|(_, config)| config.is_enabled())
             .partition(|(_, config)| config.shared && self.pool.is_some());
 
-        // Connect shared servers via pool
+        // Connect shared servers via pool, passing this session's config for
+        // each server. pool.connect_all() would iterate the pool's own config
+        // snapshot, which is loaded once at daemon start: a server configured
+        // after that (e.g. added to ~/.claude.json while the daemon runs)
+        // exists in the session config but not in the pool's, so it would be
+        // silently skipped — found in config, never spawned, no error — and
+        // every new session would show it configured-but-not-connected until
+        // the daemon restarts.
         if let Some(pool) = &self.pool {
             if !shared_servers.is_empty() {
-                let (successes, failures) = pool.connect_all().await;
-                total_successes += successes;
-                total_failures.extend(failures);
+                let connect_futures = shared_servers.iter().map(|(name, config)| {
+                    let name = (*name).clone();
+                    let config = (*config).clone();
+                    async move {
+                        let result = pool.ensure_connected(name.clone(), config).await;
+                        (name, result)
+                    }
+                });
+
+                for (name, result) in futures::future::join_all(connect_futures).await {
+                    match result {
+                        Ok(new_connection) => {
+                            if new_connection {
+                                total_successes += 1;
+                            }
+                        }
+                        Err(error_msg) => {
+                            crate::logging::error(&format!(
+                                "Failed to connect to MCP server '{}': {}",
+                                name, error_msg
+                            ));
+                            total_failures.push((name, error_msg));
+                        }
+                    }
+                }
 
                 // Acquire handles for shared servers only
                 let all_handles = pool.acquire_handles(&self.session_id).await;
@@ -604,6 +633,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connect_all_uses_session_config_for_shared_servers() {
+        // A server added to config after the daemon (and thus the shared
+        // pool's config snapshot) started must still be connected by a new
+        // session. Before the fix, connect_all() delegated to
+        // pool.connect_all(), which iterates the pool's stale snapshot: the
+        // server below would produce zero attempts and zero failures.
+        let pool = Arc::new(SharedMcpPool::new(McpConfig::default()));
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            "late-added".to_string(),
+            McpServerConfig {
+                // `true` exits immediately, so the connection attempt fails
+                // fast — the point is that an attempt happens at all.
+                command: "true".to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                shared: true,
+                transport: None,
+                url: None,
+                headers: std::collections::HashMap::new(),
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = McpManager {
+            pool: Some(pool),
+            pool_handles: RwLock::new(HashMap::new()),
+            owned_clients: RwLock::new(HashMap::new()),
+            config,
+            session_id: "stale-pool-test".to_string(),
+            project_dir: None,
+        };
+
+        let (successes, failures) = manager.connect_all().await.expect("connect_all");
+        assert_eq!(successes, 0);
+        assert_eq!(
+            failures.len(),
+            1,
+            "the session-configured server must be attempted even though the \
+             pool config snapshot does not contain it: {failures:?}"
+        );
+        assert_eq!(failures[0].0, "late-added");
+    }
+
+    #[tokio::test]
     async fn connect_on_first_call_fails_cleanly_for_broken_server() {
         // A configured server whose command exits immediately and never speaks
         // MCP. connect-on-first-call must surface a clean, bounded tool error
@@ -654,7 +728,7 @@ mod provenance_integration_tests {
 
     /// Write a minimal stdio MCP server as a shell script: answers
     /// initialize, tools/list, and tools/call with canned JSON-RPC replies.
-    fn write_fake_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
+    pub(super) fn write_fake_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
         let path = dir.join("fake-mcp-server.sh");
         let script = r##"#!/bin/bash
 while IFS= read -r line; do
@@ -761,5 +835,62 @@ done
 
         manager.disconnect_all().await;
         drop(env_guard);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod stale_pool_config_integration_tests {
+    use super::*;
+
+    /// End-to-end success path for the stale-pool-config fix: the shared pool
+    /// was created with an empty config (as at daemon start), the session
+    /// config gained a shared server afterwards, and connect_all() must spawn
+    /// it, acquire a handle, and expose its tools.
+    #[tokio::test]
+    async fn connect_all_spawns_shared_server_missing_from_pool_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let server_path = super::provenance_integration_tests::write_fake_mcp_server(temp.path());
+
+        let pool = Arc::new(SharedMcpPool::new(McpConfig::default()));
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            "late-added".to_string(),
+            McpServerConfig {
+                command: server_path.to_string_lossy().to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                shared: true,
+                transport: None,
+                url: None,
+                headers: std::collections::HashMap::new(),
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = McpManager {
+            pool: Some(Arc::clone(&pool)),
+            pool_handles: RwLock::new(HashMap::new()),
+            owned_clients: RwLock::new(HashMap::new()),
+            config,
+            session_id: "stale-pool-success-test".to_string(),
+            project_dir: None,
+        };
+
+        let (successes, failures) = manager.connect_all().await.expect("connect_all");
+        assert_eq!(failures, Vec::<(String, String)>::new());
+        assert_eq!(successes, 1);
+        assert_eq!(
+            manager.connected_servers().await,
+            vec!["late-added".to_string()]
+        );
+        let tools = manager.all_tools().await;
+        assert!(
+            tools
+                .iter()
+                .any(|(server, tool)| server == "late-added" && tool.name == "create_card"),
+            "tools from the late-added server must be visible: {tools:?}"
+        );
+
+        manager.disconnect_all().await;
     }
 }

@@ -338,7 +338,13 @@ impl SharedMcpPool {
         notify.notify_waiters();
     }
 
-    async fn ensure_connected(
+    /// Connect `name` with an explicitly supplied config (deduplicated across
+    /// concurrent callers). Returns `Ok(true)` for a new connection, `Ok(false)`
+    /// when the server was already connected. Callers that only have the
+    /// pool's own config snapshot should prefer [`Self::connect_all`]; session
+    /// managers must pass their own config here because the pool snapshot is
+    /// loaded once at daemon start and goes stale.
+    pub(crate) async fn ensure_connected(
         &self,
         name: String,
         config: McpServerConfig,
