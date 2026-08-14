@@ -55,19 +55,6 @@ fn load_file_or_empty(path: &std::path::Path) -> Result<McpConfig> {
     McpConfig::load_from_file(path).with_context(|| format!("failed to parse {}", path.display()))
 }
 
-/// The editable sources, lowest precedence first (matching
-/// `McpConfig::load_for_dir`: project files override user files).
-fn editable_sources() -> Vec<(McpScopeArg, PathBuf)> {
-    let mut sources = Vec::new();
-    if let Ok(path) = user_config_path() {
-        sources.push((McpScopeArg::User, path));
-    }
-    sources.push((McpScopeArg::Project, project_config_path()));
-    sources
-}
-
-const IMPORTED_SOURCE: &str = "imported (Claude Code/Codex config)";
-
 /// One effective server as `list` reports it. Env keys only: values may hold
 /// secrets and must never reach stdout.
 #[derive(serde::Serialize)]
@@ -90,14 +77,9 @@ fn list_rows() -> Vec<ListRow> {
     // env-expanded, non-stdio entries dropped).
     let effective = McpConfig::load();
 
-    let mut source_by_name: HashMap<String, String> = HashMap::new();
-    for (scope, path) in editable_sources() {
-        if let Ok(config) = load_file_or_empty(&path) {
-            for name in config.servers.keys() {
-                source_by_name.insert(name.clone(), scope_label(scope).to_string());
-            }
-        }
-    }
+    // Shared with the TUI's /mcp overlay so both attribute "source" the
+    // same way.
+    let source_by_name = crate::mcp::attribute_server_sources(None);
 
     let mut names: Vec<&String> = effective.servers.keys().collect();
     names.sort();
@@ -116,8 +98,10 @@ fn list_rows() -> Vec<ListRow> {
                 shared: cfg.shared,
                 source: source_by_name
                     .get(name.as_str())
-                    .cloned()
-                    .unwrap_or_else(|| IMPORTED_SOURCE.to_string()),
+                    .copied()
+                    .unwrap_or(crate::mcp::McpServerSource::Imported)
+                    .label()
+                    .to_string(),
             }
         })
         .collect()

@@ -165,7 +165,10 @@ fn removing_an_unknown_or_imported_server_explains_itself() {
     )
     .expect("write .mcp.json");
     let rows = list_rows();
-    assert_eq!(row_for(&rows, "imported").source, IMPORTED_SOURCE);
+    assert_eq!(
+        row_for(&rows, "imported").source,
+        crate::mcp::McpServerSource::Imported.label()
+    );
     let imported = run_remove("imported".to_string(), None).expect_err("imported must not vanish");
     assert!(
         imported.to_string().contains("imported config"),

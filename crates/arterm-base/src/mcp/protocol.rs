@@ -320,6 +320,70 @@ where
     output
 }
 
+/// Where an effective server definition is editable from. Drives display
+/// ("Config location") and whether arterm may modify the entry at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpServerSource {
+    /// `~/.arterm/mcp.json`
+    User,
+    /// `<project>/.arterm/mcp.json`
+    Project,
+    /// A live-read external config (`~/.claude.json`, `~/.claude/mcp.json`,
+    /// `.mcp.json`, `.claude/mcp.json`) — read-only from arterm's side.
+    Imported,
+}
+
+impl McpServerSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::User => "user (~/.arterm/mcp.json)",
+            Self::Project => "project (.arterm/mcp.json)",
+            Self::Imported => "imported (Claude Code/Codex config)",
+        }
+    }
+
+    /// Whether `arterm mcp` / the TUI may edit the defining file.
+    pub fn is_editable(self) -> bool {
+        !matches!(self, Self::Imported)
+    }
+}
+
+/// Attribute each server name defined in an arterm-owned file to that file,
+/// highest precedence winning (project overrides user, matching
+/// `McpConfig::load_for_dir`). Servers absent from the map came from an
+/// imported source. The project file is resolved against `project_dir`, or
+/// the process cwd when `None`.
+pub fn attribute_server_sources(
+    project_dir: Option<&std::path::Path>,
+) -> std::collections::HashMap<String, McpServerSource> {
+    let mut sources = std::collections::HashMap::new();
+
+    if let Ok(dir) = crate::storage::arterm_dir() {
+        let user = dir.join("mcp.json");
+        if user.exists()
+            && let Ok(config) = McpConfig::load_from_file(&user)
+        {
+            for name in config.servers.keys() {
+                sources.insert(name.clone(), McpServerSource::User);
+            }
+        }
+    }
+
+    let project = match project_dir {
+        Some(dir) => dir.join(".arterm/mcp.json"),
+        None => std::path::PathBuf::from(".arterm/mcp.json"),
+    };
+    if project.exists()
+        && let Ok(config) = McpConfig::load_from_file(&project)
+    {
+        for name in config.servers.keys() {
+            sources.insert(name.clone(), McpServerSource::Project);
+        }
+    }
+
+    sources
+}
+
 impl McpConfig {
     /// Load config from file
     pub fn load_from_file(path: &std::path::Path) -> anyhow::Result<Self> {
