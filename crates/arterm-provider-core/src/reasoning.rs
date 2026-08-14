@@ -90,6 +90,14 @@ pub fn inferred_reasoning_efforts(
         return DEEPSEEK_SELECTABLE_EFFORTS.to_vec();
     }
 
+    // Model identity, not provider identity: an xAI session reaches here as a
+    // plain openai-compatible provider, and before this arm the remote TUI
+    // inferred an empty ladder for grok-4.6 — the effort keys were dead in
+    // exactly the sessions the server-side grok gate had just fixed.
+    if provider.contains("xai") || model.contains("grok") {
+        return GROK_SELECTABLE_EFFORTS.to_vec();
+    }
+
     let is_openai_model = model.starts_with("gpt-")
         || model.starts_with("o1")
         || model.starts_with("o3")
@@ -150,6 +158,23 @@ mod tests {
             OPENAI_SELECTABLE_EFFORTS,
             "direct OpenAI-compatible runtimes use the OpenAI reasoning_effort vocabulary"
         );
+    }
+
+    #[test]
+    fn grok_ladder_is_inferred_from_model_identity() {
+        // A remote xAI session reports a plain openai-compatible provider, so
+        // the model name has to carry the family; an empty ladder here is how
+        // the effort keys went dead on grok-4.6 while the server supported it.
+        assert_eq!(
+            inferred_reasoning_efforts(Some("openai-compatible:custom"), Some("grok-4.6")),
+            GROK_SELECTABLE_EFFORTS
+        );
+        assert_eq!(
+            inferred_reasoning_efforts(Some("xai"), Some("grok-4.5")),
+            GROK_SELECTABLE_EFFORTS
+        );
+        assert!(!GROK_SELECTABLE_EFFORTS.contains(&"max"));
+        assert!(!GROK_SELECTABLE_EFFORTS.contains(&"minimal"));
     }
 
     #[test]
