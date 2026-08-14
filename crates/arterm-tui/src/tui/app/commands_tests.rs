@@ -161,6 +161,39 @@ fn model_not_found_is_fatal_model_endpoint_error() {
     assert!(is_fatal_model_endpoint_error(err));
 }
 
+/// Behavioral test for `/mcp`, driven through the real `App`: the shared
+/// dispatch table must claim it, and the pushed message must reflect the
+/// session's live MCP state. This is the wiring test — remove the
+/// `commands_mcp` entry from `dispatch_local_command` and it fails.
+mod mcp {
+    use crate::tui::app::commands_dispatch::dispatch_local_command;
+    use crate::tui::app::tests::create_test_app;
+
+    #[test]
+    fn the_mcp_command_is_claimed_and_reports_live_servers() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+        app.mcp_server_names = vec![("livedemo".to_string(), 2)];
+
+        assert!(
+            dispatch_local_command(&mut app, "/mcp"),
+            "/mcp should be claimed by the shared dispatch table"
+        );
+        let output = app
+            .display_messages
+            .last()
+            .map(|message| message.content.clone())
+            .unwrap_or_default();
+        assert!(output.contains("MCP servers"), "{output}");
+        assert!(output.contains("livedemo — 2 tools"), "{output}");
+
+        assert!(
+            !dispatch_local_command(&mut app, "/mcpsomething"),
+            "prefix collisions must not be claimed"
+        );
+    }
+}
+
 /// Behavioral tests for `/colors`, driven through the real `App` so they cover
 /// what a user actually types: dispatch, message text, config persistence, and
 /// error handling.
