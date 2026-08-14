@@ -168,7 +168,12 @@
     },
     "crates/arterm-app-core/src/server/client_session.rs": {
       "dot_ok": 8,
-      "let_underscore": 21,
+      "let_underscore": 15,
+      "unwrap_or_default": 0
+    },
+    "crates/arterm-app-core/src/server/client_session/mcp_action.rs": {
+      "dot_ok": 0,
+      "let_underscore": 6,
       "unwrap_or_default": 0
     },
     "crates/arterm-app-core/src/server/client_state.rs": {
