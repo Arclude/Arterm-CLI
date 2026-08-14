@@ -36,9 +36,7 @@ fn readonly_profile(config: &SandboxConfig) -> String {
     // Allow reading from working directory
     if let Some(ref wd) = config.working_dir {
         let wd_str = wd.to_string_lossy();
-        profile.push_str(&format!(
-            "(allow file-read* (subpath \"{wd_str}\"))\n"
-        ));
+        profile.push_str(&format!("(allow file-read* (subpath \"{wd_str}\"))\n"));
     }
 
     // Deny all writes
@@ -46,9 +44,7 @@ fn readonly_profile(config: &SandboxConfig) -> String {
 
     // Allow temp directory access for subprocess pipes (read-only)
     let tmp = std::env::temp_dir().to_string_lossy().to_string();
-    profile.push_str(&format!(
-        "(allow file-read* (subpath \"{tmp}\"))\n"
-    ));
+    profile.push_str(&format!("(allow file-read* (subpath \"{tmp}\"))\n"));
 
     // Deny network
     profile.push_str("(deny network*)\n");
@@ -73,31 +69,23 @@ fn workspace_write_profile(config: &SandboxConfig) -> String {
     // Write to working directory
     if let Some(ref wd) = config.working_dir {
         let wd_str = wd.to_string_lossy();
-        profile.push_str(&format!(
-            "(allow file-write* (subpath \"{wd_str}\"))\n"
-        ));
+        profile.push_str(&format!("(allow file-write* (subpath \"{wd_str}\"))\n"));
     }
 
     // Write to temp directories
     let tmp = std::env::temp_dir().to_string_lossy().to_string();
-    profile.push_str(&format!(
-        "(allow file-write* (subpath \"{tmp}\"))\n"
-    ));
+    profile.push_str(&format!("(allow file-write* (subpath \"{tmp}\"))\n"));
 
     // Write to scratch dir
     if let Some(ref scratch) = std::env::var_os("ARTERM_SCRATCH_DIR") {
         let s = scratch.to_string_lossy();
-        profile.push_str(&format!(
-            "(allow file-write* (subpath \"{s}\"))\n"
-        ));
+        profile.push_str(&format!("(allow file-write* (subpath \"{s}\"))\n"));
     }
 
     // Write to extra writable roots
     for root in &config.writable_roots {
         let r = root.to_string_lossy();
-        profile.push_str(&format!(
-            "(allow file-write* (subpath \"{r}\"))\n"
-        ));
+        profile.push_str(&format!("(allow file-write* (subpath \"{r}\"))\n"));
     }
 
     // Allow network (localhost and outbound)
@@ -122,8 +110,10 @@ mod tests {
 
     #[test]
     fn workspace_write_allows_working_dir() {
-        let config =
-            SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(PathBuf::from("/tmp/test")));
+        let config = SandboxConfig::new(
+            SandboxMode::WorkspaceWrite,
+            Some(PathBuf::from("/tmp/test")),
+        );
         let profile = generate_seatbelt_profile(&config).unwrap();
         assert!(profile.contains("/tmp/test"));
         assert!(profile.contains("file-write*"));

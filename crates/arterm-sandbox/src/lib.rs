@@ -158,13 +158,13 @@ pub fn apply(config: &SandboxConfig) -> Result<SandboxResult, String> {
 
     #[cfg(target_os = "linux")]
     {
-        return linux::apply_landlock(config);
+        linux::apply_landlock(config)
     }
 
     #[cfg(target_os = "macos")]
     {
-        return macos::generate_seatbelt_profile(config)
-            .map(|profile| SandboxResult::applied(format!("seatbelt profile: {profile}")));
+        macos::generate_seatbelt_profile(config)
+            .map(|profile| SandboxResult::applied(format!("seatbelt profile: {profile}")))
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -253,10 +253,8 @@ mod tests {
     #[test]
     fn writable_paths_includes_working_dir_and_tmp() {
         let tmp = tempfile::tempdir().unwrap();
-        let config = SandboxConfig::new(
-            SandboxMode::WorkspaceWrite,
-            Some(tmp.path().to_path_buf()),
-        );
+        let config =
+            SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(tmp.path().to_path_buf()));
         let paths = config.writable_paths();
         assert!(paths.contains(&tmp.path().to_path_buf()));
     }

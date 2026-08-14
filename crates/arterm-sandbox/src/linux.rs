@@ -65,6 +65,10 @@ const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 10;
 const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 11;
 
 /// All write-related access flags (what we deny in read-only mode).
+#[expect(
+    dead_code,
+    reason = "documents the complete Landlock write-access table; later sandbox phases widen RESTRICTED_WRITE_ACCESS toward it"
+)]
 const ALL_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
     | LANDLOCK_ACCESS_FS_REMOVE_FILE
     | LANDLOCK_ACCESS_FS_REMOVE_DIR
@@ -81,10 +85,13 @@ const ALL_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
 /// existing files and creating new regular files. This is the minimal set
 /// that prevents uncontrolled file modification while allowing processes
 /// to function normally (pipes, sockets, /dev/null all work).
-const RESTRICTED_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
-    | LANDLOCK_ACCESS_FS_MAKE_REG;
+const RESTRICTED_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_MAKE_REG;
 
 /// All access flags we know about (for the ruleset mask).
+#[expect(
+    dead_code,
+    reason = "documents the complete Landlock access table; later sandbox phases use it as the ruleset mask"
+)]
 const ALL_KNOWN_ACCESS: u64 = LANDLOCK_ACCESS_FS_EXECUTE | ALL_WRITE_ACCESS;
 
 /// `landlock_ruleset_attr` as expected by the kernel.
@@ -175,7 +182,11 @@ unsafe fn openat(dirfd: i32, path: *const std::os::raw::c_char, flags: i32) -> i
     #[cfg(not(target_arch = "x86_64"))]
     {
         unsafe extern "C" {
-            fn openat(dirfd: std::ffi::c_int, path: *const std::os::raw::c_char, flags: std::ffi::c_int) -> std::ffi::c_int;
+            fn openat(
+                dirfd: std::ffi::c_int,
+                path: *const std::os::raw::c_char,
+                flags: std::ffi::c_int,
+            ) -> std::ffi::c_int;
         }
         openat(dirfd, path, flags)
     }
@@ -209,11 +220,7 @@ pub fn landlock_create_ruleset_version() -> u32 {
             0,
             LANDLOCK_CREATE_RULESET_VERSION as i64,
         );
-        if ret < 0 {
-            0
-        } else {
-            ret as u32
-        }
+        if ret < 0 { 0 } else { ret as u32 }
     }
 }
 
@@ -235,10 +242,7 @@ fn landlock_create_ruleset(handled_access_fs: u64) -> Result<i32, String> {
             0, // flags
         );
         if ret < 0 {
-            Err(format!(
-                "landlock_create_ruleset failed (errno {})",
-                -ret
-            ))
+            Err(format!("landlock_create_ruleset failed (errno {})", -ret))
         } else {
             Ok(ret as i32)
         }
@@ -251,15 +255,11 @@ fn landlock_add_rule(
     path: &std::path::Path,
     allowed_access: u64,
 ) -> Result<(), String> {
-    let path_bytes = CString::new(path.as_os_str().as_bytes())
-        .map_err(|e| format!("path contains NUL: {e}"))?;
+    let path_bytes =
+        CString::new(path.as_os_str().as_bytes()).map_err(|e| format!("path contains NUL: {e}"))?;
 
     unsafe {
-        let parent_fd = openat(
-            AT_FDCWD,
-            path_bytes.as_ptr(),
-            O_PATH | O_CLOEXEC,
-        );
+        let parent_fd = openat(AT_FDCWD, path_bytes.as_ptr(), O_PATH | O_CLOEXEC);
         if parent_fd < 0 {
             return Err(format!(
                 "openat({}) failed for path {} (errno {})",
@@ -333,25 +333,14 @@ fn landlock_restrict_self(ruleset_fd: i32) -> Result<(), String> {
         const PR_SET_NO_NEW_PRIVS: std::ffi::c_int = 38;
         let ret = unsafe { prctl(PR_SET_NO_NEW_PRIVS, 1) };
         if ret < 0 {
-            return Err(format!(
-                "prctl(PR_SET_NO_NEW_PRIVS) failed (ret {})",
-                ret
-            ));
+            return Err(format!("prctl(PR_SET_NO_NEW_PRIVS) failed (ret {})", ret));
         }
     }
 
     unsafe {
-        let ret = syscall3(
-            SYS_LANDLOCK_RESTRICT_SELF,
-            ruleset_fd as i64,
-            0,
-            0,
-        );
+        let ret = syscall3(SYS_LANDLOCK_RESTRICT_SELF, ruleset_fd as i64, 0, 0);
         if ret < 0 {
-            Err(format!(
-                "landlock_restrict_self failed (errno {})",
-                -ret
-            ))
+            Err(format!("landlock_restrict_self failed (errno {})", -ret))
         } else {
             Ok(())
         }
@@ -414,10 +403,14 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
     };
 
     for path in &full_access_paths {
-        if path.exists() {
-            if let Err(e) = landlock_add_rule(ruleset_fd, path, full_access) {
-                eprintln!("arterm sandbox: skipping writable root {}: {}", path.display(), e);
-            }
+        if path.exists()
+            && let Err(e) = landlock_add_rule(ruleset_fd, path, full_access)
+        {
+            eprintln!(
+                "arterm sandbox: skipping writable root {}: {}",
+                path.display(),
+                e
+            );
         }
     }
 
@@ -432,8 +425,7 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
     match restrict_result {
         Ok(()) => Ok(SandboxResult::applied(format!(
             "Landlock ABI v{} applied (mode: {})",
-            abi,
-            config.mode
+            abi, config.mode
         ))),
         Err(e) => Err(e),
     }
@@ -479,11 +471,11 @@ mod tests {
                 // happen in the same thread.
                 let write_result = std::fs::write(&test_file, "test");
                 let exit_code = match (&sandbox_result, &write_result) {
-                    (Ok(sr), Err(_)) if sr.applied => 0,  // sandbox worked, write blocked
-                    (Ok(sr), Ok(_)) if sr.applied => 1,   // sandbox applied but write succeeded (bug)
-                    (Ok(sr), _) if !sr.applied => 2,      // sandbox not available
-                    (Err(_), _) => 3,                      // sandbox error
-                    _ => 4,                                // catch-all
+                    (Ok(sr), Err(_)) if sr.applied => 0, // sandbox worked, write blocked
+                    (Ok(sr), Ok(_)) if sr.applied => 1, // sandbox applied but write succeeded (bug)
+                    (Ok(sr), _) if !sr.applied => 2,    // sandbox not available
+                    (Err(_), _) => 3,                   // sandbox error
+                    _ => 4,                             // catch-all
                 };
                 if let Err(ref e) = sandbox_result {
                     eprintln!("CHILD sandbox error: {e}");
@@ -502,12 +494,19 @@ mod tests {
                 // Exit 2 = sandbox not available on this kernel
                 // Exit 3 = sandbox error (e.g. EPERM in multi-threaded test env)
                 if exited == 2 || exited == 3 {
-                    eprintln!("Skipping readonly test: sandbox not applicable (exit={})", exited);
+                    eprintln!(
+                        "Skipping readonly test: sandbox not applicable (exit={})",
+                        exited
+                    );
                     return;
                 }
                 // Exit 0 = sandbox blocked write (success!)
                 // Exit 1 = sandbox applied but write succeeded (unexpected)
-                assert!(exited == 0, "write should have been blocked by sandbox (exit={})", exited);
+                assert!(
+                    exited == 0,
+                    "write should have been blocked by sandbox (exit={})",
+                    exited
+                );
             }
         }
     }
@@ -521,7 +520,8 @@ mod tests {
         }
 
         let tmp = tempfile::tempdir().unwrap();
-        let config = SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(tmp.path().to_path_buf()));
+        let config =
+            SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(tmp.path().to_path_buf()));
 
         let test_file = tmp.path().join("write_ok.txt");
         unsafe {

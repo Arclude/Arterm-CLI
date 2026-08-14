@@ -606,16 +606,15 @@ fn build_shell_command_with_sandbox(
         configure_tool_scratch(&mut cmd);
 
         // Apply OS-level sandbox if configured.
-        if let Some(config) = sandbox_config {
-            if config.mode.is_sandboxed() {
-                let sb_config = config.clone();
-                let wd = working_dir.map(|p| p.to_path_buf());
-                unsafe {
-                    cmd.pre_exec(move || {
-                    let apply_config = arterm_sandbox::SandboxConfig::new(
-                        sb_config.mode,
-                        wd.clone(),
-                    );
+        if let Some(config) = sandbox_config
+            && config.mode.is_sandboxed()
+        {
+            let sb_config = config.clone();
+            let wd = working_dir.map(|p| p.to_path_buf());
+            unsafe {
+                cmd.pre_exec(move || {
+                    let apply_config =
+                        arterm_sandbox::SandboxConfig::new(sb_config.mode, wd.clone());
                     match arterm_sandbox::apply(&apply_config) {
                         Ok(result) => {
                             if !result.applied {
@@ -634,7 +633,6 @@ fn build_shell_command_with_sandbox(
                         }
                     }
                 });
-                }
             }
         }
         cmd
@@ -894,12 +892,10 @@ impl BashTool {
         // Parse sandbox mode from context and build sandbox config if active.
         let sb_config = if !ctx.sandbox_mode.is_empty() {
             match ctx.sandbox_mode.parse::<arterm_sandbox::SandboxMode>() {
-                Ok(mode) if mode.is_sandboxed() => {
-                    Some(arterm_sandbox::SandboxConfig::new(
-                        mode,
-                        ctx.working_dir.clone(),
-                    ))
-                }
+                Ok(mode) if mode.is_sandboxed() => Some(arterm_sandbox::SandboxConfig::new(
+                    mode,
+                    ctx.working_dir.clone(),
+                )),
                 _ => None,
             }
         } else {
@@ -1113,12 +1109,11 @@ impl BashTool {
     fn supports_reload_persistence(&self, ctx: &ToolContext) -> bool {
         // Don't use the reload-persistable path when sandboxed, because the
         // detached wrapper does not go through build_shell_command_with_sandbox.
-        if !ctx.sandbox_mode.is_empty() {
-            if let Ok(mode) = ctx.sandbox_mode.parse::<arterm_sandbox::SandboxMode>() {
-                if mode.is_sandboxed() {
-                    return false;
-                }
-            }
+        if !ctx.sandbox_mode.is_empty()
+            && let Ok(mode) = ctx.sandbox_mode.parse::<arterm_sandbox::SandboxMode>()
+            && mode.is_sandboxed()
+        {
+            return false;
         }
         matches!(
             ctx.execution_mode,

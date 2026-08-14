@@ -1654,10 +1654,19 @@ async fn plan_mode_blocks_edit_tool() {
     };
 
     let result = registry
-        .execute("edit", serde_json::json!({"file_path": "/tmp/nx.txt", "old_string": "a", "new_string": "b"}), ctx)
+        .execute(
+            "edit",
+            serde_json::json!({"file_path": "/tmp/nx.txt", "old_string": "a", "new_string": "b"}),
+            ctx,
+        )
         .await;
     assert!(result.is_err(), "edit should be blocked");
-    assert!(result.unwrap_err().to_string().contains("Plan Mode is active"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Plan Mode is active")
+    );
     super::set_plan_mode(session, false);
 }
 
@@ -1679,9 +1688,16 @@ async fn plan_mode_blocks_bash_tool() {
         sandbox_mode: "full-access".to_string(),
     };
 
-    let result = registry.execute("bash", serde_json::json!({"command": "echo hi"}), ctx).await;
+    let result = registry
+        .execute("bash", serde_json::json!({"command": "echo hi"}), ctx)
+        .await;
     assert!(result.is_err(), "bash should be blocked");
-    assert!(result.unwrap_err().to_string().contains("Plan Mode is active"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Plan Mode is active")
+    );
     super::set_plan_mode(session, false);
 }
 
@@ -1705,7 +1721,10 @@ async fn plan_mode_allows_read_only_tools() {
 
     let result = registry.execute("ls", serde_json::json!({}), ctx).await;
     if let Err(ref e) = result {
-        assert!(!e.to_string().contains("Plan Mode is active"), "ls should not be blocked");
+        assert!(
+            !e.to_string().contains("Plan Mode is active"),
+            "ls should not be blocked"
+        );
     }
     super::set_plan_mode(session, false);
 }
@@ -1728,8 +1747,17 @@ async fn plan_mode_off_allows_all_tools() {
         sandbox_mode: "full-access".to_string(),
     };
 
-    let result = registry.execute("edit", serde_json::json!({"file_path": "/tmp/nx.txt", "old_string": "a", "new_string": "b"}), ctx).await;
+    let result = registry
+        .execute(
+            "edit",
+            serde_json::json!({"file_path": "/tmp/nx.txt", "old_string": "a", "new_string": "b"}),
+            ctx,
+        )
+        .await;
     if let Err(ref e) = result {
-        assert!(!e.to_string().contains("Plan Mode is active"), "edit should not be blocked when off");
+        assert!(
+            !e.to_string().contains("Plan Mode is active"),
+            "edit should not be blocked when off"
+        );
     }
 }
