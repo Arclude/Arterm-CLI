@@ -80,7 +80,7 @@ kanallar oldu. Üçü bulundu, üçü de kapatıldı:
 | Uç | Neydi | Ne oldu |
 |---|---|---|
 | `telemetry.arterm.sh/v1/event` | varsayılan **açık** | `ARTERM_TELEMETRY=1` ile opt-in (`6b62ba8`) |
-| `github.com/1jehuang/arterm` | var olmayan depo üzerinden self-update | `ARTERM_UPDATE_REPO` adlanana dek kapalı (`6057590`) |
+| `github.com/1jehuang/arterm` | var olmayan depo üzerinden self-update | varsayılan artık `Arclude/Arterm-CLI` (kendi release'lerimiz); `ARTERM_UPDATE_REPO` ezer, boş değer kapatır |
 | `api.arterm.sh/v1/discovery` | varsayılan **açık** | `[sponsors] enabled` ile opt-in |
 
 Discovery üçünün en ciddisiydi ve en geç fark edileni. Diğer ikisi sayaç ve

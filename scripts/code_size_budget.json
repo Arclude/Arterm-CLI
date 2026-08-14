@@ -20,7 +20,7 @@
     "crates/arterm-app-core/src/tool/selfdev/build_queue.rs": 1353,
     "crates/arterm-app-core/src/tool/session_search.rs": 1892,
     "crates/arterm-app-core/src/tool/todo.rs": 2472,
-    "crates/arterm-app-core/src/update.rs": 1778,
+    "crates/arterm-app-core/src/update.rs": 1772,
     "crates/arterm-base/src/auth/lifecycle.rs": 2593,
     "crates/arterm-base/src/auth/mod.rs": 1656,
     "crates/arterm-base/src/auth/oauth.rs": 1518,

@@ -28,31 +28,25 @@ use update_rate_limit::{clear_rate_limit_backoff, rate_limit_error};
 
 /// The repository the self-updater downloads releases from, or `None`.
 ///
-/// `None` — the default — disables self-update entirely, and that is a
-/// security default rather than a preference.
-///
-/// The rebrand rewrote upstream's `1jehuang/jcode` to `1jehuang/arterm`, a
-/// repository that does not exist. A self-updater is by construction a remote
-/// code execution path: it downloads a release asset and installs it over the
-/// running binary. Pointed at a name nobody controls, it is one repository
-/// registration away from installing an arbitrary third party's binary — and
-/// pointing it back at upstream would be no better, because it would replace
-/// this fork with jcode on the next release.
-///
-/// Set `ARTERM_UPDATE_REPO=owner/name` to re-enable it against a repository
-/// this project actually publishes.
+/// Defaults to the repository this project publishes its own releases to.
+/// `ARTERM_UPDATE_REPO=owner/name` points elsewhere (a fork, a mirror); set
+/// it EMPTY to disable self-update entirely. The default was `None` while the
+/// rebrand left the updater aimed at `1jehuang/arterm`, a name nobody owned —
+/// a self-updater installs what it downloads over the running binary, so an
+/// unowned repository name is remote code execution waiting for a squatter.
+/// With Arclude/Arterm-CLI publishing real releases, that danger is gone.
 fn update_repo() -> Option<String> {
-    std::env::var("ARTERM_UPDATE_REPO")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    match std::env::var("ARTERM_UPDATE_REPO") {
+        Err(_) => Some("Arclude/Arterm-CLI".to_string()),
+        Ok(value) => Some(value.trim().to_string()).filter(|value| !value.is_empty()),
+    }
 }
 
-/// Message returned wherever an update path is reached with no repository set.
+/// Message returned wherever an update path is reached with updates opted out.
 /// Stated rather than silent: a self-update that quietly does nothing reads as
 /// a broken updater, and the next person "fixes" it by hardcoding a repo.
-const UPDATE_DISABLED: &str = "self-update is disabled: no ARTERM_UPDATE_REPO is configured, \
-     and this build must not download releases from a repository it does not own";
+const UPDATE_DISABLED: &str =
+    "self-update is disabled: ARTERM_UPDATE_REPO is set to an empty value";
 /// Minimum gap between *automatic* update checks.
 ///
 /// Every automatic check costs one or two unauthenticated `api.github.com`
@@ -1234,24 +1228,24 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     #[test]
-    fn self_update_is_off_until_a_repository_is_named() {
-        // A self-updater downloads a release and installs it over the running
-        // binary. The rebrand left it pointed at `1jehuang/arterm`, which does
-        // not exist — one repository registration away from installing a
-        // stranger's build. It stays off until someone names a repository this
-        // project actually publishes.
+    fn self_update_defaults_to_the_repository_this_project_publishes() {
+        // The default must name a repository this project owns and releases
+        // to — an unowned name here is remote code execution waiting for a
+        // squatter, which is why the default was `None` until
+        // Arclude/Arterm-CLI published real releases.
         let previous = std::env::var("ARTERM_UPDATE_REPO").ok();
         crate::env::remove_var("ARTERM_UPDATE_REPO");
         assert_eq!(
-            update_repo(),
-            None,
-            "no repo configured must mean no updates"
+            update_repo().as_deref(),
+            Some("Arclude/Arterm-CLI"),
+            "unset must mean this project's own releases"
         );
 
-        // Whitespace is not a repository name; without the filter it would
-        // build a URL like `https://api.github.com/repos/ /releases/latest`.
+        // An empty (or whitespace) value is the explicit opt-out; without the
+        // filter it would also build URLs like
+        // `https://api.github.com/repos/ /releases/latest`.
         crate::env::set_var("ARTERM_UPDATE_REPO", "   ");
-        assert_eq!(update_repo(), None);
+        assert_eq!(update_repo(), None, "empty must mean updates off");
 
         crate::env::set_var("ARTERM_UPDATE_REPO", "acme/arterm");
         assert_eq!(update_repo().as_deref(), Some("acme/arterm"));

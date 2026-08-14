@@ -1,7 +1,7 @@
 {
-  "total": 3275,
+  "total": 3274,
   "totals_by_pattern": {
-    "dot_ok": 1221,
+    "dot_ok": 1220,
     "let_underscore": 1217,
     "unwrap_or_default": 837
   },
@@ -567,7 +567,7 @@
       "unwrap_or_default": 1
     },
     "crates/arterm-app-core/src/update.rs": {
-      "dot_ok": 3,
+      "dot_ok": 2,
       "let_underscore": 6,
       "unwrap_or_default": 10
     },
