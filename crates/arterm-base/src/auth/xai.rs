@@ -366,12 +366,35 @@ pub async fn poll_for_tokens(grant: &DeviceCodeGrant) -> Result<XaiTokens> {
     }
 }
 
+/// Exchange a refresh token for a fresh access token, serialized via the
+/// refresh coordinator.
+///
+/// Coordination matters more here than for most providers: xAI ROTATES
+/// refresh tokens, so two concurrent refreshes are not merely wasteful -- the
+/// loser presents an already-rotated refresh token and gets the user logged
+/// out. Single-flight makes the second caller reuse the winner's result.
+pub async fn refresh_tokens(current: &XaiTokens) -> Result<XaiTokens> {
+    crate::auth::refresh_coordinator::single_flight(
+        "xai".to_string(),
+        stored_tokens,
+        |stored: &XaiTokens| !needs_refresh(stored, now_unix()),
+        {
+            let observed = current.clone();
+            move |stored: Option<XaiTokens>| async move {
+                let source = stored.unwrap_or(observed);
+                refresh_tokens_uncoordinated(&source).await
+            }
+        },
+    )
+    .await
+}
+
 /// Exchange a refresh token for a fresh access token.
 ///
 /// xAI rotates refresh tokens, so a response that omits one means "keep the one
 /// you have" -- overwriting it with an empty string would log the user out at
 /// the next refresh instead.
-pub async fn refresh_tokens(current: &XaiTokens) -> Result<XaiTokens> {
+async fn refresh_tokens_uncoordinated(current: &XaiTokens) -> Result<XaiTokens> {
     if current.refresh_token.is_empty() {
         bail!("This xAI login has no refresh token; sign in again with `arterm login xai`.");
     }

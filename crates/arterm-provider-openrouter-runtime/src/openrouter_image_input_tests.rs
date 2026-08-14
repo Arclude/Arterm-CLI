@@ -61,3 +61,94 @@ fn a_coding_endpoint_profile_reports_no_image_support() {
         "the coding endpoint answers an image part with HTTP 400, on every model"
     );
 }
+
+/// A tool result with an attached image (the `read` tool on a PNG) must reach
+/// an image-capable direct profile as an `image_url` content part in a user
+/// message after the tool message. The block order the agent produces is
+/// [ToolResult, Image, Text-label] inside one user message; the builder flushes
+/// the trailing parts as their own user message.
+#[test]
+fn tool_result_images_reach_image_capable_profiles() {
+    let _lock = ENV_LOCK.lock();
+    let (api_base, request_rx) = crate::tests::spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        profile_id: Some("xai".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        ..crate::tests::make_custom_compatible_provider()
+    };
+    assert!(provider.supports_image_input());
+
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "read the image".to_string(),
+                cache_control: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_img".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({"file_path": "vision-probe.png"}),
+                thought_signature: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![
+                ContentBlock::ToolResult {
+                    tool_use_id: "call_img".to_string(),
+                    content: "Read image file: vision-probe.png".to_string(),
+                    is_error: None,
+                },
+                ContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    data: "aW1hZ2U=".to_string(),
+                },
+                ContentBlock::Text {
+                    text: "[Attached image associated with the preceding tool result: vision-probe.png]"
+                        .to_string(),
+                    cache_control: None,
+                },
+            ],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+    ];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            if event.is_err() {
+                break;
+            }
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("capture fake provider request");
+    assert!(
+        request.contains(r#""type":"image_url""#),
+        "tool-result image must be serialized as an image_url part: {request}"
+    );
+    assert!(
+        request.contains("data:image/png;base64,aW1hZ2U="),
+        "image bytes must ride along: {request}"
+    );
+}

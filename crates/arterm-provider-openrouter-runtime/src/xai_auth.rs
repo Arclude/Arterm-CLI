@@ -17,8 +17,11 @@ pub(crate) fn xai_subscription_auth(api_key_env: &str) -> Option<ProviderAuth> {
     if tokens.access_token.is_empty() {
         return None;
     }
-    Some(ProviderAuth::AuthorizationBearer {
-        token: tokens.access_token,
+    // Not the frozen access token: the bearer is minted per request (with a
+    // coordinated refresh when stale) inside ProviderAuth::apply. Freezing it
+    // here is how every session started 403-ing with bad-credentials the
+    // moment the login's first access token aged out.
+    Some(ProviderAuth::GrokSubscription {
         label: "Grok subscription".to_string(),
     })
 }

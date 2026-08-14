@@ -1304,7 +1304,7 @@ fn make_provider() -> OpenRouterProvider {
     }
 }
 
-fn make_custom_compatible_provider() -> OpenRouterProvider {
+pub(crate) fn make_custom_compatible_provider() -> OpenRouterProvider {
     OpenRouterProvider {
         client: arterm_provider_core::shared_http_client(),
         model: Arc::new(RwLock::new(DEFAULT_MODEL.to_string())),
@@ -1361,7 +1361,7 @@ fn spawn_single_response_models_server(body: &'static str) -> (String, mpsc::Rec
     (format!("http://{addr}/v1"), request_rx)
 }
 
-fn spawn_single_response_chat_server() -> (String, mpsc::Receiver<String>) {
+pub(crate) fn spawn_single_response_chat_server() -> (String, mpsc::Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider server");
     let addr = listener.local_addr().expect("fake provider addr");
     let (request_tx, request_rx) = mpsc::channel();

@@ -10,6 +10,14 @@ pub(crate) enum ProviderAuth {
         token: String,
         label: String,
     },
+    /// xAI Grok subscription login: the bearer is minted per request from the
+    /// stored OAuth tokens, refreshing them first when they are stale. A
+    /// frozen token here is how sessions died with 403 bad-credentials hours
+    /// after login -- the refresh machinery existed but nothing on the
+    /// request path called it.
+    GrokSubscription {
+        label: String,
+    },
     HeaderValue {
         header_name: HeaderName,
         value: String,
@@ -30,6 +38,10 @@ impl ProviderAuth {
     ) -> Result<reqwest::RequestBuilder> {
         match self {
             Self::AuthorizationBearer { token, .. } => Ok(req.bearer_auth(token)),
+            Self::GrokSubscription { .. } => {
+                let tokens = arterm_base::auth::xai::load_or_refresh_tokens().await?;
+                Ok(req.bearer_auth(tokens.access_token))
+            }
             Self::HeaderValue {
                 header_name, value, ..
             } => Ok(req.header(header_name, value)),
@@ -44,6 +56,7 @@ impl ProviderAuth {
     pub(crate) fn label(&self) -> &str {
         match self {
             Self::AuthorizationBearer { label, .. } => label,
+            Self::GrokSubscription { label } => label,
             Self::HeaderValue { label, .. } => label,
             Self::AzureEntra { label } => label,
             Self::None { label } => label,
