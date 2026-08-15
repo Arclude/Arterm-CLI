@@ -2247,8 +2247,8 @@ pub(in crate::tui::app) fn handle_server_event(
             error,
             ..
         } => {
-            app.remote_model_switch_in_flight = false;
             if let Some(err) = error {
+                app.remote_model_switch_in_flight = false;
                 if let Some(prepared) = app.pending_prompt_after_model_switch.take() {
                     super::input_dispatch::restore_prepared_remote_input(app, prepared);
                 }
@@ -2267,20 +2267,20 @@ pub(in crate::tui::app) fn handle_server_event(
                 ));
                 app.set_status_notice("Model switch failed");
             } else {
+                app.remember_model_choice(&model, provider_name.as_deref());
                 app.update_context_limit_for_model(&model);
                 app.remote_provider_model = Some(model.clone());
                 app.clear_remote_startup_phase();
-                if let Some(ref pname) = provider_name {
-                    app.remote_provider_name = Some(pname.clone());
-                }
+                app.remote_provider_name = provider_name
+                    .clone()
+                    .or_else(|| app.remote_provider_name.take());
                 app.invalidate_model_picker_cache();
                 if !app.auth_catalog_refresh_pending {
                     app.push_display_message(DisplayMessage::system(format!(
-                        "✓ Switched to model: {}",
-                        model
+                        "✓ Switched to model: {model}"
                     )));
                 }
-                app.set_status_notice(format!("Model → {}", model));
+                app.set_status_notice(format!("Model → {model}"));
             }
             false
         }

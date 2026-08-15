@@ -1,3 +1,5 @@
+mod persist;
+
 use super::*;
 
 /// Reroute target offered after a provider guardrail/refusal stop. Guardrail
@@ -541,22 +543,20 @@ impl App {
 
         match self.provider.set_model(&next_model) {
             Ok(()) => {
-                self.finalize_model_switch(&next_model);
+                self.finalize_user_model_switch(&next_model);
                 let auth_suffix = self
                     .provider
                     .active_auth_method_label()
                     .map(|method| format!(" (via {})", method))
                     .unwrap_or_default();
                 self.push_display_message(DisplayMessage::system(format!(
-                    "✓ Switched to model: {}{}",
-                    next_model, auth_suffix
+                    "✓ Switched to model: {next_model}{auth_suffix}"
                 )));
-                self.set_status_notice(format!("Model → {}", next_model));
+                self.set_status_notice(format!("Model → {next_model}"));
             }
             Err(e) => {
                 self.push_display_message(DisplayMessage::error(format!(
-                    "Failed to switch model: {}",
-                    e
+                    "Failed to switch model: {e}"
                 )));
                 self.set_status_notice("Model switch failed");
             }
@@ -1470,7 +1470,7 @@ pub(super) fn handle_model_command(app: &mut App, trimmed: &str) -> bool {
         let model_name = model_name.trim();
         match app.provider.set_model(model_name) {
             Ok(()) => {
-                let active_model = app.finalize_model_switch(model_name);
+                let active_model = app.finalize_user_model_switch(model_name);
                 let auth_suffix = app
                     .provider
                     .active_auth_method_label()

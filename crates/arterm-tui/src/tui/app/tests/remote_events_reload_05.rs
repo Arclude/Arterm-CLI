@@ -701,3 +701,76 @@ fn completed_cycle_rearms_auto_poke_only_when_default_on() {
         );
     });
 }
+/// A model switch the user asked for becomes the startup default; anything
+/// automatic must leave the default alone. The complaint behind this: closing
+/// arterm on one model and reopening on whatever auto-selection favored.
+///
+/// Both tests write the shared test home's config.toml, so each restores the
+/// default it touched before returning (a leftover `default_model` breaks the
+/// startup tests that assert the auto-selected fallback).
+#[test]
+fn remote_user_model_switch_becomes_startup_default() {
+    let _env = crate::storage::lock_test_env();
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+
+    app.is_remote = true;
+    app.remote_model_switch_in_flight = true;
+    app.handle_server_event(
+        crate::protocol::ServerEvent::ModelChanged {
+            id: 0,
+            model: "glm-5.2".to_string(),
+            provider_name: Some("Z.AI".to_string()),
+            error: None,
+        },
+        &mut remote,
+    );
+
+    let saved = crate::config::Config::load();
+    let result = saved.provider.default_model.clone();
+    let _ = crate::config::Config::set_default_model(None, None);
+    assert_eq!(
+        result.as_deref(),
+        Some("glm-5.2"),
+        "a user-requested switch must persist as the startup default"
+    );
+}
+
+#[test]
+fn unsolicited_remote_model_change_does_not_touch_startup_default() {
+    let _env = crate::storage::lock_test_env();
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+
+    crate::config::Config::set_default_model(Some("user-chosen-model"), None)
+        .expect("seed default");
+
+    // No switch was requested by this client: another client or a server-side
+    // failover moved the session. The user's saved choice must survive it.
+    app.is_remote = true;
+    app.remote_model_switch_in_flight = false;
+    app.handle_server_event(
+        crate::protocol::ServerEvent::ModelChanged {
+            id: 0,
+            model: "claude-opus-5".to_string(),
+            provider_name: Some("claude".to_string()),
+            error: None,
+        },
+        &mut remote,
+    );
+
+    let saved = crate::config::Config::load();
+    let result = saved.provider.default_model.clone();
+    let _ = crate::config::Config::set_default_model(None, None);
+    assert_eq!(
+        result.as_deref(),
+        Some("user-chosen-model"),
+        "an unsolicited model change must not rewrite the startup default"
+    );
+}

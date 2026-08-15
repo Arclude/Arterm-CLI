@@ -372,6 +372,11 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("glm-4.7");
             push("glm-5");
             push("glm-5.1");
+            // Present on the live coding endpoint and in daily use; its context
+            // window is already in `open_weight_family_context_limit`. Without
+            // this line a machine that cannot reach the live catalog (fresh
+            // install, bad key) showed a list that stopped at glm-5.1.
+            push("glm-5.2");
             push("glm-4.7-flash");
             push("glm-4.7-flashx");
         }
