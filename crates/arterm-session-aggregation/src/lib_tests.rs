@@ -108,7 +108,7 @@ fn paired_device_with_no_reports_still_appears_under_its_name() {
 
     let rendered = render_plain(&groups);
     assert!(rendered.contains("windows-box"));
-    assert!(rendered.contains("no sessions reported yet"));
+    assert!(rendered.contains("no sessions reported"));
     // The fingerprint is shown in the short grouped form, not the raw 64-char hex.
     assert!(rendered.contains("ABAB-ABAB-ABAB-ABAB"));
     assert!(!rendered.contains(WINDOWS_FP));

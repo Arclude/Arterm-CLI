@@ -92,7 +92,7 @@ pub(crate) async fn handle(command: DeviceCommand) -> Result<()> {
         DeviceCommand::Invite { address } => invite(address.as_deref()),
         DeviceCommand::Join { token, name } => join(&token, name.as_deref()),
         DeviceCommand::List { json } => list(json),
-        DeviceCommand::Sessions => sessions(),
+        DeviceCommand::Sessions => sessions().await,
         DeviceCommand::Forget { device } => forget(&device),
         DeviceCommand::Rename { name } => rename(&name),
         DeviceCommand::Listen { address } => super::device_peer::listen(address).await,
@@ -224,19 +224,18 @@ fn list(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn sessions() -> Result<()> {
+async fn sessions() -> Result<()> {
     let trust = TrustStore::load().context("loading the trust store")?;
     let local = crate::registry::running_local_servers_sync()
         .context("reading this machine's running servers")?;
 
-    // No transport in this build: paired devices report nothing, so they show up
-    // under their names with "no sessions reported yet". That empty state is the
-    // seam the peer transport fills — see `arterm_session_aggregation`.
-    let groups = arterm_session_aggregation::aggregate(
-        local,
-        &trust,
-        &arterm_session_aggregation::NullRemoteSessions,
-    );
+    // Ask each paired device for its sessions over the peer transport, up front
+    // and asynchronously, then aggregate. A device that is offline or not
+    // listening reports nothing and shows up under its name with "no sessions
+    // reported yet" — the same empty state as before, but now it means "asked
+    // and heard nothing" rather than "cannot ask".
+    let remote = crate::cli::device_sessions::fetch_remote_sessions(&trust).await?;
+    let groups = arterm_session_aggregation::aggregate(local, &trust, &remote);
     print!("{}", arterm_session_aggregation::render_plain(&groups));
 
     println!();
@@ -245,7 +244,8 @@ fn sessions() -> Result<()> {
         println!("Pair one with `arterm device invite` here and `arterm device join` there.");
     } else {
         println!(
-            "Remote session reporting needs the peer transport, which is not in this build yet."
+            "A paired device only reports sessions while it runs `arterm device listen` and is on \
+             this network."
         );
     }
     Ok(())

@@ -17,7 +17,9 @@ use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::ServerName;
 
-use crate::hello::{PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, read_line, write_line};
+use crate::hello::{
+    PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, RemoteServerSummary, read_line, write_line,
+};
 use crate::subnet;
 use crate::tls::{PeerCredentials, client_config};
 
@@ -53,29 +55,7 @@ pub async fn connect_to_peer(
     secret: Option<&str>,
     listen_port: Option<u16>,
 ) -> Result<PeerLink> {
-    let peer_addr = resolve_local_address(&target.address).await?;
-
-    let config = client_config(credentials, target.fingerprint.clone())?;
-    let connector = TlsConnector::from(Arc::new(config));
-
-    let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
-        .await
-        .with_context(|| format!("connecting to {peer_addr} timed out"))?
-        .with_context(|| format!("connecting to {peer_addr}"))?;
-
-    // The certificate names the machine, not the address, and the verifier
-    // ignores this value entirely — the fingerprint is the check. It is
-    // supplied only because rustls requires a name to start a handshake.
-    let server_name = ServerName::IpAddress(peer_addr.ip().into());
-    let mut stream = timeout(CONNECT_TIMEOUT, connector.connect(server_name, tcp))
-        .await
-        .with_context(|| format!("the TLS handshake with {peer_addr} timed out"))?
-        .with_context(|| {
-            format!(
-                "the TLS handshake with {peer_addr} failed — the device there may not have this \
-                 one in its trust store"
-            )
-        })?;
+    let (mut stream, peer_addr) = dial(credentials, target).await?;
 
     let hello = match secret {
         Some(secret) => PeerHello::Pair {
@@ -121,10 +101,84 @@ pub async fn connect_to_peer(
             peer_addr,
             paired_now: true,
         }),
+        PeerWelcome::Sessions { .. } => {
+            anyhow::bail!("{peer_addr} answered a session request with a session list")
+        }
         PeerWelcome::Refused { reason } => {
             anyhow::bail!("{peer_addr} refused the connection: {reason}")
         }
     }
+}
+
+/// Ask a paired device what sessions it is running, without opening one.
+///
+/// This is what populates the cross-machine session list. It is a separate
+/// round trip from [`connect_to_peer`] on purpose: the list is read for every
+/// paired device, often, and driving a session to read it would be both
+/// wasteful and visible on the far end as a connect/disconnect.
+pub async fn list_peer_sessions(
+    credentials: &PeerCredentials,
+    target: &PeerTarget,
+) -> Result<Vec<RemoteServerSummary>> {
+    let (mut stream, peer_addr) = dial(credentials, target).await?;
+
+    write_line(
+        &mut stream,
+        &PeerHello::List {
+            version: PEER_PROTOCOL_VERSION,
+            name: credentials.name().to_string(),
+        },
+    )
+    .await?;
+
+    let welcome: PeerWelcome = timeout(CONNECT_TIMEOUT, read_line(&mut stream))
+        .await
+        .with_context(|| format!("{peer_addr} accepted the connection but never answered"))?
+        .with_context(|| format!("{peer_addr} ended the connection before listing its sessions"))?;
+
+    match welcome {
+        PeerWelcome::Sessions { servers, .. } => Ok(servers),
+        PeerWelcome::Refused { reason } => {
+            anyhow::bail!("{peer_addr} refused to list its sessions: {reason}")
+        }
+        PeerWelcome::Ready { .. } | PeerWelcome::Paired { .. } => {
+            anyhow::bail!("{peer_addr} answered a session-list request with a session")
+        }
+    }
+}
+
+/// Dial a peer: resolve to a local-network address, connect, and complete the
+/// mutual-TLS handshake. Shared by [`connect_to_peer`] and
+/// [`list_peer_sessions`] — everything up to the first handshake line is the
+/// same for both.
+async fn dial(
+    credentials: &PeerCredentials,
+    target: &PeerTarget,
+) -> Result<(TlsStream<TcpStream>, SocketAddr)> {
+    let peer_addr = resolve_local_address(&target.address).await?;
+
+    let config = client_config(credentials, target.fingerprint.clone())?;
+    let connector = TlsConnector::from(Arc::new(config));
+
+    let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
+        .await
+        .with_context(|| format!("connecting to {peer_addr} timed out"))?
+        .with_context(|| format!("connecting to {peer_addr}"))?;
+
+    // The certificate names the machine, not the address, and the verifier
+    // ignores this value entirely — the fingerprint is the check. It is
+    // supplied only because rustls requires a name to start a handshake.
+    let server_name = ServerName::IpAddress(peer_addr.ip().into());
+    let stream = timeout(CONNECT_TIMEOUT, connector.connect(server_name, tcp))
+        .await
+        .with_context(|| format!("the TLS handshake with {peer_addr} timed out"))?
+        .with_context(|| {
+            format!(
+                "the TLS handshake with {peer_addr} failed — the device there may not have this \
+                 one in its trust store"
+            )
+        })?;
+    Ok((stream, peer_addr))
 }
 
 /// Resolve `address` and keep only a destination on this machine's network.

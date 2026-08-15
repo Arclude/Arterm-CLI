@@ -28,6 +28,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::cli::device_sessions::local_session_summaries;
+
 /// Serve this machine's sessions to the devices it has paired with.
 pub(crate) async fn listen(address: Option<String>) -> Result<()> {
     let identity = DeviceIdentity::load_or_create().context("loading this device's identity")?;
@@ -35,7 +37,13 @@ pub(crate) async fn listen(address: Option<String>) -> Result<()> {
     let gate = TrustGate::for_this_device()?;
     let bind = resolve_bind_address(address.as_deref())?;
 
-    let listener = PeerListener::bind(bind, &credentials, gate).await?;
+    // Answer a peer's session-list query from this machine's own registry, so
+    // `arterm device sessions` on the other side sees real sessions rather than
+    // the empty stub. Read fresh on each query — the list changes as sessions
+    // come and go.
+    let listener = PeerListener::bind(bind, &credentials, gate)
+        .await?
+        .with_local_sessions(Arc::new(local_session_summaries));
     let local_addr = listener.local_addr();
 
     println!("{} is accepting peer connections.", identity.name());
@@ -84,6 +92,16 @@ async fn serve_one_peer(admitter: PeerAdmitter, pending: PendingPeer) -> Result<
     match admitter.establish(pending).await? {
         Admitted::Rejected(rejection) => {
             println!("Refused {}: {}", rejection.peer_addr, rejection.reason);
+            Ok(())
+        }
+        Admitted::Listed {
+            peer_name,
+            peer_addr,
+            ..
+        } => {
+            // The session list was answered during the handshake; nothing more
+            // to relay.
+            println!("{peer_name} at {peer_addr} listed this machine's sessions.");
             Ok(())
         }
         Admitted::Session(session) => {

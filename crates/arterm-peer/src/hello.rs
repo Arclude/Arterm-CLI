@@ -27,6 +27,19 @@ pub const PEER_PROTOCOL_VERSION: u32 = 1;
 /// making the listener buffer without limit.
 pub const MAX_HELLO_BYTES: usize = 4096;
 
+/// One server on a peer, as it appears in another machine's session list.
+///
+/// A trimmed [`arterm_base::registry::ServerInfo`] — this crate does not depend
+/// on `arterm-base`, and the fields a remote list needs are only these. The CLI
+/// that owns both sides converts to and from `ServerInfo`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RemoteServerSummary {
+    pub name: String,
+    pub icon: String,
+    pub version: String,
+    pub sessions: Vec<String>,
+}
+
 /// What the connecting device asks for.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -48,24 +61,32 @@ pub enum PeerHello {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         listen_port: Option<u16>,
     },
+    /// Ask what sessions this device is running, without opening one. Answered
+    /// with [`PeerWelcome::Sessions`] and then the connection closes — this is
+    /// what backs the cross-machine session list, distinct from driving a
+    /// session. Only a paired device (past the fingerprint gate) may ask.
+    List { version: u32, name: String },
 }
 
 impl PeerHello {
     pub fn version(&self) -> u32 {
         match self {
-            Self::Session { version, .. } | Self::Pair { version, .. } => *version,
+            Self::Session { version, .. }
+            | Self::Pair { version, .. }
+            | Self::List { version, .. } => *version,
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
-            Self::Session { name, .. } | Self::Pair { name, .. } => name,
+            Self::Session { name, .. } | Self::Pair { name, .. } | Self::List { name, .. } => name,
         }
     }
 
     pub fn listen_port(&self) -> Option<u16> {
         match self {
             Self::Session { listen_port, .. } | Self::Pair { listen_port, .. } => *listen_port,
+            Self::List { .. } => None,
         }
     }
 }
@@ -80,6 +101,13 @@ pub enum PeerWelcome {
     /// arterm protocol, on the same connection — a second dial would prove
     /// nothing the secret has not already proved.
     Paired { version: u32, name: String },
+    /// Answer to [`PeerHello::List`]: the servers this device is running.
+    /// Nothing further is exchanged; the connection closes after this line.
+    Sessions {
+        version: u32,
+        name: String,
+        servers: Vec<RemoteServerSummary>,
+    },
     /// Nothing further will be read from this connection.
     Refused { reason: String },
 }
@@ -87,7 +115,9 @@ pub enum PeerWelcome {
 impl PeerWelcome {
     pub fn peer_name(&self) -> Option<&str> {
         match self {
-            Self::Ready { name, .. } | Self::Paired { name, .. } => Some(name),
+            Self::Ready { name, .. } | Self::Paired { name, .. } | Self::Sessions { name, .. } => {
+                Some(name)
+            }
             Self::Refused { .. } => None,
         }
     }

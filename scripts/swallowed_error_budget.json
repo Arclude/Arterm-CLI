@@ -1,9 +1,9 @@
 {
-  "total": 3274,
+  "total": 3275,
   "totals_by_pattern": {
     "dot_ok": 1220,
     "let_underscore": 1217,
-    "unwrap_or_default": 837
+    "unwrap_or_default": 838
   },
   "tracked_files": {
     "crates/arterm-app-core/src/agent.rs": {
@@ -2434,6 +2434,11 @@
     "src/cli/debug.rs": {
       "dot_ok": 0,
       "let_underscore": 1,
+      "unwrap_or_default": 1
+    },
+    "src/cli/device_sessions.rs": {
+      "dot_ok": 0,
+      "let_underscore": 0,
       "unwrap_or_default": 1
     },
     "src/cli/dispatch.rs": {

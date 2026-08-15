@@ -11,11 +11,12 @@ use std::path::Path;
 use arterm_device::invite::{Invite, PendingInvites};
 use arterm_device::{DeviceIdentity, TrustStore};
 use arterm_peer::gate::TrustGate;
+use arterm_peer::hello::RemoteServerSummary;
 use arterm_peer::hello::{PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, read_line, write_line};
 use arterm_peer::listen::{Admitted, Arrival, PeerListener, RejectionReason};
 use arterm_peer::subnet::{LocalNetwork, SubnetPolicy};
 use arterm_peer::tls::PeerCredentials;
-use arterm_peer::{PeerTarget, connect_to_peer};
+use arterm_peer::{PeerTarget, connect_to_peer, list_peer_sessions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
 
@@ -101,11 +102,20 @@ impl Device {
 
 /// Bind a listener on loopback and hand back one connection's verdict.
 async fn listen_once(device: &Device, policy: SubnetPolicy) -> (SocketAddr, JoinHandle<Admitted>) {
+    listen_once_with_sessions(device, policy, Vec::new()).await
+}
+
+async fn listen_once_with_sessions(
+    device: &Device,
+    policy: SubnetPolicy,
+    sessions: Vec<RemoteServerSummary>,
+) -> (SocketAddr, JoinHandle<Admitted>) {
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("a valid bind address");
     let listener =
         PeerListener::bind_with_policy(bind, &device.credentials(), device.gate(), policy)
             .await
-            .expect("binding the peer listener");
+            .expect("binding the peer listener")
+            .with_local_sessions(std::sync::Arc::new(move || sessions.clone()));
     let addr = listener.local_addr();
 
     let handle = tokio::spawn(async move {
@@ -135,6 +145,9 @@ fn rejection_reason(admitted: Admitted) -> RejectionReason {
             "expected a refusal, but {} was given a session",
             session.peer_name
         ),
+        Admitted::Listed { peer_name, .. } => {
+            panic!("expected a refusal, but {peer_name} was given a session list")
+        }
     }
 }
 
@@ -171,6 +184,7 @@ async fn two_paired_devices_get_a_session_and_the_stream_stays_transparent() {
         Admitted::Rejected(rejection) => {
             panic!("a paired device was refused: {}", rejection.reason)
         }
+        Admitted::Listed { .. } => panic!("expected a session, got a session list"),
     };
     assert_eq!(session.fingerprint, guest.identity.fingerprint());
     assert!(!session.paired_now);
@@ -276,6 +290,7 @@ async fn a_live_invite_pairs_the_joiner_on_its_first_connection() {
         Admitted::Rejected(rejection) => {
             panic!("the invited device was refused: {}", rejection.reason)
         }
+        Admitted::Listed { .. } => panic!("expected a session, got a session list"),
     };
     assert!(session.paired_now);
     assert_eq!(session.fingerprint, guest.identity.fingerprint());
@@ -314,6 +329,7 @@ async fn the_pairing_connection_is_itself_a_working_session() {
     let session = match listening.await.expect("the listener task") {
         Admitted::Session(session) => session,
         Admitted::Rejected(rejection) => panic!("refused: {}", rejection.reason),
+        Admitted::Listed { .. } => panic!("expected a session, got a session list"),
     };
 
     let mut client = link.stream;
@@ -727,4 +743,67 @@ async fn a_peer_speaking_another_protocol_version_is_told_which_to_update() {
 
     let reason = rejection_reason(listening.await.expect("the listener task"));
     assert!(matches!(reason, RejectionReason::Hello(_)));
+}
+
+// ---------------------------------------------------------------------------
+// The session list (List query)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_paired_device_can_list_a_peers_sessions_without_opening_one() {
+    // This is what backs `arterm device sessions`: ask the far end what it is
+    // running, get the answer, and never open a session to do it.
+    let host = Device::new();
+    let guest = Device::new();
+    host.trusts(&guest, "guest");
+    guest.trusts(&host, "host");
+
+    let advertised = vec![
+        RemoteServerSummary {
+            name: "forge".to_string(),
+            icon: "🔥".to_string(),
+            version: "v0.10.3".to_string(),
+            sessions: vec!["fox".to_string(), "owl".to_string()],
+        },
+        RemoteServerSummary {
+            name: "anvil".to_string(),
+            icon: "⚒".to_string(),
+            version: "v0.10.3".to_string(),
+            sessions: vec![],
+        },
+    ];
+
+    let (addr, listening) =
+        listen_once_with_sessions(&host, SubnetPolicy::ThisMachine, advertised.clone()).await;
+
+    let reported = list_peer_sessions(&guest.credentials(), &target_for(&host, addr))
+        .await
+        .expect("a paired device should be able to list a peer's sessions");
+
+    assert_eq!(reported, advertised, "the list is returned verbatim");
+
+    // The listener side saw a List, not a session.
+    match listening.await.expect("the listener task") {
+        Admitted::Listed { peer_name, .. } => assert_eq!(peer_name, "guest"),
+        other => panic!("a List query should be admitted as Listed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_unpaired_device_cannot_list_sessions() {
+    // Listing is a paired-only capability: an unpaired device is dropped at the
+    // fingerprint gate before the List is ever read, exactly like a session.
+    let host = Device::new();
+    let stranger = Device::new();
+    // host does not trust stranger.
+
+    let (addr, listening) =
+        listen_once_with_sessions(&host, SubnetPolicy::ThisMachine, Vec::new()).await;
+
+    let result = list_peer_sessions(&stranger.credentials(), &target_for(&host, addr)).await;
+    assert!(
+        result.is_err(),
+        "an unpaired device must not be able to list sessions"
+    );
+    let _ = listening.await;
 }

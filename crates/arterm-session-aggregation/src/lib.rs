@@ -205,8 +205,7 @@ pub fn render_plain(groups: &[DeviceGroup]) -> String {
                 out.push_str("    no local servers running\n");
             } else {
                 out.push_str(
-                    "    no sessions reported yet — the peer transport (not in this build) \
-                     will report these\n",
+                    "    no sessions reported — the device is off, not listening, or idle\n",
                 );
             }
             continue;

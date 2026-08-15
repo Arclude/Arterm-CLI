@@ -17,7 +17,9 @@ use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
 
 use crate::gate::{Admission, TrustGate};
-use crate::hello::{PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, read_line, write_line};
+use crate::hello::{
+    PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, RemoteServerSummary, read_line, write_line,
+};
 use crate::subnet::{self, SubnetPolicy};
 use crate::tls::{PeerCredentials, peer_fingerprint, server_config};
 
@@ -100,8 +102,20 @@ pub struct PeerSession {
 #[derive(Debug)]
 pub enum Admitted {
     Session(Box<PeerSession>),
+    /// A paired device asked for the session list and was answered; the
+    /// connection is closed. No session follows.
+    Listed {
+        fingerprint: Fingerprint,
+        peer_name: String,
+        peer_addr: SocketAddr,
+    },
     Rejected(Rejection),
 }
+
+/// Supplies this machine's own session list when a peer asks for it. Injected
+/// because `arterm-peer` does not depend on the session registry — the CLI that
+/// owns both hands it in. Defaults to reporting nothing.
+pub type LocalSessions = Arc<dyn Fn() -> Vec<RemoteServerSummary> + Send + Sync>;
 
 /// The handshake half of the listener, separable so it can run off the accept
 /// loop.
@@ -110,6 +124,7 @@ pub struct PeerAdmitter {
     acceptor: TlsAcceptor,
     gate: TrustGate,
     local_name: String,
+    local_sessions: LocalSessions,
 }
 
 impl PeerAdmitter {
@@ -182,6 +197,27 @@ impl PeerAdmitter {
                         .record_address(&fingerprint, address)
                         .context("recording the address a trusted peer connected from")?;
                 }
+
+                // A trusted device that only wants the session list gets it and
+                // nothing else. This is the cross-machine list's read path,
+                // kept off the session path so listing never opens a session.
+                if let PeerHello::List { .. } = hello {
+                    write_line(
+                        &mut stream,
+                        &PeerWelcome::Sessions {
+                            version: PEER_PROTOCOL_VERSION,
+                            name: self.local_name.clone(),
+                            servers: (self.local_sessions)(),
+                        },
+                    )
+                    .await?;
+                    return Ok(Admitted::Listed {
+                        fingerprint,
+                        peer_name: device.name,
+                        peer_addr,
+                    });
+                }
+
                 write_line(
                     &mut stream,
                     &PeerWelcome::Ready {
@@ -320,6 +356,7 @@ impl PeerListener {
                 acceptor,
                 gate,
                 local_name: credentials.name().to_string(),
+                local_sessions: Arc::new(Vec::new),
             },
             local_addr,
             policy,
@@ -328,6 +365,14 @@ impl PeerListener {
 
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    /// Answer session-list requests from this provider. Without it, a peer
+    /// asking for the session list is told there are none — correct for a
+    /// process that only dials out, wrong for one running the server.
+    pub fn with_local_sessions(mut self, sessions: LocalSessions) -> Self {
+        self.admitter.local_sessions = sessions;
+        self
     }
 
     /// The handshake half, cloneable into a task per connection.
