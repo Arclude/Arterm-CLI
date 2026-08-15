@@ -35,10 +35,12 @@
 
 pub mod identity;
 pub mod invite;
+pub mod join;
 pub mod trust;
 
 pub use identity::{DeviceIdentity, Fingerprint};
 pub use invite::Invite;
+pub use join::{PendingJoin, PendingJoins};
 pub use trust::{TrustStore, TrustedDevice};
 
 /// Directory holding this installation's identity and trust state.

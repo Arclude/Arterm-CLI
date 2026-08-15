@@ -35,6 +35,7 @@ members = [
     "crates/arterm-sdk",
     "crates/arterm-desktop2",
     "crates/arterm-device",
+    "crates/arterm-peer",
     "crates/arterm-memory-types",
     "crates/arterm-message-types",
     "crates/arterm-overnight-core",
@@ -182,6 +183,7 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 # PDF parsing (behind feature flag)
 arterm-build-meta = { path = "crates/arterm-build-meta" }
 arterm-device = { path = "crates/arterm-device" }
+arterm-peer = { path = "crates/arterm-peer" }
 # Tiny leaf helpers (console/env/fs/id) used directly by the cli layer.
 # Presentation layer: the terminal UI (`tui`) + offline replay (`video_export`),
 # compiled as a separate rustc unit. It re-exports the application core

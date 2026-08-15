@@ -89,17 +89,26 @@ impl TrustStore {
         self.save()
     }
 
+    /// Look a device up the way a person names it on the command line: full
+    /// fingerprint, display name, or a fingerprint prefix long enough not to
+    /// collide by accident.
+    pub fn find_by_name_or_fingerprint(&self, needle: &str) -> Option<&TrustedDevice> {
+        self.position_of(needle).map(|index| &self.devices[index])
+    }
+
+    fn position_of(&self, needle: &str) -> Option<usize> {
+        let needle = needle.trim();
+        self.devices.iter().position(|device| {
+            device.fingerprint == needle
+                || device.name == needle
+                || device.fingerprint.starts_with(needle) && needle.len() >= 8
+        })
+    }
+
     /// Remove a device by fingerprint or by name, returning what was removed.
     pub fn forget(&mut self, needle: &str) -> Result<Option<TrustedDevice>> {
-        let needle = needle.trim();
         let found = self
-            .devices
-            .iter()
-            .position(|device| {
-                device.fingerprint == needle
-                    || device.name == needle
-                    || device.fingerprint.starts_with(needle) && needle.len() >= 8
-            })
+            .position_of(needle)
             .map(|index| self.devices.remove(index));
         if found.is_some() {
             self.save()?;

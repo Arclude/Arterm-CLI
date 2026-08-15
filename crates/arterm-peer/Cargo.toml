@@ -1,0 +1,25 @@
+[package]
+name = "arterm-peer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Mutually authenticated TLS transport between two paired arterm machines"
+
+# Deliberately a separate crate from `arterm-device`, whose module docs promise
+# "no network code lives here". That crate answers identity questions offline;
+# this one is the socket, the handshake, and the subnet rule built on top of the
+# answers it gives.
+[dependencies]
+anyhow = "1"
+arterm-device = { path = "../arterm-device" }
+chrono = { version = "0.4", features = ["serde"] }
+if-addrs = "0.15"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread"] }

@@ -153,6 +153,36 @@ impl PendingInvites {
         &self.invites
     }
 
+    /// Whether this device is currently inviting anyone.
+    ///
+    /// The peer listener asks this before it will let an unrecognised
+    /// certificate finish a handshake. Pruning happens at load, so anything
+    /// still here has an open window.
+    pub fn has_live(&self) -> bool {
+        !self.invites.is_empty()
+    }
+
+    /// Spend a secret, returning whether it was live and unspent.
+    ///
+    /// Removing on success is what makes an invite single-use: the second
+    /// device to present the same secret gets `false`, whether it is a replay
+    /// on the wire or the same person pasting the token twice.
+    pub fn consume(&mut self, secret: &str) -> Result<bool> {
+        let secret = secret.trim();
+        let found = self
+            .invites
+            .iter()
+            .position(|invite| secrets_match(&invite.secret, secret));
+        match found {
+            Some(index) => {
+                self.invites.remove(index);
+                self.save()?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
     /// Drop invites whose window has closed.
     ///
     /// An unparseable timestamp counts as expired: the safe reading of "I
@@ -176,6 +206,26 @@ impl PendingInvites {
         std::fs::write(&self.path, encoded)
             .with_context(|| format!("writing pending invites to {}", self.path.display()))
     }
+}
+
+/// Compare two secrets without letting the comparison time say how much of the
+/// guess was right.
+///
+/// The secret is 128 random bits, so a timing oracle is not the likeliest way
+/// in — but it is checked by a network listener against attacker-supplied
+/// input, which is exactly the shape where `==` on a byte string is worth not
+/// writing.
+fn secrets_match(stored: &str, offered: &str) -> bool {
+    let stored = stored.as_bytes();
+    let offered = offered.as_bytes();
+    if stored.len() != offered.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (left, right) in stored.iter().zip(offered.iter()) {
+        difference |= left ^ right;
+    }
+    difference == 0
 }
 
 #[cfg(test)]
