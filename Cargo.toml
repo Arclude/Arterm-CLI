@@ -44,6 +44,7 @@ members = [
     "crates/arterm-swarm-core",
     "crates/arterm-protocol",
     "crates/arterm-selfdev-types",
+    "crates/arterm-session-aggregation",
     "crates/arterm-session-types",
     "crates/arterm-setup-hints",
     "crates/arterm-storage",
@@ -184,6 +185,9 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 arterm-build-meta = { path = "crates/arterm-build-meta" }
 arterm-device = { path = "crates/arterm-device" }
 arterm-peer = { path = "crates/arterm-peer" }
+# Joins the local session registry with the trust store into one device-grouped
+# session list; backs `arterm device sessions`. No transport dependency.
+arterm-session-aggregation = { path = "crates/arterm-session-aggregation" }
 # Tiny leaf helpers (console/env/fs/id) used directly by the cli layer.
 # Presentation layer: the terminal UI (`tui`) + offline replay (`video_export`),
 # compiled as a separate rustc unit. It re-exports the application core

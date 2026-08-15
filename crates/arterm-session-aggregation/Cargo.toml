@@ -1,0 +1,18 @@
+[package]
+name = "arterm-session-aggregation"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Aggregate running sessions across paired machines, grouped by device"
+
+# Sits above both the local session registry (arterm-base) and the trust store
+# (arterm-device), and below any live transport. It turns "local servers + the
+# devices I trust" into one device-grouped list. No network code: the peer
+# transport plugs in through the `RemoteSessionSource` trait; this crate ships
+# only the null implementation.
+[dependencies]
+arterm-base = { path = "../arterm-base" }
+arterm-device = { path = "../arterm-device" }
+
+[dev-dependencies]
+tempfile = "3"

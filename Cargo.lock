@@ -250,6 +250,7 @@ dependencies = [
  "arterm-provider-openai-runtime",
  "arterm-provider-openrouter-runtime",
  "arterm-selfdev-types",
+ "arterm-session-aggregation",
  "arterm-tui",
  "arterm-tui-session-picker",
  "arterm-tui-style",
@@ -1125,6 +1126,15 @@ dependencies = [
  "anyhow",
  "chrono",
  "serde",
+]
+
+[[package]]
+name = "arterm-session-aggregation"
+version = "0.1.0"
+dependencies = [
+ "arterm-base",
+ "arterm-device",
+ "tempfile",
 ]
 
 [[package]]

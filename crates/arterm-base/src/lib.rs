@@ -70,6 +70,7 @@ pub mod provider;
 pub mod provider_activity;
 pub mod provider_catalog;
 pub mod registry;
+pub mod registry_host;
 pub mod runtime_memory_log;
 pub mod safety;
 pub mod secret_input;

@@ -70,6 +70,9 @@ pub(crate) enum DeviceCommand {
         json: bool,
     },
 
+    /// Show sessions across this machine and paired devices, grouped by device
+    Sessions,
+
     /// Remove a device from the trust store, by name or fingerprint
     Forget {
         /// Device name, or its fingerprint
@@ -89,6 +92,7 @@ pub(crate) async fn handle(command: DeviceCommand) -> Result<()> {
         DeviceCommand::Invite { address } => invite(address.as_deref()),
         DeviceCommand::Join { token, name } => join(&token, name.as_deref()),
         DeviceCommand::List { json } => list(json),
+        DeviceCommand::Sessions => sessions(),
         DeviceCommand::Forget { device } => forget(&device),
         DeviceCommand::Rename { name } => rename(&name),
         DeviceCommand::Listen { address } => super::device_peer::listen(address).await,
@@ -216,6 +220,33 @@ fn list(json: bool) -> Result<()> {
         );
         println!("    address      {address}");
         println!("    paired       {}", device.paired_at);
+    }
+    Ok(())
+}
+
+fn sessions() -> Result<()> {
+    let trust = TrustStore::load().context("loading the trust store")?;
+    let local = crate::registry::running_local_servers_sync()
+        .context("reading this machine's running servers")?;
+
+    // No transport in this build: paired devices report nothing, so they show up
+    // under their names with "no sessions reported yet". That empty state is the
+    // seam the peer transport fills — see `arterm_session_aggregation`.
+    let groups = arterm_session_aggregation::aggregate(
+        local,
+        &trust,
+        &arterm_session_aggregation::NullRemoteSessions,
+    );
+    print!("{}", arterm_session_aggregation::render_plain(&groups));
+
+    println!();
+    if trust.devices().is_empty() {
+        println!("No paired devices yet — only this machine's sessions appear.");
+        println!("Pair one with `arterm device invite` here and `arterm device join` there.");
+    } else {
+        println!(
+            "Remote session reporting needs the peer transport, which is not in this build yet."
+        );
     }
     Ok(())
 }

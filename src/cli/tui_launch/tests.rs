@@ -140,6 +140,7 @@ fn resumed_window_title_includes_server_name_when_registry_matches_socket() {
         pid: std::process::id(),
         started_at: "2026-01-01T00:00:00Z".to_string(),
         sessions: Vec::new(),
+        host: crate::registry::ServerHost::Local,
     });
     std::fs::create_dir_all(temp_home.path()).expect("create temp home");
     std::fs::write(
