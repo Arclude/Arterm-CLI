@@ -1,0 +1,25 @@
+[package]
+name = "arterm-device"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Device identity, the trust store, and pairing invites for peer connections"
+
+# The identity is a self-signed certificate rather than a bare keypair because
+# the peer transport will authenticate with mutual TLS: minting the cert now
+# means the device keeps the same fingerprint when that lands, instead of every
+# paired device having to re-pair.
+[dependencies]
+anyhow = "1"
+arterm-core = { path = "../arterm-core" }
+arterm-storage = { path = "../arterm-storage" }
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+rand = "0.9.3"
+rcgen = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

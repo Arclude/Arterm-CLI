@@ -369,12 +369,11 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                 })?;
             }
         },
-        Some(Command::Mcp(subcmd)) => {
-            super::mcp::run_mcp_command(subcmd)?;
-        }
+        Some(Command::Mcp(subcmd)) => super::mcp::run_mcp_command(subcmd)?,
         Some(Command::Memory(subcmd)) => {
-            commands::run_memory_command(map_memory_subcommand(subcmd))?;
+            commands::run_memory_command(map_memory_subcommand(subcmd))?
         }
+        Some(Command::Device(subcmd)) => crate::cli::device::handle(subcmd)?,
         Some(Command::Session(subcmd)) => match subcmd {
             SessionCommand::Rename {
                 session,
@@ -384,11 +383,9 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
             } => commands::run_session_rename_command(&session, name.as_deref(), clear, json)?,
         },
         Some(Command::Ambient(subcmd)) => {
-            commands::run_ambient_command(map_ambient_subcommand(subcmd)).await?;
+            commands::run_ambient_command(map_ambient_subcommand(subcmd)).await?
         }
-        Some(Command::Cloud(subcmd)) => {
-            commands::run_cloud_command(map_cloud_subcommand(subcmd))?;
-        }
+        Some(Command::Cloud(subcmd)) => commands::run_cloud_command(map_cloud_subcommand(subcmd))?,
         Some(Command::Pair { list, revoke }) => {
             commands::run_pair_command(list, revoke)?;
         }

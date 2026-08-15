@@ -305,6 +305,10 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Session(SessionCommand),
 
+    /// Device identity and pairing with other machines
+    #[command(subcommand)]
+    Device(crate::cli::device::DeviceCommand),
+
     /// Ambient mode management
     #[command(subcommand)]
     Ambient(AmbientCommand),

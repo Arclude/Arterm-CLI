@@ -30,6 +30,7 @@ pub(crate) fn initial_title(args: &Args) -> String {
         Some(Command::Mcp(_)) => "arterm mcp".to_string(),
         Some(Command::Memory(_)) => "arterm memory".to_string(),
         Some(Command::Session(_)) => "arterm session".to_string(),
+        Some(Command::Device(_)) => "arterm device".to_string(),
         Some(Command::Ambient(subcommand)) => match subcommand {
             AmbientCommand::RunVisible => "arterm ambient visible".to_string(),
             _ => "arterm ambient".to_string(),
