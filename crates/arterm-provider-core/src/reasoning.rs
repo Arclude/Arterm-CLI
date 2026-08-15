@@ -98,6 +98,17 @@ pub fn inferred_reasoning_efforts(
         return GROK_SELECTABLE_EFFORTS.to_vec();
     }
 
+    // Same shape as the Grok arm, and for the same reason: a z.ai session
+    // reaches here as `zai` or `openai-compatible:zai`, neither of which the
+    // openai-compatible gate below accepts for a non-GPT model, so the ladder
+    // came back empty and the effort keys answered "not available" on
+    // glm-5.2. z.ai serves OpenAI's own vocabulary -- live-verified: an
+    // out-of-range value is rejected with "reasoning_effort must be one of:
+    // none, minimal, low, medium, high, xhigh, max".
+    if provider.contains("zai") || model.contains("glm") {
+        return OPENAI_SELECTABLE_EFFORTS.to_vec();
+    }
+
     let is_openai_model = model.starts_with("gpt-")
         || model.starts_with("o1")
         || model.starts_with("o3")
@@ -175,6 +186,26 @@ mod tests {
         );
         assert!(!GROK_SELECTABLE_EFFORTS.contains(&"max"));
         assert!(!GROK_SELECTABLE_EFFORTS.contains(&"minimal"));
+    }
+
+    #[test]
+    fn glm_ladder_is_inferred_from_model_identity() {
+        // z.ai reports either a bare `zai` provider or openai-compatible:zai;
+        // both used to fall through to an empty ladder because glm-5.2 is not
+        // a GPT-family model, which is how the effort keys went dead on GLM.
+        assert_eq!(
+            inferred_reasoning_efforts(Some("zai"), Some("glm-5.2")),
+            OPENAI_SELECTABLE_EFFORTS
+        );
+        assert_eq!(
+            inferred_reasoning_efforts(Some("openai-compatible:zai"), Some("glm-5.2")),
+            OPENAI_SELECTABLE_EFFORTS
+        );
+        // Prefixed ids from gateways serving the family reach the same rung.
+        assert_eq!(
+            inferred_reasoning_efforts(Some("openai-compatible:custom"), Some("z-ai/glm-4.7")),
+            OPENAI_SELECTABLE_EFFORTS
+        );
     }
 
     #[test]

@@ -2462,7 +2462,7 @@ mod tests;
 mod image_input_tests;
 
 #[cfg(test)]
-mod grok_effort_tests;
+mod effort_family_tests;
 
 #[cfg(test)]
 #[path = "ollama_context_tests.rs"]

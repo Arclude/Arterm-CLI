@@ -34,10 +34,18 @@ impl OpenRouterProvider {
         ) && Self::model_is_deepseek_family(&self.model_snapshot())
     }
 
-    /// GPT-family reasoning models (gpt-5.x, codex variants, o-series) accept
-    /// the standard OpenAI `reasoning_effort` request field on any
-    /// OpenAI-compatible gateway that proxies them (e.g. OpenCode Zen serving
+    /// Models that speak OpenAI's `reasoning_effort` dialect: the standard
+    /// top-level field with OpenAI's own vocabulary, on any OpenAI-compatible
+    /// gateway that proxies them (e.g. OpenCode Zen serving
     /// `gpt-5.3-codex-spark`). Real OpenRouter uses unified reasoning instead.
+    ///
+    /// That is GPT-family reasoning models (gpt-5.x, codex variants,
+    /// o-series) and z.ai's GLM family. GLM is live-verified rather than
+    /// assumed: z.ai rejects an out-of-range value with "reasoning_effort
+    /// must be one of: none, minimal, low, medium, high, xhigh, max", which
+    /// is `OPENAI_SELECTABLE_EFFORTS` exactly. `contains` for GLM for the
+    /// same reason as DeepSeek (issue #352): gateways serve the family under
+    /// prefixed ids like `z-ai/glm-5.2`.
     fn model_is_openai_reasoning_family(model: &str) -> bool {
         let model = model.trim().to_ascii_lowercase();
         model.starts_with("gpt-5")
@@ -46,6 +54,7 @@ impl OpenRouterProvider {
             || model.starts_with("o3")
             || model.starts_with("o4")
             || model.starts_with("o5")
+            || model.contains("glm")
     }
 
     /// Does this runtime accept the OpenAI-style `reasoning_effort` field for
