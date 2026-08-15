@@ -16,6 +16,7 @@ fn test_server_info(name: &str) -> ServerInfo {
         pid: std::process::id(),
         started_at: "2025-01-01T00:00:00Z".to_string(),
         sessions: Vec::new(),
+        host: ServerHost::Local,
     }
 }
 
@@ -23,6 +24,53 @@ fn test_server_info(name: &str) -> ServerInfo {
 fn test_server_info_display_name() {
     let info = test_server_info("blazing");
     assert_eq!(info.display_name(), "🔥 blazing");
+}
+
+#[test]
+fn old_servers_json_without_host_deserializes_as_local() {
+    // A registry entry written before cross-machine sessions carries no `host`
+    // key at all. It must still load, defaulting to a local server, or every
+    // pre-upgrade `servers.json` would fail to parse.
+    let old_format = r#"{
+        "blazing": {
+            "id": "server_blazing_123",
+            "name": "blazing",
+            "icon": "🔥",
+            "socket": "/tmp/blazing.sock",
+            "debug_socket": "/tmp/blazing-debug.sock",
+            "git_hash": "abc1234",
+            "version": "v0.1.123",
+            "pid": 4242,
+            "started_at": "2025-01-01T00:00:00Z",
+            "sessions": ["fix-tests"]
+        }
+    }"#;
+
+    let registry: ServerRegistry =
+        serde_json::from_str(old_format).expect("old-format servers.json must still load");
+    let info = registry
+        .find_by_name("blazing")
+        .expect("server present after loading old format");
+    assert_eq!(info.host, ServerHost::Local);
+    assert!(info.host.is_local());
+    assert_eq!(info.sessions, vec!["fix-tests".to_string()]);
+}
+
+#[test]
+fn remote_host_survives_a_registry_round_trip() {
+    let mut registry = ServerRegistry::default();
+    let mut info = test_server_info("windows-box");
+    info.host = ServerHost::remote("deadbeef", Some("192.168.1.42:7420".to_string()));
+    registry.register(info);
+
+    let encoded = serde_json::to_string(&registry).expect("serialize registry");
+    let decoded: ServerRegistry = serde_json::from_str(&encoded).expect("deserialize registry");
+    let host = &decoded
+        .find_by_name("windows-box")
+        .expect("server present after round trip")
+        .host;
+    assert_eq!(host.fingerprint(), Some("deadbeef"));
+    assert_eq!(host.address(), Some("192.168.1.42:7420"));
 }
 
 #[test]
@@ -100,6 +148,7 @@ async fn cleanup_stale_preserves_live_socket_paths() {
         pid: dead_pid,
         started_at: "2026-01-01T00:00:00Z".to_string(),
         sessions: Vec::new(),
+        host: ServerHost::Local,
     });
 
     let removed = registry.cleanup_stale().await.expect("cleanup stale");

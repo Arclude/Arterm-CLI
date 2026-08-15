@@ -828,7 +828,7 @@ impl Server {
             version: self.identity.version.clone(),
             pid: std::process::id(),
             started_at: chrono::Utc::now().to_rfc3339(),
-            sessions: Vec::new(),
+            ..Default::default()
         }
     }
 

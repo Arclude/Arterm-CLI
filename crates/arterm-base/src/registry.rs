@@ -12,8 +12,10 @@ use tokio::fs;
 
 use crate::storage::arterm_dir;
 
+pub use crate::registry_host::ServerHost;
+
 /// Information about a running server
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerInfo {
     /// Full server ID (e.g., "server_blazing_1705012345678")
     pub id: String,
@@ -36,6 +38,12 @@ pub struct ServerInfo {
     /// Session names currently on this server
     #[serde(default)]
     pub sessions: Vec<String>,
+    /// Which machine this server runs on.
+    ///
+    /// Absent in `servers.json` written before cross-machine sessions, so it
+    /// defaults to [`ServerHost::Local`] and old files still load unchanged.
+    #[serde(default)]
+    pub host: ServerHost,
 }
 
 impl ServerInfo {
@@ -64,6 +72,20 @@ impl ServerRegistry {
         let content = fs::read_to_string(&path).await?;
         let registry: Self = serde_json::from_str(&content)?;
         Ok(registry)
+    }
+
+    /// Load the registry synchronously, for callers with no async runtime
+    /// (e.g. the `arterm device` CLI, which is sync end to end).
+    ///
+    /// Unlike [`Self::load`] this does no stale-entry cleanup: it reports the
+    /// registry exactly as written. A missing file is an empty registry.
+    pub fn load_sync() -> Result<Self> {
+        let path = registry_path()?;
+        match std::fs::read_to_string(&path) {
+            Ok(content) => Ok(serde_json::from_str(&content)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Save the registry to disk
@@ -228,6 +250,22 @@ pub async fn list_servers() -> Result<Vec<ServerInfo>> {
     let mut registry = ServerRegistry::load().await?;
     registry.cleanup_stale().await?;
     Ok(registry.servers_by_time().into_iter().cloned().collect())
+}
+
+/// Live local servers, newest first, read synchronously.
+///
+/// For sync callers (the `arterm device` CLI) that want the same "only servers
+/// whose process is still alive" view [`list_servers`] gives, without an async
+/// runtime and without rewriting `servers.json` as a side effect.
+pub fn running_local_servers_sync() -> Result<Vec<ServerInfo>> {
+    let registry = ServerRegistry::load_sync()?;
+    let mut servers: Vec<ServerInfo> = registry
+        .servers
+        .into_values()
+        .filter(|info| is_process_running(info.pid))
+        .collect();
+    servers.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    Ok(servers)
 }
 
 /// Best-effort sync lookup for a server by socket path.
