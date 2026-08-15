@@ -1,5 +1,10 @@
 use super::*;
 use crate::tui::TuiState as _;
+
+// Declared here rather than in `app.rs` because that file is over the
+// oversized-file ratchet's threshold and may not grow; this one has room.
+#[path = "effort_hint.rs"]
+mod effort_hint;
 use std::cell::RefCell;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -85,50 +90,6 @@ impl App {
         Self::sanitize_remote_model_hint(self.remote_provider_model.clone())
             .or_else(|| Self::sanitize_remote_model_hint(self.session.model.clone()))
             .or_else(|| self.configured_remote_model_hint())
-    }
-
-    /// Provider/model identity used for reasoning-effort UI decisions in remote
-    /// mode. Prefers the server-reported values, falling back to the same hints
-    /// the header uses (session stub, `ARTERM_MODEL`, config default) so effort
-    /// cycling works during the pre-History bootstrap window instead of
-    /// reporting "not available" until the server payload settles.
-    pub(super) fn remote_effort_identity(&self) -> (Option<String>, Option<String>) {
-        let model = self.effective_remote_provider_model();
-        let provider = self.remote_provider_name.clone().or_else(|| {
-            model
-                .as_deref()
-                .and_then(|model| {
-                    crate::provider::provider_for_model_with_hint(model, None).map(str::to_string)
-                })
-                .or_else(|| self.configured_remote_provider_hint())
-        });
-        (provider, model)
-    }
-
-    /// Best-known current reasoning effort for the remote session. Falls back
-    /// to the configured provider-family default when the server has not
-    /// reported one yet, so pre-settle effort cycling starts from the value the
-    /// session will actually use instead of assuming the maximum.
-    pub(super) fn remote_reasoning_effort_hint(&self) -> Option<String> {
-        self.remote_reasoning_effort.clone().or_else(|| {
-            let (provider, model) = self.remote_effort_identity();
-            let provider = provider.unwrap_or_default().to_ascii_lowercase();
-            let model = model.unwrap_or_default().to_ascii_lowercase();
-            let cfg = &crate::config::config().provider;
-            if provider.contains("anthropic")
-                || provider.contains("claude")
-                || model.starts_with("claude-")
-            {
-                cfg.anthropic_reasoning_effort.clone()
-            } else if provider.contains("openai")
-                || provider.contains("codex")
-                || model.starts_with("gpt-")
-            {
-                cfg.openai_reasoning_effort.clone()
-            } else {
-                None
-            }
-        })
     }
 
     fn remote_header_provider_model(&self) -> Option<String> {

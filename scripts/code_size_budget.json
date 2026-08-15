@@ -88,7 +88,7 @@
     "crates/arterm-tui/src/tui/app/state_ui.rs": 2213,
     "crates/arterm-tui/src/tui/app/state_ui_input_helpers.rs": 2087,
     "crates/arterm-tui/src/tui/app/tui_lifecycle.rs": 1375,
-    "crates/arterm-tui/src/tui/app/tui_state.rs": 2439,
+    "crates/arterm-tui/src/tui/app/tui_state.rs": 2400,
     "crates/arterm-tui/src/tui/app/turn.rs": 1485,
     "crates/arterm-tui/src/tui/backend.rs": 1877,
     "crates/arterm-tui/src/tui/info_widget.rs": 2233,
