@@ -1976,6 +1976,11 @@
       "let_underscore": 5,
       "unwrap_or_default": 1
     },
+    "crates/arterm-tui/src/tui/app/effort_hint.rs": {
+      "dot_ok": 0,
+      "let_underscore": 0,
+      "unwrap_or_default": 2
+    },
     "crates/arterm-tui/src/tui/app/handterm_native_scroll.rs": {
       "dot_ok": 0,
       "let_underscore": 3,
@@ -2169,7 +2174,7 @@
     "crates/arterm-tui/src/tui/app/tui_state.rs": {
       "dot_ok": 5,
       "let_underscore": 0,
-      "unwrap_or_default": 6
+      "unwrap_or_default": 4
     },
     "crates/arterm-tui/src/tui/app/turn.rs": {
       "dot_ok": 0,
