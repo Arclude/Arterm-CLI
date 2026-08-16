@@ -2778,18 +2778,11 @@ impl App {
             .session_picker_overlay
             .as_ref()
             .and_then(|cell| cell.borrow().remote_device_for_session(&session_id));
-        if let Some(device) = remote_device {
-            if !self.begin_peer_session_switch(&device, session_id) {
-                // Reaching it failed and the reason is already on screen;
-                // leaving the picker open lets the user pick something else.
-                return;
-            }
-            self.session_picker_overlay = None;
-            self.session_picker_mode = SessionPickerMode::Resume;
+        if !self.begin_session_switch(remote_device.as_deref(), session_id) {
+            // Reaching it failed and the reason is already on screen; leaving
+            // the picker open lets the user pick something else.
             return;
         }
-
-        self.workspace_client.queue_resume_session(session_id);
         self.session_picker_overlay = None;
         self.session_picker_mode = SessionPickerMode::Resume;
         self.set_status_notice(format!("Switching → {}", name));

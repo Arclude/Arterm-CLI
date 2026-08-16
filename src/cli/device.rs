@@ -55,7 +55,7 @@ pub(crate) enum DeviceCommand {
 
     /// Accept an invite minted by another device
     Join {
-        /// The invite token, e.g. arterm://192.168.1.42:7420#<fingerprint>.<secret>
+        /// The invite token, e.g. arterm://192.168.1.42:7644#<fingerprint>.<secret>
         token: String,
 
         /// Label for the other device; defaults to its address until the two connect

@@ -74,10 +74,7 @@ fn session_summary_from(info: crate::tui::session_picker::SessionInfo) -> Remote
         title: info.title,
         // A session with no visible user turn yet has no prompt to show. That
         // is an empty row, not a failure to read one.
-        prompt: match info.first_user_prompt {
-            Some(prompt) => prompt,
-            None => String::new(),
-        },
+        prompt: info.first_user_prompt.unwrap_or_default(),
         message_count: info.message_count,
         user_message_count: info.user_message_count,
         assistant_message_count: info.assistant_message_count,
@@ -142,10 +139,10 @@ pub(crate) struct PreloadedRemoteSessions {
 
 impl RemoteSessionSource for PreloadedRemoteSessions {
     fn servers_for(&self, device: &TrustedDevice) -> Vec<ServerInfo> {
-        self.by_fingerprint
-            .get(&device.fingerprint)
-            .cloned()
-            .unwrap_or_default()
+        match self.by_fingerprint.get(&device.fingerprint) {
+            Some(servers) => servers.clone(),
+            None => Vec::new(),
+        }
     }
 }
 

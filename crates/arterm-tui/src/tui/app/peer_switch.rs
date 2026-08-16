@@ -12,7 +12,8 @@
 //! next tick, when [`super::remote::apply_pending_peer_switch`] swaps the socket
 //! and the run loop reconnects.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use arterm_device::identity::Fingerprint;
 use arterm_device::{DeviceIdentity, TrustStore};
@@ -22,13 +23,45 @@ use arterm_peer::tls::PeerCredentials;
 use super::{App, DisplayMessage};
 use crate::tui::workspace_client::PeerSwitch;
 
+/// The socket this client was pointed at before its first peer switch — where
+/// "back to this machine" leads.
+///
+/// Captured on the first switch rather than at startup because that is the last
+/// moment it is still true, and because a client started with its own
+/// `ARTERM_SOCKET` has to return *there*, not to the default daemon path.
+static HOME_SOCKET: OnceLock<PathBuf> = OnceLock::new();
+
 impl App {
-    /// Queue a move to `session_id` on `device`, standing up its relay first.
+    /// Route a chosen session to the machine that owns it.
     ///
-    /// Returns false when the device cannot be reached at all, so the caller can
-    /// fall back to treating the row as local rather than closing the picker on
-    /// a switch that will not happen.
-    pub(crate) fn begin_peer_session_switch(&mut self, device: &str, session_id: String) -> bool {
+    /// Returns false only when a paired device cannot be reached, so the caller
+    /// can leave the picker open on a switch that will not happen; the reason is
+    /// already on screen by then.
+    pub(crate) fn begin_session_switch(
+        &mut self,
+        device: Option<&str>,
+        session_id: String,
+    ) -> bool {
+        if let Some(device) = device {
+            return self.begin_peer_session_switch(device, session_id);
+        }
+
+        match way_home(
+            HOME_SOCKET.get().map(PathBuf::as_path),
+            &crate::server::socket_path(),
+        ) {
+            Some(home) => self.workspace_client.queue_peer_switch(PeerSwitch {
+                socket: home.to_path_buf(),
+                session_id: Some(session_id),
+                device: "this machine".to_string(),
+            }),
+            None => self.workspace_client.queue_resume_session(session_id),
+        }
+        true
+    }
+
+    /// Queue a move to `session_id` on `device`, standing up its relay first.
+    fn begin_peer_session_switch(&mut self, device: &str, session_id: String) -> bool {
         let target = match resolve_target(device) {
             Ok(target) => target,
             Err(reason) => {
@@ -79,6 +112,10 @@ impl App {
         restrict_to_owner(&socket);
         spawn_relay(listener, credentials, Arc::new(target));
 
+        // Remember where we came from before leaving, so a local session picked
+        // later can bring the client back.
+        let _remembered = HOME_SOCKET.set(crate::server::socket_path());
+
         self.workspace_client.queue_peer_switch(PeerSwitch {
             socket,
             session_id: Some(session_id),
@@ -86,6 +123,20 @@ impl App {
         });
         true
     }
+}
+
+/// The socket a locally-owned session has to be resumed on, or `None` when the
+/// client is already there.
+///
+/// A local row chosen while pointed at a peer is the case that matters: the id
+/// belongs to this machine's store, and sending it as-is asks the other machine
+/// to resume a session it has never heard of — which is what made the move a
+/// one-way door.
+fn way_home<'a>(
+    home: Option<&'a std::path::Path>,
+    current: &std::path::Path,
+) -> Option<&'a std::path::Path> {
+    home.filter(|home| *home != current)
 }
 
 /// Where to reach `device`, from the trust store.
@@ -157,3 +208,7 @@ fn restrict_to_owner(path: &std::path::Path) {
         let _unused = path;
     }
 }
+
+#[cfg(test)]
+#[path = "peer_switch_tests.rs"]
+mod peer_switch_tests;
