@@ -229,10 +229,25 @@ ls -lh "$out_dir/$artifact" "$out_dir/$artifact.tar.gz"
 # artifact built at 268913473 reporting c9ccb4f01). Provenance that is wrong is
 # worse than provenance that is missing.
 if [[ -n "$git_hash" ]]; then
+  # This probe launches the binary that is about to be released, so its failure
+  # is the release's failure — but `2>/dev/null` plus `set -o pipefail` used to
+  # turn that into a bare "exit 101" with no reason attached. v0.10.5 lost a
+  # 35-minute build to exactly that: the binary exited non-zero here, the
+  # release job died, and the log said nothing about why.
+  probe_log="$out_dir/$artifact.version-probe.log"
+  probe_status=0
+  probe_out="$("$out_dir/$artifact.bin" --no-update --no-selfdev version 2>"$probe_log")" \
+    || probe_status=$?
+  if (( probe_status != 0 )); then
+    echo "error: the built binary exited $probe_status when asked for its version" >&2
+    echo "       (it is about to be published, so this is fatal; its output follows)" >&2
+    sed -e 's/^/       /' "$probe_log" >&2
+    exit 1
+  fi
+
   # `version` prints e.g. "version\tv0.61.2 (268913473)", so take the whole
   # value rather than just the first whitespace-separated field.
-  embedded="$("$out_dir/$artifact.bin" --no-update --no-selfdev version 2>/dev/null \
-    | awk -F'\t' '$1 == "version" { print $2; exit }')"
+  embedded="$(printf '%s\n' "$probe_out" | awk -F'\t' '$1 == "version" { print $2; exit }')"
   if [[ -n "$embedded" && "$embedded" != *"$git_hash"* ]]; then
     echo "error: embedded build metadata reports '$embedded' but the tree is at '$git_hash'" >&2
     echo "       (stale build cache; re-run after 'cargo clean' or bump ARTERM_BUILD_GIT_HASH)" >&2
