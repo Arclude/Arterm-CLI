@@ -1,0 +1,20 @@
+{
+  "version": "0.10.6",
+  "date": "2026-08-17",
+  "title": "Pairing two machines is one screen",
+  "highlights": [
+    "`/device` pairs this machine with another one nearby: open it on both, pick the other machine from the list, type the six-digit code it shows",
+    "A paired machine is reachable because arterm is running, not because someone is holding a second terminal open on `arterm device listen`",
+    "Machines announce themselves on the local network while that screen is open, so there is no address to find and no token to carry between computers"
+  ],
+  "improvements": [
+    "The device list answers 'which machines are mine' before 'which are here': a machine that is both appears once, and a paired machine that is asleep stays listed rather than looking gone",
+    "The pairing screen says when this machine has no address to be reached at, or when its announcements are not leaving the network, instead of showing an empty list",
+    "Every command arterm answers to now appears when you type `/` — `/hosted` and `/debug-fixture` worked but were listed nowhere"
+  ],
+  "fixes": [
+    "'arterm device sessions' reported every machine as idle, local and remote alike: the session list was filtered against a field nothing in arterm ever wrote to, so the cross-machine session list could never appear",
+    "The peer listener bound to whatever network interface sorted first by name, which on a machine running a VPN meant an address no other machine on the network could reach — pairing and listening both pointed nowhere, without an error",
+    "'arterm device join --help' advertised port 7420; the default is 7644"
+  ]
+}
