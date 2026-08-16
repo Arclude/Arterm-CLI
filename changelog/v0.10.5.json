@@ -1,0 +1,15 @@
+{
+  "version": "0.10.5",
+  "date": "2026-08-16",
+  "title": "The Windows build ships again",
+  "highlights": [
+    "Nothing has changed for users since 0.10.4. This release exists because 0.10.4 published without its Windows binaries, and because a release should be reproducible from its own tag"
+  ],
+  "improvements": [
+    "Windows x86_64 is published again, through the release pipeline rather than by hand"
+  ],
+  "fixes": [
+    "The release pipeline withheld the Windows x86_64 binary whenever the Windows ARM64 build failed: both were packaged in a single step that stopped at the first missing file, and the run still reported success",
+    "Windows ARM64 still does not build, so this release ships every platform except that one"
+  ]
+}
