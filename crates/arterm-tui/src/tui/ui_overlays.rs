@@ -854,3 +854,139 @@ fn choice_span(label: &str, selected: bool, color: Color) -> Span<'static> {
         Span::styled(format!("  {label}  "), Style::default().fg(dim_color()))
     }
 }
+
+/// The device pairing screen.
+///
+/// Both machines show the same thing, which is the point: this machine's code
+/// at the top, everything it can see below it. Nobody has to know whether they
+/// are the one inviting or the one joining.
+pub(super) fn draw_device_pairing(frame: &mut Frame, app: &dyn TuiState) {
+    let Some(view) = app.device_pairing() else {
+        return;
+    };
+    let full = frame.area();
+    // Header, a blank, the list, a blank, the status, the key hint, two
+    // borders. Below that the list would have no room to be a list.
+    let needed_height = view.rows.len().max(1) as u16 + 9;
+    if full.width < 40 || full.height < 12 {
+        return;
+    }
+
+    let width = full.width.saturating_sub(4).min(76);
+    let height = needed_height.min(full.height.saturating_sub(2));
+    let area = Rect {
+        x: full.x + full.width.saturating_sub(width) / 2,
+        y: full.y + full.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    clear_area(frame, area);
+
+    let accent = rgb(140, 200, 255);
+    let muted = dim_color();
+    let mut body: Vec<Line> = Vec::new();
+
+    body.push(Line::from(vec![
+        Span::styled("  This machine  ", Style::default().fg(muted)),
+        Span::styled(
+            view.name.to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {}", view.fingerprint),
+            Style::default().fg(muted),
+        ),
+    ]));
+    body.push(pairing_code_line(&view, accent, muted));
+    body.push(Line::from(""));
+
+    if view.rows.is_empty() {
+        body.push(Line::from(Span::styled(
+            "  Looking for machines on this network…",
+            Style::default().fg(muted),
+        )));
+        body.push(Line::from(Span::styled(
+            "  Open this screen on the other machine too.",
+            Style::default().fg(muted),
+        )));
+    } else {
+        for (index, row) in view.rows.iter().enumerate() {
+            body.push(device_row_line(row, index == view.selected, accent, muted));
+        }
+    }
+
+    body.push(Line::from(""));
+    if let Some(status) = view.status {
+        body.push(Line::from(Span::styled(
+            format!("  {status}"),
+            Style::default().fg(accent),
+        )));
+    }
+    body.push(Line::from(Span::styled(
+        "  ↑/↓ choose · Enter pair · digits type the code · Esc close",
+        Style::default().fg(muted),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(accent))
+        .title(Span::styled(
+            " Devices ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ));
+    frame.render_widget(Paragraph::new(body).block(block), area);
+}
+
+/// The code this machine is showing, or why it has none.
+///
+/// A machine with no address cannot be connected to, so six digits would be a
+/// promise it cannot keep; a machine whose beacons are not leaving will never
+/// appear on the other screen no matter how long anyone waits. Both are worth
+/// more than a blank line.
+fn pairing_code_line(
+    view: &crate::tui::DevicePairingView<'_>,
+    accent: Color,
+    muted: Color,
+) -> Line<'static> {
+    let Some(address) = view.address else {
+        return Line::from(Span::styled(
+            "  Not on a network, so nothing can reach this machine.",
+            Style::default().fg(dim_color()),
+        ));
+    };
+    if !view.announcing {
+        return Line::from(Span::styled(
+            format!("  {address} · not announcing yet on this network"),
+            Style::default().fg(muted),
+        ));
+    }
+    Line::from(vec![
+        Span::styled("  Pairing code  ", Style::default().fg(muted)),
+        Span::styled(
+            view.code.clone(),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("   {address}"), Style::default().fg(muted)),
+    ])
+}
+
+/// One machine, with what it is and what it is waiting for.
+fn device_row_line(
+    row: &crate::tui::device_pairing::DeviceRow,
+    selected: bool,
+    accent: Color,
+    muted: Color,
+) -> Line<'static> {
+    let marker = if selected { "›" } else { " " };
+    let name_style = if selected {
+        Style::default().fg(accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    Line::from(vec![
+        Span::styled(format!(" {marker} "), Style::default().fg(accent)),
+        Span::styled(format!("{:<22}", row.name), name_style),
+        Span::styled(format!("{:<22}", row.address), Style::default().fg(muted)),
+        Span::styled(row.state.label().to_string(), Style::default().fg(muted)),
+    ])
+}

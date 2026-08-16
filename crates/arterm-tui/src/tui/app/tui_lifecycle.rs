@@ -350,9 +350,7 @@ impl App {
     ) -> Self {
         let skills = Arc::new(SkillRegistry::default());
         let mcp_manager = Arc::new(RwLock::new(McpManager::new()));
-        if session.model.is_none() {
-            session.model = Some(provider.model());
-        }
+        session.model.get_or_insert_with(|| provider.model());
         if session.provider_key.is_none() {
             session.provider_key = crate::session::derive_session_provider_key(provider.name());
         }
@@ -738,6 +736,7 @@ impl App {
             model_status_scroll: None,
             model_status_content: String::new(),
             session_picker_overlay: None,
+            device_pairing: None,
             session_picker_mode: SessionPickerMode::Resume,
             pending_session_picker_load: None,
             settings_overlay: None,
@@ -1187,6 +1186,7 @@ impl App {
             model_status_scroll: None,
             model_status_content: String::new(),
             session_picker_overlay: None,
+            device_pairing: None,
             session_picker_mode: SessionPickerMode::Resume,
             pending_session_picker_load: None,
             settings_overlay: None,

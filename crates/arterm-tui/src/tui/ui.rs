@@ -3557,6 +3557,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // A pending destructive confirmation outranks every other late overlay: it
     // is modal, and it is drawn over the transcript it is about to delete from.
     overlays::draw_memory_clean_confirm(frame, app);
+    overlays::draw_device_pairing(frame, app);
 
     // Observe the rendered messages area for the anchor-stability (smoothness)
     // report. Runs on the final buffer so it sees exactly what the user sees.

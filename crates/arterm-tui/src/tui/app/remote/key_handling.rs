@@ -292,6 +292,9 @@ async fn handle_remote_key_internal(
     // This path duplicates the local modal chain rather than calling it, so the
     // confirmation has to be armed here too — an ordinary session is a client,
     // and wiring only the local path left the modal on screen but deaf.
+    if app_mod::commands::commands_device::handle_pairing_key(app, code) {
+        return Ok(());
+    }
     if app_mod::commands::commands_memory::handle_pending_confirm_key(app, code) {
         return Ok(());
     }

@@ -1635,6 +1635,7 @@ pub struct App {
     model_status_content: String,
     /// Session picker overlay (None = not visible)
     session_picker_overlay: Option<RefCell<super::session_picker::SessionPicker>>,
+    pub(crate) device_pairing: Option<Box<super::device_pairing::DevicePairing>>,
     /// `/config` display-settings overlay (None = not visible).
     pub(crate) settings_overlay: Option<super::settings_overlay::SettingsOverlay>,
     /// The `/mcp` server-status overlay, when it is open.

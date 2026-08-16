@@ -117,6 +117,9 @@ pub(super) fn disable_auto_poke(app: &mut App) -> usize {
     cleared
 }
 
+#[path = "commands_device.rs"]
+pub(super) mod commands_device;
+
 #[path = "commands_memory.rs"]
 pub(super) mod commands_memory;
 
@@ -1860,6 +1863,10 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
     }
 
     if commands_memory::handle_memory_command(app, trimmed) {
+        return true;
+    }
+
+    if commands_device::handle_device_command(app, trimmed) {
         return true;
     }
 

@@ -17,6 +17,7 @@ pub(crate) mod fuzzy;
 // so existing `crate::tui::image` / `crate::tui::image_metadata` paths keep working.
 pub use arterm_terminal_image::display as image;
 use arterm_terminal_image::metadata as image_metadata;
+pub mod device_pairing;
 pub mod info_widget;
 mod info_widget_layout;
 mod info_widget_overview;
@@ -28,6 +29,7 @@ pub mod login_picker;
 pub mod markdown;
 pub mod mcp_picker;
 pub mod memory_clean_view;
+pub use device_pairing::{DevicePairing, DevicePairingView};
 pub use memory_clean_view::MemoryCleanConfirmView;
 mod memory_profile;
 pub mod mermaid;
@@ -646,6 +648,10 @@ pub trait TuiState {
     }
     /// The `/memory clean` confirmation, when one is waiting on an answer.
     fn memory_clean_confirm(&self) -> Option<MemoryCleanConfirmView<'_>> {
+        None
+    }
+    /// The device pairing screen, while it is open.
+    fn device_pairing(&self) -> Option<DevicePairingView<'_>> {
         None
     }
     /// Whether anyone has said anything yet in this session.

@@ -14,7 +14,7 @@
 //! of minutes, not a standing key that grants pairing forever.
 
 use anyhow::{Context, Result};
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
 
 use crate::identity::Fingerprint;
@@ -41,6 +41,21 @@ pub struct PendingInvite {
     pub secret: String,
     pub address: String,
     pub expires_at: String,
+    /// Wrong guesses this invite will survive before it is torn up.
+    ///
+    /// A 16-byte hex secret does not need this; a six-digit code does. What
+    /// makes a short code safe is not its length but that it cannot be tried
+    /// many times: five wrong guesses out of a million is not a search.
+    #[serde(default = "default_attempts")]
+    pub attempts_left: u32,
+}
+
+/// How many wrong secrets an invite tolerates before it stops existing.
+const PAIRING_ATTEMPTS: u32 = 5;
+
+/// Invites written before this field existed still get a full allowance.
+fn default_attempts() -> u32 {
+    PAIRING_ATTEMPTS
 }
 
 impl Invite {
@@ -57,6 +72,41 @@ impl Invite {
             fingerprint,
             secret: hex::encode(secret),
         })
+    }
+
+    /// Mint an invite whose secret is a six-digit code, for pairing where the
+    /// other machine is chosen from a list rather than told an address.
+    ///
+    /// The long secret exists because a token is the *only* thing the other
+    /// side receives. When the address and fingerprint arrive by discovery, the
+    /// code carries less: it just has to prove that the person choosing this
+    /// machine is looking at this screen. Everything else — that the machine is
+    /// the one it claims to be, that it holds the matching key — is settled by
+    /// mutual TLS afterwards.
+    ///
+    /// Short is safe here only because it is also brief and few: the invite
+    /// expires with its window, and five wrong guesses tear it up (see
+    /// [`PendingInvites::consume`]).
+    pub fn mint_code(address: &str, fingerprint: Fingerprint) -> Result<Self> {
+        let address = address.trim();
+        if address.is_empty() {
+            anyhow::bail!("an invite needs an address the other device can reach");
+        }
+        let code: u32 = rand::rng().random_range(0..1_000_000);
+        Ok(Self {
+            address: address.to_string(),
+            fingerprint,
+            secret: format!("{code:06}"),
+        })
+    }
+
+    /// The secret as a person reads it aloud: `418 902`.
+    pub fn spaced_secret(&self) -> String {
+        if self.secret.len() == 6 && self.secret.chars().all(|ch| ch.is_ascii_digit()) {
+            format!("{} {}", &self.secret[..3], &self.secret[3..])
+        } else {
+            self.secret.clone()
+        }
     }
 
     /// Render as the single string that gets copied to the other machine.
@@ -145,6 +195,7 @@ impl PendingInvites {
             secret: invite.secret.clone(),
             address: invite.address.clone(),
             expires_at: expires_at.to_rfc3339(),
+            attempts_left: PAIRING_ATTEMPTS,
         });
         self.save()
     }
@@ -167,6 +218,11 @@ impl PendingInvites {
     /// Removing on success is what makes an invite single-use: the second
     /// device to present the same secret gets `false`, whether it is a replay
     /// on the wire or the same person pasting the token twice.
+    ///
+    /// A wrong secret costs every live invite one of its attempts, and an
+    /// invite that runs out is dropped. Without that, a short pairing code
+    /// could simply be guessed at until the window closed; with it, the whole
+    /// window is worth five tries.
     pub fn consume(&mut self, secret: &str) -> Result<bool> {
         let secret = secret.trim();
         let found = self
@@ -179,7 +235,14 @@ impl PendingInvites {
                 self.save()?;
                 Ok(true)
             }
-            None => Ok(false),
+            None => {
+                for invite in &mut self.invites {
+                    invite.attempts_left = invite.attempts_left.saturating_sub(1);
+                }
+                self.invites.retain(|invite| invite.attempts_left > 0);
+                self.save()?;
+                Ok(false)
+            }
         }
     }
 

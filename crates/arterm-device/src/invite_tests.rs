@@ -92,6 +92,7 @@ fn expired_invites_are_dropped_on_load() {
         secret: "deadbeef".to_string(),
         address: "192.168.1.42:7420".to_string(),
         expires_at: stale.to_rfc3339(),
+        attempts_left: 5,
     }])
     .expect("encode");
     std::fs::write(&path, encoded).expect("write");
@@ -113,6 +114,7 @@ fn an_invite_with_an_unreadable_expiry_counts_as_expired() {
         secret: "deadbeef".to_string(),
         address: "192.168.1.42:7420".to_string(),
         expires_at: "whenever".to_string(),
+        attempts_left: 5,
     }])
     .expect("encode");
     std::fs::write(&path, encoded).expect("write");
@@ -136,4 +138,59 @@ fn a_damaged_invite_file_is_an_error_not_an_empty_list() {
 
     let error = PendingInvites::load_at(path).expect_err("malformed file must fail");
     assert!(error.to_string().contains("malformed"), "{error}");
+}
+
+/// A six-digit code is only safe because it cannot be tried many times. This is
+/// the property that makes the whole discovery-based pairing flow acceptable,
+/// so it is pinned rather than left to the reader of `consume`.
+#[test]
+fn a_short_code_survives_only_a_handful_of_wrong_guesses() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("invites.json");
+    let mut invites = PendingInvites::load_at(path.clone()).expect("load");
+
+    let invite = Invite::mint_code("192.168.1.100:7644", fingerprint()).expect("mint");
+    invites.record(&invite).expect("record");
+
+    for attempt in 0..5 {
+        assert!(
+            !invites.consume("000000").expect("consume"),
+            "guess {attempt} must be refused"
+        );
+    }
+
+    assert!(
+        !invites.consume(&invite.secret).expect("consume"),
+        "the invite must be gone after five wrong guesses, even for the right code"
+    );
+}
+
+/// Guessing must cost something, but not everything: a correct code inside the
+/// allowance still pairs.
+#[test]
+fn a_wrong_guess_does_not_burn_the_invite_outright() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("invites.json");
+    let mut invites = PendingInvites::load_at(path).expect("load");
+
+    let invite = Invite::mint_code("192.168.1.100:7644", fingerprint()).expect("mint");
+    invites.record(&invite).expect("record");
+
+    assert!(!invites.consume("999999").expect("consume"));
+    assert!(
+        invites.consume(&invite.secret).expect("consume"),
+        "one mistyped digit must not cost the pairing"
+    );
+}
+
+/// The code is what a person reads off one screen and types into another, so
+/// its shape matters: always six digits, leading zeros kept.
+#[test]
+fn a_minted_code_is_always_six_digits() {
+    for _ in 0..200 {
+        let invite = Invite::mint_code("192.168.1.100:7644", fingerprint()).expect("mint");
+        assert_eq!(invite.secret.len(), 6, "{}", invite.secret);
+        assert!(invite.secret.chars().all(|ch| ch.is_ascii_digit()));
+        assert_eq!(invite.spaced_secret().len(), 7);
+    }
 }
