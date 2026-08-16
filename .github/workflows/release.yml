@@ -394,7 +394,18 @@ jobs:
             @{ Name = 'arterm-windows-aarch64'; Path = 'artifacts/windows-unsigned-aarch64/arterm-windows-aarch64.exe' }
           )
 
+          $published = @()
           foreach ($asset in $assets) {
+            # One architecture failing to build must not suppress the other.
+            # In v0.10.4 the ARM64 build died in tract-linalg, this loop threw
+            # on the first missing file, and the x86_64 binary — which had
+            # built cleanly — was never published either. The release job that
+            # follows reports per-platform availability, so a partial Windows
+            # release is a reported outcome rather than a broken one.
+            if (-not (Test-Path -LiteralPath $asset.Path)) {
+              Write-Warning "No binary for $($asset.Name); skipping it."
+              continue
+            }
             $source = (Resolve-Path -LiteralPath $asset.Path).Path
             if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
               $signature = Get-AuthenticodeSignature -LiteralPath $source
@@ -407,7 +418,13 @@ jobs:
             $destination = Join-Path dist "$($asset.Name).exe"
             Copy-Item -LiteralPath $source -Destination $destination -Force
             tar -czf "dist/$($asset.Name).tar.gz" -C dist "$($asset.Name).exe"
+            $published += $asset.Name
           }
+
+          if ($published.Count -eq 0) {
+            throw 'No Windows binaries were produced by any architecture.'
+          }
+          Write-Host "Packaged: $($published -join ', ')"
 
       - name: Upload final Windows artifacts
         uses: actions/upload-artifact@v4
@@ -421,6 +438,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arterm-windows-aarch64
+          # Explicit rather than relying on the action's default: when ARM64
+          # does not build there is nothing here, and that must stay a warning.
+          if-no-files-found: warn
           path: |
             dist/arterm-windows-aarch64.exe
             dist/arterm-windows-aarch64.tar.gz
@@ -431,7 +451,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release upload "${env:GITHUB_REF_NAME}" dist/arterm-windows-x86_64.exe dist/arterm-windows-x86_64.tar.gz dist/arterm-windows-aarch64.exe dist/arterm-windows-aarch64.tar.gz --clobber
+          # Whatever the packaging step produced, not a fixed list: naming the
+          # ARM64 files here would fail the upload — and withhold x86_64 —
+          # every time ARM64 does not build.
+          $files = @(Get-ChildItem -Path dist -File | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) {
+            throw 'No Windows assets to publish.'
+          }
+          gh release upload "${env:GITHUB_REF_NAME}" @files --clobber
 
   build-freebsd:
     name: Build (x86_64-unknown-freebsd)
