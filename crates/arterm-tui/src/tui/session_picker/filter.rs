@@ -393,3 +393,30 @@ impl SessionPicker {
         self.rebuild_items();
     }
 }
+
+impl SessionPicker {
+    /// Whether the picker is still showing its "Loading sessions…" placeholder.
+    ///
+    /// Lets a caller tell a load that ended before producing anything from one
+    /// that finished and then closed its channel — which is ordinary, because
+    /// the list is delivered in two parts: local rows immediately, then any
+    /// paired machines' rows once they answer.
+    pub(crate) fn is_loading(&self) -> bool {
+        self.loading_message.is_some()
+    }
+}
+
+impl SessionPicker {
+    /// The paired device a session belongs to, if it is not on this machine.
+    ///
+    /// Read from the row rather than by asking the trust store again: the list
+    /// on screen is what the user chose from, and a device renamed since the
+    /// list was built should not silently redirect the switch.
+    pub(crate) fn remote_device_for_session(&self, session_id: &str) -> Option<String> {
+        self.all_server_groups
+            .iter()
+            .flat_map(|group| group.sessions.iter())
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.server_name.clone())
+    }
+}

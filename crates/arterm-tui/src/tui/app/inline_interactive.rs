@@ -2332,9 +2332,31 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.pending_session_picker_load = Some(super::PendingSessionPickerLoad { receiver: rx });
 
-        tokio::task::spawn_blocking(move || {
-            let result = session_picker::load_sessions_grouped();
-            let _ = tx.send(result);
+        tokio::spawn(async move {
+            let local = tokio::task::spawn_blocking(session_picker::load_sessions_grouped)
+                .await
+                .unwrap_or_else(|join| Err(anyhow::anyhow!("session load task failed: {join}")));
+
+            // Local first, so a sleeping paired machine cannot hold the list
+            // behind its TLS timeout. The remote rows land as a second message
+            // and reseed the open picker in place.
+            //
+            // A closed channel means the picker is gone, which is reason enough
+            // not to go dialling other machines for a list nobody is reading.
+            let local_failed = local.is_err();
+            if tx.send(local).is_err() || local_failed {
+                return;
+            }
+
+            let Some(group) = session_picker::remote_devices::fetch().await else {
+                return;
+            };
+            if let Ok(Ok((mut groups, orphans))) =
+                tokio::task::spawn_blocking(session_picker::load_sessions_grouped).await
+            {
+                groups.push(group);
+                let _ = tx.send(Ok((groups, orphans)));
+            }
         });
     }
 
@@ -2439,7 +2461,9 @@ impl App {
 
         match recv_result {
             Ok(Ok((server_groups, orphan_sessions))) => {
-                self.pending_session_picker_load = None;
+                // Deliberately left armed: the load sends the local rows first
+                // and any paired machines' rows after, so a second message is
+                // expected. The channel closing is what ends the wait.
                 if picker_active {
                     return self.apply_loaded_session_picker(server_groups, orphan_sessions);
                 }
@@ -2461,7 +2485,14 @@ impl App {
             Err(std::sync::mpsc::TryRecvError::Empty) => false,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.pending_session_picker_load = None;
-                if picker_active {
+                // A closed channel after rows have already landed is the load
+                // finishing, not failing. Only a picker still on its loading
+                // placeholder was left with nothing.
+                let still_waiting = self
+                    .session_picker_overlay
+                    .as_ref()
+                    .is_some_and(|cell| cell.borrow().is_loading());
+                if picker_active && still_waiting {
                     self.session_picker_overlay = None;
                     self.push_display_message(DisplayMessage::error(
                         "Session loading stopped before returning a result.".to_string(),
@@ -2741,6 +2772,23 @@ impl App {
                 name
             )));
         }
+        // A row from a paired machine resumes over there, not here. Read the
+        // device off the list the user chose from, before the overlay goes.
+        let remote_device = self
+            .session_picker_overlay
+            .as_ref()
+            .and_then(|cell| cell.borrow().remote_device_for_session(&session_id));
+        if let Some(device) = remote_device {
+            if !self.begin_peer_session_switch(&device, session_id) {
+                // Reaching it failed and the reason is already on screen;
+                // leaving the picker open lets the user pick something else.
+                return;
+            }
+            self.session_picker_overlay = None;
+            self.session_picker_mode = SessionPickerMode::Resume;
+            return;
+        }
+
         self.workspace_client.queue_resume_session(session_id);
         self.session_picker_overlay = None;
         self.session_picker_mode = SessionPickerMode::Resume;

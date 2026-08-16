@@ -120,6 +120,9 @@ pub(super) fn disable_auto_poke(app: &mut App) -> usize {
 #[path = "commands_memory.rs"]
 pub(super) mod commands_memory;
 
+#[path = "peer_switch.rs"]
+mod peer_switch;
+
 #[path = "commands_auto_poke_errors.rs"]
 mod auto_poke_errors;
 pub(super) use auto_poke_errors::is_non_retryable_auto_poke_error;

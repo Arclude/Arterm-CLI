@@ -22,6 +22,8 @@ path = "src/lib.rs"
 # Re-exported via `pub use arterm_app_core::*` in lib.rs. default-features=false
 # so this crate (and ultimately the root crate) controls app-core's features.
 arterm-app-core = { path = "../arterm-app-core", default-features = false }
+arterm-device = { path = "../arterm-device" }
+arterm-peer = { path = "../arterm-peer" }
 
 # Pure math kernels for the idle animations (3D samplers, glyph chooser,
 # HSV->RGB). Pinned to opt-level = 3 in all profiles via workspace Cargo.toml so

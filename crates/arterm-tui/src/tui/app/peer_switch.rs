@@ -1,0 +1,159 @@
+//! Opening a session that lives on a paired machine.
+//!
+//! The client never speaks the peer protocol itself. It puts a local socket in
+//! front of the peer, points `ARTERM_SOCKET` at it, and reconnects — after
+//! which the ordinary remote path is talking to the other machine's server
+//! without knowing it. That is the same shape `arterm device connect` uses from
+//! the shell, and it reuses the same splice
+//! ([`arterm_peer::relay_local_stream`]) rather than a second implementation of
+//! it.
+//!
+//! Setting up the relay is all this module does. The actual move happens on the
+//! next tick, when [`super::remote::apply_pending_peer_switch`] swaps the socket
+//! and the run loop reconnects.
+
+use std::sync::Arc;
+
+use arterm_device::identity::Fingerprint;
+use arterm_device::{DeviceIdentity, TrustStore};
+use arterm_peer::PeerTarget;
+use arterm_peer::tls::PeerCredentials;
+
+use super::{App, DisplayMessage};
+use crate::tui::workspace_client::PeerSwitch;
+
+impl App {
+    /// Queue a move to `session_id` on `device`, standing up its relay first.
+    ///
+    /// Returns false when the device cannot be reached at all, so the caller can
+    /// fall back to treating the row as local rather than closing the picker on
+    /// a switch that will not happen.
+    pub(crate) fn begin_peer_session_switch(&mut self, device: &str, session_id: String) -> bool {
+        let target = match resolve_target(device) {
+            Ok(target) => target,
+            Err(reason) => {
+                self.push_display_message(DisplayMessage::error(reason));
+                return false;
+            }
+        };
+
+        let socket = match relay_socket_path(&target.fingerprint) {
+            Some(path) => path,
+            None => {
+                self.push_display_message(DisplayMessage::error(format!(
+                    "Could not place a local socket for {device}."
+                )));
+                return false;
+            }
+        };
+
+        let identity = match DeviceIdentity::load_or_create() {
+            Ok(identity) => identity,
+            Err(error) => {
+                self.push_display_message(DisplayMessage::error(format!(
+                    "This device has no identity to reach {device} with: {error}"
+                )));
+                return false;
+            }
+        };
+        let credentials = match PeerCredentials::from_identity(&identity) {
+            Ok(credentials) => Arc::new(credentials),
+            Err(error) => {
+                self.push_display_message(DisplayMessage::error(format!(
+                    "Could not build credentials for {device}: {error}"
+                )));
+                return false;
+            }
+        };
+
+        crate::transport::remove_socket(&socket);
+        let listener = match crate::transport::Listener::bind(&socket) {
+            Ok(listener) => listener,
+            Err(error) => {
+                self.push_display_message(DisplayMessage::error(format!(
+                    "Could not open a local socket for {device}: {error}"
+                )));
+                return false;
+            }
+        };
+        restrict_to_owner(&socket);
+        spawn_relay(listener, credentials, Arc::new(target));
+
+        self.workspace_client.queue_peer_switch(PeerSwitch {
+            socket,
+            session_id: Some(session_id),
+            device: device.to_string(),
+        });
+        true
+    }
+}
+
+/// Where to reach `device`, from the trust store.
+fn resolve_target(device: &str) -> Result<PeerTarget, String> {
+    let trust =
+        TrustStore::load().map_err(|error| format!("Could not read paired devices: {error}"))?;
+    let entry = trust
+        .find_by_name_or_fingerprint(device)
+        .ok_or_else(|| format!("{device} is no longer a paired device."))?;
+    let address = entry
+        .address
+        .clone()
+        .ok_or_else(|| format!("{device} has no recorded address, so there is nowhere to dial."))?;
+    let fingerprint = Fingerprint::from_hex(&entry.fingerprint)
+        .map_err(|error| format!("{device} has an unreadable fingerprint: {error}"))?;
+    Ok(PeerTarget {
+        address,
+        fingerprint,
+    })
+}
+
+/// Named after the device so two peer sessions cannot collide, and kept well
+/// away from `arterm.sock` so nothing mistakes it for the local daemon — which
+/// is also what `server_is_remote_peer` keys on.
+fn relay_socket_path(fingerprint: &Fingerprint) -> Option<std::path::PathBuf> {
+    let short = fingerprint.to_hex().get(..16)?.to_string();
+    Some(crate::storage::runtime_dir().join(format!("arterm-peer-{short}.sock")))
+}
+
+/// One TLS link per local connection: the client re-dials on every reconnect,
+/// and the arterm protocol has no framing that would let two share a stream.
+fn spawn_relay(
+    listener: crate::transport::Listener,
+    credentials: Arc<PeerCredentials>,
+    target: Arc<PeerTarget>,
+) {
+    tokio::spawn(async move {
+        #[cfg_attr(unix, allow(unused_mut))]
+        let mut listener = listener;
+        loop {
+            let Ok((mut local, _addr)) = listener.accept().await else {
+                return;
+            };
+            let credentials = Arc::clone(&credentials);
+            let target = Arc::clone(&target);
+            tokio::spawn(async move {
+                if let Err(error) =
+                    arterm_peer::relay_local_stream(&credentials, &target, &mut local).await
+                {
+                    crate::logging::warn(&format!("Peer session ended: {error:#}"));
+                }
+            });
+        }
+    });
+}
+
+/// Stricter than the daemon socket beside it: this one is a door to a different
+/// machine's agent, and should not be walkable by anyone sharing this host.
+fn restrict_to_owner(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            crate::logging::warn(&format!("Could not restrict {}: {error}", path.display()));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _unused = path;
+    }
+}

@@ -29,6 +29,7 @@ mod filter;
 mod loading;
 mod memory;
 mod navigation;
+pub mod remote_devices;
 mod render;
 
 #[cfg(test)]
@@ -2497,11 +2498,8 @@ impl SessionPicker {
         // Initialize mermaid image picker (fast default, optional probe via env)
         super::mermaid::init_picker();
         let perf_policy = crate::perf::tui_policy();
-        let keyboard_enhanced = if perf_policy.enable_keyboard_enhancement {
-            super::enable_keyboard_enhancement()
-        } else {
-            false
-        };
+        let keyboard_enhanced =
+            perf_policy.enable_keyboard_enhancement && super::enable_keyboard_enhancement();
         let mouse_capture = perf_policy.enable_mouse_capture;
         crossterm::execute!(std::io::stdout(), crossterm::event::EnableBracketedPaste)?;
         if mouse_capture {
