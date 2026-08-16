@@ -247,6 +247,10 @@ fn spawn_relay(
     target: Arc<PeerTarget>,
 ) {
     tokio::spawn(async move {
+        // Windows' named-pipe listener accepts through `&mut self`; the Unix
+        // socket listener does not, so the `mut` is unused there.
+        #[cfg_attr(unix, allow(unused_mut))]
+        let mut listener = listener;
         loop {
             let mut local = match listener.accept().await {
                 Ok((stream, _addr)) => stream,
