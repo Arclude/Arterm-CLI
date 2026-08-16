@@ -115,3 +115,35 @@ pub(super) async fn handle_workspace_command(
     ));
     Ok(true)
 }
+
+/// Apply a queued move to another machine, if one is waiting.
+///
+/// Returns whether the caller should drop this connection and reconnect. The
+/// swap itself is only a socket change: `server::socket_path()` is read afresh
+/// on every dial (`backend.rs`), so pointing `ARTERM_SOCKET` at the relay and
+/// letting the run loop reconnect is the whole mechanism — no second connection
+/// path, and the reload handoff stays untouched because none of its markers are
+/// set.
+///
+/// The resume target has to move with it. The loop reconnects with
+/// `reconnect_target_session_id()`, which is the session id this client is
+/// already in; asking a *peer* to resume that id would name a session it has
+/// never had. Clearing both ids and setting the peer's own is what makes this a
+/// switch rather than a failed resume.
+pub(in crate::tui::app) fn apply_pending_peer_switch(app: &mut App) -> bool {
+    let Some(switch) = app.workspace_client.take_pending_peer_switch() else {
+        return false;
+    };
+    let Some(socket) = switch.socket.to_str() else {
+        app.push_display_message(DisplayMessage::error(
+            "The relay socket path is not valid UTF-8, so the switch was abandoned.".to_string(),
+        ));
+        return false;
+    };
+
+    crate::server::set_socket_path(socket);
+    app.remote_session_id = None;
+    app.resume_session_id = switch.session_id;
+    app.set_status_notice(format!("Switching to {}…", switch.device));
+    true
+}

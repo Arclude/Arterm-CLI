@@ -22,6 +22,24 @@ pub(crate) struct WorkspaceClientState {
     imported_server_sessions: bool,
     pending_split_target: Option<WorkspaceSplitTarget>,
     pending_resume_session: Option<String>,
+    pending_peer_switch: Option<PeerSwitch>,
+}
+
+/// A queued move to a session on another machine.
+///
+/// Both halves are needed together and neither is useful alone: the socket is a
+/// relay this client put in front of the peer, and the session id only resolves
+/// on the far end. Resuming the *current* id against a peer would ask it for a
+/// session it has never heard of, which is what makes this a switch rather than
+/// an ordinary resume.
+#[derive(Debug, Clone)]
+pub(crate) struct PeerSwitch {
+    /// Local socket the relay is serving; what `ARTERM_SOCKET` becomes.
+    pub(crate) socket: std::path::PathBuf,
+    /// Session to resume once connected, as the peer knows it.
+    pub(crate) session_id: Option<String>,
+    /// Device name, for the notice shown after the switch.
+    pub(crate) device: String,
 }
 
 impl WorkspaceClientState {
@@ -91,6 +109,19 @@ impl WorkspaceClientState {
 
     pub(crate) fn queue_resume_session(&mut self, session_id: String) {
         self.pending_resume_session = Some(session_id);
+    }
+
+    /// Queue a move to another machine's session.
+    ///
+    /// Not gated on `enabled` like the workspace map is: reaching a paired
+    /// device has nothing to do with whether workspaces are turned on, and
+    /// silently dropping it there would be a switch that appears to do nothing.
+    pub(crate) fn queue_peer_switch(&mut self, switch: PeerSwitch) {
+        self.pending_peer_switch = Some(switch);
+    }
+
+    pub(crate) fn take_pending_peer_switch(&mut self) -> Option<PeerSwitch> {
+        self.pending_peer_switch.take()
     }
 
     pub(crate) fn handle_split_response(&mut self, new_session_id: &str) -> bool {
