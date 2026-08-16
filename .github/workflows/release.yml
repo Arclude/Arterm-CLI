@@ -458,7 +458,11 @@ jobs:
           if ($files.Count -eq 0) {
             throw 'No Windows assets to publish.'
           }
-          gh release upload "${env:GITHUB_REF_NAME}" @files --clobber
+          # `$files`, not `@files`: splatting is defined for cmdlets, while an
+          # array handed to a native command is unrolled into separate
+          # arguments — which is the behaviour wanted here, and the one that
+          # cannot be argued with.
+          gh release upload "${env:GITHUB_REF_NAME}" $files --clobber
 
   build-freebsd:
     name: Build (x86_64-unknown-freebsd)
