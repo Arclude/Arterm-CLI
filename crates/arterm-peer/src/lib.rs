@@ -46,6 +46,7 @@
 //! the server that already exists.
 
 pub mod connect;
+pub mod discovery;
 pub mod gate;
 pub mod hello;
 pub mod listen;
@@ -56,6 +57,7 @@ pub use connect::{
     PeerLink, PeerTarget, connect_to_peer, is_ordinary_disconnect, list_peer_sessions,
     relay_local_stream,
 };
+pub use discovery::{DISCOVERY_PORT, DiscoveredDevice, Presence};
 pub use gate::{Admission, TrustGate};
 pub use hello::{PeerHello, PeerWelcome, RemoteServerSummary, RemoteSessionSummary};
 pub use listen::{
