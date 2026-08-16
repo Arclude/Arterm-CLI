@@ -289,6 +289,13 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    // This path duplicates the local modal chain rather than calling it, so the
+    // confirmation has to be armed here too — an ordinary session is a client,
+    // and wiring only the local path left the modal on screen but deaf.
+    if app_mod::commands::commands_memory::handle_pending_confirm_key(app, code) {
+        return Ok(());
+    }
+
     if app.prompt_history_search.is_some() {
         app.handle_prompt_history_search_key(code, modifiers);
         return Ok(());
@@ -1602,20 +1609,7 @@ async fn handle_remote_key_internal(
                 }
 
                 if trimmed == "/memory status" {
-                    let default_enabled = crate::config::config().features.memory;
-                    app.push_display_message(DisplayMessage::system(format!(
-                        "Memory feature: {} (config default: {})",
-                        if app.memory_enabled {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        },
-                        if default_enabled {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    )));
+                    super::super::commands::commands_memory::push_status(app);
                     return Ok(());
                 }
 
@@ -1658,10 +1652,13 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
-                if trimmed.starts_with("/memory ") {
-                    app.push_display_message(DisplayMessage::error(
-                        "Usage: /memory [on|off|status]".to_string(),
-                    ));
+                if let Some(rest) = trimmed.strip_prefix("/memory ") {
+                    use super::super::commands::commands_memory;
+                    if !commands_memory::handle_remote_extra(app, rest) {
+                        app.push_display_message(DisplayMessage::error(
+                            commands_memory::USAGE.to_string(),
+                        ));
+                    }
                     return Ok(());
                 }
 

@@ -10,14 +10,15 @@
 //! which leaves `dispatch.rs` smaller than a Clean arm alone would have left it.
 
 use std::io::Write;
-use std::path::Path;
 
 use anyhow::{Context, Result};
 
 use crate::cli::args::MemoryCommand;
 use crate::cli::commands::{self, MemorySubcommand};
 use crate::memory::MemoryManager;
-use crate::storage;
+// The delete itself lives in arterm-base so the TUI's `/memory clean` removes
+// exactly the same files this does.
+use crate::memory_clean::{clear_projects_dir, projects_dir, remove_store_at};
 
 /// Run `arterm memory clean`.
 pub(crate) fn run(all_projects: bool, yes: bool) -> Result<()> {
@@ -26,7 +27,7 @@ pub(crate) fn run(all_projects: bool, yes: bool) -> Result<()> {
             println!("Nothing was cleaned.");
             return Ok(());
         }
-        let dir = storage::arterm_dir()?.join("memory").join("projects");
+        let dir = projects_dir()?;
         match clear_projects_dir(&dir)? {
             0 => println!("No project memory to clean."),
             1 => println!("Cleaned 1 project's memory. Global memory is untouched."),
@@ -39,7 +40,17 @@ pub(crate) fn run(all_projects: bool, yes: bool) -> Result<()> {
         println!("Nothing was cleaned.");
         return Ok(());
     }
-    let cleaned = match MemoryManager::new().project_memory_path()? {
+    // Scope the manager to this directory. A bare `MemoryManager::new()` has
+    // `project_dir: None`, so `project_memory_path` returns None and the clean
+    // reported "nothing to clean" for every project that had a store — the
+    // command's default path could never delete anything. The store is keyed on
+    // the session working dir when written (see `turn_memory`), and the CLI's
+    // equivalent is where it was invoked.
+    let project_dir = std::env::current_dir().context("finding the current directory")?;
+    let cleaned = match MemoryManager::new()
+        .with_project_dir(project_dir)
+        .project_memory_path()?
+    {
         Some(path) => remove_store_at(&path)?,
         None => false,
     };
@@ -70,49 +81,6 @@ fn confirm(target: &str) -> Result<bool> {
     }
     let answer = answer.trim().to_ascii_lowercase();
     Ok(answer == "y" || answer == "yes")
-}
-
-/// Remove one store file and its `.json.bak` sibling. Returns whether the store
-/// existed. Path-based so it can be tested without moving `ARTERM_HOME`.
-fn remove_store_at(path: &Path) -> Result<bool> {
-    let existed = path.exists();
-    if existed {
-        std::fs::remove_file(path)
-            .with_context(|| format!("removing project memory at {}", path.display()))?;
-    }
-    // The migration backup is a copy of what was just deleted; leaving it means
-    // the memory was not really cleared, so its removal is part of the job.
-    let backup = path.with_extension("json.bak");
-    if backup.exists() {
-        std::fs::remove_file(&backup)
-            .with_context(|| format!("removing the backup at {}", backup.display()))?;
-    }
-    Ok(existed)
-}
-
-/// Remove every `<hash>.json` (and its `.json.bak`) under `dir`, returning how
-/// many stores were removed.
-fn clear_projects_dir(dir: &Path) -> Result<usize> {
-    if !dir.exists() {
-        return Ok(0);
-    }
-    let mut removed = 0;
-    for entry in std::fs::read_dir(dir)
-        .with_context(|| format!("reading project memory directory {}", dir.display()))?
-    {
-        let path = entry?.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        // Both the store (`<hash>.json`) and its backup (`<hash>.json.bak`).
-        if name.ends_with(".json") || name.ends_with(".json.bak") {
-            std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
-            if name.ends_with(".json") {
-                removed += 1;
-            }
-        }
-    }
-    Ok(removed)
 }
 
 /// Map the parsed `memory` subcommand onto the handler enum. Moved here from
@@ -147,7 +115,3 @@ pub(crate) fn dispatch(subcmd: MemoryCommand) -> Result<()> {
         other => commands::run_memory_command(map_memory_subcommand(other)),
     }
 }
-
-#[cfg(test)]
-#[path = "memory_clean_tests.rs"]
-mod memory_clean_tests;

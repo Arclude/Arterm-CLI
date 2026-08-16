@@ -2070,27 +2070,8 @@ fn edge_autoscroll_zone_rows(height: u16) -> u16 {
 }
 
 #[cfg(test)]
-mod edge_autoscroll_zone_tests {
-    use super::edge_autoscroll_zone_rows;
-
-    #[test]
-    fn zone_is_at_least_one_row_for_tiny_panes() {
-        // Even a 1-2 row pane should keep a usable hot zone so the edge still triggers.
-        assert_eq!(edge_autoscroll_zone_rows(0), 1);
-        assert_eq!(edge_autoscroll_zone_rows(1), 1);
-        assert_eq!(edge_autoscroll_zone_rows(3), 1);
-        assert_eq!(edge_autoscroll_zone_rows(4), 1);
-    }
-
-    #[test]
-    fn zone_scales_with_height_but_is_capped() {
-        assert_eq!(edge_autoscroll_zone_rows(8), 2);
-        assert_eq!(edge_autoscroll_zone_rows(12), 3);
-        // Capped at 3 so tall panes keep a large neutral middle region.
-        assert_eq!(edge_autoscroll_zone_rows(40), 3);
-        assert_eq!(edge_autoscroll_zone_rows(200), 3);
-    }
-}
+#[path = "ui_edge_autoscroll_tests.rs"]
+mod edge_autoscroll_zone_tests;
 
 pub(crate) fn copy_pane_vertical_edge_point(
     pane: crate::tui::CopySelectionPane,
@@ -3572,6 +3553,10 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // Ctrl+R reverse prompt-history search overlay (drawn after the command
     // palette so it wins when both could be visible).
     input_ui::draw_prompt_history_search_overlay(frame, app, chunks[7]);
+
+    // A pending destructive confirmation outranks every other late overlay: it
+    // is modal, and it is drawn over the transcript it is about to delete from.
+    overlays::draw_memory_clean_confirm(frame, app);
 
     // Observe the rendered messages area for the anchor-stability (smoothness)
     // report. Runs on the final buffer so it sees exactly what the user sees.

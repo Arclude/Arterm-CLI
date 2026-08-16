@@ -132,7 +132,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/fix", "Recover when the model cannot continue"),
     RegisteredCommand::public("/dictate", "Run configured external dictation command"),
     RegisteredCommand::public("/dictation", "Alias for /dictate"),
-    RegisteredCommand::public("/memory", "Toggle memory feature"),
+    RegisteredCommand::public("/memory", "Toggle memory feature, or clean stored memory"),
     RegisteredCommand::public("/test", "Verify a claim/current changes with layered tests"),
     RegisteredCommand::public(
         "/initiatives",
@@ -912,14 +912,7 @@ impl App {
         }
 
         if prefix.starts_with("/memory ") {
-            return self.rank_suggestions(
-                input,
-                vec![
-                    ("/memory on".into(), "Enable memory for this session"),
-                    ("/memory off".into(), "Disable memory for this session"),
-                    ("/memory status".into(), "Show memory feature status"),
-                ],
-            );
+            return self.rank_suggestions(input, super::commands::commands_memory::suggestions());
         }
 
         if prefix.starts_with("/improve ") {

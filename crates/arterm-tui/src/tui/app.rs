@@ -990,6 +990,8 @@ pub struct App {
     // after an update fails because the local checkout and upstream diverged.
     // Accepted with the same key as the fallback offer.
     pending_merge_offer: Option<PendingMergeOffer>,
+    // A `/memory clean` waiting on its Enter/Y confirmation.
+    pending_memory_clean: Option<commands::commands_memory::PendingMemoryClean>,
     // Local session file write to flush once the first "sending" frame is visible.
     session_save_pending: bool,
     // Tool calls detected during streaming (shown in real-time with details)
@@ -2505,11 +2507,8 @@ impl App {
                 && current.message_hashes[..previous.message_hashes.len()]
                     == previous.message_hashes;
         }
-        if previous.message_count == current.message_count {
-            current.messages_hash == previous.messages_hash
-        } else {
-            false
-        }
+        previous.message_count == current.message_count
+            && current.messages_hash == previous.messages_hash
     }
 
     fn kv_cache_common_prefix_messages(

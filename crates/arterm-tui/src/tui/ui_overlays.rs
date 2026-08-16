@@ -345,7 +345,10 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
 
     lines.push(Line::from(Span::styled("  Memory & Swarm", section_style)));
     lines.push(Line::from(""));
-    lines.push(help_entry("/memory [on|off]", "Toggle memory features"));
+    lines.push(help_entry(
+        "/memory [on|off|status|clean]",
+        "Toggle memory features, or delete stored project memory",
+    ));
     lines.push(help_entry(
         "/test [claim]",
         "Run layered verification and produce proof",
@@ -780,5 +783,74 @@ fn color_to_rgb(color: Color) -> Option<[u8; 3]> {
             Some([r, g, b])
         }
         _ => None,
+    }
+}
+
+/// Draw the `/memory clean` confirmation over the transcript.
+///
+/// Centered and drawn in the late overlay pass so the memories it is about to
+/// delete stay visible behind it.
+pub(super) fn draw_memory_clean_confirm(frame: &mut Frame, app: &dyn TuiState) {
+    let Some(view) = app.memory_clean_confirm() else {
+        return;
+    };
+    let full = frame.area();
+    // Two borders, a blank row, the choice row, the key hint, and one line of
+    // slack. Below that there is no room to ask anything, so do not try.
+    let needed_height = view.lines.len() as u16 + 6;
+    if full.width < 24 || full.height < needed_height {
+        return;
+    }
+
+    let width = full.width.saturating_sub(4).min(78);
+    let height = needed_height.min(full.height.saturating_sub(2));
+    let area = Rect {
+        x: full.x + full.width.saturating_sub(width) / 2,
+        y: full.y + full.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    clear_area(frame, area);
+
+    let danger = rgb(255, 107, 107);
+    let muted = dim_color();
+    let mut body: Vec<Line> = vec![Line::from("")];
+    body.extend(
+        view.lines
+            .iter()
+            .map(|line| Line::from(Span::styled(format!("  {line}"), Style::default()))),
+    );
+    body.push(Line::from(""));
+    body.push(Line::from(vec![
+        Span::raw("   "),
+        choice_span("Delete", view.delete_selected, danger),
+        Span::raw("    "),
+        choice_span("Cancel", !view.delete_selected, muted),
+    ]));
+    body.push(Line::from(Span::styled(
+        "   ←/→ choose · Enter apply · Esc cancel",
+        Style::default().fg(muted),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(danger))
+        .title(Span::styled(
+            format!(" {} ", view.title),
+            Style::default().fg(danger).add_modifier(Modifier::BOLD),
+        ));
+    frame.render_widget(Paragraph::new(body).block(block), area);
+}
+
+/// One of the two choices, bracketed when it is the selected one so the
+/// highlight survives a terminal that drops colors.
+fn choice_span(label: &str, selected: bool, color: Color) -> Span<'static> {
+    if selected {
+        Span::styled(
+            format!("‹ {label} ›"),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(format!("  {label}  "), Style::default().fg(dim_color()))
     }
 }

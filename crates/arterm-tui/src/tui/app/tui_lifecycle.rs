@@ -154,13 +154,10 @@ impl App {
         let Some(pending) = self.rate_limit_pending_message.as_mut() else {
             return false;
         };
-        if !pending.auto_retry {
-            if force {
-                pending.auto_retry = true;
-            } else {
-                return false;
-            }
+        if !pending.auto_retry && !force {
+            return false;
         }
+        pending.auto_retry = true;
 
         let plan = crate::network_retry::wait_plan();
         let retry_at = Instant::now() + Duration::from_secs(5);
@@ -465,6 +462,7 @@ impl App {
             pending_fallback_offer: None,
             pending_fallback_resend: None,
             pending_merge_offer: None,
+            pending_memory_clean: None,
             session_save_pending: false,
             streaming_tool_calls: Vec::new(),
             attempt_committed_assistant_messages: 0,
@@ -913,6 +911,7 @@ impl App {
             pending_fallback_offer: None,
             pending_fallback_resend: None,
             pending_merge_offer: None,
+            pending_memory_clean: None,
             session_save_pending: false,
             streaming_tool_calls: Vec::new(),
             attempt_committed_assistant_messages: 0,

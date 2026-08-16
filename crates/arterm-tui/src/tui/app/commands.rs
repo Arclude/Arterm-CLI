@@ -117,6 +117,9 @@ pub(super) fn disable_auto_poke(app: &mut App) -> usize {
     cleared
 }
 
+#[path = "commands_memory.rs"]
+pub(super) mod commands_memory;
+
 #[path = "commands_auto_poke_errors.rs"]
 mod auto_poke_errors;
 pub(super) use auto_poke_errors::is_non_retryable_auto_poke_error;
@@ -1853,58 +1856,7 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
         return true;
     }
 
-    if trimmed == "/memory status" {
-        let default_enabled = crate::config::config().features.memory;
-        app.push_display_message(DisplayMessage::system(format!(
-            "Memory feature: {} (config default: {})",
-            if app.memory_enabled {
-                "enabled"
-            } else {
-                "disabled"
-            },
-            if default_enabled {
-                "enabled"
-            } else {
-                "disabled"
-            }
-        )));
-        return true;
-    }
-
-    if trimmed == "/memory" {
-        let new_state = !app.memory_enabled;
-        app.set_memory_feature_enabled(new_state);
-        let label = if new_state { "ON" } else { "OFF" };
-        app.set_status_notice(format!("Memory: {}", label));
-        app.push_display_message(DisplayMessage::system(format!(
-            "Memory feature {} for this session.",
-            if new_state { "enabled" } else { "disabled" }
-        )));
-        return true;
-    }
-
-    if trimmed == "/memory on" {
-        app.set_memory_feature_enabled(true);
-        app.set_status_notice("Memory: ON");
-        app.push_display_message(DisplayMessage::system(
-            "Memory feature enabled for this session.".to_string(),
-        ));
-        return true;
-    }
-
-    if trimmed == "/memory off" {
-        app.set_memory_feature_enabled(false);
-        app.set_status_notice("Memory: OFF");
-        app.push_display_message(DisplayMessage::system(
-            "Memory feature disabled for this session.".to_string(),
-        ));
-        return true;
-    }
-
-    if trimmed.starts_with("/memory ") {
-        app.push_display_message(DisplayMessage::error(
-            "Usage: /memory [on|off|status]".to_string(),
-        ));
+    if commands_memory::handle_memory_command(app, trimmed) {
         return true;
     }
 

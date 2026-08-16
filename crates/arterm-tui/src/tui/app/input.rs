@@ -852,14 +852,12 @@ impl App {
                 true
             }
             ClipboardPasteContent::Error(message) => {
+                self.set_status_notice(message);
                 if let ClipboardPasteKind::ImageUrl {
                     fallback_text: Some(text),
                 } = result.kind
                 {
-                    self.set_status_notice(message);
                     handle_text_paste(self, text);
-                } else {
-                    self.set_status_notice(message);
                 }
                 true
             }
@@ -1450,16 +1448,13 @@ pub(super) fn send_action(app: &App, alternate_shortcut: bool) -> SendAction {
     if app.input.trim().starts_with('/') || app.input.trim().starts_with('!') {
         return SendAction::Submit;
     }
-    if alternate_shortcut {
-        if app.queue_mode {
-            SendAction::Interleave
-        } else {
-            SendAction::Queue
-        }
-    } else if app.queue_mode {
-        SendAction::Queue
-    } else {
+    // The alternate shortcut inverts the queue mode: it queues when the mode
+    // would interleave, and interleaves when the mode would queue. So the two
+    // agreeing means interleave, and disagreeing means queue.
+    if alternate_shortcut == app.queue_mode {
         SendAction::Interleave
+    } else {
+        SendAction::Queue
     }
 }
 
@@ -2506,6 +2501,11 @@ pub(super) fn handle_modal_key(
     code: KeyCode,
     modifiers: KeyModifiers,
 ) -> Result<bool> {
+    // An armed `/memory clean` owns the next key; anything but a yes cancels.
+    if super::commands::commands_memory::handle_pending_confirm_key(app, code) {
+        return Ok(true);
+    }
+
     if app.prompt_history_search.is_some() {
         app.handle_prompt_history_search_key(code, modifiers);
         return Ok(true);

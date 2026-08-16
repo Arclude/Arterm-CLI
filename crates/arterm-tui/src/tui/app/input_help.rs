@@ -109,7 +109,9 @@ impl App {
             "fast" => {
                 "/fast\nShow whether fast mode is enabled, plus the saved default.\n\n/fast on\nEnable fast mode (service_tier = priority) for the current session.\n\n/fast off\nDisable fast mode for the current session.\n\n/fast status\nShow current fast-mode status.\n\n/fast default on\nSave fast mode as the default on startup.\n\n/fast default off\nSave fast mode as the default off on startup.\n\n/fast default status\nShow the saved fast-mode default."
             }
-            "memory" => "/memory [on|off|status]\nToggle memory features for this session.",
+            "memory" => {
+                "/memory\nToggle memory features for this session.\n\n/memory on\nEnable memory for this session.\n\n/memory off\nDisable memory for this session.\n\n/memory status\nShow whether memory is on, plus the config default.\n\n/memory clean\nShow what deleting this project's stored memory would remove. Nothing is deleted until you repeat it with --yes.\n\n/memory clean --yes\nDelete this project's stored memory. Global memory is never touched and this cannot be undone.\n\n/memory clean --all-projects [--yes]\nThe same for every project's memory on this machine."
+            }
             "log" => {
                 "/log mark [note]\nWrite a distinctive ARTERM_LOG_MARK line to ~/.arterm/logs/arterm-YYYY-MM-DD.log with the current session, provider, model, working directory, and optional note. Use this to mark a spot for agents to inspect later."
             }
