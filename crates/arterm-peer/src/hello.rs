@@ -27,17 +27,76 @@ pub const PEER_PROTOCOL_VERSION: u32 = 1;
 /// making the listener buffer without limit.
 pub const MAX_HELLO_BYTES: usize = 4096;
 
+/// One session on a peer, with enough to draw a row without opening it.
+///
+/// Only what a list row and its preview header show. Anything richer (the
+/// transcript, tool calls) belongs to the session itself, which is one
+/// `connect_to_peer` away.
+///
+/// Times are epoch milliseconds rather than `DateTime`: the wire should not
+/// carry a formatting choice, and a peer whose clock is skewed is easier to
+/// reason about as a number.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RemoteSessionSummary {
+    pub id: String,
+    /// Short display name, already extracted from the id by the far end.
+    pub short_name: String,
+    pub icon: String,
+    pub title: String,
+    /// First visible user prompt, which is what a compact row shows.
+    pub prompt: String,
+    pub message_count: usize,
+    pub user_message_count: usize,
+    pub assistant_message_count: usize,
+    pub created_at_ms: i64,
+    pub last_message_at_ms: i64,
+    pub working_dir: Option<String>,
+    pub model: Option<String>,
+    pub estimated_tokens: usize,
+    /// Whether the far end considers this session live.
+    pub is_active: bool,
+}
+
 /// One server on a peer, as it appears in another machine's session list.
 ///
 /// A trimmed [`arterm_base::registry::ServerInfo`] — this crate does not depend
 /// on `arterm-base`, and the fields a remote list needs are only these. The CLI
 /// that owns both sides converts to and from `ServerInfo`.
+///
+/// `sessions` and `details` describe the same sessions twice on purpose. A
+/// build that predates `details` sends only the id list and ignores the field
+/// it does not know, so pairing across versions keeps working in both
+/// directions — an id-only list is a thin row, not a failed connection. That is
+/// why this is an added field rather than a [`PEER_PROTOCOL_VERSION`] bump:
+/// nothing on the wire had to change meaning.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RemoteServerSummary {
     pub name: String,
     pub icon: String,
     pub version: String,
     pub sessions: Vec<String>,
+    #[serde(default)]
+    pub details: Vec<RemoteSessionSummary>,
+}
+
+impl RemoteServerSummary {
+    /// The sessions to display, preferring the detailed list.
+    ///
+    /// Falls back to synthesizing rows from the id list, so a peer on an older
+    /// build still appears — with its sessions named but not described.
+    pub fn display_sessions(&self) -> Vec<RemoteSessionSummary> {
+        if !self.details.is_empty() {
+            return self.details.clone();
+        }
+        self.sessions
+            .iter()
+            .map(|id| RemoteSessionSummary {
+                id: id.clone(),
+                short_name: id.clone(),
+                ..RemoteSessionSummary::default()
+            })
+            .collect()
+    }
 }
 
 /// What the connecting device asks for.

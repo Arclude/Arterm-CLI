@@ -208,3 +208,45 @@ async fn resolve_local_address(address: &str) -> Result<SocketAddr> {
         ),
     }
 }
+
+/// Splice one already-accepted local stream onto a fresh link to the peer.
+///
+/// The accept loop stays with the caller because the listener type differs by
+/// caller — the CLI serves a Unix socket or named pipe, and a client that wants
+/// to reach a peer without leaving its process may not listen at all. What must
+/// not differ, and so lives here, is dialling the peer and moving the bytes.
+///
+/// One link per local connection, deliberately: the arterm protocol has no
+/// framing that would let two clients share a single TLS stream, and a client
+/// re-dials on every reconnect.
+pub async fn relay_local_stream<S>(
+    credentials: &PeerCredentials,
+    target: &PeerTarget,
+    local: &mut S,
+) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + ?Sized,
+{
+    let link = connect_to_peer(credentials, target, None, None)
+        .await
+        .with_context(|| format!("reaching {}", target.address))?;
+    let mut remote = link.stream;
+    match tokio::io::copy_bidirectional(local, &mut remote).await {
+        Ok(_) => Ok(()),
+        // A session that ends is a disconnect, not a failure: whichever side
+        // hangs up first, the other sees a reset rather than a clean EOF.
+        Err(error) if is_ordinary_disconnect(&error) => Ok(()),
+        Err(error) => Err(error).context("relaying the peer session"),
+    }
+}
+
+/// Whether an I/O error is just the other end going away.
+pub fn is_ordinary_disconnect(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::NotConnected
+    )
+}

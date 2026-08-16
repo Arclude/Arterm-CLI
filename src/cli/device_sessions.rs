@@ -20,7 +20,9 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use arterm_device::{DeviceIdentity, Fingerprint, TrustStore, TrustedDevice};
-use arterm_peer::{PeerCredentials, PeerTarget, RemoteServerSummary, list_peer_sessions};
+use arterm_peer::{
+    PeerCredentials, PeerTarget, RemoteServerSummary, RemoteSessionSummary, list_peer_sessions,
+};
 use arterm_session_aggregation::RemoteSessionSource;
 
 use crate::registry::ServerInfo;
@@ -36,7 +38,56 @@ pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
         Ok(servers) => servers,
         Err(_) => return Vec::new(),
     };
-    servers.into_iter().map(summary_from).collect()
+    // The same rows the local picker draws, so a remote list is not a poorer
+    // view of the same sessions. Read once for every server; a failure here
+    // degrades to the id-only list rather than reporting an empty machine.
+    let details = local_session_details();
+    servers
+        .into_iter()
+        .map(|server| summary_from(server, &details))
+        .collect()
+}
+
+/// Rich summaries for this machine's sessions, keyed by session id.
+///
+/// Sourced from the session picker's own loader rather than a second parse of
+/// the session files: a remote row that disagreed with the local one about the
+/// same session would be worse than no row at all.
+fn local_session_details() -> HashMap<String, RemoteSessionSummary> {
+    let Ok((groups, orphans)) = crate::tui::session_picker::load_sessions_grouped() else {
+        return HashMap::new();
+    };
+    groups
+        .into_iter()
+        .flat_map(|group| group.sessions)
+        .chain(orphans)
+        .map(|info| (info.id.clone(), session_summary_from(info)))
+        .collect()
+}
+
+/// A local `SessionInfo` trimmed for the wire.
+fn session_summary_from(info: crate::tui::session_picker::SessionInfo) -> RemoteSessionSummary {
+    RemoteSessionSummary {
+        id: info.id,
+        short_name: info.short_name,
+        icon: info.icon,
+        title: info.title,
+        // A session with no visible user turn yet has no prompt to show. That
+        // is an empty row, not a failure to read one.
+        prompt: match info.first_user_prompt {
+            Some(prompt) => prompt,
+            None => String::new(),
+        },
+        message_count: info.message_count,
+        user_message_count: info.user_message_count,
+        assistant_message_count: info.assistant_message_count,
+        created_at_ms: info.created_at.timestamp_millis(),
+        last_message_at_ms: info.last_message_time.timestamp_millis(),
+        working_dir: info.working_dir,
+        model: info.model,
+        estimated_tokens: info.estimated_tokens,
+        is_active: info.last_active_at.is_some(),
+    }
 }
 
 /// Ask every paired device for its sessions, concurrently, before aggregation.
@@ -99,12 +150,25 @@ impl RemoteSessionSource for PreloadedRemoteSessions {
 }
 
 /// A local `ServerInfo` trimmed for the wire.
-fn summary_from(server: ServerInfo) -> RemoteServerSummary {
+///
+/// `sessions` still carries the plain ids: a peer on a build that predates
+/// `details` reads that field and nothing else, so dropping it would make this
+/// machine look empty to every older device.
+fn summary_from(
+    server: ServerInfo,
+    details: &HashMap<String, RemoteSessionSummary>,
+) -> RemoteServerSummary {
+    let session_details = server
+        .sessions
+        .iter()
+        .filter_map(|id| details.get(id).cloned())
+        .collect();
     RemoteServerSummary {
         name: server.name,
         icon: server.icon,
         version: server.version,
         sessions: server.sessions,
+        details: session_details,
     }
 }
 

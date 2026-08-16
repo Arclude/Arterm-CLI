@@ -135,3 +135,93 @@ async fn a_hello_reports_the_version_it_was_sent_with() {
     assert_eq!(hello.version(), 99);
     assert_eq!(session_hello().version(), PEER_PROTOCOL_VERSION);
 }
+
+/// A peer on a build that predates `details` sends only the id list. Its
+/// sessions must still appear — thin, not missing — or adding the field would
+/// have broken every pairing with an older machine.
+#[test]
+fn an_id_only_summary_from_an_older_peer_still_lists_its_sessions() {
+    let wire = r#"{"name":"cliff","icon":"C","version":"9.1.0","sessions":["ses_a","ses_b"]}"#;
+    let summary: RemoteServerSummary = serde_json::from_str(wire).expect("older peer parses");
+    assert!(summary.details.is_empty());
+
+    let shown = summary.display_sessions();
+    assert_eq!(shown.len(), 2);
+    assert_eq!(shown[0].id, "ses_a");
+    assert_eq!(
+        shown[0].short_name, "ses_a",
+        "with nothing better to show, the id is the name"
+    );
+    assert_eq!(shown[0].message_count, 0);
+}
+
+/// The other direction: a new peer's extra field must not stop an older build
+/// from parsing the line. Serde ignores unknown fields, and this pins that.
+#[test]
+fn an_older_peer_can_parse_a_summary_that_carries_details() {
+    #[derive(serde::Deserialize)]
+    #[allow(dead_code)]
+    struct OldSummary {
+        name: String,
+        icon: String,
+        version: String,
+        sessions: Vec<String>,
+    }
+
+    let rich = RemoteServerSummary {
+        name: "cliff".into(),
+        icon: "C".into(),
+        version: "9.1.0".into(),
+        sessions: vec!["ses_a".into()],
+        details: vec![RemoteSessionSummary {
+            id: "ses_a".into(),
+            short_name: "alpha".into(),
+            prompt: "merhaba".into(),
+            message_count: 4,
+            ..RemoteSessionSummary::default()
+        }],
+    };
+    let wire = serde_json::to_string(&rich).expect("serialize");
+    let old: OldSummary = serde_json::from_str(&wire).expect("older build parses");
+    assert_eq!(old.sessions, vec!["ses_a".to_string()]);
+}
+
+/// When details are present they win, so a peer that can describe its sessions
+/// is never shown as bare ids.
+#[test]
+fn details_are_preferred_over_the_id_list() {
+    let summary = RemoteServerSummary {
+        sessions: vec!["ses_a".into()],
+        details: vec![RemoteSessionSummary {
+            id: "ses_a".into(),
+            short_name: "alpha".into(),
+            message_count: 7,
+            ..RemoteSessionSummary::default()
+        }],
+        ..RemoteServerSummary::default()
+    };
+    let shown = summary.display_sessions();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].short_name, "alpha");
+    assert_eq!(shown[0].message_count, 7);
+}
+
+/// Moved here with the predicate it tests: a session that ends is a
+/// disconnect, and only the relay cares which kinds count.
+#[test]
+fn a_peer_hanging_up_is_not_treated_as_a_fault() {
+    for kind in [
+        std::io::ErrorKind::BrokenPipe,
+        std::io::ErrorKind::ConnectionReset,
+        std::io::ErrorKind::UnexpectedEof,
+        std::io::ErrorKind::NotConnected,
+    ] {
+        assert!(crate::is_ordinary_disconnect(&std::io::Error::new(
+            kind, "gone"
+        )));
+    }
+    assert!(!crate::is_ordinary_disconnect(&std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "refused"
+    )));
+}

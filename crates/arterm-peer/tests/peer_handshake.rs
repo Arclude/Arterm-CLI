@@ -764,12 +764,14 @@ async fn a_paired_device_can_list_a_peers_sessions_without_opening_one() {
             icon: "🔥".to_string(),
             version: "v0.10.3".to_string(),
             sessions: vec!["fox".to_string(), "owl".to_string()],
+            details: Vec::new(),
         },
         RemoteServerSummary {
             name: "anvil".to_string(),
             icon: "⚒".to_string(),
             version: "v0.10.3".to_string(),
             sessions: vec![],
+            details: Vec::new(),
         },
     ];
 

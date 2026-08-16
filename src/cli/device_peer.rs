@@ -136,7 +136,7 @@ async fn serve_one_peer(admitter: PeerAdmitter, pending: PendingPeer) -> Result<
                 Ok(_byte_counts) => Ok(()),
                 // A peer closing its side mid-copy is an ordinary end to a
                 // session, not a fault worth a non-zero exit.
-                Err(error) if is_ordinary_disconnect(&error) => Ok(()),
+                Err(error) if arterm_peer::is_ordinary_disconnect(&error) => Ok(()),
                 Err(error) => {
                     Err(error).with_context(|| format!("relaying {}'s session", session.peer_name))
                 }
@@ -262,17 +262,13 @@ fn spawn_relay(
             let credentials = Arc::clone(&credentials);
             let target = Arc::clone(&target);
             tokio::spawn(async move {
-                match connect_to_peer(&credentials, &target, None, None).await {
-                    Ok(link) => {
-                        let mut remote = link.stream;
-                        if let Err(error) =
-                            tokio::io::copy_bidirectional(&mut local, &mut remote).await
-                            && !is_ordinary_disconnect(&error)
-                        {
-                            eprintln!("The peer session ended: {error}");
-                        }
-                    }
-                    Err(error) => eprintln!("Could not reach {}: {error:#}", target.address),
+                // Dialling and splicing live in `arterm-peer` so a client that
+                // reaches a peer from inside its own process does exactly what
+                // this loop does, rather than a second implementation of it.
+                if let Err(error) =
+                    arterm_peer::relay_local_stream(&credentials, &target, &mut local).await
+                {
+                    eprintln!("The peer session ended: {error:#}");
                 }
             });
         }
@@ -297,17 +293,6 @@ fn restrict_to_owner(path: &std::path::Path) -> Result<()> {
         let _unused = path;
     }
     Ok(())
-}
-
-/// Whether an I/O error is one end hanging up rather than something wrong.
-fn is_ordinary_disconnect(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::BrokenPipe
-            | std::io::ErrorKind::ConnectionReset
-            | std::io::ErrorKind::UnexpectedEof
-            | std::io::ErrorKind::NotConnected
-    )
 }
 
 /// Where to reach the named device.

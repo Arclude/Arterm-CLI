@@ -52,9 +52,12 @@ pub mod listen;
 pub mod subnet;
 pub mod tls;
 
-pub use connect::{PeerLink, PeerTarget, connect_to_peer, list_peer_sessions};
+pub use connect::{
+    PeerLink, PeerTarget, connect_to_peer, is_ordinary_disconnect, list_peer_sessions,
+    relay_local_stream,
+};
 pub use gate::{Admission, TrustGate};
-pub use hello::{PeerHello, PeerWelcome, RemoteServerSummary};
+pub use hello::{PeerHello, PeerWelcome, RemoteServerSummary, RemoteSessionSummary};
 pub use listen::{
     Admitted, Arrival, LocalSessions, PeerAdmitter, PeerListener, PeerSession, PendingPeer,
     Rejection, RejectionReason,

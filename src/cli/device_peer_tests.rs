@@ -148,19 +148,3 @@ async fn the_local_socket_is_reachable_only_by_its_owner() {
     crate::transport::remove_socket(&path);
     std::fs::remove_dir_all(&dir).expect("cleaning up");
 }
-
-#[test]
-fn a_peer_hanging_up_is_not_treated_as_a_fault() {
-    for kind in [
-        std::io::ErrorKind::BrokenPipe,
-        std::io::ErrorKind::ConnectionReset,
-        std::io::ErrorKind::UnexpectedEof,
-        std::io::ErrorKind::NotConnected,
-    ] {
-        assert!(is_ordinary_disconnect(&std::io::Error::new(kind, "gone")));
-    }
-    assert!(!is_ordinary_disconnect(&std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        "refused"
-    )));
-}
