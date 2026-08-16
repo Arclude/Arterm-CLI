@@ -88,7 +88,7 @@ pub(crate) async fn listen(address: Option<String>) -> Result<()> {
 }
 
 /// Finish one peer's handshake and join it to the local daemon socket.
-async fn serve_one_peer(admitter: PeerAdmitter, pending: PendingPeer) -> Result<()> {
+pub(crate) async fn serve_one_peer(admitter: PeerAdmitter, pending: PendingPeer) -> Result<()> {
     match admitter.establish(pending).await? {
         Admitted::Rejected(rejection) => {
             println!("Refused {}: {}", rejection.peer_addr, rejection.reason);

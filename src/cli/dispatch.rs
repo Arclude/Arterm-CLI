@@ -139,6 +139,9 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                 server_new_ms,
                 serve_start.elapsed().as_millis()
             ));
+            // Paired machines are reachable because the daemon is running, not
+            // because someone is holding a second terminal open.
+            crate::cli::device_service::spawn();
             server.run().await?;
         }
         Some(Command::Acp) => {

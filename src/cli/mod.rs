@@ -6,6 +6,7 @@ pub mod commands;
 pub mod debug;
 pub mod device;
 pub mod device_peer;
+pub mod device_service;
 pub mod device_sessions;
 pub mod dispatch;
 pub mod hot_exec;
