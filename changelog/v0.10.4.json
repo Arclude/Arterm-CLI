@@ -1,0 +1,21 @@
+{
+  "version": "0.10.4",
+  "date": "2026-08-16",
+  "title": "Two machines, one session list",
+  "highlights": [
+    "Two machines can be paired over mutual TLS, after which either one can open and drive a session running on the other",
+    "The session picker lists what your paired machines are running and opens those sessions without leaving the TUI",
+    "/memory clean now works from inside a session and asks before it deletes anything"
+  ],
+  "improvements": [
+    "The session list groups sessions by the machine they belong to, and 'arterm device sessions' shows the same across every paired machine",
+    "Choosing one of this machine's sessions after switching to another machine brings the client back here, instead of asking the other machine for a session it has never heard of",
+    "A paired machine that is asleep or off the network no longer holds up the session list; it simply contributes no rows"
+  ],
+  "fixes": [
+    "'arterm memory clean' reported success while deleting nothing, because it never resolved the project it was run in",
+    "Cleaning a project's memory left its backup copies on disk",
+    "'arterm device join --help' advertised port 7420; the default is 7644",
+    "Pairing could not accept incoming connections on Windows"
+  ]
+}
