@@ -126,26 +126,55 @@ impl SubnetPolicy {
 ///
 /// A specific interface address, never `0.0.0.0`: binding the wildcard puts the
 /// port on every network this machine can see, including ones the same-subnet
-/// rule is meant to keep it off. The first non-loopback, non-link-local IPv4
-/// address wins, sorted by interface name so the choice does not change between
-/// runs on a machine with several.
+/// rule is meant to keep it off.
+///
+/// Candidates are ranked rather than taken in interface-name order. Name order
+/// alone picked `CloudflareWARP`'s `172.16.0.2/32` over `wlan0`'s
+/// `192.168.1.100/24` on a real machine, purely because "C" sorts before "w" —
+/// and a peer on the LAN cannot reach a VPN's point-to-point address, so both
+/// `listen` and the address baked into `invite` pointed somewhere unreachable
+/// with no error anywhere. Every VPN client on the machine is a chance to lose
+/// that coin toss.
 pub fn default_bind_ip() -> Result<IpAddr> {
-    let mut interfaces =
+    let interfaces =
         if_addrs::get_if_addrs().context("reading this machine's network interfaces")?;
-    interfaces.sort_by(|left, right| left.name.cmp(&right.name));
 
-    for interface in &interfaces {
-        if let if_addrs::IfAddr::V4(v4) = &interface.addr
-            && is_bindable_v4(v4.ip)
-        {
-            return Ok(IpAddr::V4(v4.ip));
-        }
+    let mut candidates: Vec<(u8, &str, Ipv4Addr)> = interfaces
+        .iter()
+        .filter_map(|interface| match &interface.addr {
+            if_addrs::IfAddr::V4(v4) if is_bindable_v4(v4.ip) => {
+                Some((bind_rank_v4(v4), interface.name.as_str(), v4.ip))
+            }
+            _ => None,
+        })
+        .collect();
+
+    // Best rank first; interface name breaks ties so the choice is stable
+    // between runs on a machine with several equally good addresses.
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+
+    match candidates.first() {
+        Some((_, _, ip)) => Ok(IpAddr::V4(*ip)),
+        None => anyhow::bail!(
+            "this machine has no non-loopback IPv4 address, so there is no local network to \
+             listen on — connect it to the network, or pass `--address <ip>:<port>` to choose \
+             one yourself"
+        ),
     }
+}
 
-    anyhow::bail!(
-        "this machine has no non-loopback IPv4 address, so there is no local network to listen \
-         on — connect it to the network, or pass `--address <ip>:<port>` to choose one yourself"
-    )
+/// How good an address is for a peer listener, higher is better.
+///
+/// A `/32` is a point-to-point address handed out by a VPN. It is reachable
+/// only through that tunnel, which is exactly not the local network two paired
+/// machines are looking for each other on, so it ranks below anything sitting
+/// on a real subnet. A private address on a real subnet is the LAN case this is
+/// for and ranks highest.
+fn bind_rank_v4(v4: &if_addrs::Ifv4Addr) -> u8 {
+    if v4.netmask == Ipv4Addr::new(255, 255, 255, 255) {
+        return 0;
+    }
+    if v4.ip.is_private() { 2 } else { 1 }
 }
 
 /// Whether an address is worth binding a peer listener to.

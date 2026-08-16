@@ -148,3 +148,56 @@ fn a_bindable_address_is_neither_loopback_nor_link_local() {
         Ipv4Addr::from_str("0.0.0.0").expect("valid address")
     ));
 }
+
+/// The case that sent a real machine's listener to an address no peer could
+/// reach: Cloudflare WARP's point-to-point `/32` beat the LAN address purely on
+/// interface name order.
+#[test]
+fn a_vpn_point_to_point_address_ranks_below_a_lan_address() {
+    let lan = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("192.168.1.100").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.255.255.0").expect("valid mask"),
+        prefixlen: 24,
+        broadcast: None,
+    };
+    let warp = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("172.16.0.2").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.255.255.255").expect("valid mask"),
+        prefixlen: 32,
+        broadcast: None,
+    };
+
+    assert!(
+        bind_rank_v4(&lan) > bind_rank_v4(&warp),
+        "a LAN address must outrank a VPN's /32, whatever the interfaces are called"
+    );
+}
+
+/// Both are real subnets, so neither is disqualified — but two paired machines
+/// look for each other on a local network, so the private one is the better bet.
+#[test]
+fn a_private_subnet_outranks_a_public_one() {
+    let private = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("10.0.0.5").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.0.0.0").expect("valid mask"),
+        prefixlen: 8,
+        broadcast: None,
+    };
+    let public = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("203.0.113.5").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.255.255.0").expect("valid mask"),
+        prefixlen: 24,
+        broadcast: None,
+    };
+
+    assert!(bind_rank_v4(&private) > bind_rank_v4(&public));
+}
+
+/// A machine with only a VPN still has to be able to listen somewhere: ranking
+/// last is not the same as being excluded.
+#[test]
+fn a_point_to_point_address_is_still_bindable() {
+    assert!(is_bindable_v4(
+        Ipv4Addr::from_str("172.16.0.2").expect("valid address")
+    ));
+}

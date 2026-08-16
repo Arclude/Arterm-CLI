@@ -226,7 +226,7 @@ fn list(json: bool) -> Result<()> {
 
 async fn sessions() -> Result<()> {
     let trust = TrustStore::load().context("loading the trust store")?;
-    let local = crate::registry::running_local_servers_sync()
+    let local = crate::cli::device_sessions::local_servers_with_sessions()
         .context("reading this machine's running servers")?;
 
     // Ask each paired device for its sessions over the peer transport, up front

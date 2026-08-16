@@ -27,42 +27,47 @@ use arterm_session_aggregation::RemoteSessionSource;
 
 use crate::registry::ServerInfo;
 
-/// This machine's running servers, trimmed to what a peer's session list needs.
+/// This machine's sessions, grouped by server, trimmed for a peer's list.
+///
+/// Grouped by the session picker's own loader rather than by the server
+/// registry. The registry looks like the natural source — it has a per-server
+/// `sessions` list — but nothing ever writes to it: `ServerRegistry::add_session`
+/// and `remove_session` have no callers anywhere in the tree, so that list is
+/// permanently empty. Building the answer from it filtered every session away
+/// and reported every machine as idle, which is indistinguishable from a
+/// machine that really is idle. That is why the whole feature looked like a
+/// transport problem when the transport was fine.
+///
+/// Using the picker's loader also makes a remote list the same view as the
+/// local one, rather than a poorer second parse of the same files.
 ///
 /// Read fresh each call: a peer asks whenever it refreshes its list, and the
-/// answer changes as sessions start and stop. Failure to read the registry is
-/// reported as "no servers" rather than an error — a peer querying the list
-/// should see an empty machine, not a broken one.
+/// answer changes as sessions start and stop. A failure to read is reported as
+/// "no servers" rather than an error — a peer querying the list should see an
+/// empty machine, not a broken one.
 pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
-    let servers = match crate::registry::running_local_servers_sync() {
-        Ok(servers) => servers,
-        Err(_) => return Vec::new(),
-    };
-    // The same rows the local picker draws, so a remote list is not a poorer
-    // view of the same sessions. Read once for every server; a failure here
-    // degrades to the id-only list rather than reporting an empty machine.
-    let details = local_session_details();
-    servers
-        .into_iter()
-        .map(|server| summary_from(server, &details))
-        .collect()
-}
-
-/// Rich summaries for this machine's sessions, keyed by session id.
-///
-/// Sourced from the session picker's own loader rather than a second parse of
-/// the session files: a remote row that disagreed with the local one about the
-/// same session would be worse than no row at all.
-fn local_session_details() -> HashMap<String, RemoteSessionSummary> {
     let Ok((groups, orphans)) = crate::tui::session_picker::load_sessions_grouped() else {
-        return HashMap::new();
+        return Vec::new();
     };
-    groups
+
+    let mut summaries: Vec<RemoteServerSummary> = groups
         .into_iter()
-        .flat_map(|group| group.sessions)
-        .chain(orphans)
-        .map(|info| (info.id.clone(), session_summary_from(info)))
-        .collect()
+        .map(|group| summary_from_sessions(group.name, group.icon, group.version, group.sessions))
+        .collect();
+
+    // Sessions whose server is no longer registered still live on disk and
+    // still resume, so hiding them from a peer would make this machine look
+    // emptier than it is.
+    if !orphans.is_empty() {
+        summaries.push(summary_from_sessions(
+            "sessions".to_string(),
+            "📁".to_string(),
+            String::new(),
+            orphans,
+        ));
+    }
+
+    summaries
 }
 
 /// A local `SessionInfo` trimmed for the wire.
@@ -146,26 +151,53 @@ impl RemoteSessionSource for PreloadedRemoteSessions {
     }
 }
 
-/// A local `ServerInfo` trimmed for the wire.
+/// This machine's running servers, with their session lists filled in.
 ///
-/// `sessions` still carries the plain ids: a peer on a build that predates
-/// `details` reads that field and nothing else, so dropping it would make this
-/// machine look empty to every older device.
-fn summary_from(
-    server: ServerInfo,
-    details: &HashMap<String, RemoteSessionSummary>,
+/// `running_local_servers_sync` is still the source for what only the local
+/// view knows — socket, pid, host — but its `sessions` field is always empty
+/// for the reason [`local_session_summaries`] documents, so the ids come from
+/// the picker's loader and are matched to a server by name. A server the loader
+/// does not know keeps its own (empty) list rather than borrowing another's.
+pub(crate) fn local_servers_with_sessions() -> anyhow::Result<Vec<ServerInfo>> {
+    let mut servers = crate::registry::running_local_servers_sync()?;
+    let Ok((groups, _orphans)) = crate::tui::session_picker::load_sessions_grouped() else {
+        return Ok(servers);
+    };
+
+    let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
+    for group in groups {
+        by_name.insert(
+            group.name,
+            group.sessions.into_iter().map(|info| info.id).collect(),
+        );
+    }
+    for server in &mut servers {
+        if let Some(ids) = by_name.remove(&server.name) {
+            server.sessions = ids;
+        }
+    }
+    Ok(servers)
+}
+
+/// One server's sessions, trimmed for the wire.
+///
+/// `sessions` still carries the plain ids alongside the richer `details`: a
+/// peer on a build that predates `details` reads that field and nothing else,
+/// so dropping it would make this machine look empty to every older device.
+fn summary_from_sessions(
+    name: String,
+    icon: String,
+    version: String,
+    sessions: Vec<crate::tui::session_picker::SessionInfo>,
 ) -> RemoteServerSummary {
-    let session_details = server
-        .sessions
-        .iter()
-        .filter_map(|id| details.get(id).cloned())
-        .collect();
+    let details: Vec<RemoteSessionSummary> =
+        sessions.into_iter().map(session_summary_from).collect();
     RemoteServerSummary {
-        name: server.name,
-        icon: server.icon,
-        version: server.version,
-        sessions: server.sessions,
-        details: session_details,
+        name,
+        icon,
+        version,
+        sessions: details.iter().map(|detail| detail.id.clone()).collect(),
+        details,
     }
 }
 
