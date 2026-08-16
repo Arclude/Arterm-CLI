@@ -161,6 +161,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/support", "Email support with diagnostics prefilled"),
     RegisteredCommand::public("/subscription", "Show arterm subscription status"),
     RegisteredCommand::public("/subscribe", "Why and how to subscribe to arterm"),
+    RegisteredCommand::public("/hosted", "Alias for /subscribe"),
     RegisteredCommand::public("/config", "Show or edit configuration"),
     RegisteredCommand::public("/log", "Mark the current location in the arterm logs"),
     RegisteredCommand::public(
@@ -206,6 +207,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/accounts", "Alias for /account"),
     RegisteredCommand::public("/cache", "Show cache stats or set cache TTL"),
     RegisteredCommand::public("/debug-visual", "Toggle visual debug overlay"),
+    RegisteredCommand::hidden("/debug-fixture", "Insert a canned message for UI debugging"),
     RegisteredCommand::public("/screenshot-mode", "Toggle screenshot capture mode"),
     RegisteredCommand::public("/screenshot", "Capture a screenshot debug state"),
     RegisteredCommand::public("/record", "Record a demo capture"),
@@ -2078,3 +2080,7 @@ mod external_cli_suggestion_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "command_registry_tests.rs"]
+mod command_registry_tests;
