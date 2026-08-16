@@ -1126,6 +1126,17 @@ pub(crate) enum MemoryCommand {
     /// Show memory statistics
     Stats,
 
+    /// Delete stored project memory. Global memory is not touched.
+    Clean {
+        /// Clean every project's memory, not just this project's
+        #[arg(long)]
+        all_projects: bool,
+
+        /// Skip the confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
+    },
+
     /// Clear test memory storage (used by debug sessions)
     ClearTest,
 }

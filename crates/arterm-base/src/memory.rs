@@ -249,7 +249,7 @@ impl MemoryManager {
         self.project_dir.clone()
     }
 
-    fn project_memory_path(&self) -> Result<Option<PathBuf>> {
+    pub fn project_memory_path(&self) -> Result<Option<PathBuf>> {
         // In test mode, use test directory
         if self.test_mode {
             let test_dir = storage::arterm_dir()?.join("memory").join("test");
