@@ -706,6 +706,26 @@ impl Registry {
             return Err(anyhow::anyhow!(msg));
         }
 
+        // Granular permission rules: deny → ask → allow, most specific
+        // specifier wins. Deny blocks here; ask/allow are recorded for the
+        // interactive approval path.
+        let rules = &crate::config::config().permission_rules;
+        if !rules.is_empty()
+            && rules.decide(resolved_name, &input)
+                == crate::config::permission_rules::PermissionDecision::Deny
+        {
+            let mut fields =
+                Self::tool_lifecycle_fields("blocked", name, resolved_name, &input, &ctx);
+            fields.push((
+                "block_reason".to_string(),
+                "matched a deny permission rule".to_string(),
+            ));
+            crate::logging::event_warn("TOOL_LIFECYCLE", fields);
+            return Err(anyhow::anyhow!(
+                "Tool call blocked by permission rules: {resolved_name} matched a deny rule",
+            ));
+        }
+
         if let Some(policy) = session_tool_policy(&ctx.session_id) {
             if let Some(allowed) = policy.allowed_tools.as_ref()
                 && !tool_name_is_allowed(allowed, resolved_name)
@@ -1376,5 +1396,95 @@ mod mcp_allow_list_tests {
 
 #[cfg(test)]
 mod checkpoint_e2e_tests;
+#[cfg(test)]
+mod permission_gate_tests {
+    use super::bash::BashTool;
+    use super::{CompactionManager, Registry, Tool, ToolContext, ToolExecutionMode};
+    use crate::skill::SkillRegistry;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    fn ctx(session: &str) -> ToolContext {
+        ToolContext {
+            session_id: session.to_string(),
+            message_id: session.to_string(),
+            tool_call_id: format!("{session}-call"),
+            working_dir: Some(std::env::temp_dir()),
+            stdin_request_tx: None,
+            graceful_shutdown_signal: None,
+            execution_mode: ToolExecutionMode::Direct,
+            sandbox_mode: "full-access".to_string(),
+        }
+    }
+
+    /// A registry with just the bash tool registered.
+    fn bash_registry() -> Registry {
+        let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
+        Registry::insert_tool(&mut tools, "bash", BashTool::new());
+        Registry {
+            tools: Arc::new(RwLock::new(tools)),
+            skills: Arc::new(RwLock::new(SkillRegistry::default())),
+            compaction: Arc::new(RwLock::new(CompactionManager::new())),
+        }
+    }
+
+    /// Run `body` with a temporary ARTERM_HOME holding exactly `config`.
+    /// The global config cache is force-reloaded around it so the gate sees
+    /// the temporary rules, and restored afterwards.
+    async fn with_config(config: &str, body: impl std::future::Future<Output = ()>) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("config.toml"), config).expect("write config");
+        let prev = std::env::var_os("ARTERM_HOME");
+        unsafe { std::env::set_var("ARTERM_HOME", dir.path()) };
+        crate::config::invalidate_config_cache();
+        body.await;
+        match prev {
+            Some(v) => unsafe { std::env::set_var("ARTERM_HOME", v) },
+            None => unsafe { std::env::remove_var("ARTERM_HOME") },
+        }
+        crate::config::invalidate_config_cache();
+    }
+
+    /// A deny rule must block the call before the tool ever runs, even for
+    /// commands that would otherwise succeed.
+    #[tokio::test]
+    async fn deny_rule_blocks_bash_call() {
+        with_config("permission_rules = [\"deny Bash(echo *)\"]\n", async {
+            let registry = bash_registry();
+            let err = registry
+                .execute(
+                    "bash",
+                    serde_json::json!({"command": "echo should-not-run"}),
+                    ctx("perm-deny-test"),
+                )
+                .await
+                .expect_err("deny rule must block");
+            assert!(
+                err.to_string().contains("permission rules"),
+                "unexpected error: {err}"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn no_rules_means_no_gate() {
+        with_config("permission_rules = []\n", async {
+            let registry = bash_registry();
+            // `true` runs everywhere; the call goes through the gate untouched.
+            let out = registry
+                .execute(
+                    "bash",
+                    serde_json::json!({"command": "true"}),
+                    ctx("perm-default-test"),
+                )
+                .await
+                .expect("no rules configured, call must pass");
+            assert!(!out.output.to_ascii_lowercase().contains("error"));
+        })
+        .await;
+    }
+}
 #[cfg(test)]
 mod tests;
