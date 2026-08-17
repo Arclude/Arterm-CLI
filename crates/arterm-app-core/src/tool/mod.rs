@@ -18,6 +18,7 @@ mod discover;
 mod discover_secrets;
 mod edit;
 pub mod git_auto_commit;
+mod github;
 mod gmail;
 mod goal;
 pub mod inflight;
@@ -289,7 +290,8 @@ impl Registry {
             Self::insert_tool_timed(&mut m, &mut timings, "diagnostics", || {
                 diagnostics::DiagnosticsTool::new()
             });
-            Self::insert_tool_timed(&mut m, &mut timings, "lsp", || lsp::LspTool::new());
+            Self::insert_tool_timed(&mut m, &mut timings, "lsp", lsp::LspTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "github", github::GithubTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "bash", bash::BashTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "browser", browser::BrowserTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "open", open::OpenTool::new);
