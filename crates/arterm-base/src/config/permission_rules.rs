@@ -22,10 +22,12 @@ pub enum PermissionDecision {
     /// Hard block. The model sees a refusal.
     Deny,
     /// The call requires the user's approval before running.
-    #[allow(dead_code, reason = "wired by the interactive ask path in a follow-up")]
+    ///
+    /// No live session can ask yet, so the tool registry refuses these rather
+    /// than running them unasked. See the gate in `arterm_app_core::tool`.
     Ask,
     /// Explicitly approved, skips any default ask.
-    #[allow(dead_code, reason = "wired by the interactive ask path in a follow-up")]
+    #[allow(dead_code, reason = "matched, but carries no behavior of its own yet")]
     Allow,
     /// No rule matched: fall through to the default behavior.
     Default,

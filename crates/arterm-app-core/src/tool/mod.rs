@@ -31,6 +31,7 @@ mod monitor;
 mod multiedit;
 mod open;
 mod patch;
+mod permission_gate;
 mod read;
 mod repo_map;
 pub mod selfdev;
@@ -721,24 +722,15 @@ impl Registry {
             return Err(anyhow::anyhow!(msg));
         }
 
-        // Granular permission rules: deny → ask → allow, most specific
-        // specifier wins. Deny blocks here; ask/allow are recorded for the
-        // interactive approval path.
-        let rules = &crate::config::config().permission_rules;
-        if !rules.is_empty()
-            && rules.decide(resolved_name, &input)
-                == crate::config::permission_rules::PermissionDecision::Deny
+        // Granular permission rules. `ask` refuses too; see permission_gate.
+        if let permission_gate::GateOutcome::Blocked { reason, message } =
+            permission_gate::evaluate(resolved_name, &input)
         {
             let mut fields =
                 Self::tool_lifecycle_fields("blocked", name, resolved_name, &input, &ctx);
-            fields.push((
-                "block_reason".to_string(),
-                "matched a deny permission rule".to_string(),
-            ));
+            fields.push(("block_reason".to_string(), reason.to_string()));
             crate::logging::event_warn("TOOL_LIFECYCLE", fields);
-            return Err(anyhow::anyhow!(
-                "Tool call blocked by permission rules: {resolved_name} matched a deny rule",
-            ));
+            return Err(anyhow::anyhow!(message));
         }
 
         if let Some(policy) = session_tool_policy(&ctx.session_id) {
@@ -1420,7 +1412,7 @@ mod permission_gate_tests {
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
-    fn ctx(session: &str) -> ToolContext {
+    pub(super) fn ctx(session: &str) -> ToolContext {
         ToolContext {
             session_id: session.to_string(),
             message_id: session.to_string(),
@@ -1434,7 +1426,7 @@ mod permission_gate_tests {
     }
 
     /// A registry with just the bash tool registered.
-    fn bash_registry() -> Registry {
+    pub(super) fn bash_registry() -> Registry {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
         Registry::insert_tool(&mut tools, "bash", BashTool::new());
         Registry {
@@ -1447,7 +1439,7 @@ mod permission_gate_tests {
     /// Run `body` with a temporary ARTERM_HOME holding exactly `config`.
     /// The global config cache is force-reloaded around it so the gate sees
     /// the temporary rules, and restored afterwards.
-    async fn with_config(config: &str, body: impl std::future::Future<Output = ()>) {
+    pub(super) async fn with_config(config: &str, body: impl std::future::Future<Output = ()>) {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("config.toml"), config).expect("write config");
         let prev = std::env::var_os("ARTERM_HOME");

@@ -615,17 +615,30 @@ bind_addr = "0.0.0.0"
 # Set ARTERM_DISABLE_POWER_INHIBIT=1 to force-disable regardless of this setting.
 prevent_sleep_while_streaming = true
 
-# OS-level sandbox for bash commands. Restricts filesystem access for agent-spawned
-# commands. Does not affect the interactive TUI or arterm's own operations.
+# OS-level sandbox for bash commands. Restricts filesystem and outbound network
+# access for agent-spawned commands. Does not affect the interactive TUI or
+# arterm's own operations.
 #
 # Modes:
-#   "full-access"    - No restrictions (default, current behavior)
-#   "workspace-write" - Write only to working directory + temp dirs
-#   "read-only"      - No filesystem writes at all
+#   "workspace-write" - Default. Writes limited to the working directory, temp
+#                       dirs and harmless devices (/dev/null and friends);
+#                       outbound TCP limited to DNS/HTTP/HTTPS.
+#   "read-only"       - No filesystem writes outside temp; no outbound TCP.
+#   "full-access"     - Off. No restrictions.
 #
-# Linux uses Landlock LSM (kernel >= 5.13). macOS uses Seatbelt (sandbox-exec).
+# An empty value means "unset" and resolves to the default, so switching the
+# sandbox off is something you write down rather than something a stale config
+# does for you.
+#
+# Linux uses Landlock LSM (kernel >= 5.13; egress needs >= 6.7). macOS uses
+# Seatbelt (sandbox-exec). On a kernel without Landlock the command still runs,
+# unsandboxed, and says so on stderr.
+#
+# Known limit: Landlock filters TCP only. UDP -- including DNS and QUIC/HTTP-3
+# on port 443 -- is not restricted in any mode.
+#
 # Set ARTERM_SANDBOX_MODE env var to override at runtime.
-sandbox_mode = "full-access"
+sandbox_mode = "workspace-write"
 
 # Granular tool permission rules, evaluated for every tool call.
 # Each rule: "<verb> Tool(<specifier>)" with verb one of deny / ask / allow.
@@ -643,8 +656,11 @@ sandbox_mode = "full-access"
 #   "deny Edit(.env*)",
 #   "allow Bash(git *)",
 #   "allow Bash(npm run *)",
-#   "ask Bash(npm publish)",
+#   "ask Bash(npm publish)",   # refused for now: see the note below
 # ]
+# `ask` currently REFUSES the call. A live session has no way to prompt for
+# approval yet, so an ask rule fails closed instead of running the command
+# unasked -- which is what it did before, silently. Use `allow` to permit.
 permission_rules = []
 
 [safety]
