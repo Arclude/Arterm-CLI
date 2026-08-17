@@ -18,7 +18,9 @@ use tokio_rustls::server::TlsStream;
 
 use crate::gate::{Admission, TrustGate};
 use crate::hello::{
-    PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, RemoteServerSummary, read_line, write_line,
+    MAX_HELLO_BYTES, MAX_SESSION_LIST_PAGES, PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome,
+    RemoteServerSummary, SessionPage, page_of_servers, read_line, sessions_within_budget,
+    total_sessions, write_line,
 };
 use crate::subnet::{self, SubnetPolicy};
 use crate::tls::{PeerCredentials, peer_fingerprint, server_config};
@@ -201,16 +203,8 @@ impl PeerAdmitter {
                 // A trusted device that only wants the session list gets it and
                 // nothing else. This is the cross-machine list's read path,
                 // kept off the session path so listing never opens a session.
-                if let PeerHello::List { .. } = hello {
-                    write_line(
-                        &mut stream,
-                        &PeerWelcome::Sessions {
-                            version: PEER_PROTOCOL_VERSION,
-                            name: self.local_name.clone(),
-                            servers: (self.local_sessions)(),
-                        },
-                    )
-                    .await?;
+                if let PeerHello::List { page, .. } = hello {
+                    self.serve_session_list(&mut stream, page).await?;
                     return Ok(Admitted::Listed {
                         fingerprint,
                         peer_name: device.name,
@@ -285,6 +279,89 @@ impl PeerAdmitter {
                 Ok(reject(peer_addr, RejectionReason::NoLongerTrusted))
             }
         }
+    }
+
+    /// Answer a session-list request, a page at a time, until the asking device
+    /// has everything or stops asking.
+    ///
+    /// The list is read once, before the first page goes out, and every page is
+    /// cut from that one snapshot. Re-reading per page would be both slower and
+    /// wrong: sessions start and stop while a list is being collected, and a
+    /// shifting list under a moving offset skips and repeats rows.
+    ///
+    /// Previews are cut here rather than by whoever supplied the list, so the
+    /// bound holds for every producer.
+    async fn serve_session_list(
+        &self,
+        stream: &mut TlsStream<TcpStream>,
+        first: Option<SessionPage>,
+    ) -> Result<()> {
+        let snapshot: Vec<RemoteServerSummary> = (self.local_sessions)()
+            .into_iter()
+            .map(|server| RemoteServerSummary {
+                details: server
+                    .details
+                    .into_iter()
+                    .map(|session| session.trimmed_for_wire())
+                    .collect(),
+                ..server
+            })
+            .collect();
+
+        // No page asked for means a build that predates pagination: it reads
+        // one reply, under the handshake cap, and then closes. As much as fits
+        // is the most that device can be told.
+        let Some(mut page) = first else {
+            return write_line(
+                stream,
+                &sessions_within_budget(
+                    PEER_PROTOCOL_VERSION,
+                    &self.local_name,
+                    &snapshot,
+                    MAX_HELLO_BYTES,
+                ),
+            )
+            .await;
+        };
+
+        // Bounded on this side too. A verified peer that keeps asking for the
+        // same page would otherwise hold the connection and this task open for
+        // as long as it liked; the same cap the client stops collecting at is
+        // the natural place to stop answering.
+        let total = total_sessions(&snapshot);
+        for _page in 0..MAX_SESSION_LIST_PAGES {
+            let (servers, more) = page_of_servers(&snapshot, page.offset, page.effective_limit());
+            write_line(
+                stream,
+                &PeerWelcome::Sessions {
+                    version: PEER_PROTOCOL_VERSION,
+                    name: self.local_name.clone(),
+                    servers,
+                    more,
+                    total: Some(total),
+                },
+            )
+            .await?;
+            if !more {
+                return Ok(());
+            }
+
+            // Whatever comes back that is not another page request ends the
+            // listing. The pages already sent are the answer, and a peer that
+            // hangs up after reading enough is not a fault on this side. The
+            // version is checked on every line rather than only the first, so
+            // the rule holds for the whole exchange.
+            let next = timeout(HANDSHAKE_TIMEOUT, read_line::<_, PeerHello>(stream)).await;
+            page = match next {
+                Ok(Ok(PeerHello::List {
+                    version,
+                    page: Some(asked),
+                    ..
+                })) if version == PEER_PROTOCOL_VERSION => asked,
+                _ended => return Ok(()),
+            };
+        }
+        Ok(())
     }
 
     async fn refuse(&self, stream: &mut TlsStream<TcpStream>, reason: &str) -> Result<()> {

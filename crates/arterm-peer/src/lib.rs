@@ -54,12 +54,15 @@ pub mod subnet;
 pub mod tls;
 
 pub use connect::{
-    PeerLink, PeerTarget, connect_to_peer, is_ordinary_disconnect, list_peer_sessions,
-    relay_local_stream,
+    PeerLink, PeerListError, PeerTarget, connect_to_peer, is_ordinary_disconnect,
+    list_peer_sessions, relay_local_stream,
 };
 pub use discovery::{DISCOVERY_PORT, DiscoveredDevice, Presence};
 pub use gate::{Admission, TrustGate};
-pub use hello::{PeerHello, PeerWelcome, RemoteServerSummary, RemoteSessionSummary};
+pub use hello::{
+    MAX_HELLO_BYTES, MAX_SESSION_LIST_BYTES, PeerHello, PeerWelcome, RemoteServerSummary,
+    RemoteSessionSummary, SESSION_PAGE_LIMIT, SessionPage,
+};
 pub use listen::{
     Admitted, Arrival, LocalSessions, PeerAdmitter, PeerListener, PeerSession, PendingPeer,
     Rejection, RejectionReason,

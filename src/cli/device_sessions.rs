@@ -128,12 +128,24 @@ async fn query_device(
         address,
         fingerprint,
     };
-    // Unreachable, not listening, off this network: expected, and empty rather
-    // than an error. This is the one swallow the design calls for — the reader
-    // cannot tell an off device from an idle one, on purpose.
     match list_peer_sessions(&credentials, &target).await {
         Ok(summaries) => Ok(summaries.into_iter().map(server_info_from).collect()),
-        Err(_unreachable) => Ok(Vec::new()),
+        // Unreachable, not listening, off this network: expected, and empty
+        // rather than an error. This is the one swallow the design calls for —
+        // the reader cannot tell an off device from an idle one, on purpose.
+        Err(unreachable) if unreachable.is_unreachable() => Ok(Vec::new()),
+        // A device that answered and could not be understood is not asleep. It
+        // still contributes no rows, because one broken peer must not empty the
+        // whole list, but it says so where someone can find it: this was silent
+        // for as long as the session list was capped at a handshake's 4 KiB,
+        // and a hand-built probe was the only way to see the real error.
+        Err(unusable) => {
+            crate::logging::warn(&format!(
+                "{} answered the session list with something unusable: {unusable}",
+                device.name
+            ));
+            Ok(Vec::new())
+        }
     }
 }
 

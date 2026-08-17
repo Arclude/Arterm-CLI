@@ -18,7 +18,9 @@ use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::ServerName;
 
 use crate::hello::{
-    PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, RemoteServerSummary, read_line, write_line,
+    LineError, MAX_SESSION_LIST_BYTES, MAX_SESSION_LIST_PAGES, PEER_PROTOCOL_VERSION, PeerHello,
+    PeerWelcome, RemoteServerSummary, SessionPage, merge_session_pages, read_line,
+    read_line_with_limit, total_sessions, write_line,
 };
 use crate::subnet;
 use crate::tls::{PeerCredentials, client_config};
@@ -110,40 +112,141 @@ pub async fn connect_to_peer(
     }
 }
 
+/// Why listing a peer's sessions failed, split by whether anyone should hear
+/// about it.
+///
+/// The cross-machine list is built to expect unreachable devices: a laptop that
+/// is asleep, off this network, or simply not listening contributes no rows and
+/// no noise, and a reader is not meant to be able to tell it from an idle one.
+/// Everything else — a reply that will not parse, one longer than the reader
+/// accepts, a refusal — is a fault, and reporting it as "no sessions" is what
+/// kept a 4 KiB cap on the session list invisible for as long as it was.
+#[derive(Debug)]
+pub enum PeerListError {
+    /// Nothing answered at that address, or the connection died before the
+    /// answer did. Expected, and quiet by design.
+    Unreachable(anyhow::Error),
+    /// The device answered and the answer could not be used.
+    Unusable(anyhow::Error),
+}
+
+impl PeerListError {
+    /// Whether this is the expected "that machine is not there" case.
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, Self::Unreachable(_))
+    }
+
+    /// The wrapped cause, whichever kind this is.
+    pub fn cause(&self) -> &anyhow::Error {
+        match self {
+            Self::Unreachable(error) | Self::Unusable(error) => error,
+        }
+    }
+}
+
+impl std::fmt::Display for PeerListError {
+    /// The full chain either way, for the reason [`LineError`] gives: the
+    /// detail that names the fault is the whole point of keeping this typed.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.cause())
+    }
+}
+
+impl std::error::Error for PeerListError {}
+
 /// Ask a paired device what sessions it is running, without opening one.
 ///
 /// This is what populates the cross-machine session list. It is a separate
 /// round trip from [`connect_to_peer`] on purpose: the list is read for every
 /// paired device, often, and driving a session to read it would be both
 /// wasteful and visible on the far end as a connect/disconnect.
+///
+/// A long list arrives a page at a time, all on the one connection this opens.
+/// Each reply says whether another page is waiting; a peer that predates
+/// pagination never says so, and its single reply is the whole answer — which
+/// is why the reply is read under [`MAX_SESSION_LIST_BYTES`] rather than a
+/// handshake's limit. That larger cap is what makes an old peer's one enormous
+/// line readable at all.
 pub async fn list_peer_sessions(
     credentials: &PeerCredentials,
     target: &PeerTarget,
-) -> Result<Vec<RemoteServerSummary>> {
-    let (mut stream, peer_addr) = dial(credentials, target).await?;
-
-    write_line(
-        &mut stream,
-        &PeerHello::List {
-            version: PEER_PROTOCOL_VERSION,
-            name: credentials.name().to_string(),
-        },
-    )
-    .await?;
-
-    let welcome: PeerWelcome = timeout(CONNECT_TIMEOUT, read_line(&mut stream))
+) -> Result<Vec<RemoteServerSummary>, PeerListError> {
+    let (mut stream, peer_addr) = dial(credentials, target)
         .await
-        .with_context(|| format!("{peer_addr} accepted the connection but never answered"))?
-        .with_context(|| format!("{peer_addr} ended the connection before listing its sessions"))?;
+        .map_err(PeerListError::Unreachable)?;
 
-    match welcome {
-        PeerWelcome::Sessions { servers, .. } => Ok(servers),
-        PeerWelcome::Refused { reason } => {
-            anyhow::bail!("{peer_addr} refused to list its sessions: {reason}")
+    let mut collected: Vec<RemoteServerSummary> = Vec::new();
+    let mut offset = 0usize;
+    for _page in 0..MAX_SESSION_LIST_PAGES {
+        write_line(
+            &mut stream,
+            &PeerHello::List {
+                version: PEER_PROTOCOL_VERSION,
+                name: credentials.name().to_string(),
+                page: Some(SessionPage::at(offset)),
+            },
+        )
+        .await
+        .map_err(PeerListError::Unreachable)?;
+
+        let welcome = read_session_page(&mut stream, peer_addr).await?;
+        let (servers, more) = match welcome {
+            PeerWelcome::Sessions { servers, more, .. } => (servers, more),
+            PeerWelcome::Refused { reason } => {
+                return Err(PeerListError::Unusable(anyhow::anyhow!(
+                    "{peer_addr} refused to list its sessions: {reason}"
+                )));
+            }
+            PeerWelcome::Ready { .. } | PeerWelcome::Paired { .. } => {
+                return Err(PeerListError::Unusable(anyhow::anyhow!(
+                    "{peer_addr} answered a session-list request with a session"
+                )));
+            }
+        };
+
+        let received = total_sessions(&servers);
+        merge_session_pages(&mut collected, servers);
+        if !more {
+            return Ok(collected);
         }
-        PeerWelcome::Ready { .. } | PeerWelcome::Paired { .. } => {
-            anyhow::bail!("{peer_addr} answered a session-list request with a session")
+        if received == 0 {
+            // "There is more" and nothing sent is a peer that would keep this
+            // loop asking for the same page forever.
+            return Err(PeerListError::Unusable(anyhow::anyhow!(
+                "{peer_addr} says more sessions follow but sent none, so there is no page to ask \
+                 for next"
+            )));
         }
+        offset += received;
+    }
+
+    Err(PeerListError::Unusable(anyhow::anyhow!(
+        "{peer_addr} still had more sessions after {MAX_SESSION_LIST_PAGES} pages, which is more \
+         than any machine lists — treating it as a fault rather than reading without limit"
+    )))
+}
+
+/// Read one page of a session list, under the data cap rather than the
+/// handshake cap, and say which kind of failure it was.
+async fn read_session_page<S>(
+    stream: &mut S,
+    peer_addr: SocketAddr,
+) -> Result<PeerWelcome, PeerListError>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
+    let read = read_line_with_limit::<_, PeerWelcome>(stream, MAX_SESSION_LIST_BYTES);
+    match timeout(CONNECT_TIMEOUT, read).await {
+        Err(_elapsed) => Err(PeerListError::Unreachable(anyhow::anyhow!(
+            "{peer_addr} accepted the connection but never answered"
+        ))),
+        Ok(Ok(welcome)) => Ok(welcome),
+        Ok(Err(LineError::Transport(error))) => Err(PeerListError::Unreachable(error.context(
+            format!("{peer_addr} ended the connection before listing its sessions"),
+        ))),
+        Ok(Err(LineError::Protocol(error))) => Err(PeerListError::Unusable(error.context(
+            format!("{peer_addr} sent a session list that cannot be read"),
+        ))),
     }
 }
 

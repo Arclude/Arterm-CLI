@@ -12,7 +12,10 @@ use arterm_device::invite::{Invite, PendingInvites};
 use arterm_device::{DeviceIdentity, TrustStore};
 use arterm_peer::gate::TrustGate;
 use arterm_peer::hello::RemoteServerSummary;
-use arterm_peer::hello::{PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, read_line, write_line};
+use arterm_peer::hello::{
+    MAX_HELLO_BYTES, MAX_PREVIEW_CHARS, PEER_PROTOCOL_VERSION, PeerHello, PeerWelcome, read_line,
+    write_line,
+};
 use arterm_peer::listen::{Admitted, Arrival, PeerListener, RejectionReason};
 use arterm_peer::subnet::{LocalNetwork, SubnetPolicy};
 use arterm_peer::tls::PeerCredentials;
@@ -788,6 +791,141 @@ async fn a_paired_device_can_list_a_peers_sessions_without_opening_one() {
     match listening.await.expect("the listener task") {
         Admitted::Listed { peer_name, .. } => assert_eq!(peer_name, "guest"),
         other => panic!("a List query should be admitted as Listed, got {other:?}"),
+    }
+}
+
+/// The list that used to be impossible.
+///
+/// The reply was read under the handshake's 4 KiB cap, so a machine with more
+/// than a handful of sessions answered with a line the asking device refused —
+/// and the CLI turned that refusal into "no sessions", which looks exactly like
+/// a laptop that is asleep. A three-session round trip passes either way; only
+/// a list too big for one handshake line tells the two apart.
+#[tokio::test]
+async fn a_session_list_far_larger_than_a_handshake_line_arrives_whole() {
+    let host = Device::new();
+    let guest = Device::new();
+    host.trusts(&guest, "guest");
+    guest.trusts(&host, "host");
+
+    let advertised = vec![bulky_server("forge", 100)];
+    let encoded = serde_json::to_string(&advertised).expect("encoding the advertised list");
+    assert!(
+        encoded.len() > 4 * MAX_HELLO_BYTES,
+        "the point of this test is a list that cannot be one handshake line, got {} bytes",
+        encoded.len()
+    );
+
+    let (addr, listening) =
+        listen_once_with_sessions(&host, SubnetPolicy::ThisMachine, advertised).await;
+
+    let reported = list_peer_sessions(&guest.credentials(), &target_for(&host, addr))
+        .await
+        .expect("a long session list must survive the round trip");
+
+    assert_eq!(reported.len(), 1, "one server, however many pages it took");
+    assert_eq!(
+        reported[0].details.len(),
+        100,
+        "every session comes back, not just the first page"
+    );
+    assert_eq!(reported[0].sessions.len(), 100);
+    assert_eq!(
+        reported[0].details[0].id, "ses_0",
+        "the pages go back together in order"
+    );
+    assert_eq!(reported[0].details[99].id, "ses_99");
+    assert!(
+        reported[0].details[0].prompt.chars().count() <= MAX_PREVIEW_CHARS + 1,
+        "a row's preview is cut on the wire, so page size is predictable"
+    );
+
+    match listening.await.expect("the listener task") {
+        Admitted::Listed { peer_name, .. } => assert_eq!(peer_name, "guest"),
+        other => panic!("a List query should be admitted as Listed, got {other:?}"),
+    }
+}
+
+/// The other compatibility direction, driven by hand because this build's
+/// client always paginates. A device on the released build sends a list request
+/// with no page and reads exactly one reply, under the handshake cap. It has to
+/// be answered with a line it can actually read — a short list is a worse answer
+/// than the whole one and a far better answer than the parse error it gets
+/// today.
+#[tokio::test]
+async fn a_client_that_cannot_paginate_is_still_answered_with_a_readable_list() {
+    let host = Device::new();
+    let guest = Device::new();
+    host.trusts(&guest, "guest");
+    guest.trusts(&host, "host");
+
+    let advertised = vec![bulky_server("forge", 100)];
+    let (addr, listening) =
+        listen_once_with_sessions(&host, SubnetPolicy::ThisMachine, advertised).await;
+
+    let config = arterm_peer::tls::client_config(&guest.credentials(), host.identity.fingerprint())
+        .expect("building a client configuration");
+    let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+    let tcp = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("connecting");
+    let server_name = tokio_rustls::rustls::pki_types::ServerName::IpAddress(addr.ip().into());
+    let mut stream = connector
+        .connect(server_name, tcp)
+        .await
+        .expect("a paired device completes the handshake");
+
+    // The exact line the released build sends: no `page`, because it has none.
+    let legacy = serde_json::json!({
+        "kind": "list",
+        "version": PEER_PROTOCOL_VERSION,
+        "name": "guest",
+    });
+    write_line(&mut stream, &legacy)
+        .await
+        .expect("sending a list request from a build that predates pagination");
+
+    // And read it the way that build reads it: one line, handshake cap.
+    let welcome: PeerWelcome = read_line(&mut stream)
+        .await
+        .expect("an older client has to be answered with a line it can read");
+    match welcome {
+        PeerWelcome::Sessions { servers, .. } => {
+            let shown: usize = servers.iter().map(|server| server.sessions.len()).sum();
+            assert!(shown > 0, "an older client should see sessions, not none");
+            assert!(
+                shown < 100,
+                "a hundred sessions cannot fit a handshake line, so this test proves nothing if \
+                 they all arrived"
+            );
+        }
+        other => panic!("a List query should be answered with a list, got {other:?}"),
+    }
+
+    match listening.await.expect("the listener task") {
+        Admitted::Listed { peer_name, .. } => assert_eq!(peer_name, "guest"),
+        other => panic!("a List query should be admitted as Listed, got {other:?}"),
+    }
+}
+
+/// One server carrying `count` sessions with rows as large as rows get: a first
+/// prompt far longer than a row shows, which is what a real machine has.
+fn bulky_server(name: &str, count: usize) -> RemoteServerSummary {
+    RemoteServerSummary {
+        name: name.to_string(),
+        icon: "🔥".to_string(),
+        version: "9.1.0".to_string(),
+        sessions: (0..count).map(|n| format!("ses_{n}")).collect(),
+        details: (0..count)
+            .map(|n| arterm_peer::RemoteSessionSummary {
+                id: format!("ses_{n}"),
+                short_name: format!("session {n}"),
+                title: format!("what session {n} is about"),
+                prompt: "bir istem ".repeat(40),
+                message_count: n,
+                ..Default::default()
+            })
+            .collect(),
     }
 }
 
