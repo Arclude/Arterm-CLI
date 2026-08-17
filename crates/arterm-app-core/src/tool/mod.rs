@@ -23,6 +23,7 @@ mod goal;
 pub mod inflight;
 mod invalid;
 mod ls;
+mod lsp;
 pub mod mcp;
 mod memory;
 mod multiedit;
@@ -288,6 +289,7 @@ impl Registry {
             Self::insert_tool_timed(&mut m, &mut timings, "diagnostics", || {
                 diagnostics::DiagnosticsTool::new()
             });
+            Self::insert_tool_timed(&mut m, &mut timings, "lsp", || lsp::LspTool::new());
             Self::insert_tool_timed(&mut m, &mut timings, "bash", bash::BashTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "browser", browser::BrowserTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "open", open::OpenTool::new);
