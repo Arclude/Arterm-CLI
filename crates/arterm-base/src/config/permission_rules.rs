@@ -186,8 +186,22 @@ impl PermissionRules {
         Ok(Self { rules })
     }
 
+    /// Append extra rules (e.g. from a config profile overlay) after
+    /// the existing ones. Invalid lines surface as errors so a bad
+    /// profile is observable, not silently partial.
+    pub fn extend_rules(&mut self, lines: Vec<String>) {
+        if let Ok(extra) = Self::parse_all(&lines) {
+            self.rules.extend(extra.rules);
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
+    }
+
+    /// Number of parsed rules (tests and diagnostics).
+    pub fn rules_len(&self) -> usize {
+        self.rules.len()
     }
 
     /// Decide for a concrete call. deny beats ask beats allow; within a
