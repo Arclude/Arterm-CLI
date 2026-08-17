@@ -185,3 +185,24 @@ fn dynamic_gate_empty_input_returns_empty() {
     let out = dynamic_gate_select(Vec::new(), 5);
     assert!(out.is_empty());
 }
+
+#[test]
+fn turn_ended_cooldown_and_turn_floor() {
+    // The turn-end auto-extraction guard logic is embedded in
+    // `on_turn_ended`, which needs a live sidecar; here we verify the
+    // SessionState cooldown bookkeeping invariants it relies on.
+    let mut ss = SessionState::default();
+    assert!(
+        ss.turn_count < 2,
+        "fresh session must be under the turn floor"
+    );
+    assert!(ss.last_turn_end_extraction.is_none());
+
+    ss.turn_count = 3;
+    ss.last_turn_end_extraction = Some(Instant::now());
+    let last = ss.last_turn_end_extraction.unwrap();
+    assert!(
+        last.elapsed() < Duration::from_secs(90),
+        "a just-set cooldown must read as active"
+    );
+}

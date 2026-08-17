@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::embedding;
@@ -272,6 +272,22 @@ impl MemoryAgentHandle {
     pub fn reset(&self) {
         let _ = self.tx.try_send(AgentMessage::Reset);
     }
+
+    /// Notify the memory agent that a turn just finished. Fire-and-forget;
+    /// the agent decides whether an extraction is worth running (rate limits,
+    /// minimum content, LLM availability) so callers never block on this.
+    pub fn turn_ended(
+        &self,
+        session_id: &str,
+        messages: Arc<[crate::message::Message]>,
+        working_dir: Option<String>,
+    ) {
+        let _ = self.tx.try_send(AgentMessage::TurnEnded {
+            session_id: session_id.to_string(),
+            messages,
+            working_dir,
+        });
+    }
 }
 
 /// Messages sent to the memory agent
@@ -281,6 +297,14 @@ enum AgentMessage {
         messages: Arc<[crate::message::Message]>,
         working_dir: Option<String>,
         timestamp: Instant,
+    },
+    /// Turn ended: opportunistically extract learnings from the turn while
+    /// the user reads the reply. Cheaper than waiting for a topic change,
+    /// bounded so quiet sessions do not pay per-turn LLM costs.
+    TurnEnded {
+        session_id: String,
+        messages: Arc<[crate::message::Message]>,
+        working_dir: Option<String>,
     },
     Reset,
 }
@@ -344,6 +368,8 @@ fn record_maintenance_stat(duration_ms: u64) {
 struct SessionState {
     /// Working directory associated with this session.
     working_dir: Option<String>,
+    /// When the last turn-end auto-extraction ran (cooldown guard).
+    last_turn_end_extraction: Option<Instant>,
     /// Last context embedding (for topic change detection)
     last_context_embedding: Option<Vec<f32>>,
     /// Last context string (for extraction when topic changes)
@@ -467,10 +493,61 @@ impl MemoryAgent {
                         crate::logging::error(&format!("Memory agent error: {}", e));
                     }
                 }
+
+                AgentMessage::TurnEnded {
+                    session_id,
+                    messages,
+                    working_dir,
+                } => {
+                    if working_dir.is_some() {
+                        self.session_state(&session_id).working_dir = working_dir;
+                    }
+                    self.on_turn_ended(&session_id, &messages).await;
+                }
             }
         }
 
         crate::logging::info("Memory agent stopped");
+    }
+
+    /// Handle a turn-end notification: run an opportunistic extraction of
+    /// learnings from the turn while the user reads the reply.
+    ///
+    /// Bounded by [`TURN_END_EXTRACTION_MIN_TURNS`] (quiet/short sessions are
+    /// not worth an LLM call) and [`TURN_END_EXTRACTION_COOLDOWN`] (bursty
+    /// tool loops do not pay per turn). Skips when the runtime is dormant or
+    /// the turn added too little content.
+    async fn on_turn_ended(&mut self, session_id: &str, messages: &Arc<[crate::message::Message]>) {
+        const TURN_END_EXTRACTION_MIN_TURNS: usize = 2;
+        const TURN_END_EXTRACTION_COOLDOWN: Duration = Duration::from_secs(90);
+
+        if !memory::memory_runtime_active() {
+            return;
+        }
+        {
+            let ss = self.session_state(session_id);
+            if ss.turn_count < TURN_END_EXTRACTION_MIN_TURNS {
+                return;
+            }
+            if let Some(last) = ss.last_turn_end_extraction
+                && last.elapsed() < TURN_END_EXTRACTION_COOLDOWN
+            {
+                return;
+            }
+            ss.last_turn_end_extraction = Some(Instant::now());
+        }
+
+        let context = memory::format_context_for_extraction(messages);
+        if context.len() < 400 {
+            return; // Too little happened this turn to be worth a judge call.
+        }
+        crate::memory_log::log_topic_change(
+            session_id,
+            "turn-end",
+            "auto-memory turn-end extraction",
+        );
+        self.extract_from_context(session_id, &context, "turn end")
+            .await;
     }
 
     /// Process a context update
@@ -1831,6 +1908,20 @@ pub fn update_context_sync_with_dir(
                 handle.update_context_sync_with_dir(&sid, messages, working_dir);
             }
         });
+    }
+}
+
+/// Notify the memory agent that a turn finished (auto-memory). Fire-and-
+/// forget; a no-op (without initializing the agent) when the agent is not
+/// running, so turn-end auto-extraction never costs anything when memory is
+/// off or the runtime is dormant.
+pub fn turn_ended(
+    session_id: &str,
+    messages: Arc<[crate::message::Message]>,
+    working_dir: Option<String>,
+) {
+    if let Some(handle) = get() {
+        handle.turn_ended(session_id, messages, working_dir);
     }
 }
 

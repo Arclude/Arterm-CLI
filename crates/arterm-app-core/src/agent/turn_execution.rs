@@ -98,6 +98,18 @@ impl Agent {
         let result = self.run_turn_streaming_mpsc(event_tx).await;
         self.current_turn_system_reminder = None;
         self.fire_turn_end_hook(&result, turn_started_at, start_message_index);
+        // Auto-memory: let the memory agent opportunistically extract
+        // learnings from this turn while the user reads the reply. The agent
+        // rate-limits internally; this is a no-op when memory is off.
+        if self.memory_enabled {
+            let messages: std::sync::Arc<[crate::message::Message]> =
+                self.session.messages_for_provider().into();
+            crate::memory_agent::turn_ended(
+                &self.session.id,
+                messages,
+                self.session.working_dir.clone(),
+            );
+        }
         result
     }
 
