@@ -16,6 +16,7 @@ mod debug_socket;
 mod discover;
 mod discover_secrets;
 mod edit;
+pub mod git_auto_commit;
 mod gmail;
 mod goal;
 pub mod inflight;

@@ -132,6 +132,7 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "ARTERM_PIN_IMAGES",
     "ARTERM_PIN_TODOS",
     "ARTERM_PREVENT_SLEEP_WHILE_STREAMING",
+    "ARTERM_GIT_AUTO_COMMIT",
     "ARTERM_PROVIDER",
     "ARTERM_PROMPT_ENTRY_ANIMATION",
     "ARTERM_QUEUE_MODE",
@@ -514,6 +515,13 @@ pub struct Config {
     /// commands are restricted via Landlock (Linux) or Seatbelt (macOS).
     #[serde(default)]
     pub sandbox_mode: String,
+
+    /// Commit touched files after each successful file-mutating tool run
+    /// (edit/write/multiedit/patch/apply_patch), with an `arterm:` commit
+    /// prefix. Only the tool's own files are staged and only when they were
+    /// clean beforehand; off by default.
+    #[serde(default)]
+    pub git_auto_commit: bool,
 
     /// Desktop notifications for interactive sessions (e.g. turn completion)
     pub notifications: NotificationsConfig,

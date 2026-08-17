@@ -466,6 +466,15 @@ impl Config {
             }
         }
 
+        // Git auto-commit override (see tool::git_auto_commit)
+        if let Ok(v) = std::env::var("ARTERM_GIT_AUTO_COMMIT") {
+            match v.trim().to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => self.git_auto_commit = true,
+                "0" | "false" | "no" | "off" => self.git_auto_commit = false,
+                _ => {}
+            }
+        }
+
         if let Ok(v) = std::env::var("ARTERM_HOOK_PRE_TOOL_TIMEOUT_MS") {
             if let Ok(parsed) = v.trim().parse::<u64>() {
                 self.hooks.pre_tool_timeout_ms = parsed;

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use similar::{ChangeTag, TextDiff};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const FILE_TOUCH_PREVIEW_MAX_LINES: usize = 6;
 const FILE_TOUCH_PREVIEW_MAX_BYTES: usize = 240;
@@ -251,7 +251,18 @@ impl Tool for ApplyPatchTool {
         if results.is_empty() {
             Ok(ToolOutput::new("No changes applied"))
         } else {
+            // Repository-level undo point for every successfully touched file.
+            let resolved_touched: Vec<PathBuf> = touched_paths
+                .iter()
+                .map(|p| ctx.resolve_path(Path::new(p)))
+                .collect();
+            let autocommit = super::git_auto_commit::commit_touched(
+                ctx.working_dir.as_deref().unwrap_or(Path::new(".")),
+                "apply_patch",
+                &resolved_touched,
+            );
             let mut body = results.join("\n");
+            super::git_auto_commit::append_notice(&mut body, &autocommit);
             config_watch.finish(&mut body);
             let output = ToolOutput::new(body);
             if touched_paths.len() == 1 {
