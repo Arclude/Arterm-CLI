@@ -7,6 +7,7 @@
 //! This module uses raw syscalls (no libc crate) to avoid adding dependencies.
 //! The syscall numbers are stable on x86_64, x86, aarch64, and arm.
 
+use crate::policy::EgressDefault;
 use crate::{SandboxConfig, SandboxMode, SandboxResult};
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
@@ -64,6 +65,13 @@ const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 10;
 // ABI v2 (kernel ≥ 6.2): refer
 const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 11;
 
+// ABI v4 (kernel ≥ 6.7): network access flags. Bind is currently unused:
+// outbound connect control is the security boundary for tool subprocesses.
+const LANDLOCK_ACCESS_NET_CONNECT_TCP: u64 = 1 << 1;
+
+/// Minimum Landlock ABI version that supports network rules.
+const NET_ABI_VERSION: u32 = 4;
+
 /// All write-related access flags (what we deny in read-only mode).
 #[expect(
     dead_code,
@@ -100,11 +108,19 @@ struct LandlockRulesetAttr {
     /// Bitmask of `LANDLOCK_ACCESS_FS_*` handled by this ruleset.
     handled_access_fs: u64,
     /// Bitmask of `LANDLOCK_ACCESS_NET_*` (ABI v4+, kernel ≥ 6.7). 0 = don't handle.
-    #[allow(dead_code)]
     handled_access_net: u64,
     /// Scoped (ABI v5+, kernel ≥ 6.10). 0 = don't scope.
     #[allow(dead_code)]
     scoped: u64,
+}
+
+/// `landlock_net_port_attr` for adding a network port rule (ABI v4+).
+#[repr(C)]
+struct LandlockNetPortAttr {
+    /// The allowed access mask for this port.
+    allowed_access: u64,
+    /// The TCP port in host byte order.
+    port: u64,
 }
 
 /// `landlock_path_beneath_attr` for adding a path rule.
@@ -225,26 +241,60 @@ pub fn landlock_create_ruleset_version() -> u32 {
 }
 
 /// Create a Landlock ruleset file descriptor.
-fn landlock_create_ruleset(handled_access_fs: u64) -> Result<i32, String> {
+///
+/// `handled_access_net` is honored only on ABI v4+ kernels; the attr size
+/// grows to include the network field when it is non-zero.
+fn landlock_create_ruleset(handled_access_fs: u64, handled_access_net: u64) -> Result<i32, String> {
     let attr = LandlockRulesetAttr {
         handled_access_fs,
-        handled_access_net: 0,
+        handled_access_net,
         scoped: 0,
     };
+    // Size 8 = handled_access_fs only (ABI v1 minimum). Size 16 also passes
+    // handled_access_net, required for network rules on ABI v4+.
+    let attr_size: usize = if handled_access_net != 0 { 16 } else { 8 };
     unsafe {
-        // Pass size = 8 (offsetof + sizeof handled_access_fs only).
-        // Passing the full struct size works on newer kernels but the
-        // minimum guaranteed size is just the first field for ABI v1 compat.
         let ret = syscall3(
             SYS_LANDLOCK_CREATE_RULESET,
             &attr as *const LandlockRulesetAttr as i64,
-            8, // size of handled_access_fs field only
+            attr_size as i64,
             0, // flags
         );
         if ret < 0 {
             Err(format!("landlock_create_ruleset failed (errno {})", -ret))
         } else {
             Ok(ret as i32)
+        }
+    }
+}
+
+/// Add a TCP port rule to the ruleset (ABI v4+).
+///
+/// `allowed_access` of 0 denies both bind and connect on the port, which is
+/// Landlock's deny-by-default behavior for handled network access.
+fn landlock_add_net_rule(ruleset_fd: i32, port: u16, allowed_access: u64) -> Result<(), String> {
+    let net_attr = LandlockNetPortAttr {
+        allowed_access,
+        port: u64::from(port),
+    };
+
+    const LANDLOCK_RULE_NET_PORT: u64 = 2;
+
+    unsafe {
+        let ret = syscall4(
+            SYS_LANDLOCK_ADD_RULE,
+            ruleset_fd as i64,
+            LANDLOCK_RULE_NET_PORT as i64,
+            &net_attr as *const LandlockNetPortAttr as i64,
+            0, // flags
+        );
+        if ret < 0 {
+            Err(format!(
+                "landlock_add_rule(net_port {}) failed (errno {})",
+                port, -ret
+            ))
+        } else {
+            Ok(())
         }
     }
 }
@@ -368,8 +418,21 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
         RESTRICTED_WRITE_ACCESS & !LANDLOCK_ACCESS_FS_REFER
     };
 
+    // Network enforcement: Landlock ABI v4+ (kernel ≥ 6.7). When the
+    // effective egress policy is enumerably restrictive, handle TCP connect
+    // so that only allowed ports can be reached. When the kernel is older,
+    // report the gap instead of silently running unrestricted.
+    let egress = config.effective_egress();
+    let ports = egress.allowed_ports();
+    let net_enforced = abi >= NET_ABI_VERSION && ports.is_some();
+    let handled_net = if net_enforced {
+        LANDLOCK_ACCESS_NET_CONNECT_TCP
+    } else {
+        0
+    };
+
     // Create the ruleset
-    let ruleset_fd = landlock_create_ruleset(handled)?;
+    let ruleset_fd = landlock_create_ruleset(handled, handled_net)?;
 
     // Add ALL paths as "allowed" for the handled operations, then restrict
     // specific dangerous paths. Since Landlock is deny-by-default for handled
@@ -414,6 +477,22 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
         }
     }
 
+    // Egress enforcement (ABI v4+): Landlock is deny-by-default for handled
+    // net access, so each allow rule opens exactly one port. Deny rules in
+    // the policy are already covered by the default-deny; explicit port
+    // denials simply do not get an allow rule. A deny-everything policy with
+    // zero allow rules denies all outbound TCP.
+    let mut net_rule_failures = 0usize;
+    if net_enforced && let Some(ports) = ports.as_ref() {
+        for &port in ports {
+            if let Err(e) = landlock_add_net_rule(ruleset_fd, port, LANDLOCK_ACCESS_NET_CONNECT_TCP)
+            {
+                net_rule_failures += 1;
+                eprintln!("arterm sandbox: egress rule for port {port} failed: {e}");
+            }
+        }
+    }
+
     // Restrict ourselves
     let restrict_result = landlock_restrict_self(ruleset_fd);
 
@@ -423,12 +502,36 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
     }
 
     match restrict_result {
-        Ok(()) => Ok(SandboxResult::applied(format!(
-            "Landlock ABI v{} applied (mode: {})",
-            abi, config.mode
-        ))),
+        Ok(()) => {
+            let mut message = format!("Landlock ABI v{} applied (mode: {}", abi, config.mode);
+            if net_enforced {
+                let count = ports.as_ref().map(|p| p.len()).unwrap_or(0);
+                message.push_str(&format!(
+                    ", egress: {count} port(s) allowed, {} denied",
+                    if net_rule_failures > 0 {
+                        format!("{net_rule_failures} rule(s) failed")
+                    } else {
+                        "rest".to_string()
+                    }
+                ));
+            } else if abi < NET_ABI_VERSION {
+                message
+                    .push_str(", egress: NOT enforced (kernel < 6.7 lacks Landlock network rules)");
+            } else if egress.default_action == EgressDefault::Allow {
+                message.push_str(", egress: allow-all policy");
+            }
+            message.push(')');
+            Ok(SandboxResult::applied(message))
+        }
         Err(e) => Err(e),
     }
+}
+
+/// Whether the effective egress policy would allow a TCP connect to `port`.
+/// Exposed for tests and diagnostics; the kernel enforces the real policy.
+#[cfg(test)]
+pub(crate) fn policy_permits_port(config: &SandboxConfig, port: u16) -> bool {
+    config.effective_egress().permits(port)
 }
 
 #[cfg(test)]
@@ -540,9 +643,149 @@ mod tests {
         }
     }
 
+    #[test]
+    fn readonly_denies_outbound_connect() {
+        let abi = landlock_create_ruleset_version();
+        if abi < NET_ABI_VERSION {
+            eprintln!("Skipping: Landlock network rules need ABI v4 (kernel ≥ 6.7)");
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let config = SandboxConfig::new(SandboxMode::Readonly, Some(tmp.path().to_path_buf()));
+        // readonly implies deny-all egress with zero allow rules.
+        assert_eq!(
+            config.effective_egress().allowed_ports(),
+            Some(vec![]),
+            "readonly must enumerate an empty allowlist"
+        );
+
+        let exit = run_sandboxed_connect_probe(&config, 9); // discard port, likely unfiltered
+        eprintln!("readonly probe exit code: {exit}");
+        match exit {
+            // 0 = connect blocked by the LSM: exactly what read-only demands
+            0 => {}
+            // 1 = connect succeeded: sandbox failed to enforce
+            1 => panic!("sandbox applied but outbound connect succeeded"),
+            2 => eprintln!("Skipping: sandbox not applicable"),
+            3 => eprintln!("Skipping: sandbox error in child"),
+            _ => panic!("unexpected probe exit {exit}"),
+        }
+    }
+
+    #[test]
+    fn workspace_write_allows_web_ports_only() {
+        let abi = landlock_create_ruleset_version();
+        if abi < NET_ABI_VERSION {
+            eprintln!("Skipping: Landlock network rules need ABI v4 (kernel ≥ 6.7)");
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let config =
+            SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(tmp.path().to_path_buf()));
+
+        // The default policy permits 443 but not 6667.
+        assert!(policy_permits_port(&config, 443));
+        assert!(!policy_permits_port(&config, 6667));
+
+        // Probing 443 against localhost may legitimately fail (no listener),
+        // which still proves the port was reachable at the LSM layer: a
+        // Landlock denial surfaces as EACCES, not ECONNREFUSED.
+        let exit = run_sandboxed_connect_probe(&config, 443);
+        assert_ne!(exit, 2, "sandbox should have applied on an ABI v4+ kernel");
+
+        // 6667 is not in the allowlist; the connect must be denied by the LSM.
+        let exit = run_sandboxed_connect_probe(&config, 6667);
+        eprintln!("blocked-port probe exit code: {exit}");
+        match exit {
+            // 0 = connect blocked: exactly what the policy demands
+            0 => {}
+            1 => panic!("sandbox applied but connect to 6667 succeeded"),
+            2 => eprintln!("Skipping: sandbox not applicable"),
+            3 => eprintln!("Skipping: sandbox error in child"),
+            _ => panic!("unexpected probe exit {exit}"),
+        }
+    }
+
+    /// Fork a child that applies the sandbox then attempts a TCP connect.
+    ///
+    /// Exit codes: 0 = connect blocked by sandbox, 1 = connect succeeded,
+    /// 2 = sandbox not applied, 3 = sandbox error.
+    fn run_sandboxed_connect_probe(config: &SandboxConfig, port: u16) -> i32 {
+        use std::net::{TcpStream, ToSocketAddrs as _};
+        use std::time::Duration;
+
+        let mut pipe = [0i32; 2];
+        unsafe {
+            let ret = pipe2(&mut pipe as *mut i32, 0);
+            assert_eq!(ret, 0, "pipe2 failed");
+        }
+
+        unsafe {
+            let pid = libc_fork();
+            if pid == 0 {
+                // Child
+                close(pipe[0]);
+                let sandbox_result = apply_landlock(config);
+                if let Err(ref e) = sandbox_result {
+                    eprintln!("probe child: sandbox error: {e}");
+                }
+                let connected = match ("127.0.0.1", port).to_socket_addrs() {
+                    Ok(mut addrs) => addrs
+                        .next()
+                        .and_then(|addr| {
+                            TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()
+                        })
+                        .is_some(),
+                    Err(_) => false,
+                };
+                let code = match &sandbox_result {
+                    Ok(sr) if sr.applied => {
+                        if connected {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Ok(_) => 2,
+                    Err(_) => 3,
+                };
+                let mut msg = [0u8; 1];
+                msg[0] = code as u8;
+                let _ = write_fd(pipe[1], msg.as_ptr(), 1);
+                close(pipe[1]);
+                std::process::exit(0);
+            } else if pid > 0 {
+                // Parent
+                close(pipe[1]);
+                let mut buf = [0u8; 1];
+                let mut read_n = 0usize;
+                while read_n < 1 {
+                    let n = read_fd(pipe[0], buf.as_mut_ptr().add(read_n), 1);
+                    if n <= 0 {
+                        break;
+                    }
+                    read_n += n as usize;
+                }
+                close(pipe[0]);
+                let mut status: i32 = 0;
+                libc_waitpid(pid, &mut status, 0);
+                i32::from(buf[0])
+            } else {
+                close(pipe[0]);
+                close(pipe[1]);
+                2
+            }
+        }
+    }
+
     unsafe extern "C" {
         fn fork() -> i32;
         fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+        fn pipe2(fds: *mut i32, flags: i32) -> i32;
+        fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+        fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
     }
 
     unsafe fn libc_fork() -> i32 {
@@ -551,5 +794,13 @@ mod tests {
 
     unsafe fn libc_waitpid(pid: i32, status: *mut i32, options: i32) -> i32 {
         unsafe { waitpid(pid, status, options) }
+    }
+
+    unsafe fn write_fd(fd: i32, buf: *const u8, count: usize) -> isize {
+        unsafe { write(fd, buf, count) }
+    }
+
+    unsafe fn read_fd(fd: i32, buf: *mut u8, count: usize) -> isize {
+        unsafe { read(fd, buf, count) }
     }
 }
