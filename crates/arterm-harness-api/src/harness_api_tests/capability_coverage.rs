@@ -48,6 +48,15 @@ const LEDGER: &[(&str, Disposition)] = &[
     ("GetHistory", Covered),
     ("GetModelCatalog", Covered),
     ("InputShell", ClientInternal),
+    (
+        "McpAction",
+        Gap(
+            "connect, disconnect, or reload an MCP server. Without it a client \
+             cannot manage where the agent's tools come from: the tool set is \
+             whatever the daemon loaded at startup, and a server that drops \
+             stays dropped until someone restarts the daemon or drives the TUI",
+        ),
+    ),
     ("Message", Covered),
     ("NotifyAuthChanged", Covered),
     ("RefreshModels", ClientInternal),
