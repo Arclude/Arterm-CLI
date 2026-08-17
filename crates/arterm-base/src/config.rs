@@ -138,6 +138,7 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "ARTERM_REASONING_DISPLAY",
     "ARTERM_REDRAW_FPS",
     "ARTERM_SAME_PROVIDER_ACCOUNT_FAILOVER",
+    "ARTERM_SANDBOX_MODE",
     "ARTERM_SCROLL_BOOKMARK_KEY",
     "ARTERM_SCROLL_DOWN_FALLBACK_KEY",
     "ARTERM_SCROLL_DOWN_KEY",
@@ -507,6 +508,12 @@ pub struct Config {
 
     /// Safety / notification configuration
     pub safety: SafetyConfig,
+
+    /// OS-level sandbox mode for bash commands: "full-access" (default),
+    /// "workspace-write", or "read-only". When set to a sandboxed mode, bash
+    /// commands are restricted via Landlock (Linux) or Seatbelt (macOS).
+    #[serde(default)]
+    pub sandbox_mode: String,
 
     /// Desktop notifications for interactive sessions (e.g. turn completion)
     pub notifications: NotificationsConfig,

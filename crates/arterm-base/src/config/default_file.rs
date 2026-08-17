@@ -608,6 +608,18 @@ bind_addr = "0.0.0.0"
 # Set ARTERM_DISABLE_POWER_INHIBIT=1 to force-disable regardless of this setting.
 prevent_sleep_while_streaming = true
 
+# OS-level sandbox for bash commands. Restricts filesystem access for agent-spawned
+# commands. Does not affect the interactive TUI or arterm's own operations.
+#
+# Modes:
+#   "full-access"    - No restrictions (default, current behavior)
+#   "workspace-write" - Write only to working directory + temp dirs
+#   "read-only"      - No filesystem writes at all
+#
+# Linux uses Landlock LSM (kernel >= 5.13). macOS uses Seatbelt (sandbox-exec).
+# Set ARTERM_SANDBOX_MODE env var to override at runtime.
+sandbox_mode = "full-access"
+
 [safety]
 # Notification settings for ambient mode events
 

@@ -457,6 +457,15 @@ impl Config {
         hook_env_override(&mut self.hooks.session_end, "ARTERM_HOOK_SESSION_END");
         hook_env_override(&mut self.hooks.pre_tool, "ARTERM_HOOK_PRE_TOOL");
         hook_env_override(&mut self.hooks.post_tool, "ARTERM_HOOK_POST_TOOL");
+
+        // OS-level sandbox mode override
+        if let Ok(v) = std::env::var("ARTERM_SANDBOX_MODE") {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                self.sandbox_mode = trimmed.to_string();
+            }
+        }
+
         if let Ok(v) = std::env::var("ARTERM_HOOK_PRE_TOOL_TIMEOUT_MS") {
             if let Ok(parsed) = v.trim().parse::<u64>() {
                 self.hooks.pre_tool_timeout_ms = parsed;

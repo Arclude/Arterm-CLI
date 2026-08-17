@@ -321,6 +321,7 @@ dependencies = [
  "arterm-pdf",
  "arterm-plan",
  "arterm-provider-core",
+ "arterm-sandbox",
  "arterm-schema-dialect",
  "arterm-selfdev-types",
  "arterm-session-types",
@@ -1094,6 +1095,13 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "unicode-width",
+]
+
+[[package]]
+name = "arterm-sandbox"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]

@@ -567,6 +567,18 @@ macro_rules! apply_env_hygiene {
 }
 
 fn build_shell_command(cmd_str: &str) -> TokioCommand {
+    build_shell_command_with_sandbox(cmd_str, None, None)
+}
+
+/// Build a shell command, optionally applying OS-level sandboxing.
+///
+/// When `sandbox_mode` is set (and not `FullAccess`), a `pre_exec` hook is
+/// installed that applies Landlock (Linux) restrictions to the child process.
+fn build_shell_command_with_sandbox(
+    cmd_str: &str,
+    working_dir: Option<&std::path::Path>,
+    sandbox_config: Option<&arterm_sandbox::SandboxConfig>,
+) -> TokioCommand {
     #[cfg(windows)]
     {
         let mut cmd = TokioCommand::new("cmd.exe");
@@ -583,6 +595,7 @@ fn build_shell_command(cmd_str: &str) -> TokioCommand {
         // selects the documented quote handling used with this form.
         cmd.args(["/D", "/S", "/C"])
             .raw_arg(format!("\"{cmd_str}\""));
+        let _ = (working_dir, sandbox_config); // sandbox not supported on Windows yet
         cmd
     }
     #[cfg(not(windows))]
@@ -591,6 +604,37 @@ fn build_shell_command(cmd_str: &str) -> TokioCommand {
         apply_env_hygiene!(cmd);
         cmd.arg("-c").arg(cmd_str);
         configure_tool_scratch(&mut cmd);
+
+        // Apply OS-level sandbox if configured.
+        if let Some(config) = sandbox_config
+            && config.mode.is_sandboxed()
+        {
+            let sb_config = config.clone();
+            let wd = working_dir.map(|p| p.to_path_buf());
+            unsafe {
+                cmd.pre_exec(move || {
+                    let apply_config =
+                        arterm_sandbox::SandboxConfig::new(sb_config.mode, wd.clone());
+                    match arterm_sandbox::apply(&apply_config) {
+                        Ok(result) => {
+                            if !result.applied {
+                                eprintln!("arterm sandbox: {}", result.message);
+                            }
+                            Ok(())
+                        }
+                        Err(e) => {
+                            eprintln!("arterm sandbox error: {e}");
+                            // Return error to abort exec - the sandbox
+                            // failed and we don't want to run unsandboxed.
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                format!("arterm sandbox error: {e}"),
+                            ))
+                        }
+                    }
+                });
+            }
+        }
         cmd
     }
 }
@@ -845,7 +889,24 @@ impl BashTool {
 
         let has_stdin_channel = ctx.stdin_request_tx.is_some();
 
-        let mut command = build_shell_command(&params.command);
+        // Parse sandbox mode from context and build sandbox config if active.
+        let sb_config = if !ctx.sandbox_mode.is_empty() {
+            match ctx.sandbox_mode.parse::<arterm_sandbox::SandboxMode>() {
+                Ok(mode) if mode.is_sandboxed() => Some(arterm_sandbox::SandboxConfig::new(
+                    mode,
+                    ctx.working_dir.clone(),
+                )),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        let mut command = build_shell_command_with_sandbox(
+            &params.command,
+            ctx.working_dir.as_deref(),
+            sb_config.as_ref(),
+        );
         command
             .kill_on_drop(true)
             .stdout(Stdio::piped())
@@ -1046,6 +1107,14 @@ impl BashTool {
 
     #[cfg(unix)]
     fn supports_reload_persistence(&self, ctx: &ToolContext) -> bool {
+        // Don't use the reload-persistable path when sandboxed, because the
+        // detached wrapper does not go through build_shell_command_with_sandbox.
+        if !ctx.sandbox_mode.is_empty()
+            && let Ok(mode) = ctx.sandbox_mode.parse::<arterm_sandbox::SandboxMode>()
+            && mode.is_sandboxed()
+        {
+            return false;
+        }
         matches!(
             ctx.execution_mode,
             crate::tool::ToolExecutionMode::AgentTurn

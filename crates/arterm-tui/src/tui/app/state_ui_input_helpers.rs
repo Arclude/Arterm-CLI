@@ -125,6 +125,10 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/cls", "Clear the view only, keeping context"),
     RegisteredCommand::hidden("/clear-view", "Alias for /cls"),
     RegisteredCommand::public("/rewind", "Rewind conversation to previous message"),
+    RegisteredCommand::public(
+        "/planmode",
+        "Toggle Plan Mode (read-only exploration, blocks write tools)",
+    ),
     RegisteredCommand::public("/poke", "Poke model to resume with incomplete todos"),
     RegisteredCommand::public("/plan", "Create a plan-only response as a plan card"),
     RegisteredCommand::public("/improve", "Autonomously improve the repository"),

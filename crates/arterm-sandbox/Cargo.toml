@@ -1,0 +1,10 @@
+[package]
+name = "arterm-sandbox"
+version = "0.1.0"
+edition = "2024"
+description = "OS-level sandboxing for bash command execution (Linux Landlock, macOS Seatbelt)"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

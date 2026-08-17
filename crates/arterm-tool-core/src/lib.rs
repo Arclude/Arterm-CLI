@@ -108,6 +108,10 @@ pub struct ToolContext {
     pub stdin_request_tx: Option<tokio::sync::mpsc::UnboundedSender<StdinInputRequest>>,
     pub graceful_shutdown_signal: Option<InterruptSignal>,
     pub execution_mode: ToolExecutionMode,
+    /// OS-level sandbox mode for bash commands: "read-only", "workspace-write",
+    /// or "full-access" (default). When set to a sandboxed mode, the bash tool
+    /// applies Landlock (Linux) or Seatbelt (macOS) restrictions.
+    pub sandbox_mode: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +130,7 @@ impl ToolContext {
             stdin_request_tx: self.stdin_request_tx.clone(),
             graceful_shutdown_signal: self.graceful_shutdown_signal.clone(),
             execution_mode: self.execution_mode,
+            sandbox_mode: self.sandbox_mode.clone(),
         }
     }
 
