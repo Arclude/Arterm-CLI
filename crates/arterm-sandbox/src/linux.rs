@@ -50,62 +50,12 @@ const SYS_LANDLOCK_RESTRICT_SELF: i64 = 446;
 /// `landlock_create_ruleset` flags: report ABI version without creating.
 const LANDLOCK_CREATE_RULESET_VERSION: u64 = 1 << 0;
 
-// Access flags for filesystem (ABI v1, kernel ≥ 5.13)
-const LANDLOCK_ACCESS_FS_EXECUTE: u64 = 1 << 0;
-const LANDLOCK_ACCESS_FS_WRITE_FILE: u64 = 1 << 1;
-const LANDLOCK_ACCESS_FS_REMOVE_FILE: u64 = 1 << 2;
-const LANDLOCK_ACCESS_FS_REMOVE_DIR: u64 = 1 << 3;
-const LANDLOCK_ACCESS_FS_MAKE_CHAR: u64 = 1 << 4;
-const LANDLOCK_ACCESS_FS_MAKE_DIR: u64 = 1 << 5;
-const LANDLOCK_ACCESS_FS_MAKE_REG: u64 = 1 << 6;
-const LANDLOCK_ACCESS_FS_MAKE_SOCK: u64 = 1 << 7;
-const LANDLOCK_ACCESS_FS_MAKE_FIFO: u64 = 1 << 8;
-const LANDLOCK_ACCESS_FS_MAKE_BLOCK: u64 = 1 << 9;
-const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 10;
-// ABI v2 (kernel ≥ 6.2): refer
-const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 11;
+mod access;
 
-// ABI v4 (kernel ≥ 6.7): network access flags. Bind is currently unused:
-// outbound connect control is the security boundary for tool subprocesses.
-const LANDLOCK_ACCESS_NET_CONNECT_TCP: u64 = 1 << 1;
-
-/// Minimum Landlock ABI version that supports network rules.
-const NET_ABI_VERSION: u32 = 4;
-
-/// All write-related access flags (what we deny in read-only mode).
-#[expect(
-    dead_code,
-    reason = "documents the complete Landlock write-access table; later sandbox phases widen RESTRICTED_WRITE_ACCESS toward it"
-)]
-const ALL_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
-    | LANDLOCK_ACCESS_FS_REMOVE_FILE
-    | LANDLOCK_ACCESS_FS_REMOVE_DIR
-    | LANDLOCK_ACCESS_FS_MAKE_CHAR
-    | LANDLOCK_ACCESS_FS_MAKE_DIR
-    | LANDLOCK_ACCESS_FS_MAKE_REG
-    | LANDLOCK_ACCESS_FS_MAKE_SOCK
-    | LANDLOCK_ACCESS_FS_MAKE_FIFO
-    | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-    | LANDLOCK_ACCESS_FS_MAKE_SYM
-    | LANDLOCK_ACCESS_FS_REFER;
-
-/// Write-related access flags that we restrict. We only restrict writing to
-/// existing files and creating new regular files. This is the minimal set
-/// that prevents uncontrolled file modification while allowing processes
-/// to function normally (pipes and sockets are untouched).
-///
-/// Character devices are NOT automatically fine: `WRITE_FILE` covers them too,
-/// so `cmd > /dev/null` was denied in both sandboxed modes until
-/// [`ALWAYS_WRITABLE_DEVICES`] was allowed explicitly.
-const RESTRICTED_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_MAKE_REG;
-
-/// The subset of [`RESTRICTED_WRITE_ACCESS`] that applies to a non-directory.
-///
-/// `MAKE_REG` means "create a regular file *inside* this directory", so passing
-/// it in a rule whose target is a file makes `landlock_add_rule` fail with
-/// EINVAL. That failure was only ever an `eprintln`, so a file-granular
-/// writable root looked accepted and silently did nothing.
-const FILE_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE;
+// The kernel access-right table and the ABI gating over it. Split out so
+// the contract with `include/uapi/linux/landlock.h` sits next to the test
+// that pins it against the header.
+use access::*;
 
 /// Devices every ordinary command expects to write, allowed in every sandboxed
 /// mode including read-only.
@@ -126,13 +76,6 @@ const ALWAYS_WRITABLE_DEVICES: &[&str] = &[
     "/dev/ptmx",
     "/dev/pts",
 ];
-
-/// All access flags we know about (for the ruleset mask).
-#[expect(
-    dead_code,
-    reason = "documents the complete Landlock access table; later sandbox phases use it as the ruleset mask"
-)]
-const ALL_KNOWN_ACCESS: u64 = LANDLOCK_ACCESS_FS_EXECUTE | ALL_WRITE_ACCESS;
 
 /// `landlock_ruleset_attr` as expected by the kernel.
 #[repr(C)]
@@ -462,15 +405,10 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
         ));
     }
 
-    // Determine which access flags to handle based on ABI version.
-    // We only handle file-level write/remove flags: this means reads, execute,
-    // and pipe/socket creation are always allowed.
-    let handled = if abi >= 2 {
-        RESTRICTED_WRITE_ACCESS
-    } else {
-        // ABI v1: no REFER
-        RESTRICTED_WRITE_ACCESS & !LANDLOCK_ACCESS_FS_REFER
-    };
+    // Which of the write flags this kernel is willing to hear about. Reads,
+    // execute, ioctl and pipe/socket creation stay unhandled, so they are
+    // always allowed.
+    let handled = restricted_write_access(abi);
 
     // Network enforcement: Landlock ABI v4+ (kernel ≥ 6.7). When the
     // effective egress policy is enumerably restrictive, handle TCP connect
@@ -488,15 +426,12 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
     // Create the ruleset
     let ruleset_fd = landlock_create_ruleset(handled, handled_net)?;
 
-    // Add ALL paths as "allowed" for the handled operations, then restrict
-    // specific dangerous paths. Since Landlock is deny-by-default for handled
-    // flags, we need to explicitly allow the operations we want.
+    // Landlock is deny-by-default for every handled right, so the rules below
+    // are the only places those rights exist. Anything not listed is denied,
+    // which is why `handled` must not name a right nothing grants back.
     //
-    // For now, add the root filesystem with full access to handled flags,
-    // then we can tighten by removing specific path rules.
-    //
-    // In read-only mode: don't add any write rules, so all writes are denied.
-    // In workspace-write: add writable paths with full access.
+    // In read-only mode the list is temp and scratch only; in workspace-write
+    // it also carries the working directory and the caller's extra roots.
 
     let full_access = handled;
 
@@ -520,14 +455,18 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
     };
 
     // Devices first: they are allowed in every sandboxed mode, read-only
-    // included, so that redirection keeps working under the sandbox.
+    // included, so that redirection keeps working under the sandbox. They get
+    // the non-directory mask even where the path is a directory (`/dev/pts`):
+    // `cmd > /dev/null` needs write and truncate, and nothing needs to create
+    // or delete entries under /dev.
+    let device_access = full_access & FILE_WRITE_ACCESS;
     let device_paths = ALWAYS_WRITABLE_DEVICES.iter().map(std::path::Path::new);
 
     for path in full_access_paths.iter().map(std::path::PathBuf::as_path) {
         add_writable_rule(ruleset_fd, path, full_access);
     }
     for path in device_paths {
-        add_writable_rule(ruleset_fd, path, full_access);
+        add_writable_rule(ruleset_fd, path, device_access);
     }
 
     // Egress enforcement (ABI v4+): Landlock is deny-by-default for handled
@@ -588,272 +527,5 @@ pub(crate) fn policy_permits_port(config: &SandboxConfig, port: u16) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::SandboxConfig;
-
-    #[test]
-    fn query_landlock_abi() {
-        let abi = landlock_create_ruleset_version();
-        // On this kernel (7.1.x), Landlock should be supported.
-        // But don't fail the test if running in CI without Landlock.
-        println!("Landlock ABI version: {}", abi);
-    }
-
-    #[test]
-    fn readonly_denies_writes() {
-        let abi = landlock_create_ruleset_version();
-        if abi == 0 {
-            eprintln!("Skipping: Landlock not available");
-            return;
-        }
-
-        let tmp = tempfile::tempdir().unwrap();
-        let config = SandboxConfig::new(SandboxMode::Readonly, Some(tmp.path().to_path_buf()));
-
-        // Fork a child that applies the sandbox and tries to write
-        // Write to a path outside the allowed writable directories.
-        // The sandbox allows writes to TMPDIR and ARTERM_SCRATCH_DIR even in
-        // read-only mode, so we write to a different location.
-        let test_file = std::path::PathBuf::from("/var/tmp/arterm-sandbox-ro-test.txt");
-        let _ = std::fs::remove_file(&test_file);
-        unsafe {
-            let pid = libc_fork();
-            if pid == 0 {
-                // Child: apply sandbox, then try to write
-                let sandbox_result = apply_landlock(&config);
-                // Try to create a file - should fail in read-only mode.
-                // Landlock restricts the calling thread, so the write must
-                // happen in the same thread.
-                let write_result = std::fs::write(&test_file, "test");
-                let exit_code = match (&sandbox_result, &write_result) {
-                    (Ok(sr), Err(_)) if sr.applied => 0, // sandbox worked, write blocked
-                    (Ok(sr), Ok(_)) if sr.applied => 1, // sandbox applied but write succeeded (bug)
-                    (Ok(sr), _) if !sr.applied => 2,    // sandbox not available
-                    (Err(_), _) => 3,                   // sandbox error
-                    _ => 4,                             // catch-all
-                };
-                if let Err(ref e) = sandbox_result {
-                    eprintln!("CHILD sandbox error: {e}");
-                }
-                if let Ok(ref sr) = sandbox_result {
-                    eprintln!("CHILD sandbox: applied={} msg={}", sr.applied, sr.message);
-                }
-                std::process::exit(exit_code);
-            } else if pid > 0 {
-                // Parent: wait for child
-                let mut status: i32 = 0;
-                libc_waitpid(pid, &mut status, 0);
-                // Exit code 0 = write failed (sandbox working)
-                let exited = (status & 0xff00) >> 8;
-                // Exit 0 = sandbox blocked write
-                // Exit 2 = sandbox not available on this kernel
-                // Exit 3 = sandbox error (e.g. EPERM in multi-threaded test env)
-                if exited == 2 || exited == 3 {
-                    eprintln!(
-                        "Skipping readonly test: sandbox not applicable (exit={})",
-                        exited
-                    );
-                    return;
-                }
-                // Exit 0 = sandbox blocked write (success!)
-                // Exit 1 = sandbox applied but write succeeded (unexpected)
-                assert!(
-                    exited == 0,
-                    "write should have been blocked by sandbox (exit={})",
-                    exited
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn workspace_write_allows_working_dir() {
-        let abi = landlock_create_ruleset_version();
-        if abi == 0 {
-            eprintln!("Skipping: Landlock not available");
-            return;
-        }
-
-        let tmp = tempfile::tempdir().unwrap();
-        let config =
-            SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(tmp.path().to_path_buf()));
-
-        let test_file = tmp.path().join("write_ok.txt");
-        unsafe {
-            let pid = libc_fork();
-            if pid == 0 {
-                let _ = apply_landlock(&config);
-                let result = std::fs::write(&test_file, "ok");
-                std::process::exit(if result.is_ok() { 0 } else { 1 });
-            } else if pid > 0 {
-                let mut status: i32 = 0;
-                libc_waitpid(pid, &mut status, 0);
-                let exited = (status & 0xff00) >> 8;
-                assert_eq!(exited, 0, "write to working dir should succeed");
-                assert!(test_file.exists(), "file should exist");
-            }
-        }
-    }
-
-    #[test]
-    fn readonly_denies_outbound_connect() {
-        let abi = landlock_create_ruleset_version();
-        if abi < NET_ABI_VERSION {
-            eprintln!("Skipping: Landlock network rules need ABI v4 (kernel ≥ 6.7)");
-            return;
-        }
-
-        let tmp = tempfile::tempdir().unwrap();
-        let config = SandboxConfig::new(SandboxMode::Readonly, Some(tmp.path().to_path_buf()));
-        // readonly implies deny-all egress with zero allow rules.
-        assert_eq!(
-            config.effective_egress().allowed_ports(),
-            Some(vec![]),
-            "readonly must enumerate an empty allowlist"
-        );
-
-        let exit = run_sandboxed_connect_probe(&config, 9); // discard port, likely unfiltered
-        eprintln!("readonly probe exit code: {exit}");
-        match exit {
-            // 0 = connect blocked by the LSM: exactly what read-only demands
-            0 => {}
-            // 1 = connect succeeded: sandbox failed to enforce
-            1 => panic!("sandbox applied but outbound connect succeeded"),
-            2 => eprintln!("Skipping: sandbox not applicable"),
-            3 => eprintln!("Skipping: sandbox error in child"),
-            _ => panic!("unexpected probe exit {exit}"),
-        }
-    }
-
-    #[test]
-    fn workspace_write_allows_web_ports_only() {
-        let abi = landlock_create_ruleset_version();
-        if abi < NET_ABI_VERSION {
-            eprintln!("Skipping: Landlock network rules need ABI v4 (kernel ≥ 6.7)");
-            return;
-        }
-
-        let tmp = tempfile::tempdir().unwrap();
-        let config =
-            SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(tmp.path().to_path_buf()));
-
-        // The default policy permits 443 but not 6667.
-        assert!(policy_permits_port(&config, 443));
-        assert!(!policy_permits_port(&config, 6667));
-
-        // Probing 443 against localhost may legitimately fail (no listener),
-        // which still proves the port was reachable at the LSM layer: a
-        // Landlock denial surfaces as EACCES, not ECONNREFUSED.
-        let exit = run_sandboxed_connect_probe(&config, 443);
-        assert_ne!(exit, 2, "sandbox should have applied on an ABI v4+ kernel");
-
-        // 6667 is not in the allowlist; the connect must be denied by the LSM.
-        let exit = run_sandboxed_connect_probe(&config, 6667);
-        eprintln!("blocked-port probe exit code: {exit}");
-        match exit {
-            // 0 = connect blocked: exactly what the policy demands
-            0 => {}
-            1 => panic!("sandbox applied but connect to 6667 succeeded"),
-            2 => eprintln!("Skipping: sandbox not applicable"),
-            3 => eprintln!("Skipping: sandbox error in child"),
-            _ => panic!("unexpected probe exit {exit}"),
-        }
-    }
-
-    /// Fork a child that applies the sandbox then attempts a TCP connect.
-    ///
-    /// Exit codes: 0 = connect blocked by sandbox, 1 = connect succeeded,
-    /// 2 = sandbox not applied, 3 = sandbox error.
-    fn run_sandboxed_connect_probe(config: &SandboxConfig, port: u16) -> i32 {
-        use std::net::{TcpStream, ToSocketAddrs as _};
-        use std::time::Duration;
-
-        let mut pipe = [0i32; 2];
-        unsafe {
-            let ret = pipe2(&mut pipe as *mut i32, 0);
-            assert_eq!(ret, 0, "pipe2 failed");
-        }
-
-        unsafe {
-            let pid = libc_fork();
-            if pid == 0 {
-                // Child
-                close(pipe[0]);
-                let sandbox_result = apply_landlock(config);
-                if let Err(ref e) = sandbox_result {
-                    eprintln!("probe child: sandbox error: {e}");
-                }
-                let connected = match ("127.0.0.1", port).to_socket_addrs() {
-                    Ok(mut addrs) => addrs
-                        .next()
-                        .and_then(|addr| {
-                            TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()
-                        })
-                        .is_some(),
-                    Err(_) => false,
-                };
-                let code = match &sandbox_result {
-                    Ok(sr) if sr.applied => {
-                        if connected {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                    Ok(_) => 2,
-                    Err(_) => 3,
-                };
-                let mut msg = [0u8; 1];
-                msg[0] = code as u8;
-                let _ = write_fd(pipe[1], msg.as_ptr(), 1);
-                close(pipe[1]);
-                std::process::exit(0);
-            } else if pid > 0 {
-                // Parent
-                close(pipe[1]);
-                let mut buf = [0u8; 1];
-                let mut read_n = 0usize;
-                while read_n < 1 {
-                    let n = read_fd(pipe[0], buf.as_mut_ptr().add(read_n), 1);
-                    if n <= 0 {
-                        break;
-                    }
-                    read_n += n as usize;
-                }
-                close(pipe[0]);
-                let mut status: i32 = 0;
-                libc_waitpid(pid, &mut status, 0);
-                i32::from(buf[0])
-            } else {
-                close(pipe[0]);
-                close(pipe[1]);
-                2
-            }
-        }
-    }
-
-    unsafe extern "C" {
-        fn fork() -> i32;
-        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
-        fn pipe2(fds: *mut i32, flags: i32) -> i32;
-        fn write(fd: i32, buf: *const u8, count: usize) -> isize;
-        fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
-    }
-
-    unsafe fn libc_fork() -> i32 {
-        unsafe { fork() }
-    }
-
-    unsafe fn libc_waitpid(pid: i32, status: *mut i32, options: i32) -> i32 {
-        unsafe { waitpid(pid, status, options) }
-    }
-
-    unsafe fn write_fd(fd: i32, buf: *const u8, count: usize) -> isize {
-        unsafe { write(fd, buf, count) }
-    }
-
-    unsafe fn read_fd(fd: i32, buf: *mut u8, count: usize) -> isize {
-        unsafe { read(fd, buf, count) }
-    }
-}
+#[path = "linux_tests.rs"]
+mod linux_tests;
