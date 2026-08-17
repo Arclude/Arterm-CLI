@@ -293,6 +293,21 @@ pub struct SwarmAwaitCompleted {
     pub wake: bool,
 }
 
+/// A reactive monitor matched a watched line or WebSocket message.
+///
+/// The server bus monitor turns this into a session soft interrupt so the
+/// agent can react mid-conversation without polling.
+#[derive(Clone, Debug)]
+pub struct MonitorMatched {
+    pub monitor_id: String,
+    pub session_id: String,
+    pub kind: String,
+    pub source: String,
+    pub pattern: String,
+    pub line: String,
+    pub match_count: u32,
+}
+
 /// Result of a `/productivity` report generation run.
 ///
 /// Carries already-rendered outputs (markdown + PNG bytes) so the TUI layer can
@@ -407,6 +422,8 @@ pub enum BusEvent {
     BackgroundTaskProgress(BackgroundTaskProgressEvent),
     /// A backgrounded `swarm await_members` watcher reached a terminal result.
     SwarmAwaitCompleted(SwarmAwaitCompleted),
+    /// A reactive monitor matched a watched line or WebSocket message.
+    MonitorMatched(MonitorMatched),
     /// Usage report fetched from providers
     UsageReport(Vec<arterm_usage_types::ProviderUsage>),
     /// Progressive usage report update while providers are still loading
