@@ -766,6 +766,10 @@ pub struct TerminalConfig {
 /// failures only logged. `pre_tool` is a gate: arterm waits for it and exit
 /// code 2 blocks the tool call (stderr becomes the error shown to the model);
 /// exit 0 allows; anything else fails open.
+///
+/// A hook entry may be a local command, an `http(s)://` URL (JSON POST of the
+/// hook payload), or, for `pre_tool` only, `prompt:` plus an optional
+/// instruction for an LLM permission gate. HTTP/LLM failures fail open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookCommands(Vec<String>);
 
@@ -840,8 +844,10 @@ pub struct HooksConfig {
     /// Env override: ARTERM_HOOK_SESSION_END.
     pub session_end: Option<HookCommands>,
     /// Gate hook before each tool call. Receives TOOL_NAME and the tool input
-    /// JSON on stdin (also truncated in TOOL_INPUT). Exit 0 allows, exit 2
-    /// blocks (stderr is fed back to the model), anything else fails open.
+    /// JSON on stdin (also truncated in TOOL_INPUT). A command exits 0 to
+    /// allow or 2 to block; an `http(s)://` URL POSTs the payload (403 or
+    /// `{"decision":"block"}` blocks); `prompt:` asks the sidecar LLM
+    /// (ALLOW / BLOCK <reason>). Anything else fails open.
     /// Env override: ARTERM_HOOK_PRE_TOOL.
     pub pre_tool: Option<HookCommands>,
     /// Runs after each tool call completes.

@@ -14,9 +14,11 @@
 //!   `post_tool`): spawned detached, fire-and-forget. Failures are logged and
 //!   never affect the agent.
 //! - **Gate** (`pre_tool`): arterm waits (with a timeout) for the hook to
-//!   exit. Exit 0 allows the tool call, exit 2 blocks it and the hook's
-//!   stderr is fed back to the model as the tool error. Any other outcome
-//!   (other exit codes, timeout, spawn failure) fails open with a warning.
+//!   finish. A command exits 0 to allow or 2 to block (stderr is the tool
+//!   error). An `http(s)://` URL POSTs the JSON payload (403 or
+//!   `{"decision":"block"}` blocks). `prompt:` asks the sidecar LLM
+//!   (`ALLOW` / `BLOCK <reason>`). Any other outcome fails open with a
+//!   warning.
 //!
 //! Hook processes get `ARTERM_HOOKS_DISABLED=1` in their environment so a
 //! hook that itself invokes arterm does not recursively trigger hooks.
@@ -36,6 +38,37 @@ const PAYLOAD_ENV_LIMIT: usize = 16 * 1024;
 const TOOL_INPUT_ENV_LIMIT: usize = 16 * 1024;
 /// Maximum chars of hook stderr used as a block reason.
 const BLOCK_REASON_LIMIT: usize = 2000;
+/// Default timeout for detached HTTP observer posts.
+const HTTP_OBSERVER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HookTarget {
+    Command(String),
+    Http(String),
+    Prompt(String),
+}
+
+fn hook_target(command_line: &str) -> HookTarget {
+    let trimmed = command_line.trim();
+    if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
+        HookTarget::Http(trimmed.to_string())
+    } else if let Some(rest) = trimmed.strip_prefix("prompt:") {
+        HookTarget::Prompt(rest.trim().to_string())
+    } else {
+        HookTarget::Command(trimmed.to_string())
+    }
+}
+
+fn block_reason(reason: &str, fallback: &str) -> GateDecision {
+    let reason = reason.trim();
+    GateDecision::Block {
+        reason: if reason.is_empty() {
+            fallback.to_string()
+        } else {
+            truncate_bytes(reason, BLOCK_REASON_LIMIT).to_string()
+        },
+    }
+}
 
 /// Decision returned by the `pre_tool` gate hook.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,7 +263,8 @@ fn build_hook_process(
 /// Fire an observer hook for `event` if one is configured.
 ///
 /// Detached and fire-and-forget: failures are logged, never propagated, and
-/// the hook process cannot block the agent.
+/// the hook process cannot block the agent. `http(s)://` entries POST the
+/// JSON payload in the background; `prompt:` is ignored on observers.
 pub fn dispatch_observer(event: HookEvent) {
     let command_lines = hook_commands(event.event);
     if command_lines.is_empty() {
@@ -238,36 +272,45 @@ pub fn dispatch_observer(event: HookEvent) {
     }
     let event_name = event.event;
     for command_line in command_lines {
-        match build_hook_process(&command_line, &event) {
-            Ok(mut cmd) => {
-                cmd.stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null());
-                match crate::platform::spawn_detached(&mut cmd) {
-                    Ok(_) => crate::logging::debug(&format!(
-                        "Hook '{event_name}' dispatched to '{command_line}' (session={:?})",
-                        event.session_id
-                    )),
-                    Err(error) => crate::logging::warn(&format!(
-                        "Hook '{event_name}' command '{command_line}' failed to start: {error}"
-                    )),
-                }
+        match hook_target(&command_line) {
+            HookTarget::Http(url) => {
+                let payload = payload_json(&event);
+                spawn_http_observer(url, payload, event_name, event.session_id.clone());
             }
-            Err(error) => crate::logging::warn(&format!(
-                "Hook '{event_name}' command '{command_line}' is invalid: {error}"
+            HookTarget::Prompt(_) => crate::logging::warn(&format!(
+                "Hook '{event_name}' ignores `prompt:` (LLM gates are pre_tool only)"
             )),
+            HookTarget::Command(command_line) => match build_hook_process(&command_line, &event) {
+                Ok(mut cmd) => {
+                    cmd.stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null());
+                    match crate::platform::spawn_detached(&mut cmd) {
+                        Ok(_) => crate::logging::debug(&format!(
+                            "Hook '{event_name}' dispatched to '{command_line}' (session={:?})",
+                            event.session_id
+                        )),
+                        Err(error) => crate::logging::warn(&format!(
+                            "Hook '{event_name}' command '{command_line}' failed to start: {error}"
+                        )),
+                    }
+                }
+                Err(error) => crate::logging::warn(&format!(
+                    "Hook '{event_name}' command '{command_line}' is invalid: {error}"
+                )),
+            },
         }
     }
 }
 
 /// Run the `pre_tool` gate hook for a tool call, if configured.
 ///
-/// The hook receives `ARTERM_HOOK_TOOL_NAME` plus the full tool input JSON on
-/// stdin (and truncated in `ARTERM_HOOK_TOOL_INPUT`). Contract:
+/// Each configured entry is a command, an `http(s)://` URL, or `prompt:`.
+/// Contract:
 ///
-/// - exit 0: allow the tool call
-/// - exit 2: block it; stderr becomes the error shown to the model
-/// - anything else (other exits, timeout, spawn failure): fail open
+/// - command exit 0 / HTTP 2xx without a block body / LLM `ALLOW`: allow
+/// - command exit 2 / HTTP 403 or `{"decision":"block"}` / LLM `BLOCK`: block
+/// - anything else (other exits, timeout, spawn/HTTP/LLM failure): fail open
 pub async fn run_pre_tool_gate(
     session_id: &str,
     working_dir: Option<&str>,
@@ -292,12 +335,201 @@ pub async fn run_pre_tool_gate(
 
     let mut decision = GateDecision::Allow;
     for command_line in command_lines {
-        let current = run_pre_tool_command(&command_line, &event, tool_name, tool_input_json).await;
+        let current = run_pre_tool_target(&command_line, &event, tool_name, tool_input_json).await;
         if matches!(current, GateDecision::Block { .. }) && decision == GateDecision::Allow {
             decision = current;
         }
     }
     decision
+}
+
+fn gate_timeout() -> std::time::Duration {
+    std::time::Duration::from_millis(crate::config::config().hooks.pre_tool_timeout_ms.max(1))
+}
+
+fn spawn_http_observer(
+    url: String,
+    payload: String,
+    event_name: &'static str,
+    session_id: Option<String>,
+) {
+    let run = async move {
+        if let Err(error) = post_hook_http(&url, &payload, HTTP_OBSERVER_TIMEOUT).await {
+            crate::logging::warn(&format!(
+                "Hook '{event_name}' HTTP POST to '{url}' failed: {error} (session={session_id:?})"
+            ));
+        } else {
+            crate::logging::debug(&format!(
+                "Hook '{event_name}' HTTP POST to '{url}' dispatched (session={session_id:?})"
+            ));
+        }
+    };
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(run);
+    } else {
+        std::thread::spawn(move || {
+            match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt.block_on(run),
+                Err(error) => crate::logging::warn(&format!(
+                    "Hook '{event_name}' HTTP observer failed to start runtime: {error}"
+                )),
+            }
+        });
+    }
+}
+
+async fn post_hook_http(
+    url: &str,
+    payload: &str,
+    timeout: std::time::Duration,
+) -> Result<(u16, String), String> {
+    let client = crate::provider::shared_http_client();
+    let response = client
+        .post(url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::USER_AGENT, "arterm-hooks")
+        .timeout(timeout)
+        .body(payload.to_string())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap_or_default();
+    Ok((status, body))
+}
+
+fn parse_http_gate_response(status: u16, body: &str) -> GateDecision {
+    if status == 403 {
+        return block_reason(body, "blocked by pre_tool HTTP hook");
+    }
+    if !(200..300).contains(&status) {
+        crate::logging::warn(&format!(
+            "Hook 'pre_tool' HTTP hook returned {status} (allowing tool call)"
+        ));
+        return GateDecision::Allow;
+    }
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return GateDecision::Allow;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        let decision = value
+            .get("decision")
+            .or_else(|| value.get("action"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("allow");
+        if decision.eq_ignore_ascii_case("block")
+            || decision.eq_ignore_ascii_case("deny")
+            || decision.eq_ignore_ascii_case("reject")
+        {
+            let reason = value
+                .get("reason")
+                .or_else(|| value.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            return block_reason(reason, "blocked by pre_tool HTTP hook");
+        }
+        return GateDecision::Allow;
+    }
+    parse_prompt_gate_response(trimmed)
+}
+
+fn parse_prompt_gate_response(raw: &str) -> GateDecision {
+    let trimmed = raw.trim();
+    let first_line = trimmed.lines().next().unwrap_or("").trim();
+    let (token, rest) =
+        match first_line.split_once(|c: char| c.is_whitespace() || matches!(c, ':' | '-')) {
+            Some((token, rest)) => (token, rest.trim()),
+            None => (first_line, ""),
+        };
+    match token.to_ascii_uppercase().as_str() {
+        "ALLOW" | "YES" | "OK" => GateDecision::Allow,
+        "BLOCK" | "DENY" | "REJECT" | "NO" => block_reason(rest, "blocked by pre_tool prompt hook"),
+        _ => {
+            crate::logging::warn(&format!(
+                "Hook 'pre_tool' prompt hook returned unparseable decision {trimmed:?} (allowing tool call)"
+            ));
+            GateDecision::Allow
+        }
+    }
+}
+
+async fn run_http_pre_tool_gate(url: &str, event: &HookEvent) -> GateDecision {
+    match post_hook_http(url, &payload_json(event), gate_timeout()).await {
+        Ok((status, body)) => parse_http_gate_response(status, &body),
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "Hook 'pre_tool' HTTP POST to '{url}' failed: {error} (allowing tool call)"
+            ));
+            GateDecision::Allow
+        }
+    }
+}
+
+const DEFAULT_PROMPT_GATE_SYSTEM: &str = "You are a permission gate for an AI coding agent. \
+Decide whether the proposed tool call is allowed. Reply with exactly one line: \
+ALLOW or BLOCK <short reason>. Default to ALLOW unless the call is clearly \
+destructive, exfiltrating secrets, or outside the user's request.";
+
+async fn run_prompt_pre_tool_gate(
+    instruction: &str,
+    event: &HookEvent,
+    tool_name: &str,
+    tool_input_json: &str,
+) -> GateDecision {
+    if !crate::sidecar::Sidecar::llm_backend_available() {
+        crate::logging::warn(
+            "Hook 'pre_tool' prompt: no LLM backend available (allowing tool call)",
+        );
+        return GateDecision::Allow;
+    }
+    let system = if instruction.is_empty() {
+        DEFAULT_PROMPT_GATE_SYSTEM.to_string()
+    } else {
+        format!("{DEFAULT_PROMPT_GATE_SYSTEM}\n\nAdditional policy:\n{instruction}")
+    };
+    let user = format!(
+        "session={}\ntool={tool_name}\ncwd={}\ninput={tool_input_json}",
+        event.session_id.as_deref().unwrap_or("-"),
+        event.cwd.as_deref().unwrap_or("-"),
+    );
+    let sidecar = crate::sidecar::Sidecar::new();
+    match tokio::time::timeout(gate_timeout(), sidecar.complete(&system, &user)).await {
+        Ok(Ok(text)) => parse_prompt_gate_response(&text),
+        Ok(Err(error)) => {
+            crate::logging::warn(&format!(
+                "Hook 'pre_tool' prompt hook failed: {error} (allowing tool call)"
+            ));
+            GateDecision::Allow
+        }
+        Err(_) => {
+            crate::logging::warn(&format!(
+                "Hook 'pre_tool' prompt hook timed out after {}ms (allowing tool call)",
+                gate_timeout().as_millis()
+            ));
+            GateDecision::Allow
+        }
+    }
+}
+
+async fn run_pre_tool_target(
+    command_line: &str,
+    event: &HookEvent,
+    tool_name: &str,
+    tool_input_json: &str,
+) -> GateDecision {
+    match hook_target(command_line) {
+        HookTarget::Http(url) => run_http_pre_tool_gate(&url, event).await,
+        HookTarget::Prompt(instruction) => {
+            run_prompt_pre_tool_gate(&instruction, event, tool_name, tool_input_json).await
+        }
+        HookTarget::Command(command_line) => {
+            run_pre_tool_command(&command_line, event, tool_name, tool_input_json).await
+        }
+    }
 }
 
 async fn run_pre_tool_command(
@@ -387,6 +619,127 @@ async fn run_pre_tool_command(
 #[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hook_target_classifies_command_http_and_prompt() {
+        assert_eq!(
+            hook_target("~/bin/policy"),
+            HookTarget::Command("~/bin/policy".into())
+        );
+        assert_eq!(
+            hook_target("https://hooks.example/pre"),
+            HookTarget::Http("https://hooks.example/pre".into())
+        );
+        assert_eq!(
+            hook_target("http://127.0.0.1:9/x"),
+            HookTarget::Http("http://127.0.0.1:9/x".into())
+        );
+        assert_eq!(
+            hook_target("prompt: never rm -rf /"),
+            HookTarget::Prompt("never rm -rf /".into())
+        );
+        assert_eq!(hook_target("prompt:"), HookTarget::Prompt(String::new()));
+    }
+
+    #[test]
+    fn parse_prompt_gate_response_allow_and_block() {
+        assert_eq!(parse_prompt_gate_response("ALLOW"), GateDecision::Allow);
+        assert_eq!(parse_prompt_gate_response("yes"), GateDecision::Allow);
+        assert_eq!(
+            parse_prompt_gate_response("BLOCK rm -rf /"),
+            GateDecision::Block {
+                reason: "rm -rf /".into()
+            }
+        );
+        assert_eq!(
+            parse_prompt_gate_response("deny: writes to /etc"),
+            GateDecision::Block {
+                reason: "writes to /etc".into()
+            }
+        );
+        assert_eq!(parse_prompt_gate_response("nonsense"), GateDecision::Allow);
+    }
+
+    #[test]
+    fn parse_http_gate_response_status_and_json() {
+        assert_eq!(
+            parse_http_gate_response(403, "nope"),
+            GateDecision::Block {
+                reason: "nope".into()
+            }
+        );
+        assert_eq!(parse_http_gate_response(200, ""), GateDecision::Allow);
+        assert_eq!(
+            parse_http_gate_response(200, r#"{"decision":"allow"}"#),
+            GateDecision::Allow
+        );
+        assert_eq!(
+            parse_http_gate_response(200, r#"{"decision":"block","reason":"secret"}"#),
+            GateDecision::Block {
+                reason: "secret".into()
+            }
+        );
+        assert_eq!(parse_http_gate_response(500, "boom"), GateDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn pre_tool_http_gate_blocks_on_json_decision() {
+        let _guard = crate::storage::lock_test_env();
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = vec![0u8; 8192];
+            let n = stream.read(&mut buf).await.expect("read");
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = r#"{"decision":"block","reason":"http policy"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.expect("write");
+            request
+        });
+
+        let url = format!("http://{addr}/pre-tool");
+        let prev = std::env::var_os("ARTERM_HOOK_PRE_TOOL");
+        crate::env::set_var("ARTERM_HOOK_PRE_TOOL", &url);
+        let decision =
+            run_pre_tool_gate("ses_http", Some("/work"), "bash", r#"{"command":"rm"}"#).await;
+        match prev {
+            Some(v) => crate::env::set_var("ARTERM_HOOK_PRE_TOOL", v),
+            None => crate::env::remove_var("ARTERM_HOOK_PRE_TOOL"),
+        }
+        assert_eq!(
+            decision,
+            GateDecision::Block {
+                reason: "http policy".into()
+            }
+        );
+        let request = server.await.expect("server");
+        assert!(request.starts_with("POST "), "{request}");
+        assert!(request.contains("\"event\":\"pre_tool\""), "{request}");
+        assert!(request.contains("\"tool_name\":\"bash\""), "{request}");
+    }
+
+    #[tokio::test]
+    async fn pre_tool_prompt_without_backend_fails_open() {
+        let _guard = crate::storage::lock_test_env();
+        if crate::sidecar::Sidecar::llm_backend_available() {
+            return;
+        }
+        let prev = std::env::var_os("ARTERM_HOOK_PRE_TOOL");
+        crate::env::set_var("ARTERM_HOOK_PRE_TOOL", "prompt: never allow bash");
+        let decision = run_pre_tool_gate("ses_p", None, "bash", "{}").await;
+        match prev {
+            Some(v) => crate::env::set_var("ARTERM_HOOK_PRE_TOOL", v),
+            None => crate::env::remove_var("ARTERM_HOOK_PRE_TOOL"),
+        }
+        assert_eq!(decision, GateDecision::Allow);
+    }
 
     #[test]
     fn payload_json_includes_event_and_lowercased_fields() {
