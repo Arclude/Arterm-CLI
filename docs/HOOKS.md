@@ -24,8 +24,10 @@ Env overrides (always win; empty value disables a config hook):
 
 ## Common contract
 
-- The hook command line is parsed shell-style (quotes and backslash escapes
-  work) but executed **directly**, not through a shell. A leading `~/` in the
+- A hook entry is either a **command**, an **`http(s)://` URL**, or (for
+  `pre_tool` only) **`prompt:`** plus an optional instruction.
+- Command lines are parsed shell-style (quotes and backslash escapes work)
+  but executed **directly**, not through a shell. A leading `~/` in the
   program path is expanded.
 - The hook runs in the session working directory when known.
 - Every hook receives:
@@ -66,19 +68,31 @@ Fires after every tool call. Extra fields: `ARTERM_HOOK_TOOL_NAME`,
 `ARTERM_HOOK_STATUS`, `ARTERM_HOOK_DURATION_MS`, `ARTERM_HOOK_OUTPUT_BYTES` (on
 success), `ARTERM_HOOK_ERROR` (on failure).
 
+## HTTP hooks
+
+Any hook slot may be an `http://` or `https://` URL instead of a command.
+arterm POSTs `ARTERM_HOOK_PAYLOAD` as `application/json`. Observer HTTP posts
+are detached and never block the agent. Failures are logged.
+
 ## Gate hook: `pre_tool`
 
-`pre_tool` runs **synchronously before every tool call** and can block it:
+`pre_tool` runs **synchronously before every tool call** and can block it.
+Each configured entry is a command, an HTTP URL, or `prompt:`:
 
-- The hook receives `ARTERM_HOOK_TOOL_NAME` plus the full tool input JSON on
-  **stdin** (and a 16 KB-truncated copy in `ARTERM_HOOK_TOOL_INPUT`).
-- **Exit 0**: allow the call.
-- **Exit 2**: block the call. The hook's stderr (trimmed, capped at 2000
-  chars) is returned to the model as the tool error, so the model can adapt.
+- **Command**: receives `ARTERM_HOOK_TOOL_NAME` plus the full tool input JSON
+  on **stdin** (and a 16 KB-truncated copy in `ARTERM_HOOK_TOOL_INPUT`).
+  **Exit 0** allows. **Exit 2** blocks; stderr (trimmed, capped at 2000
+  chars) is returned to the model as the tool error.
+- **HTTP**: POSTs the JSON payload. **403** or a 2xx body of
+  `{"decision":"block","reason":"..."}` blocks. Other 4xx/5xx fail open.
+- **`prompt:`**: asks the cheap sidecar LLM. Reply must start with `ALLOW`
+  or `BLOCK <reason>`. Optional text after `prompt:` is extra policy.
+  Missing credentials, timeouts, and unparseable replies fail open.
 - **Anything else fails open** with a logged warning: other exit codes,
-  timeout (`pre_tool_timeout_ms`, default 5s), missing binary, spawn errors.
+  timeout (`pre_tool_timeout_ms`, default 5s), missing binary, spawn/HTTP
+  errors.
 
-Fail-open is deliberate: a broken policy script should degrade to "no policy"
+Fail-open is deliberate: a broken policy should degrade to "no policy"
 rather than brick every session. If you need fail-closed semantics, make the
 hook itself robust (it is your trust boundary, not arterm).
 

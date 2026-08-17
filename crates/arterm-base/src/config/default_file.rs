@@ -531,9 +531,12 @@ swarm_max_concurrent_agents = 32
 # Hook processes get ARTERM_HOOKS_DISABLED=1 so nested arterm calls don't recurse.
 #
 # All hooks except pre_tool are observers: detached, fire-and-forget, failures
-# only logged. Env overrides: ARTERM_HOOK_TURN_START, ARTERM_HOOK_TURN_END,
-# ARTERM_HOOK_SESSION_START, ARTERM_HOOK_SESSION_END, ARTERM_HOOK_PRE_TOOL,
-# ARTERM_HOOK_POST_TOOL (set empty to disable a config hook).
+# only logged. A hook entry may be a local command, an http(s):// URL (JSON
+# POST of the payload), or, for pre_tool only, `prompt:` plus an optional
+# LLM instruction. HTTP/LLM failures fail open. Env overrides:
+# ARTERM_HOOK_TURN_START, ARTERM_HOOK_TURN_END, ARTERM_HOOK_SESSION_START,
+# ARTERM_HOOK_SESSION_END, ARTERM_HOOK_PRE_TOOL, ARTERM_HOOK_POST_TOOL
+# (set empty to disable a config hook).
 #
 # Runs when an agent turn begins, before the model starts generating and before
 # the first pre_tool. Lets integrations detect the agent is working during the
@@ -553,11 +556,15 @@ swarm_max_concurrent_agents = 32
 # Runs when a session closes normally. Extra: ARTERM_HOOK_SOURCE ("close").
 # session_end = ""
 #
-# Gate hook before every tool call. Receives ARTERM_HOOK_TOOL_NAME and the tool
-# input JSON on stdin (truncated copy in ARTERM_HOOK_TOOL_INPUT). Exit 0 allows
-# the call; exit 2 blocks it and stderr is shown to the model as the error;
-# any other outcome (other exits, timeout, missing binary) fails open.
+# Gate hook before every tool call. A command receives ARTERM_HOOK_TOOL_NAME
+# and the tool input JSON on stdin (truncated copy in ARTERM_HOOK_TOOL_INPUT):
+# exit 0 allows, exit 2 blocks (stderr is the model-visible error). An
+# http(s):// URL POSTs the JSON payload (403 or {"decision":"block"} blocks).
+# `prompt:` asks the sidecar LLM (ALLOW / BLOCK <reason>). Other outcomes
+# fail open.
 # pre_tool = "~/bin/arterm-tool-policy"
+# pre_tool = "https://hooks.example/pre-tool"
+# pre_tool = "prompt: block destructive shell and writes outside the repo"
 #
 # Max milliseconds to wait for pre_tool before failing open (default: 5000).
 # pre_tool_timeout_ms = 5000
