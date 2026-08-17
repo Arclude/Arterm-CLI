@@ -148,6 +148,7 @@ global-hotkey = "0.7"
 
 [dev-dependencies]
 # Dev-only cycle (cargo permits dev-dependencies on dependents): base's
+tempfile = "3"
 # MultiProvider routing tests exercise the real OpenRouter/OpenAI-compatible
 # runtime through the composition-root registry, exactly like the binary.
 arterm-provider-openrouter-runtime = { path = "../arterm-provider-openrouter-runtime" }
