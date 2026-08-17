@@ -109,6 +109,9 @@ impl Tool for EditTool {
         // Find line number where edit starts
         let start_line = find_line_number(&content, &params.old_string);
 
+        // Checkpoint the pre-edit state so `undo` can restore it.
+        super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &path);
+
         // Write back
         tokio::fs::write(&path, &new_content).await?;
 
@@ -136,6 +139,13 @@ impl Tool for EditTool {
             detail,
         }));
 
+        // Repository-level undo point, when enabled.
+        let autocommit = super::git_auto_commit::commit_touched(
+            ctx.working_dir.as_deref().unwrap_or(Path::new(".")),
+            "edit",
+            std::slice::from_ref(&path),
+        );
+
         // Extract context around the edit to help with consecutive edits
         let end_line = start_line + params.new_string.lines().count().saturating_sub(1);
         let context = extract_context(&new_content, start_line, end_line, 3);
@@ -144,6 +154,7 @@ impl Tool for EditTool {
             "Edited {}: replaced {} occurrence(s)\n{}\n\nContext after edit (lines {}-{}):\n{}",
             params.file_path, occurrences, diff, context.0, context.1, context.2
         );
+        super::git_auto_commit::append_notice(&mut body, &autocommit);
         super::config_edit_notice::append_config_edit_notice(
             &mut body,
             &path,

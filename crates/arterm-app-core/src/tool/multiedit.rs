@@ -125,8 +125,18 @@ impl Tool for MultiEditTool {
             }
         }
 
+        // Checkpoint the pre-edit state so `undo` can restore it.
+        super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &path);
+
         // Write the result
         tokio::fs::write(&path, &content).await?;
+
+        // Repository-level undo point, when enabled.
+        let autocommit = super::git_auto_commit::commit_touched(
+            ctx.working_dir.as_deref().unwrap_or(Path::new(".")),
+            "multiedit",
+            std::slice::from_ref(&path),
+        );
 
         // Format output
         let mut output = format!("Edited {}\n\n", params.file_path);
@@ -157,6 +167,7 @@ impl Tool for MultiEditTool {
             output.push_str(&generate_diff_summary(&original_content, &content));
         }
 
+        super::git_auto_commit::append_notice(&mut output, &autocommit);
         super::config_edit_notice::append_config_edit_notice(
             &mut output,
             &path,

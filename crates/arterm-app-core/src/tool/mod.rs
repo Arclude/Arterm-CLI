@@ -6,15 +6,18 @@ mod bash;
 mod batch;
 mod bg;
 mod browser;
+pub mod checkpoint;
 mod communicate;
 #[cfg(target_os = "macos")]
 mod computer;
 mod config_edit_notice;
 mod conversation_search;
 mod debug_socket;
+mod diagnostics;
 mod discover;
 mod discover_secrets;
 mod edit;
+pub mod git_auto_commit;
 mod gmail;
 mod goal;
 pub mod inflight;
@@ -26,6 +29,7 @@ mod multiedit;
 mod open;
 mod patch;
 mod read;
+mod repo_map;
 pub mod selfdev;
 pub(crate) mod serde_coerce;
 mod session_search;
@@ -33,6 +37,7 @@ pub(crate) mod session_search_index;
 mod side_panel;
 mod skill;
 mod todo;
+mod undo;
 mod webfetch;
 mod websearch;
 mod write;
@@ -262,6 +267,7 @@ impl Registry {
                 side_panel::SidePanelTool::new,
             );
             Self::insert_tool_timed(&mut m, &mut timings, "edit", edit::EditTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "undo", undo::UndoTool::new);
             Self::insert_tool_timed(
                 &mut m,
                 &mut timings,
@@ -276,6 +282,12 @@ impl Registry {
                 apply_patch::ApplyPatchTool::new,
             );
             Self::insert_tool_timed(&mut m, &mut timings, "ls", ls::LsTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "repo_map", || {
+                repo_map::RepoMapTool::new()
+            });
+            Self::insert_tool_timed(&mut m, &mut timings, "diagnostics", || {
+                diagnostics::DiagnosticsTool::new()
+            });
             Self::insert_tool_timed(&mut m, &mut timings, "bash", bash::BashTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "browser", browser::BrowserTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "open", open::OpenTool::new);
@@ -700,6 +712,26 @@ impl Registry {
         // Plan Mode: block write tools during read-only exploration.
         if let Err(msg) = check_plan_mode(&ctx.session_id, resolved_name) {
             return Err(anyhow::anyhow!(msg));
+        }
+
+        // Granular permission rules: deny → ask → allow, most specific
+        // specifier wins. Deny blocks here; ask/allow are recorded for the
+        // interactive approval path.
+        let rules = &crate::config::config().permission_rules;
+        if !rules.is_empty()
+            && rules.decide(resolved_name, &input)
+                == crate::config::permission_rules::PermissionDecision::Deny
+        {
+            let mut fields =
+                Self::tool_lifecycle_fields("blocked", name, resolved_name, &input, &ctx);
+            fields.push((
+                "block_reason".to_string(),
+                "matched a deny permission rule".to_string(),
+            ));
+            crate::logging::event_warn("TOOL_LIFECYCLE", fields);
+            return Err(anyhow::anyhow!(
+                "Tool call blocked by permission rules: {resolved_name} matched a deny rule",
+            ));
         }
 
         if let Some(policy) = session_tool_policy(&ctx.session_id) {
@@ -1370,5 +1402,97 @@ mod mcp_allow_list_tests {
     }
 }
 
+#[cfg(test)]
+mod checkpoint_e2e_tests;
+#[cfg(test)]
+mod permission_gate_tests {
+    use super::bash::BashTool;
+    use super::{CompactionManager, Registry, Tool, ToolContext, ToolExecutionMode};
+    use crate::skill::SkillRegistry;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    fn ctx(session: &str) -> ToolContext {
+        ToolContext {
+            session_id: session.to_string(),
+            message_id: session.to_string(),
+            tool_call_id: format!("{session}-call"),
+            working_dir: Some(std::env::temp_dir()),
+            stdin_request_tx: None,
+            graceful_shutdown_signal: None,
+            execution_mode: ToolExecutionMode::Direct,
+            sandbox_mode: "full-access".to_string(),
+        }
+    }
+
+    /// A registry with just the bash tool registered.
+    fn bash_registry() -> Registry {
+        let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
+        Registry::insert_tool(&mut tools, "bash", BashTool::new());
+        Registry {
+            tools: Arc::new(RwLock::new(tools)),
+            skills: Arc::new(RwLock::new(SkillRegistry::default())),
+            compaction: Arc::new(RwLock::new(CompactionManager::new())),
+        }
+    }
+
+    /// Run `body` with a temporary ARTERM_HOME holding exactly `config`.
+    /// The global config cache is force-reloaded around it so the gate sees
+    /// the temporary rules, and restored afterwards.
+    async fn with_config(config: &str, body: impl std::future::Future<Output = ()>) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("config.toml"), config).expect("write config");
+        let prev = std::env::var_os("ARTERM_HOME");
+        unsafe { std::env::set_var("ARTERM_HOME", dir.path()) };
+        crate::config::invalidate_config_cache();
+        body.await;
+        match prev {
+            Some(v) => unsafe { std::env::set_var("ARTERM_HOME", v) },
+            None => unsafe { std::env::remove_var("ARTERM_HOME") },
+        }
+        crate::config::invalidate_config_cache();
+    }
+
+    /// A deny rule must block the call before the tool ever runs, even for
+    /// commands that would otherwise succeed.
+    #[tokio::test]
+    async fn deny_rule_blocks_bash_call() {
+        with_config("permission_rules = [\"deny Bash(echo *)\"]\n", async {
+            let registry = bash_registry();
+            let err = registry
+                .execute(
+                    "bash",
+                    serde_json::json!({"command": "echo should-not-run"}),
+                    ctx("perm-deny-test"),
+                )
+                .await
+                .expect_err("deny rule must block");
+            assert!(
+                err.to_string().contains("permission rules"),
+                "unexpected error: {err}"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn no_rules_means_no_gate() {
+        with_config("permission_rules = []\n", async {
+            let registry = bash_registry();
+            // `true` runs everywhere; the call goes through the gate untouched.
+            let out = registry
+                .execute(
+                    "bash",
+                    serde_json::json!({"command": "true"}),
+                    ctx("perm-default-test"),
+                )
+                .await
+                .expect("no rules configured, call must pass");
+            assert!(!out.output.to_ascii_lowercase().contains("error"));
+        })
+        .await;
+    }
+}
 #[cfg(test)]
 mod tests;

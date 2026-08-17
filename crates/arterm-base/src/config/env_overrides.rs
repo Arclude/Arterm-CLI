@@ -466,6 +466,33 @@ impl Config {
             }
         }
 
+        // Git auto-commit override (see tool::git_auto_commit)
+        if let Ok(v) = std::env::var("ARTERM_GIT_AUTO_COMMIT") {
+            match v.trim().to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => self.git_auto_commit = true,
+                "0" | "false" | "no" | "off" => self.git_auto_commit = false,
+                _ => {}
+            }
+        }
+
+        // Granular permission rules override: semicolon-separated rules like
+        // "deny Bash(rm -rf *); allow Bash(git *)". Invalid rules are ignored
+        // (the config file stays the source of truth for validation errors).
+        if let Ok(v) = std::env::var("ARTERM_PERMISSION_RULES") {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                let lines: Vec<String> = trimmed
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if let Ok(rules) = permission_rules::PermissionRules::parse_all(&lines) {
+                    self.permission_rules = rules;
+                }
+            }
+        }
+
         if let Ok(v) = std::env::var("ARTERM_HOOK_PRE_TOOL_TIMEOUT_MS") {
             if let Ok(parsed) = v.trim().parse::<u64>() {
                 self.hooks.pre_tool_timeout_ms = parsed;

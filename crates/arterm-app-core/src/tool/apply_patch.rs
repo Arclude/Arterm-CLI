@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use similar::{ChangeTag, TextDiff};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const FILE_TOUCH_PREVIEW_MAX_LINES: usize = 6;
 const FILE_TOUCH_PREVIEW_MAX_BYTES: usize = 240;
@@ -93,6 +93,8 @@ impl Tool for ApplyPatchTool {
             match hunk {
                 PatchHunk::AddFile { path, contents } => {
                     let resolved = ctx.resolve_path(Path::new(path));
+                    // Checkpoint (records "file absent") so `undo` can remove it.
+                    super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &resolved);
                     if let Some(parent) = resolved.parent() {
                         tokio::fs::create_dir_all(parent).await?;
                     }
@@ -133,6 +135,8 @@ impl Tool for ApplyPatchTool {
                     let old_contents = tokio::fs::read_to_string(&resolved)
                         .await
                         .unwrap_or_default();
+                    // Checkpoint before delete so `undo` can restore it.
+                    super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &resolved);
                     if tokio::fs::remove_file(&resolved).await.is_ok() {
                         let diff = generate_diff_summary(&old_contents, "");
                         publish_file_touch(
@@ -162,8 +166,14 @@ impl Tool for ApplyPatchTool {
                     match apply_update_chunks(&resolved, chunks).await {
                         Ok((old_contents, new_contents)) => {
                             let diff = generate_diff_summary(&old_contents, &new_contents);
+                            // Checkpoint both sides of a move so `undo` can
+                            // restore the source and remove the destination.
+                            super::checkpoint::GLOBAL
+                                .snapshot_and_record(&ctx.session_id, &resolved);
                             if let Some(dest) = move_to {
                                 let dest_resolved = ctx.resolve_path(Path::new(dest));
+                                super::checkpoint::GLOBAL
+                                    .snapshot_and_record(&ctx.session_id, &dest_resolved);
                                 if let Some(parent) = dest_resolved.parent() {
                                     tokio::fs::create_dir_all(parent).await?;
                                 }
@@ -241,7 +251,18 @@ impl Tool for ApplyPatchTool {
         if results.is_empty() {
             Ok(ToolOutput::new("No changes applied"))
         } else {
+            // Repository-level undo point for every successfully touched file.
+            let resolved_touched: Vec<PathBuf> = touched_paths
+                .iter()
+                .map(|p| ctx.resolve_path(Path::new(p)))
+                .collect();
+            let autocommit = super::git_auto_commit::commit_touched(
+                ctx.working_dir.as_deref().unwrap_or(Path::new(".")),
+                "apply_patch",
+                &resolved_touched,
+            );
             let mut body = results.join("\n");
+            super::git_auto_commit::append_notice(&mut body, &autocommit);
             config_watch.finish(&mut body);
             let output = ToolOutput::new(body);
             if touched_paths.len() == 1 {

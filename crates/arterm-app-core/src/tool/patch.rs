@@ -72,11 +72,15 @@ impl Tool for PatchTool {
         let config_watch = super::config_edit_notice::ConfigEditWatch::begin();
         let mut results = Vec::new();
 
+        let mut touched: Vec<std::path::PathBuf> = Vec::new();
         for patch in patches {
             let resolved_path = ctx.resolve_path(Path::new(&patch.path));
+            // Checkpoint the pre-patch state so `undo` can restore it.
+            super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &resolved_path);
             let result = apply_patch_with_diff(&patch, &resolved_path).await;
             match result {
                 Ok((msg, diff)) => {
+                    touched.push(resolved_path);
                     if diff.is_empty() {
                         results.push(format!("✓ {}: {}", patch.path, msg));
                     } else {
@@ -87,7 +91,15 @@ impl Tool for PatchTool {
             }
         }
 
+        // Repository-level undo point for every successfully patched file.
+        let autocommit = super::git_auto_commit::commit_touched(
+            ctx.working_dir.as_deref().unwrap_or(Path::new(".")),
+            "patch",
+            &touched,
+        );
+
         let mut body = results.join("\n\n");
+        super::git_auto_commit::append_notice(&mut body, &autocommit);
         config_watch.finish(&mut body);
         Ok(ToolOutput::new(body))
     }

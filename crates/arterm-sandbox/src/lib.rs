@@ -1,14 +1,20 @@
-//! OS-level sandboxing for command execution.
+//! OS-level sandboxing for command execution, structured after the
+//! OpenSandbox architecture:
 //!
-//! Provides filesystem access restriction via:
-//! - **Linux**: Landlock LSM (kernel ≥ 5.13) via raw syscalls
-//! - **macOS**: Seatbelt (`sandbox-exec`) via profile generation
-//! - **Other platforms**: No-op (returns success with a notice)
+//! - **Policy as data** (`policy.rs`): a runtime-neutral `SandboxConfig`
+//!   holding the filesystem mode and the outbound `NetworkPolicy`.
+//! - **Runtime-specific enforcement**: Linux Landlock (`linux.rs`) and macOS
+//!   Seatbelt (`macos.rs`). Other platforms report an observable skip.
+//! - **Secure defaults with explicit escape hatches**: sandboxed modes imply
+//!   a deny-by-default egress policy; `full-access` is the explicit opt-out.
+//! - **Observable failures**: `apply` reports whether the sandbox was
+//!   enforced, and why, so callers can refuse to run unsandboxed.
 //!
 //! # Sandbox modes
 //!
 //! - `Readonly`: No filesystem writes, no network
-//! - `WorkspaceWrite`: Write only to the working directory + temp dirs
+//! - `WorkspaceWrite`: Write only to the working directory + temp dirs,
+//!   outbound network limited by the egress policy (DNS/HTTP/HTTPS by default)
 //! - `FullAccess`: No restrictions (equivalent to no sandbox)
 //!
 //! # Usage
@@ -19,138 +25,17 @@
 
 #![cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 
-use std::path::PathBuf;
+mod policy;
 
-/// The sandbox policy to enforce.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SandboxMode {
-    /// No filesystem writes, no network access. Read-only exploration.
-    Readonly,
-    /// Write access to the working directory and temp directories only.
-    /// Network access allowed for localhost.
-    WorkspaceWrite,
-    /// No sandbox restrictions. Equivalent to running without a sandbox.
-    FullAccess,
-}
-
-impl SandboxMode {
-    pub fn is_sandboxed(self) -> bool {
-        !matches!(self, SandboxMode::FullAccess)
-    }
-}
-
-impl std::fmt::Display for SandboxMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SandboxMode::Readonly => write!(f, "read-only"),
-            SandboxMode::WorkspaceWrite => write!(f, "workspace-write"),
-            SandboxMode::FullAccess => write!(f, "full-access"),
-        }
-    }
-}
-
-impl std::str::FromStr for SandboxMode {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "read-only" | "readonly" => Ok(SandboxMode::Readonly),
-            "workspace-write" | "workspace" => Ok(SandboxMode::WorkspaceWrite),
-            "full-access" | "full" | "none" | "off" => Ok(SandboxMode::FullAccess),
-            _ => Err(format!(
-                "unknown sandbox mode '{s}'; expected read-only, workspace-write, or full-access"
-            )),
-        }
-    }
-}
-
-/// Configuration for applying a sandbox to a child process.
-#[derive(Debug, Clone)]
-pub struct SandboxConfig {
-    pub mode: SandboxMode,
-    /// The working directory the tool is executing in.
-    pub working_dir: Option<PathBuf>,
-    /// Extra directories that should be writable (e.g. cargo registry, cache).
-    pub writable_roots: Vec<PathBuf>,
-}
-
-impl SandboxConfig {
-    pub fn new(mode: SandboxMode, working_dir: Option<PathBuf>) -> Self {
-        Self {
-            mode,
-            working_dir,
-            writable_roots: Vec::new(),
-        }
-    }
-
-    pub fn with_writable_roots(mut self, roots: Vec<PathBuf>) -> Self {
-        self.writable_roots = roots;
-        self
-    }
-
-    /// Collect all directories that should be writable in WorkspaceWrite mode.
-    fn writable_paths(&self) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-
-        // Working directory and all ancestors up to root (for traversal)
-        if let Some(ref wd) = self.working_dir {
-            paths.push(wd.clone());
-        }
-
-        // System temp directories
-        if let Some(tmp) = std::env::temp_dir().to_str() {
-            paths.push(PathBuf::from(tmp));
-        }
-
-        // Tool scratch directory
-        if let Some(ref scratch) = std::env::var_os("ARTERM_SCRATCH_DIR") {
-            paths.push(PathBuf::from(scratch));
-        }
-
-        // User-configured writable roots
-        paths.extend(self.writable_roots.iter().cloned());
-
-        paths
-    }
-}
-
-/// The result of attempting to apply a sandbox.
-#[derive(Debug)]
-pub struct SandboxResult {
-    /// Whether the sandbox was successfully applied.
-    pub applied: bool,
-    /// A human-readable description of what happened, for diagnostics.
-    pub message: String,
-}
-
-impl SandboxResult {
-    fn applied(msg: impl Into<String>) -> Self {
-        Self {
-            applied: true,
-            message: msg.into(),
-        }
-    }
-
-    fn skipped(msg: impl Into<String>) -> Self {
-        Self {
-            applied: false,
-            message: msg.into(),
-        }
-    }
-}
-
-// ─── platform modules ────────────────────────────────────────────────────
-
-#[cfg(target_os = "linux")]
-mod linux;
-
-#[cfg(target_os = "macos")]
-mod macos;
+pub use policy::{
+    EgressAction, EgressDefault, EgressRule, EgressTarget, NetworkPolicy, SandboxConfig,
+    SandboxMode, SandboxResult,
+};
 
 /// Apply the sandbox. This must be called from a `pre_exec` hook on the child
 /// process, after `fork()` but before `exec()`.
 ///
-/// On platforms without sandbox support, this is a no-op that logs a notice.
+/// On platforms without sandbox support, this is a no-op that reports a skip.
 pub fn apply(config: &SandboxConfig) -> Result<SandboxResult, String> {
     if !config.mode.is_sandboxed() {
         return Ok(SandboxResult::skipped("full-access mode, no sandbox"));
@@ -175,6 +60,14 @@ pub fn apply(config: &SandboxConfig) -> Result<SandboxResult, String> {
         ))
     }
 }
+
+// ─── platform modules ────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+mod linux;
+
+#[cfg(target_os = "macos")]
+mod macos;
 
 /// Generate a macOS Seatbelt profile string for the given config.
 ///
@@ -251,18 +144,65 @@ mod tests {
     }
 
     #[test]
+    fn readonly_denies_all_egress_by_default() {
+        let config = SandboxConfig::new(SandboxMode::Readonly, None);
+        let policy = config.effective_egress();
+        assert!(!policy.permits(443));
+        assert!(!policy.permits(53));
+        assert_eq!(policy.allowed_ports(), Some(vec![]));
+    }
+
+    #[test]
+    fn workspace_write_allows_web_ports_by_default() {
+        let config = SandboxConfig::new(SandboxMode::WorkspaceWrite, None);
+        let policy = config.effective_egress();
+        assert!(policy.permits(443));
+        assert!(policy.permits(53));
+        assert!(
+            !policy.permits(6667),
+            "IRC should not be allowed by default"
+        );
+    }
+
+    #[test]
+    fn explicit_egress_overrides_mode_default() {
+        let config = SandboxConfig::new(SandboxMode::WorkspaceWrite, None)
+            .with_egress(NetworkPolicy::allow_ports(&[443]));
+        let policy = config.effective_egress();
+        assert!(policy.permits(443));
+        assert!(!policy.permits(80), "explicit policy replaces the default");
+    }
+
+    #[test]
+    fn deny_rules_override_allow() {
+        let policy = NetworkPolicy {
+            default_action: EgressDefault::Allow,
+            rules: vec![EgressRule::allow_any(), EgressRule::deny_port(6667)],
+        };
+        assert!(policy.permits(443));
+        assert!(!policy.permits(6667));
+    }
+
+    #[test]
+    fn allow_ports_enumerates() {
+        let policy = NetworkPolicy::allow_ports(&[443, 80, 443]);
+        assert_eq!(policy.allowed_ports(), Some(vec![80, 443]));
+    }
+
+    #[test]
+    fn full_access_allows_all_egress_by_default() {
+        let config = SandboxConfig::new(SandboxMode::FullAccess, None);
+        let policy = config.effective_egress();
+        assert!(policy.permits(6667));
+        assert_eq!(policy.allowed_ports(), None);
+    }
+
+    #[test]
     fn writable_paths_includes_working_dir_and_tmp() {
         let tmp = tempfile::tempdir().unwrap();
         let config =
             SandboxConfig::new(SandboxMode::WorkspaceWrite, Some(tmp.path().to_path_buf()));
         let paths = config.writable_paths();
         assert!(paths.contains(&tmp.path().to_path_buf()));
-    }
-
-    #[test]
-    fn full_access_returns_skipped() {
-        let config = SandboxConfig::new(SandboxMode::FullAccess, None);
-        let result = apply(&config).unwrap();
-        assert!(!result.applied);
     }
 }

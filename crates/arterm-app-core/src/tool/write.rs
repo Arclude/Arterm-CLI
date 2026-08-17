@@ -74,6 +74,10 @@ impl Tool for WriteTool {
             None
         };
 
+        // Checkpoint the pre-write state (including "file was absent") so
+        // `undo` can restore or delete it.
+        super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &path);
+
         // Write the file
         tokio::fs::write(&path, &params.content).await?;
 
@@ -103,6 +107,13 @@ impl Tool for WriteTool {
             detail,
         }));
 
+        // Repository-level undo point, when enabled.
+        let autocommit = super::git_auto_commit::commit_touched(
+            ctx.working_dir.as_deref().unwrap_or(Path::new(".")),
+            "write",
+            std::slice::from_ref(&path),
+        );
+
         let mut body = if existed {
             format!(
                 "Updated {} ({} lines){}\n{}",
@@ -123,6 +134,7 @@ impl Tool for WriteTool {
         // A write that lands on the active config.toml states exactly which
         // settings changed and whether they are live, so neither the agent nor
         // the user has to guess whether the edit took effect.
+        super::git_auto_commit::append_notice(&mut body, &autocommit);
         super::config_edit_notice::append_config_edit_notice(
             &mut body,
             &path,

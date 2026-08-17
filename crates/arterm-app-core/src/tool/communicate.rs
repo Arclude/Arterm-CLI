@@ -1894,11 +1894,78 @@ struct CommunicateInput {
     /// Required and nonblank for the explicit `spawn` action.
     #[serde(default)]
     label: Option<String>,
+    /// Custom agent name (from .arterm/agents/*.md or ~/.arterm/agents/*.md).
+    /// When set, the agent's saved prompt is prepended to the initial message
+    /// and its model/effort frontmatter hints fill any unset fields.
+    #[serde(default)]
+    agent: Option<String>,
+    /// Spawn the agent in an isolated git worktree (a new `arterm/<slug>`
+    /// branch under .arterm/worktrees/). Requires the working dir to be a git
+    /// repo; the spawned agent gets the worktree as its working dir so it can
+    /// build and test without racing the coordinator's checkout.
+    #[serde(default)]
+    isolate: Option<bool>,
 }
 
 impl CommunicateInput {
     fn spawn_initial_message(&self) -> Option<String> {
         self.initial_message.clone().or_else(|| self.prompt.clone())
+    }
+
+    /// Resolve the custom-agent overlay for a spawn: when `agent` names a
+    /// definition in `.arterm/agents/`, return it; unknown names are an error
+    /// listing what is available.
+    fn resolve_agent_overlay(
+        &self,
+        working_dir: Option<&str>,
+    ) -> anyhow::Result<Option<crate::agents::AgentDefinition>> {
+        let Some(name) = self.agent.as_deref().map(str::trim) else {
+            return Ok(None);
+        };
+        if name.is_empty() {
+            return Ok(None);
+        }
+        let registry = crate::agents::AgentRegistry::load(working_dir.map(std::path::Path::new));
+        match registry.get(name) {
+            Some(def) => Ok(Some(def.clone())),
+            None => {
+                let available: Vec<String> =
+                    registry.all().iter().map(|a| a.name.clone()).collect();
+                let hint = if available.is_empty() {
+                    "no custom agents are defined (create .arterm/agents/<name>.md)".to_string()
+                } else {
+                    format!("available agents: {}", available.join(", "))
+                };
+                Err(anyhow::anyhow!("unknown agent '{name}' ({hint})"))
+            }
+        }
+    }
+
+    /// Apply an agent overlay to the spawn inputs: prepend the agent prompt to
+    /// the initial message and let frontmatter hints fill unset model and
+    /// effort. Label defaults to the agent name when blank.
+    fn apply_agent_overlay(
+        &self,
+        def: &crate::agents::AgentDefinition,
+        initial_message: Option<String>,
+    ) -> (Option<String>, Option<String>, Option<String>, String) {
+        let message = match initial_message {
+            Some(msg) => Some(format!(
+                "# Agent persona: {}\n\n{}\n\n# Task\n\n{}",
+                def.name, def.prompt, msg
+            )),
+            None => Some(def.prompt.clone()),
+        };
+        let model = self.model.clone().or_else(|| def.model.clone());
+        let effort = self.effort.clone().or_else(|| def.effort.clone());
+        let label = self
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| def.name.clone());
+        (message, model, effort, label)
     }
 
     fn required_spawn_label(&self) -> anyhow::Result<String> {
@@ -2048,6 +2115,14 @@ impl Tool for CommunicateTool {
                 "model": {
                     "type": "string",
                     "description": "Model for spawned agents, e.g. 'gpt-5.5' or 'claude-api:opus'. Omit to inherit; see list_models."
+                },
+                "agent": {
+                    "type": "string",
+                    "description": "Custom agent name for spawn: loads .arterm/agents/<name>.md (or ~/.arterm/agents/<name>.md), prepends its prompt to the initial message, and fills model/effort/label from its frontmatter when unset."
+                },
+                "isolate": {
+                    "type": "boolean",
+                    "description": "Spawn into an isolated git worktree (new arterm/<slug> branch under .arterm/worktrees/). Use for build/test-heavy work that must not race the main checkout. Requires a git repo."
                 },
                 "effort": {
                     "type": "string",
@@ -2718,16 +2793,53 @@ impl Tool for CommunicateTool {
             }
 
             "spawn" => {
-                let label = params.required_spawn_label()?;
+                let requested_dir = params.working_dir.clone().or_else(|| {
+                    ctx.working_dir
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().into_owned())
+                });
+                // Worktree isolation: swap the working dir for a fresh
+                // `arterm/<slug>` worktree before spawning.
+                let working_dir = if params.isolate.unwrap_or(false) {
+                    let base = std::path::PathBuf::from(
+                        requested_dir.clone().unwrap_or_else(|| ".".to_string()),
+                    );
+                    let base = crate::worktree::repo_root(&base).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "isolate requires a git repository (no repo root from {})",
+                            base.display()
+                        )
+                    })?;
+                    let label_for_slug = params
+                        .label
+                        .clone()
+                        .or_else(|| params.agent.clone())
+                        .unwrap_or_else(|| "worker".to_string());
+                    let wt = crate::worktree::create_worktree(&base, &label_for_slug)
+                        .map_err(anyhow::Error::msg)?;
+                    Some(wt.path.to_string_lossy().into_owned())
+                } else {
+                    requested_dir.clone()
+                };
+                let overlay = params.resolve_agent_overlay(working_dir.as_deref())?;
+                let (initial_message, model, effort, label) = match &overlay {
+                    Some(def) => params.apply_agent_overlay(def, params.spawn_initial_message()),
+                    None => (
+                        params.spawn_initial_message(),
+                        params.model.clone(),
+                        params.effort.clone(),
+                        params.required_spawn_label()?,
+                    ),
+                };
                 let request = Request::CommSpawn {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
                     working_dir: params.working_dir.clone(),
-                    initial_message: params.spawn_initial_message(),
+                    initial_message,
                     request_nonce: None,
                     spawn_mode: params.spawn_mode.clone(),
-                    model: params.model.clone(),
-                    effort: params.effort.clone(),
+                    model,
+                    effort,
                     label: Some(label),
                 };
 

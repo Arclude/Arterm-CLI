@@ -620,6 +620,26 @@ prevent_sleep_while_streaming = true
 # Set ARTERM_SANDBOX_MODE env var to override at runtime.
 sandbox_mode = "full-access"
 
+# Granular tool permission rules, evaluated for every tool call.
+# Each rule: "<verb> Tool(<specifier>)" with verb one of deny / ask / allow.
+#   - deny  blocks the call outright,
+#   - ask   requires user approval (interactive sessions),
+#   - allow approves it without asking.
+# Precedence: deny > ask > allow; the most specific specifier wins.
+# The specifier matches the tool's primary input (bash command, file path).
+# `*` matches within a word, a bare `*` or `**` spans any number of words.
+#
+# Examples:
+# permission_rules = [
+#   "deny Bash(rm -rf *)",
+#   "deny Bash(git push ** --force)",
+#   "deny Edit(.env*)",
+#   "allow Bash(git *)",
+#   "allow Bash(npm run *)",
+#   "ask Bash(npm publish)",
+# ]
+permission_rules = []
+
 [safety]
 # Notification settings for ambient mode events
 
