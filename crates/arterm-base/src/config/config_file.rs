@@ -11,16 +11,38 @@ impl Config {
     /// Load config from file, with environment variable overrides
     pub fn load() -> Self {
         let mut config = Self::load_from_file().unwrap_or_default();
+        if let Some(name) = super::profiles::active_profile_name(None)
+            && let Err(err) = super::profiles::apply_profile(&mut config, &name)
+        {
+            crate::logging::error(&format!("config profile not applied: {err}"));
+        }
         config.apply_env_overrides();
         config
+    }
+
+    /// Load config and apply the active named profile (explicit
+    /// argument wins over `ARTERM_PROFILE`). Env overrides re-run
+    /// after the profile so explicit env always beats the profile.
+    /// Unknown profile names return an error naming the defined ones.
+    pub fn load_with_profile(cli_profile: Option<&str>) -> anyhow::Result<Self> {
+        let mut config = Self::load_from_file().unwrap_or_default();
+        if let Some(name) = super::profiles::active_profile_name(cli_profile) {
+            super::profiles::apply_profile(&mut config, &name)?;
+        }
+        config.apply_env_overrides();
+        Ok(config)
     }
 
     /// Load config from file, with environment variable overrides.
     ///
     /// Unlike [`Self::load`], this returns TOML/read errors to callers that need
-    /// to distinguish a malformed config from an absent config.
+    /// to distinguish a malformed config from an absent config. Profile
+    /// application errors are returned too (unknown profile name).
     pub fn load_strict() -> anyhow::Result<Self> {
         let mut config = Self::load_from_file_strict()?.unwrap_or_default();
+        if let Some(name) = super::profiles::active_profile_name(None) {
+            super::profiles::apply_profile(&mut config, &name)?;
+        }
         config.apply_env_overrides();
         Ok(config)
     }

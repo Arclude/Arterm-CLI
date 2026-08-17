@@ -237,6 +237,30 @@ fn parse_and_prepare_args() -> Result<Args> {
         crate::env::set_var("ARTERM_TRACE", "1");
     }
 
+    // A named config profile is applied by propagating it to
+    // ARTERM_PROFILE: every Config::load() (including the cached one)
+    // picks it up via the env fingerprint, and an explicit
+    // ARTERM_PROFILE set by the user still wins over nothing.
+    if let Some(profile) = args.profile.as_deref() {
+        let profile = profile.trim();
+        if profile.is_empty() {
+            anyhow::bail!(
+                "--profile requires a profile name from [profiles.<name>] in config.toml"
+            );
+        }
+        // Fail fast and visibly on an unknown profile instead of
+        // silently running with the base config.
+        let cfg = crate::config::Config::load();
+        if cfg.profiles_section.get(profile).is_none() {
+            let defined = cfg.profiles_section.names().join(", ");
+            anyhow::bail!(
+                "unknown --profile `{profile}` (defined in config.toml: [{}])",
+                if defined.is_empty() { "none" } else { &defined }
+            );
+        }
+        crate::env::set_var("ARTERM_PROFILE", profile);
+    }
+
     if let Some(ref socket) = args.socket {
         server::set_socket_path(socket);
     }

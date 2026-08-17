@@ -29,6 +29,7 @@ const CONFIG_CACHE_CHECK_INTERVAL: Duration = if cfg!(test) {
 
 const CONFIG_ENV_KEYS: &[&str] = &[
     "HOME",
+    "ARTERM_PROFILE",
     "ARTERM_ACP_PROFILE",
     "ARTERM_ACP_TOOL_PROFILE",
     "ARTERM_ACTIVE_SESSIONS_MANAGER",
@@ -530,6 +531,16 @@ pub struct Config {
     #[serde(default)]
     pub permission_rules: permission_rules::PermissionRules,
 
+    /// Named overlay profiles, keyed by profile name. Selected with
+    /// `--profile <name>` or `ARTERM_PROFILE`; each profile overrides
+    /// only the fields it lists (see `config::profiles`).
+    #[serde(
+        default,
+        rename = "profiles",
+        skip_serializing_if = "ProfilesConfig::is_empty"
+    )]
+    pub profiles_section: ProfilesConfig,
+
     /// Desktop notifications for interactive sessions (e.g. turn completion)
     pub notifications: NotificationsConfig,
 
@@ -756,6 +767,9 @@ mod default_file;
 mod display_summary;
 mod env_overrides;
 pub mod permission_rules;
+pub mod profiles;
+
+use profiles::ProfilesConfig;
 
 #[cfg(test)]
 #[path = "config_tests.rs"]

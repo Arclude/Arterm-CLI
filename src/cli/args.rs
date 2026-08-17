@@ -102,6 +102,11 @@ pub(crate) struct Args {
     #[arg(long, global = true)]
     pub(crate) tool_profile: Option<String>,
 
+    /// Named config profile from [profiles.<name>] in config.toml:
+    /// a bundle of provider/model/sandbox/tool/permission overrides.
+    #[arg(long, global = true)]
+    pub(crate) profile: Option<String>,
+
     /// Comma-separated explicit allow-list of tools to expose, e.g. bash,read,write,apply_patch. Use '*' or 'all' for the unrestricted full toolset.
     #[arg(long, global = true)]
     pub(crate) tools: Option<String>,
