@@ -28,6 +28,7 @@ mod multiedit;
 mod open;
 mod patch;
 mod read;
+mod repo_map;
 pub mod selfdev;
 pub(crate) mod serde_coerce;
 mod session_search;
@@ -280,6 +281,9 @@ impl Registry {
                 apply_patch::ApplyPatchTool::new,
             );
             Self::insert_tool_timed(&mut m, &mut timings, "ls", ls::LsTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "repo_map", || {
+                repo_map::RepoMapTool::new()
+            });
             Self::insert_tool_timed(&mut m, &mut timings, "bash", bash::BashTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "browser", browser::BrowserTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "open", open::OpenTool::new);
