@@ -73,6 +73,120 @@ fn display_form_is_grouped_and_shorter_than_the_verified_value() {
 }
 
 #[test]
+fn what_is_printed_is_what_is_accepted() {
+    // The property that keeps the printer and the matcher from drifting: every
+    // form the tool shows a person must be one the tool answers to. This is the
+    // whole bug -- `device list` printed a grouped uppercase value that
+    // `device forget` then refused.
+    let fingerprint = Fingerprint::of_certificate(b"a device certificate");
+
+    assert!(
+        fingerprint.answers_to(&fingerprint.to_display()),
+        "the short form `device list` prints"
+    );
+    assert!(
+        fingerprint.answers_to(&fingerprint.to_hex()),
+        "the full form `device show` prints"
+    );
+    assert_ne!(
+        Fingerprint::canonical(&fingerprint.to_display()),
+        fingerprint.to_display(),
+        "the printed form is not already canonical -- were it so, the check above would be vacuous"
+    );
+}
+
+#[test]
+fn a_fingerprint_answers_to_every_spelling_of_itself() {
+    let fingerprint = Fingerprint::of_certificate(b"a device certificate");
+    let grouped = fingerprint.to_display();
+    let full = fingerprint.to_hex();
+
+    let spellings = [
+        grouped.clone(),
+        grouped.to_lowercase(),
+        grouped.replace('-', ""),
+        grouped.replace('-', "").to_lowercase(),
+        grouped.replace('-', " "),
+        grouped.replace('-', ":"),
+        alternating_case(&grouped),
+        format!("  {grouped}\n"),
+        full.clone(),
+        full.to_uppercase(),
+        alternating_case(&full),
+    ];
+    for spelling in spellings {
+        assert!(
+            fingerprint.answers_to(&spelling),
+            "should have matched {spelling:?}"
+        );
+    }
+}
+
+#[test]
+fn a_fingerprint_does_not_answer_to_something_that_is_merely_close() {
+    // Exact on the canonical value, never a prefix: this identifier is what
+    // decides which machine is meant.
+    let fingerprint = Fingerprint::of_certificate(b"a device certificate");
+    let other = Fingerprint::of_certificate(b"a different device certificate");
+    let grouped = fingerprint.to_display();
+    let full = fingerprint.to_hex();
+
+    let wrong = [
+        String::new(),
+        "-".to_string(),
+        grouped[..9].to_string(),
+        grouped[..grouped.len() - 1].to_string(),
+        format!("{grouped}-0000"),
+        full[..32].to_string(),
+        full[..full.len() - 1].to_string(),
+        format!("{full}00"),
+        "z".repeat(64),
+        other.to_display(),
+        other.to_hex(),
+    ];
+    for value in wrong {
+        assert!(
+            !fingerprint.answers_to(&value),
+            "should have refused {value:?}"
+        );
+    }
+}
+
+#[test]
+fn a_grouped_full_value_still_parses() {
+    // `from_hex` shares the same canonical form, so a value pasted back with
+    // its grouping intact is not a parse error.
+    let fingerprint = Fingerprint::of_certificate(b"a device certificate");
+    let grouped: String = fingerprint
+        .to_hex()
+        .as_bytes()
+        .chunks(4)
+        .map(|chunk| String::from_utf8_lossy(chunk).to_uppercase())
+        .collect::<Vec<_>>()
+        .join("-");
+
+    assert_eq!(
+        Fingerprint::from_hex(&grouped).expect("parse grouped hex"),
+        fingerprint
+    );
+}
+
+/// Upper-cases every other character, the way a value looks after being retyped
+/// by hand rather than copied.
+fn alternating_case(text: &str) -> String {
+    text.chars()
+        .enumerate()
+        .map(|(index, c)| {
+            if index % 2 == 0 {
+                c.to_ascii_uppercase()
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
+        .collect()
+}
+
+#[test]
 fn renaming_keeps_the_fingerprint() {
     // The name is a label; the identity is the key. Renaming a device must not
     // cost its pairings.

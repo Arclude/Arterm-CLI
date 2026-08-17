@@ -84,6 +84,87 @@ fn forgetting_by_name_and_by_fingerprint_both_work() {
 }
 
 #[test]
+fn forgetting_accepts_the_fingerprint_exactly_as_device_list_prints_it() {
+    // `device list` prints the short grouped uppercase form, so that is the
+    // string a person copies into `device forget`. Refusing it -- as this did
+    // -- means the tool rejects its own output.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut trust = store(&dir);
+    let fingerprint = Fingerprint::of_certificate(b"the other laptop");
+    trust
+        .trust(device(&fingerprint.to_hex(), "laptop"))
+        .expect("trust");
+
+    let printed = fingerprint.to_display();
+    let removed = trust.forget(&printed).expect("forget").expect("was found");
+
+    assert_eq!(removed.name, "laptop");
+    assert!(store(&dir).devices().is_empty(), "removal is persisted");
+}
+
+#[test]
+fn a_lookup_accepts_every_spelling_the_tool_prints() {
+    // `device connect` and the TUI's peer switch reach the store through the
+    // same lookup, so they all gain this at once.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut trust = store(&dir);
+    let fingerprint = Fingerprint::of_certificate(b"the other laptop");
+    trust
+        .trust(device(&fingerprint.to_hex(), "laptop"))
+        .expect("trust");
+
+    let grouped = fingerprint.to_display();
+    let spellings = [
+        grouped.clone(),
+        grouped.to_lowercase(),
+        grouped.replace('-', ""),
+        grouped.replace('-', "").to_lowercase(),
+        fingerprint.to_hex(),
+        fingerprint.to_hex().to_uppercase(),
+        "laptop".to_string(),
+    ];
+    for spelling in spellings {
+        assert!(
+            trust.find_by_name_or_fingerprint(&spelling).is_some(),
+            "should have found {spelling:?}"
+        );
+    }
+}
+
+#[test]
+fn a_fingerprint_prefix_is_not_enough_to_name_a_device() {
+    // A lookup takes the first match, so a prefix that happened to fit two
+    // paired devices would silently forget or connect to the wrong one.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut trust = store(&dir);
+    let fingerprint = Fingerprint::of_certificate(b"the other laptop");
+    trust
+        .trust(device(&fingerprint.to_hex(), "laptop"))
+        .expect("trust");
+
+    let grouped = fingerprint.to_display();
+    for partial in [&grouped[..9], &fingerprint.to_hex()[..32]] {
+        assert!(
+            trust.find_by_name_or_fingerprint(partial).is_none(),
+            "should have refused {partial:?}"
+        );
+    }
+}
+
+#[test]
+fn a_device_stored_with_an_unparseable_fingerprint_is_still_removable() {
+    // Nothing writes one, but a hand-edited store must not trap an entry that
+    // cannot be named.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut trust = store(&dir);
+    trust
+        .trust(device("not-a-fingerprint", "damaged"))
+        .expect("trust");
+
+    assert!(trust.forget("not-a-fingerprint").expect("forget").is_some());
+}
+
+#[test]
 fn forgetting_something_unknown_reports_nothing_removed() {
     let dir = tempfile::tempdir().expect("temp dir");
     let mut trust = store(&dir);

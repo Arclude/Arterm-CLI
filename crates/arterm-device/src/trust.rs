@@ -89,20 +89,19 @@ impl TrustStore {
         self.save()
     }
 
-    /// Look a device up the way a person names it on the command line: full
-    /// fingerprint, display name, or a fingerprint prefix long enough not to
-    /// collide by accident.
+    /// Look a device up the way a person names it on the command line: display
+    /// name, full fingerprint, or the short grouped fingerprint that
+    /// `arterm device list` prints — the last two in any case, with or without
+    /// their grouping separators.
     pub fn find_by_name_or_fingerprint(&self, needle: &str) -> Option<&TrustedDevice> {
         self.position_of(needle).map(|index| &self.devices[index])
     }
 
     fn position_of(&self, needle: &str) -> Option<usize> {
-        let needle = needle.trim();
-        self.devices.iter().position(|device| {
-            device.fingerprint == needle
-                || device.name == needle
-                || device.fingerprint.starts_with(needle) && needle.len() >= 8
-        })
+        let name = needle.trim();
+        self.devices
+            .iter()
+            .position(|device| device.name == name || answers_to(&device.fingerprint, needle))
     }
 
     /// Remove a device by fingerprint or by name, returning what was removed.
@@ -123,6 +122,19 @@ impl TrustStore {
         let encoded = serde_json::to_string_pretty(&file)?;
         std::fs::write(&self.path, encoded)
             .with_context(|| format!("writing the trust store to {}", self.path.display()))
+    }
+}
+
+/// Whether a stored hex fingerprint answers to what a person typed.
+///
+/// The spellings that count as a match are decided by [`Fingerprint`], next to
+/// the code that prints them, so this store can never end up refusing a value
+/// the tool itself displayed. A stored entry too damaged to parse is still
+/// matched literally, so it stays removable.
+fn answers_to(stored: &str, typed: &str) -> bool {
+    match Fingerprint::from_hex(stored) {
+        Ok(fingerprint) => fingerprint.answers_to(typed),
+        Err(_) => stored.trim() == typed.trim(),
     }
 }
 

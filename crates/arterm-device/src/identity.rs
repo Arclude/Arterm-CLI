@@ -28,7 +28,7 @@ impl Fingerprint {
     }
 
     pub fn from_hex(text: &str) -> Result<Self> {
-        let raw = hex::decode(text.trim())
+        let raw = hex::decode(Self::canonical(text))
             .with_context(|| format!("device fingerprint is not valid hex: {text}"))?;
         let bytes: [u8; 32] = raw.as_slice().try_into().map_err(|_| {
             anyhow::anyhow!(
@@ -49,6 +49,35 @@ impl Fingerprint {
             .map(|pair| format!("{:02X}{:02X}", pair[0], pair[1]))
             .collect::<Vec<_>>()
             .join("-")
+    }
+
+    /// A typed or pasted fingerprint reduced to the one spelling everything
+    /// here compares against: lowercase hex, no grouping.
+    ///
+    /// [`Self::to_display`] prints uppercase groups joined by dashes, so the
+    /// obvious copy-paste out of `arterm device list` is neither lowercase nor
+    /// unseparated. Spaces and colons are stripped too: those are what a value
+    /// comes back as after a trip through a chat window.
+    pub fn canonical(typed: &str) -> String {
+        typed
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '-' && *c != ':')
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    }
+
+    /// Whether this fingerprint answers to what a person typed.
+    ///
+    /// Accepts both forms the tool prints — the full hex value and the short
+    /// grouped one — in any case, with or without the grouping separators.
+    /// Every comparison is exact on the canonical value: this is the identifier
+    /// that decides which machine is meant, so an arbitrary prefix is not
+    /// enough. The short form is checked by running it back through
+    /// [`Self::to_display`] rather than by re-deriving its length here, which
+    /// is what stops the printer and the matcher from drifting apart.
+    pub fn answers_to(&self, typed: &str) -> bool {
+        let typed = Self::canonical(typed);
+        typed == self.to_hex() || typed == Self::canonical(&self.to_display())
     }
 }
 
