@@ -11,7 +11,7 @@ description = "Aggregate running sessions across paired machines, grouped by dev
 # transport plugs in through the `RemoteSessionSource` trait; this crate ships
 # only the null implementation.
 [dependencies]
-arterm-base = { path = "../arterm-base" }
+arterm-base = { path = "../arterm-base", default-features = false }
 arterm-device = { path = "../arterm-device" }
 
 [dev-dependencies]
