@@ -52,10 +52,7 @@ impl Tool for LspTool {
     }
 
     fn description(&self) -> &str {
-        "Language-server navigation: go-to-definition, find-references, hover for a symbol. \
-         Auto-detects the language server from the project (rust-analyzer, \
-         typescript-language-server, gopls, pyright-langserver must be on PATH). \
-         Returns file:line:col locations. First query may be slow while the server indexes."
+        "Go-to-definition, find-references, hover via the project's language server."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -65,7 +62,7 @@ impl Tool for LspTool {
                 "action": {
                     "type": "string",
                     "enum": ["definition", "references", "hover"],
-                    "description": "definition: where is this symbol declared. references: everywhere it is used. hover: type/signature info."
+                    "description": "definition | references | hover"
                 },
                 "file": {
                     "type": "string",
