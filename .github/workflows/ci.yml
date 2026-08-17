@@ -394,6 +394,72 @@ jobs:
           cargo install cargo-audit --locked
           scripts/security_preflight.sh --strict
 
+  # The suite, actually executed.
+  #
+  # Every other job that touches tests either compiles them and throws the
+  # binaries away (`--lib --bins --no-run` in `build`) or runs one named cohort
+  # (sdk parity, desktop2 `profile::`, retention_readiness, secret_input,
+  # embedding stability). Those cohorts exist because someone noticed, one at a
+  # time, that a specific test was never running -- #651 and #660 both have that
+  # shape. The general case was still true on 2026-08-17:
+  # `every_reference_client_capability_is_triaged` had been failing on main
+  # since the MCP work landed, through green run after green run, because
+  # nothing anywhere ran it. ~8,800 tests were compile-checked and dropped.
+  #
+  # Linux only, deliberately. The suite is validated here; the pty cohorts
+  # cannot run on the Windows runner at all (see `build`), and a second and
+  # third platform would triple the cost of a job whose value is catching
+  # logic regressions, which are not platform-specific. The per-OS jobs still
+  # build and smoke-test everywhere.
+  test-suite:
+    name: Full Test Suite (Linux)
+    runs-on: ubuntu-latest
+    # Pure execution measured at 6.6 minutes over 210 suites; the rest is
+    # compiling test harnesses, which is what the cache is for. The cap is
+    # sized for a cold cache, not a warm one.
+    timeout-minutes: 75
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      # Both of these live in the repo's tracked `.cargo/config.toml`, and this
+      # job deliberately does NOT write that file -- `build` does (`cat >` for
+      # the mold linker), which silently destroys them. Set explicitly so this
+      # job survives someone copying that pattern here later:
+      #
+      #   RUST_TEST_THREADS=1  ARTERM_HOME is process-global; part of the suite
+      #     reads state under it while part swaps it to a temp dir, so parallel
+      #     tests produce ~2 failures per run, never the same two, never
+      #     reproducible alone.
+      #   ARTERM_HOME          keeps tests out of the real ~/.arterm.
+      RUST_TEST_THREADS: "1"
+      ARTERM_HOME: ${{ github.workspace }}/target/test-home
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test-suite-ubuntu
+          cache-all-crates: "true"
+
+      # arterm-desktop2 pulls yeslogic-fontconfig-sys, whose build script hard
+      # fails without fontconfig.pc. Same reason the quality job installs it.
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y -qq libfontconfig1-dev
+
+      # `--no-fail-fast` is not optional here. Without it cargo stops at the
+      # first failing test binary, and the run reports roughly half the suite
+      # having "passed" -- which reads exactly like a full green run.
+      - name: Run the workspace test suite
+        shell: bash
+        run: |
+          python3 .github/scripts/run_with_timeout.py 3600 \
+            "$(rustup which cargo)" test --workspace --no-fail-fast
+
   windows-build-test:
     name: Build & Test (windows-latest)
     runs-on: windows-latest
