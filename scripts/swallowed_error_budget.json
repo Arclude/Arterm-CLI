@@ -1,9 +1,9 @@
 {
-  "total": 3275,
+  "total": 3305,
   "totals_by_pattern": {
-    "dot_ok": 1220,
-    "let_underscore": 1217,
-    "unwrap_or_default": 838
+    "dot_ok": 1229,
+    "let_underscore": 1231,
+    "unwrap_or_default": 845
   },
   "tracked_files": {
     "crates/arterm-app-core/src/agent.rs": {
@@ -78,8 +78,8 @@
     },
     "crates/arterm-app-core/src/channel.rs": {
       "dot_ok": 0,
-      "let_underscore": 5,
-      "unwrap_or_default": 5
+      "let_underscore": 3,
+      "unwrap_or_default": 3
     },
     "crates/arterm-app-core/src/external_auth.rs": {
       "dot_ok": 0,
@@ -393,7 +393,7 @@
     },
     "crates/arterm-app-core/src/tool/bash.rs": {
       "dot_ok": 16,
-      "let_underscore": 12,
+      "let_underscore": 13,
       "unwrap_or_default": 4
     },
     "crates/arterm-app-core/src/tool/bg.rs": {
@@ -451,6 +451,11 @@
       "let_underscore": 0,
       "unwrap_or_default": 1
     },
+    "crates/arterm-app-core/src/tool/diagnostics.rs": {
+      "dot_ok": 0,
+      "let_underscore": 1,
+      "unwrap_or_default": 0
+    },
     "crates/arterm-app-core/src/tool/discover.rs": {
       "dot_ok": 3,
       "let_underscore": 0,
@@ -458,6 +463,16 @@
     },
     "crates/arterm-app-core/src/tool/discover_secrets.rs": {
       "dot_ok": 0,
+      "let_underscore": 0,
+      "unwrap_or_default": 1
+    },
+    "crates/arterm-app-core/src/tool/git_auto_commit.rs": {
+      "dot_ok": 2,
+      "let_underscore": 1,
+      "unwrap_or_default": 0
+    },
+    "crates/arterm-app-core/src/tool/github.rs": {
+      "dot_ok": 1,
       "let_underscore": 0,
       "unwrap_or_default": 1
     },
@@ -480,6 +495,11 @@
       "dot_ok": 1,
       "let_underscore": 0,
       "unwrap_or_default": 0
+    },
+    "crates/arterm-app-core/src/tool/lsp.rs": {
+      "dot_ok": 0,
+      "let_underscore": 1,
+      "unwrap_or_default": 3
     },
     "crates/arterm-app-core/src/tool/mcp.rs": {
       "dot_ok": 0,
@@ -505,6 +525,11 @@
       "dot_ok": 1,
       "let_underscore": 2,
       "unwrap_or_default": 1
+    },
+    "crates/arterm-app-core/src/tool/repo_map.rs": {
+      "dot_ok": 1,
+      "let_underscore": 0,
+      "unwrap_or_default": 3
     },
     "crates/arterm-app-core/src/tool/selfdev/build_queue.rs": {
       "dot_ok": 2,
@@ -582,6 +607,11 @@
       "unwrap_or_default": 0
     },
     "crates/arterm-app-core/src/usage_openai.rs": {
+      "dot_ok": 1,
+      "let_underscore": 0,
+      "unwrap_or_default": 0
+    },
+    "crates/arterm-base/src/agents.rs": {
       "dot_ok": 1,
       "let_underscore": 0,
       "unwrap_or_default": 0
@@ -709,9 +739,14 @@
     "crates/arterm-base/src/config/config_file.rs": {
       "dot_ok": 1,
       "let_underscore": 4,
-      "unwrap_or_default": 2
+      "unwrap_or_default": 3
     },
     "crates/arterm-base/src/config/env_overrides.rs": {
+      "dot_ok": 1,
+      "let_underscore": 0,
+      "unwrap_or_default": 0
+    },
+    "crates/arterm-base/src/config/profiles.rs": {
       "dot_ok": 1,
       "let_underscore": 0,
       "unwrap_or_default": 0
@@ -774,7 +809,7 @@
     "crates/arterm-base/src/hooks.rs": {
       "dot_ok": 0,
       "let_underscore": 2,
-      "unwrap_or_default": 0
+      "unwrap_or_default": 1
     },
     "crates/arterm-base/src/import.rs": {
       "dot_ok": 3,
@@ -784,6 +819,11 @@
     "crates/arterm-base/src/login_qr.rs": {
       "dot_ok": 4,
       "let_underscore": 0,
+      "unwrap_or_default": 0
+    },
+    "crates/arterm-base/src/lsp.rs": {
+      "dot_ok": 1,
+      "let_underscore": 5,
       "unwrap_or_default": 0
     },
     "crates/arterm-base/src/mcp/client.rs": {
@@ -833,7 +873,7 @@
     },
     "crates/arterm-base/src/memory_agent.rs": {
       "dot_ok": 0,
-      "let_underscore": 6,
+      "let_underscore": 7,
       "unwrap_or_default": 3
     },
     "crates/arterm-base/src/memory_log.rs": {
@@ -859,6 +899,11 @@
     "crates/arterm-base/src/model_pricing.rs": {
       "dot_ok": 2,
       "let_underscore": 1,
+      "unwrap_or_default": 0
+    },
+    "crates/arterm-base/src/monitor.rs": {
+      "dot_ok": 0,
+      "let_underscore": 5,
       "unwrap_or_default": 0
     },
     "crates/arterm-base/src/platform.rs": {
@@ -1095,6 +1140,11 @@
       "dot_ok": 5,
       "let_underscore": 0,
       "unwrap_or_default": 3
+    },
+    "crates/arterm-base/src/worktree.rs": {
+      "dot_ok": 2,
+      "let_underscore": 0,
+      "unwrap_or_default": 0
     },
     "crates/arterm-build-meta/build.rs": {
       "dot_ok": 12,
@@ -1610,6 +1660,11 @@
       "dot_ok": 0,
       "let_underscore": 0,
       "unwrap_or_default": 1
+    },
+    "crates/arterm-sandbox/src/lib.rs": {
+      "dot_ok": 0,
+      "let_underscore": 1,
+      "unwrap_or_default": 0
     },
     "crates/arterm-schema-dialect/src/dialect.rs": {
       "dot_ok": 0,

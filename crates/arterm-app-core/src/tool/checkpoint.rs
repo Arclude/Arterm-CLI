@@ -21,6 +21,10 @@ const MAX_SNAPSHOTS_PER_FILE: usize = 5;
 /// Snapshots older than this are pruned opportunistically.
 const MAX_AGE_SECS: u64 = 7 * 24 * 3600;
 
+/// A poisoned lock is recovered rather than propagated: it means another
+/// thread panicked while holding it, and the snapshot map itself is still
+/// readable. Panicking here would take the whole process down from inside a
+/// tool call, which is a worse outcome than a possibly-stale checkpoint.
 /// A checkpoint of one file's pre-edit state.
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
@@ -82,7 +86,10 @@ impl CheckpointStore {
 
     /// Record a checkpoint (caller has already taken the snapshot).
     pub fn record(&self, cp: Checkpoint) {
-        let mut guard = self.checkpoints.lock().expect("checkpoint lock poisoned");
+        let mut guard = self
+            .checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Bound per-file history: drop the oldest snapshots for this file.
         let file = cp.file_path.clone();
         let mut count = guard.iter().filter(|c| c.file_path == file).count();
@@ -111,14 +118,20 @@ impl CheckpointStore {
 
     /// Pop and return the most recent checkpoint for `path`, if any.
     pub fn pop_for(&self, path: &Path) -> Option<Checkpoint> {
-        let mut guard = self.checkpoints.lock().expect("checkpoint lock poisoned");
+        let mut guard = self
+            .checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let pos = guard.iter().rposition(|c| c.file_path == path)?;
         Some(guard.remove(pos))
     }
 
     /// Pop the most recent checkpoint for `path` owned by `session_id`.
     pub fn pop_for_session(&self, session_id: &str, path: &Path) -> Option<Checkpoint> {
-        let mut guard = self.checkpoints.lock().expect("checkpoint lock poisoned");
+        let mut guard = self
+            .checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let pos = guard
             .iter()
             .rposition(|c| c.file_path == path && c.session_id == session_id)?;
@@ -127,7 +140,10 @@ impl CheckpointStore {
 
     /// The most recent checkpoint overall (without removing it).
     pub fn latest(&self) -> Option<Checkpoint> {
-        let guard = self.checkpoints.lock().expect("checkpoint lock poisoned");
+        let guard = self
+            .checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         guard.last().cloned()
     }
 
@@ -135,7 +151,7 @@ impl CheckpointStore {
     pub fn len(&self) -> usize {
         self.checkpoints
             .lock()
-            .expect("checkpoint lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .len()
     }
 
@@ -150,7 +166,10 @@ impl CheckpointStore {
             .unwrap_or(Duration::ZERO)
             .as_secs()
             .saturating_sub(MAX_AGE_SECS);
-        let mut guard = self.checkpoints.lock().expect("checkpoint lock poisoned");
+        let mut guard = self
+            .checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         guard.retain(|c| c.created_at >= cutoff);
     }
 }
