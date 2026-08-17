@@ -806,12 +806,12 @@ fn wrapped_rows_fit_inside_the_composer_well() {
         let input = composer_layout(&mut app, &source, frame);
         let lines = input.lines();
         assert!(lines.len() > 1, "a long line did not wrap at {size:?}");
-        for line in &lines {
-            let right = input.caret_rect(line.end, 1.0).x0;
-            assert!(
-                right <= usable + 1.0,
-                "a wrapped row reached {right:.1}px but only {usable:.1}px fit"
-            );
+        // Trailing whitespace may hang past the wrap width, and every row here
+        // ends in a space, so the caret after it measured that space glyph.
+        for line in input.layout().lines() {
+            let m = line.metrics();
+            let right = f64::from(m.advance - m.trailing_whitespace) / scale;
+            assert!(right <= usable + 1.0, "row {right:.1}px > {usable:.1}px");
         }
     }
 }

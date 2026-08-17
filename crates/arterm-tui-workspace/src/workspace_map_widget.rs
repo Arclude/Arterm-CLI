@@ -273,8 +273,20 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
         render_workspace_map(&mut buf, Rect::new(0, 0, 20, 6), &rows, 0);
 
+        // Resolve indexed colors too. "Completed tiles are green" is a promise
+        // to every user, and a 256-color terminal gets the same tile as
+        // `Color::Indexed`; matching only `Color::Rgb` asserted the runner's
+        // `COLORTERM` instead of the tile's color, so this passed on a
+        // developer's terminal and failed on a hosted CI runner.
         let has_greenish_fg = buf.content().iter().any(|cell| {
-            matches!(cell.style().fg, Some(ratatui::style::Color::Rgb(r, g, b)) if g > r && g > b)
+            let (r, g, b) = match cell.style().fg {
+                Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
+                Some(ratatui::style::Color::Indexed(index)) => {
+                    crate::color_support::indexed_to_rgb(index)
+                }
+                _ => return false,
+            };
+            g > r && g > b
         });
         assert!(has_greenish_fg);
     }

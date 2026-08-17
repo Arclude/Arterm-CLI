@@ -735,6 +735,14 @@ mod light_theme_interaction {
     /// behavior.
     #[test]
     fn configured_colors_survive_the_light_theme_pass() {
+        // "Unmodified" is only expressible on a truecolor terminal: a
+        // 256-color host quantizes the configured (171,60,58) to the nearest
+        // cube entry (175,95,95) and the assertion below fails for a reason
+        // that has nothing to do with the light-theme pass being tested.
+        // Without this the test passes on a developer's terminal and fails on
+        // a hosted CI runner, which is where it was found.
+        crate::color::pin_truecolor_for_tests();
+
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
