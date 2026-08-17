@@ -337,6 +337,33 @@ pub fn display_settings() -> &'static [Setting] {
                     .is_some()
             },
         },
+        // The one non-`[display]` entry, and it earns the exception: the
+        // sandbox is on by default, so the person it inconveniences needs a way
+        // to turn it off that is not "find config.toml and learn a key". Every
+        // other excluded setting has its own command (`/login`, `/model`); this
+        // one had nothing.
+        Setting {
+            key: "sandbox_mode",
+            help: "Restrict what agent-run bash commands may write and connect to.",
+            values: &["workspace-write", "read-only", "full-access"],
+            read: |c| {
+                let mode = c.sandbox_mode.trim();
+                if mode.is_empty() {
+                    // Empty means unset, and `apply_defaults` resolves it on
+                    // load; show what is in force, not the blank in the file.
+                    crate::config::default_sandbox_mode()
+                } else {
+                    mode.to_string()
+                }
+            },
+            write: |c, v| {
+                if !matches!(v, "workspace-write" | "read-only" | "full-access") {
+                    return false;
+                }
+                c.sandbox_mode = v.to_string();
+                true
+            },
+        },
         Setting {
             key: "idle_animation",
             help: "Animate the idle indicator between turns.",

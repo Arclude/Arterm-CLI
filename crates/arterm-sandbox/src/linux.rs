@@ -92,8 +92,40 @@ const ALL_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
 /// Write-related access flags that we restrict. We only restrict writing to
 /// existing files and creating new regular files. This is the minimal set
 /// that prevents uncontrolled file modification while allowing processes
-/// to function normally (pipes, sockets, /dev/null all work).
+/// to function normally (pipes and sockets are untouched).
+///
+/// Character devices are NOT automatically fine: `WRITE_FILE` covers them too,
+/// so `cmd > /dev/null` was denied in both sandboxed modes until
+/// [`ALWAYS_WRITABLE_DEVICES`] was allowed explicitly.
 const RESTRICTED_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_MAKE_REG;
+
+/// The subset of [`RESTRICTED_WRITE_ACCESS`] that applies to a non-directory.
+///
+/// `MAKE_REG` means "create a regular file *inside* this directory", so passing
+/// it in a rule whose target is a file makes `landlock_add_rule` fail with
+/// EINVAL. That failure was only ever an `eprintln`, so a file-granular
+/// writable root looked accepted and silently did nothing.
+const FILE_WRITE_ACCESS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE;
+
+/// Devices every ordinary command expects to write, allowed in every sandboxed
+/// mode including read-only.
+///
+/// `cmd > /dev/null` is the most common redirection in shell, and `2>/dev/null`
+/// is right behind it. Denying them does not protect anything -- these devices
+/// hold no user data and writing to them cannot modify the filesystem -- while
+/// making the sandbox read as broken rather than as protective, which is how it
+/// gets switched off. `/dev` as a whole is deliberately NOT allowed: that would
+/// hand out raw block devices along with them.
+const ALWAYS_WRITABLE_DEVICES: &[&str] = &[
+    "/dev/null",
+    "/dev/zero",
+    "/dev/full",
+    "/dev/random",
+    "/dev/urandom",
+    "/dev/tty",
+    "/dev/ptmx",
+    "/dev/pts",
+];
 
 /// All access flags we know about (for the ruleset mask).
 #[expect(
@@ -299,6 +331,28 @@ fn landlock_add_net_rule(ruleset_fd: i32, port: u16, allowed_access: u64) -> Res
     }
 }
 
+/// Grant write access to one path, choosing the mask its file type accepts.
+///
+/// Missing paths are skipped silently: `/dev/ptmx` and friends are absent in
+/// some containers, and that is not an error worth printing on every command.
+fn add_writable_rule(ruleset_fd: i32, path: &std::path::Path, full_access: u64) {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return;
+    };
+    let access = if metadata.is_dir() {
+        full_access
+    } else {
+        full_access & FILE_WRITE_ACCESS
+    };
+    if let Err(e) = landlock_add_rule(ruleset_fd, path, access) {
+        eprintln!(
+            "arterm sandbox: skipping writable root {}: {}",
+            path.display(),
+            e
+        );
+    }
+}
+
 /// Add a path rule to the ruleset.
 fn landlock_add_rule(
     ruleset_fd: i32,
@@ -465,16 +519,15 @@ pub fn apply_landlock(config: &SandboxConfig) -> Result<SandboxResult, String> {
         SandboxMode::FullAccess => Vec::new(),
     };
 
-    for path in &full_access_paths {
-        if path.exists()
-            && let Err(e) = landlock_add_rule(ruleset_fd, path, full_access)
-        {
-            eprintln!(
-                "arterm sandbox: skipping writable root {}: {}",
-                path.display(),
-                e
-            );
-        }
+    // Devices first: they are allowed in every sandboxed mode, read-only
+    // included, so that redirection keeps working under the sandbox.
+    let device_paths = ALWAYS_WRITABLE_DEVICES.iter().map(std::path::Path::new);
+
+    for path in full_access_paths.iter().map(std::path::PathBuf::as_path) {
+        add_writable_rule(ruleset_fd, path, full_access);
+    }
+    for path in device_paths {
+        add_writable_rule(ruleset_fd, path, full_access);
     }
 
     // Egress enforcement (ABI v4+): Landlock is deny-by-default for handled

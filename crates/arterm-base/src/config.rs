@@ -512,10 +512,15 @@ pub struct Config {
     /// Safety / notification configuration
     pub safety: SafetyConfig,
 
-    /// OS-level sandbox mode for bash commands: "full-access" (default),
-    /// "workspace-write", or "read-only". When set to a sandboxed mode, bash
+    /// OS-level sandbox mode for bash commands: "workspace-write" (default),
+    /// "read-only", or "full-access" to switch it off. In a sandboxed mode bash
     /// commands are restricted via Landlock (Linux) or Seatbelt (macOS).
-    #[serde(default)]
+    ///
+    /// Empty means unset, not off: [`Config::apply_defaults`] resolves it to
+    /// [`default_sandbox_mode`]. Turning the sandbox off is something a person
+    /// should have to write down, and `sandbox_mode = ""` is what a config
+    /// written before the default changed looks like.
+    #[serde(default = "default_sandbox_mode")]
     pub sandbox_mode: String,
 
     /// Commit touched files after each successful file-mutating tool run
@@ -801,4 +806,27 @@ pub(crate) fn is_default_discovery_endpoint(endpoint: &str) -> bool {
     let endpoint = endpoint.trim_end_matches('/');
     endpoint == arterm_config_types::DEFAULT_DISCOVERY_ENDPOINT
         || endpoint == arterm_config_types::LEGACY_DISCOVERY_ENDPOINT
+}
+
+/// The sandbox mode a config that does not mention one gets.
+///
+/// `workspace-write`, not `full-access`: the sandbox existed, worked, and was
+/// off in every shipped config, which is the same as not having one. The mode
+/// lets commands write the working directory and reach DNS/HTTP/HTTPS, and
+/// stops them writing anywhere else.
+pub fn default_sandbox_mode() -> String {
+    "workspace-write".to_string()
+}
+
+impl Config {
+    /// Resolve fields whose "unset" value is not their disabled value.
+    ///
+    /// Called after the file, the profile and the environment have all had
+    /// their say, so an explicit `full-access` from any of them survives while
+    /// an absent or empty setting becomes the default.
+    pub(crate) fn apply_defaults(&mut self) {
+        if self.sandbox_mode.trim().is_empty() {
+            self.sandbox_mode = default_sandbox_mode();
+        }
+    }
 }

@@ -1086,3 +1086,21 @@ async fn a_spawned_command_cannot_read_the_session_keys() {
     );
     assert!(env_dump.contains("PATH="), "PATH must survive: {env_dump}");
 }
+
+/// The config default has to be a mode the bash tool treats as sandboxed.
+///
+/// `bash.rs` parses `ctx.sandbox_mode` and silently runs unsandboxed when the
+/// string does not parse or is empty, so a typo in the default would turn the
+/// sandbox off everywhere without failing a single test. These two crates are
+/// the pair that has to agree, and this is the only place that can check it.
+#[test]
+fn the_config_default_is_a_mode_the_bash_tool_sandboxes() {
+    let default = arterm_base::config::default_sandbox_mode();
+    let mode: arterm_sandbox::SandboxMode = default
+        .parse()
+        .unwrap_or_else(|e| panic!("default sandbox mode {default:?} does not parse: {e}"));
+    assert!(
+        mode.is_sandboxed(),
+        "default sandbox mode {default:?} parses but sandboxes nothing"
+    );
+}
