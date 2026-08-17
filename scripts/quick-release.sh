@@ -7,20 +7,24 @@ set -euo pipefail
 #   let CI replace it with portable/signoff assets and add every other platform.
 # - --prepare-fast-macos/--fast-macos-local: do the same for macOS arm64 using
 #   the local osxcross cache.
-# - --remote: push the tag immediately and let CI gate publication.
+# - --remote: push the tag immediately and let CI build every platform.
 # - default: build Linux + macOS locally and stage them on the CI-owned draft.
+#
+# Every mode refuses to tag a commit whose CI run is not green; pass
+# --skip-ci-check to override.
 #
 # Usage:
 #   scripts/quick-release.sh --prepare-fast v0.5.5 # warm selfdev before bump
 #   scripts/quick-release.sh --fast-local v0.5.5  # package it, public now
 #   scripts/quick-release.sh --prepare-fast-macos v0.5.5
 #   scripts/quick-release.sh --fast-macos-local v0.5.5
-#   scripts/quick-release.sh --remote v0.5.5      # tag now, CI-gated publication
+#   scripts/quick-release.sh --remote v0.5.5      # tag now, CI builds it all
 #   scripts/quick-release.sh v0.5.5               # local Linux + macOS draft
 #   scripts/quick-release.sh --dry-run v0.5.5     # standard local build only
 
 MODE="standard"
 DRY_RUN=false
+SKIP_CI_CHECK=false
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --dry-run) DRY_RUN=true ;;
@@ -44,13 +48,16 @@ while [[ "${1:-}" == --* ]]; do
             [[ "$MODE" == "standard" ]] || { echo "Error: release modes cannot be combined." >&2; exit 1; }
             MODE="remote"
             ;;
+        --skip-ci-check)
+            SKIP_CI_CHECK=true
+            ;;
         --)
             shift
             break
             ;;
         *)
             echo "Error: Unknown option: $1" >&2
-            echo "Usage: scripts/quick-release.sh [--prepare-fast | --fast-local | --prepare-fast-macos | --fast-macos-local | --remote | --dry-run] <version> [title]" >&2
+            echo "Usage: scripts/quick-release.sh [--prepare-fast | --fast-local | --prepare-fast-macos | --fast-macos-local | --remote | --dry-run] [--skip-ci-check] <version> [title]" >&2
             exit 1
             ;;
     esac
@@ -62,7 +69,7 @@ if $DRY_RUN && [[ "$MODE" == "remote" ]]; then
     exit 1
 fi
 
-VERSION="${1:?Usage: scripts/quick-release.sh [--prepare-fast | --fast-local | --prepare-fast-macos | --fast-macos-local | --remote | --dry-run] <version> [title]}"
+VERSION="${1:?Usage: scripts/quick-release.sh [--prepare-fast | --fast-local | --prepare-fast-macos | --fast-macos-local | --remote | --dry-run] [--skip-ci-check] <version> [title]}"
 TITLE="${2:-$VERSION}"
 VERSION_NUM="${VERSION#v}"
 
@@ -153,7 +160,62 @@ elapsed() {
     echo $(( $(date +%s) - OVERALL_START ))
 }
 
+# Refuse to tag a commit CI has not approved.
+#
+# Nothing else does this. `release.yml` triggers on the tag and CI triggers on
+# the branch, two workflows with no edge between them: a red main releases
+# exactly as readily as a green one, and the release reports success either way.
+# That is not hypothetical -- upstream jcode, which this pipeline was forked
+# from, published nine releases over a week in which every single CI run on
+# master was red.
+#
+# This is the cheapest place to close it: one lookup, before the tag exists.
+# After the tag is pushed the release is already building.
+require_green_ci() {
+    local head_commit branch run status conclusion
+    head_commit="$(git rev-parse HEAD)"
+    branch="$(git rev-parse --abbrev-ref HEAD)"
+
+    if $SKIP_CI_CHECK; then
+        echo "  ⚠ CI check skipped (--skip-ci-check)"
+        return
+    fi
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Error: gh is required to verify CI before tagging. Install it, or" >&2
+        echo "       pass --skip-ci-check if you accept releasing unverified." >&2
+        exit 1
+    fi
+
+    echo "▸ Checking CI on $head_commit..."
+    run="$(gh run list --workflow CI --branch "$branch" --limit 40 \
+        --json headSha,status,conclusion \
+        --jq "[.[] | select(.headSha == \"$head_commit\")] | .[0] // empty" 2>/dev/null || true)"
+
+    if [[ -z "$run" ]]; then
+        echo "Error: no CI run found for $head_commit on $branch." >&2
+        echo "       Push the commit and let CI finish, or pass --skip-ci-check." >&2
+        exit 1
+    fi
+
+    status="$(printf '%s' "$run" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+    conclusion="$(printf '%s' "$run" | python3 -c 'import json,sys; print(json.load(sys.stdin)["conclusion"] or "")')"
+
+    if [[ "$status" != "completed" ]]; then
+        echo "Error: CI on $head_commit is still $status." >&2
+        echo "       Wait for it to finish, or pass --skip-ci-check." >&2
+        exit 1
+    fi
+    if [[ "$conclusion" != "success" ]]; then
+        echo "Error: CI on $head_commit concluded '$conclusion', not success." >&2
+        echo "       Fix it before releasing, or pass --skip-ci-check if you have" >&2
+        echo "       a reason this release should go out anyway." >&2
+        exit 1
+    fi
+    echo "  CI green on this commit"
+}
+
 tag_and_push() {
+    require_green_ci
     echo "▸ Tagging $VERSION..."
     local head_commit remote_tags remote_commit local_commit
     head_commit="$(git rev-parse HEAD)"

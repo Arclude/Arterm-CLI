@@ -77,6 +77,8 @@ Tag push (v*)
 Key design decisions:
 - **Every platform and architecture is independent.** A failure remains visible in CI and release notes but cannot suppress another target's successful asset.
 - **At least one platform asset must succeed.** If every build fails, the release remains a draft.
+- **An optional platform may be absent, but not quietly.** Independence was read as "a missing asset is nobody's problem", and Windows ARM64 stopped building at v0.10.4 without failing a single release; three shipped without it. `scripts/check_release_assets.py` now compares the built set against the previous release: a platform that shipped last time and is missing now fails the release, unless `scripts/release_assets.json` records it under `known_gaps` with the reason. An entry there that starts building again also fails, so the file cannot become a standing excuse.
+- **The tag is only cut on a commit CI approved.** `release.yml` triggers on the tag and CI on the branch; there is no edge between them, so nothing in GitHub stops a red commit from being released. `quick-release.sh` checks the CI conclusion for HEAD before tagging (`--skip-ci-check` overrides, loudly).
 - **Windows executables must be signed before public upload.** Signing is required for Windows assets. `WINDOWS_SIGNING_REQUIRED=false` remains an explicit emergency override and is not suitable for an official Windows build.
 - **Checksums describe exactly the assets published in that release.** Late or failed optional platforms are omitted instead of blocking unrelated platforms.
 - **Shallow clones** (`fetch-depth: 1`) to minimize checkout time.

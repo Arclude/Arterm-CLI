@@ -558,52 +558,52 @@ jobs:
           path: artifacts
           pattern: arterm-*
 
-      - name: Validate required platform asset set
+      # The asset set this release promises lives in scripts/release_assets.json:
+      # REQUIRED is what `scripts/install.sh` and the Homebrew formula resolve,
+      # optional is everything else.
+      #
+      # All nine used to be mandatory, which is why nothing could ever publish:
+      # Windows needs an Azure signing profile this repository does not always
+      # have and FreeBSD builds in a VM that fails independently, so one absent
+      # optional platform kept the whole release in draft forever -- no public
+      # assets, and `curl | bash` resolving an older tag.
+      #
+      # Narrowing REQUIRED fixed that and introduced the opposite failure:
+      # "optional" was implemented as "silently absent", so Windows ARM64
+      # stopped building at v0.10.4 and three releases shipped without it, each
+      # reporting success. The checker ratchets the optional set against the
+      # previous release so a platform cannot leave quietly.
+      - name: Collect the previous release's asset names
+        id: previous_assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous=$(gh release list --limit 30 \
+            --json tagName,isDraft,isPrerelease,createdAt \
+            --jq "[.[] | select(.isDraft == false and .isPrerelease == false)
+                   | select(.tagName != \"${GITHUB_REF_NAME}\")]
+                  | sort_by(.createdAt) | reverse | .[0].tagName // empty")
+          if [ -z "$previous" ]; then
+            echo "No previous public release; the regression check is skipped."
+            echo "file=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Comparing against $previous"
+          gh release view "$previous" --json assets --jq '.assets[].name' \
+            > previous-assets.txt
+          echo "file=previous-assets.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Validate the platform asset set
         shell: bash
         run: |
           set -euo pipefail
-          # REQUIRED is what this release promises: the four tarballs
-          # `scripts/install.sh` resolves and the Homebrew formula points at.
-          # Everything else is reported, not required.
-          #
-          # All nine used to be mandatory, which is why nothing could ever
-          # publish: Windows needs an Azure signing profile this repository
-          # does not have and FreeBSD builds in a VM that fails independently,
-          # so one absent optional platform kept the whole release in draft
-          # forever -- no public assets, and `curl | bash` resolving an older
-          # tag. It also contradicted this job's own availability report below,
-          # which exists precisely to record a platform as unavailable.
-          required=(
-            artifacts/arterm-linux-x86_64/arterm-linux-x86_64.tar.gz
-            artifacts/arterm-linux-aarch64/arterm-linux-aarch64.tar.gz
-            artifacts/arterm-macos-aarch64/arterm-macos-aarch64.tar.gz
-            artifacts/arterm-macos-x86_64/arterm-macos-x86_64.tar.gz
-          )
-          optional=(
-            artifacts/arterm-windows-x86_64/arterm-windows-x86_64.exe
-            artifacts/arterm-windows-x86_64/arterm-windows-x86_64.tar.gz
-            artifacts/arterm-windows-aarch64/arterm-windows-aarch64.exe
-            artifacts/arterm-windows-aarch64/arterm-windows-aarch64.tar.gz
-            artifacts/arterm-freebsd-x86_64/arterm-freebsd-x86_64.tar.gz
-          )
-
-          missing=()
-          for asset in "${required[@]}"; do
-            if [ ! -f "$asset" ]; then
-              missing+=("$asset")
-            fi
-          done
-          if [ "${#missing[@]}" -ne 0 ]; then
-            printf 'Missing REQUIRED release asset: %s\n' "${missing[@]}" >&2
-            echo "Keeping the release as a draft: Linux and macOS must both ship" >&2
-            exit 1
+          args=(--artifacts artifacts)
+          if [ -n "${{ steps.previous_assets.outputs.file }}" ]; then
+            args+=(--previous-assets "${{ steps.previous_assets.outputs.file }}")
           fi
-
-          for asset in "${optional[@]}"; do
-            if [ ! -f "$asset" ]; then
-              echo "note: optional asset not built for this release: $asset"
-            fi
-          done
+          python3 scripts/check_release_assets.py "${args[@]}"
 
       # Build jobs normally attach their own assets to the draft. Upload them
       # again here so a late per-platform upload failure cannot leave a built

@@ -104,6 +104,12 @@ jobs:
         shell: bash
         run: python3 scripts/check_dependency_boundaries.py
 
+      # Run them, do not merely compile them: this file exists because a check
+      # that never executes is indistinguishable from one that passes.
+      - name: Test the release asset checker
+        shell: bash
+        run: python3 -m unittest discover -s scripts -p 'test_check_release_assets.py' -v
+
       - name: Enforce Rust and TypeScript SDK surface parity
         shell: bash
         run: cargo test -p arterm-sdk parity -- --nocapture

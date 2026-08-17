@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "required": [
+    "arterm-linux-x86_64/arterm-linux-x86_64.tar.gz",
+    "arterm-linux-aarch64/arterm-linux-aarch64.tar.gz",
+    "arterm-macos-aarch64/arterm-macos-aarch64.tar.gz",
+    "arterm-macos-x86_64/arterm-macos-x86_64.tar.gz"
+  ],
+  "optional": [
+    "arterm-windows-x86_64/arterm-windows-x86_64.exe",
+    "arterm-windows-x86_64/arterm-windows-x86_64.tar.gz",
+    "arterm-windows-aarch64/arterm-windows-aarch64.exe",
+    "arterm-windows-aarch64/arterm-windows-aarch64.tar.gz",
+    "arterm-freebsd-x86_64/arterm-freebsd-x86_64.tar.gz"
+  ],
+  "known_gaps": {
+    "arterm-windows-aarch64/arterm-windows-aarch64.exe": "tract-linalg 0.23.4 cannot assemble its ARM64 SIMD kernels for aarch64-pc-windows-msvc: the build script emits no arm64simd_mmm_*.o and the link fails with LNK1181. Absent since v0.10.4; v0.10.3 was the last release that carried it.",
+    "arterm-windows-aarch64/arterm-windows-aarch64.tar.gz": "Same build failure as the .exe above; the tarball is packed from it."
+  }
+}
