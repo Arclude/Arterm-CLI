@@ -89,6 +89,7 @@ pub mod storage;
 pub mod subscription_api;
 pub mod subscription_catalog;
 pub mod telegram;
+pub mod worktree;
 pub mod telemetry {
     pub use arterm_telemetry_core::*;
 }

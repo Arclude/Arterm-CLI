@@ -1899,6 +1899,12 @@ struct CommunicateInput {
     /// and its model/effort frontmatter hints fill any unset fields.
     #[serde(default)]
     agent: Option<String>,
+    /// Spawn the agent in an isolated git worktree (a new `arterm/<slug>`
+    /// branch under .arterm/worktrees/). Requires the working dir to be a git
+    /// repo; the spawned agent gets the worktree as its working dir so it can
+    /// build and test without racing the coordinator's checkout.
+    #[serde(default)]
+    isolate: Option<bool>,
 }
 
 impl CommunicateInput {
@@ -2113,6 +2119,10 @@ impl Tool for CommunicateTool {
                 "agent": {
                     "type": "string",
                     "description": "Custom agent name for spawn: loads .arterm/agents/<name>.md (or ~/.arterm/agents/<name>.md), prepends its prompt to the initial message, and fills model/effort/label from its frontmatter when unset."
+                },
+                "isolate": {
+                    "type": "boolean",
+                    "description": "Spawn into an isolated git worktree (new arterm/<slug> branch under .arterm/worktrees/). Use for build/test-heavy work that must not race the main checkout. Requires a git repo."
                 },
                 "effort": {
                     "type": "string",
@@ -2783,11 +2793,34 @@ impl Tool for CommunicateTool {
             }
 
             "spawn" => {
-                let working_dir = params.working_dir.clone().or_else(|| {
+                let requested_dir = params.working_dir.clone().or_else(|| {
                     ctx.working_dir
                         .as_ref()
                         .map(|p| p.to_string_lossy().into_owned())
                 });
+                // Worktree isolation: swap the working dir for a fresh
+                // `arterm/<slug>` worktree before spawning.
+                let working_dir = if params.isolate.unwrap_or(false) {
+                    let base = std::path::PathBuf::from(
+                        requested_dir.clone().unwrap_or_else(|| ".".to_string()),
+                    );
+                    let base = crate::worktree::repo_root(&base).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "isolate requires a git repository (no repo root from {})",
+                            base.display()
+                        )
+                    })?;
+                    let label_for_slug = params
+                        .label
+                        .clone()
+                        .or_else(|| params.agent.clone())
+                        .unwrap_or_else(|| "worker".to_string());
+                    let wt = crate::worktree::create_worktree(&base, &label_for_slug)
+                        .map_err(anyhow::Error::msg)?;
+                    Some(wt.path.to_string_lossy().into_owned())
+                } else {
+                    requested_dir.clone()
+                };
                 let overlay = params.resolve_agent_overlay(working_dir.as_deref())?;
                 let (initial_message, model, effort, label) = match &overlay {
                     Some(def) => params.apply_agent_overlay(def, params.spawn_initial_message()),
