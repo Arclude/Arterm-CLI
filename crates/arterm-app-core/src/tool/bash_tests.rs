@@ -303,12 +303,23 @@ async fn test_reload_persistable_bash_continues_in_background() {
             .expect("status_file should be present"),
     );
 
-    tokio::time::sleep(std::time::Duration::from_millis(1400)).await;
-
-    let status = crate::background::global()
-        .status(&task_id)
-        .await
-        .expect("status should exist");
+    // Poll for the terminal status the way the other background tests here do,
+    // rather than sleeping a fixed 1400ms and reading once. The command sleeps
+    // for a second, so that left a 400ms margin for spawn, wake and the status
+    // write -- enough on a developer machine, not enough on a loaded CI runner,
+    // which read the task as still `Running`. This waits up to 10s but returns
+    // as soon as the task leaves `Running`, so the common case is no slower.
+    let mut final_status = None;
+    for _ in 0..200 {
+        if let Some(status) = crate::background::global().status(&task_id).await
+            && status.status != BackgroundTaskStatus::Running
+        {
+            final_status = Some(status);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let status = final_status.expect("reload-persisted background task should finish");
     assert_eq!(status.status, BackgroundTaskStatus::Completed);
     let output = crate::background::global()
         .output(&task_id)
