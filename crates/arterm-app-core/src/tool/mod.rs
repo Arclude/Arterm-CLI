@@ -13,6 +13,7 @@ mod computer;
 mod config_edit_notice;
 mod conversation_search;
 mod debug_socket;
+mod diagnostics;
 mod discover;
 mod discover_secrets;
 mod edit;
@@ -283,6 +284,9 @@ impl Registry {
             Self::insert_tool_timed(&mut m, &mut timings, "ls", ls::LsTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "repo_map", || {
                 repo_map::RepoMapTool::new()
+            });
+            Self::insert_tool_timed(&mut m, &mut timings, "diagnostics", || {
+                diagnostics::DiagnosticsTool::new()
             });
             Self::insert_tool_timed(&mut m, &mut timings, "bash", bash::BashTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "browser", browser::BrowserTool::new);

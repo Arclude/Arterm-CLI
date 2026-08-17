@@ -1,0 +1,328 @@
+diff --git a/crates/arterm-base/src/memory.rs b/crates/arterm-base/src/memory.rs
+index 20c5d5e..e9f0de7 100644
+--- a/crates/arterm-base/src/memory.rs
++++ b/crates/arterm-base/src/memory.rs
+@@ -249,7 +249,7 @@ impl MemoryManager {
+         self.project_dir.clone()
+     }
+ 
+-    fn project_memory_path(&self) -> Result<Option<PathBuf>> {
++    pub fn project_memory_path(&self) -> Result<Option<PathBuf>> {
+         // In test mode, use test directory
+         if self.test_mode {
+             let test_dir = storage::arterm_dir()?.join("memory").join("test");
+diff --git a/src/cli/args.rs b/src/cli/args.rs
+index b48c2cf..6613bd3 100644
+--- a/src/cli/args.rs
++++ b/src/cli/args.rs
+@@ -1126,6 +1126,17 @@ pub(crate) enum MemoryCommand {
+     /// Show memory statistics
+     Stats,
+ 
++    /// Delete stored project memory. Global memory is not touched.
++    Clean {
++        /// Clean every project's memory, not just this project's
++        #[arg(long)]
++        all_projects: bool,
++
++        /// Skip the confirmation prompt
++        #[arg(short, long)]
++        yes: bool,
++    },
++
+     /// Clear test memory storage (used by debug sessions)
+     ClearTest,
+ }
+diff --git a/src/cli/dispatch.rs b/src/cli/dispatch.rs
+index f9e9e17..250d271 100644
+--- a/src/cli/dispatch.rs
++++ b/src/cli/dispatch.rs
+@@ -6,9 +6,8 @@ use std::process::{Command as ProcessCommand, Stdio};
+ use std::time::Instant;
+ 
+ use super::args::{
+-    AmbientCommand, Args, AuthCommand, CloudCommand, CloudSessionsCommand, Command, MemoryCommand,
+-    ModelCommand, ProviderCommand, RestartCommand, ServerCommand, SessionCommand,
+-    TranscriptModeArg,
++    AmbientCommand, Args, AuthCommand, CloudCommand, CloudSessionsCommand, Command, ModelCommand,
++    ProviderCommand, RestartCommand, ServerCommand, SessionCommand, TranscriptModeArg,
+ };
+ use crate::{
+     agent, auth, build, provider, provider_catalog, server, session, setup_hints, startup_profile,
+@@ -370,9 +369,7 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
+             }
+         },
+         Some(Command::Mcp(subcmd)) => super::mcp::run_mcp_command(subcmd)?,
+-        Some(Command::Memory(subcmd)) => {
+-            commands::run_memory_command(map_memory_subcommand(subcmd))?
+-        }
++        Some(Command::Memory(subcmd)) => crate::cli::memory_clean::dispatch(subcmd)?,
+         Some(Command::Device(subcmd)) => crate::cli::device::handle(subcmd)?,
+         Some(Command::Session(subcmd)) => match subcmd {
+             SessionCommand::Rename {
+@@ -663,29 +660,6 @@ fn resolve_resume_id(resume_id: &str) -> Result<String> {
+     }
+ }
+ 
+-fn map_memory_subcommand(subcmd: MemoryCommand) -> commands::MemorySubcommand {
+-    match subcmd {
+-        MemoryCommand::List { scope, tag } => commands::MemorySubcommand::List { scope, tag },
+-        MemoryCommand::Search { query, semantic } => {
+-            commands::MemorySubcommand::Search { query, semantic }
+-        }
+-        MemoryCommand::Export { output, scope } => {
+-            commands::MemorySubcommand::Export { output, scope }
+-        }
+-        MemoryCommand::Import {
+-            input,
+-            scope,
+-            overwrite,
+-        } => commands::MemorySubcommand::Import {
+-            input,
+-            scope,
+-            overwrite,
+-        },
+-        MemoryCommand::Stats => commands::MemorySubcommand::Stats,
+-        MemoryCommand::ClearTest => commands::MemorySubcommand::ClearTest,
+-    }
+-}
+-
+ fn map_ambient_subcommand(subcmd: AmbientCommand) -> commands::AmbientSubcommand {
+     match subcmd {
+         AmbientCommand::Status => commands::AmbientSubcommand::Status,
+diff --git a/src/cli/memory_clean.rs b/src/cli/memory_clean.rs
+new file mode 100644
+index 0000000..4895f69
+--- /dev/null
++++ b/src/cli/memory_clean.rs
+@@ -0,0 +1,153 @@
++//! `arterm memory clean` — delete stored project memory.
++//!
++//! Project scope only: global memory is never touched here. The default is this
++//! project's memory (the same file `arterm memory list`/`stats` read);
++//! `--all-projects` clears every project on the machine. Both prompt before an
++//! irreversible delete unless `--yes`.
++//!
++//! Kept out of `commands.rs` and `dispatch.rs` because both are over the
++//! oversized-file ratchet's threshold. `map_memory_subcommand` moves here too,
++//! which leaves `dispatch.rs` smaller than a Clean arm alone would have left it.
++
++use std::io::Write;
++use std::path::Path;
++
++use anyhow::{Context, Result};
++
++use crate::cli::args::MemoryCommand;
++use crate::cli::commands::{self, MemorySubcommand};
++use crate::memory::MemoryManager;
++use crate::storage;
++
++/// Run `arterm memory clean`.
++pub(crate) fn run(all_projects: bool, yes: bool) -> Result<()> {
++    if all_projects {
++        if !yes && !confirm("every project's memory on this machine")? {
++            println!("Nothing was cleaned.");
++            return Ok(());
++        }
++        let dir = storage::arterm_dir()?.join("memory").join("projects");
++        match clear_projects_dir(&dir)? {
++            0 => println!("No project memory to clean."),
++            1 => println!("Cleaned 1 project's memory. Global memory is untouched."),
++            n => println!("Cleaned {n} projects' memory. Global memory is untouched."),
++        }
++        return Ok(());
++    }
++
++    if !yes && !confirm("this project's memory")? {
++        println!("Nothing was cleaned.");
++        return Ok(());
++    }
++    let cleaned = match MemoryManager::new().project_memory_path()? {
++        Some(path) => remove_store_at(&path)?,
++        None => false,
++    };
++    if cleaned {
++        println!("Cleaned this project's memory. Global memory is untouched.");
++        println!("Run `arterm memory clean --all-projects` to clear every project.");
++    } else {
++        println!("This project has no stored memory to clean.");
++    }
++    Ok(())
++}
++
++/// Ask before an irreversible delete. Returns true only on an explicit yes.
++///
++/// A no, an empty line, or EOF (piped with no `--yes`) all count as "do not
++/// delete" — the safe default for something that cannot be undone.
++fn confirm(target: &str) -> Result<bool> {
++    let mut stdout = std::io::stdout();
++    write!(
++        stdout,
++        "This permanently deletes {target}. Continue? [y/N] "
++    )
++    .and_then(|()| stdout.flush())
++    .context("writing the confirmation prompt")?;
++    let mut answer = String::new();
++    if std::io::stdin().read_line(&mut answer)? == 0 {
++        return Ok(false); // EOF: no one is there to confirm.
++    }
++    let answer = answer.trim().to_ascii_lowercase();
++    Ok(answer == "y" || answer == "yes")
++}
++
++/// Remove one store file and its `.json.bak` sibling. Returns whether the store
++/// existed. Path-based so it can be tested without moving `ARTERM_HOME`.
++fn remove_store_at(path: &Path) -> Result<bool> {
++    let existed = path.exists();
++    if existed {
++        std::fs::remove_file(path)
++            .with_context(|| format!("removing project memory at {}", path.display()))?;
++    }
++    // The migration backup is a copy of what was just deleted; leaving it means
++    // the memory was not really cleared, so its removal is part of the job.
++    let backup = path.with_extension("json.bak");
++    if backup.exists() {
++        std::fs::remove_file(&backup)
++            .with_context(|| format!("removing the backup at {}", backup.display()))?;
++    }
++    Ok(existed)
++}
++
++/// Remove every `<hash>.json` (and its `.json.bak`) under `dir`, returning how
++/// many stores were removed.
++fn clear_projects_dir(dir: &Path) -> Result<usize> {
++    if !dir.exists() {
++        return Ok(0);
++    }
++    let mut removed = 0;
++    for entry in std::fs::read_dir(dir)
++        .with_context(|| format!("reading project memory directory {}", dir.display()))?
++    {
++        let path = entry?.path();
++        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
++            continue;
++        };
++        // Both the store (`<hash>.json`) and its backup (`<hash>.json.bak`).
++        if name.ends_with(".json") || name.ends_with(".json.bak") {
++            std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
++            if name.ends_with(".json") {
++                removed += 1;
++            }
++        }
++    }
++    Ok(removed)
++}
++
++/// Map the parsed `memory` subcommand onto the handler enum. Moved here from
++/// `dispatch.rs` (over the oversized-file ratchet) so the Clean arm nets that
++/// file smaller, not larger.
++pub(crate) fn map_memory_subcommand(subcmd: MemoryCommand) -> MemorySubcommand {
++    match subcmd {
++        MemoryCommand::List { scope, tag } => MemorySubcommand::List { scope, tag },
++        MemoryCommand::Search { query, semantic } => MemorySubcommand::Search { query, semantic },
++        MemoryCommand::Export { output, scope } => MemorySubcommand::Export { output, scope },
++        MemoryCommand::Import {
++            input,
++            scope,
++            overwrite,
++        } => MemorySubcommand::Import {
++            input,
++            scope,
++            overwrite,
++        },
++        MemoryCommand::Stats => MemorySubcommand::Stats,
++        MemoryCommand::ClearTest => MemorySubcommand::ClearTest,
++        // Clean is handled before this mapping (see dispatch), so it never
++        // reaches the shared `run_memory_command`.
++        MemoryCommand::Clean { .. } => MemorySubcommand::Stats,
++    }
++}
++
++/// Run a `memory` subcommand, routing Clean around the shared handler.
++pub(crate) fn dispatch(subcmd: MemoryCommand) -> Result<()> {
++    match subcmd {
++        MemoryCommand::Clean { all_projects, yes } => run(all_projects, yes),
++        other => commands::run_memory_command(map_memory_subcommand(other)),
++    }
++}
++
++#[cfg(test)]
++#[path = "memory_clean_tests.rs"]
++mod memory_clean_tests;
+diff --git a/src/cli/memory_clean_tests.rs b/src/cli/memory_clean_tests.rs
+new file mode 100644
+index 0000000..c8a8e60
+--- /dev/null
++++ b/src/cli/memory_clean_tests.rs
+@@ -0,0 +1,59 @@
++use super::*;
++
++#[test]
++fn removing_a_store_deletes_it_and_its_backup() {
++    let dir = tempfile::tempdir().expect("temp dir");
++    let store = dir.path().join("abc123.json");
++    let backup = dir.path().join("abc123.json.bak");
++    std::fs::write(&store, "{}").expect("write store");
++    std::fs::write(&backup, "{}").expect("write backup");
++
++    assert!(
++        remove_store_at(&store).expect("remove"),
++        "the store was there"
++    );
++    assert!(!store.exists(), "store is gone");
++    assert!(
++        !backup.exists(),
++        "the backup is gone too, or memory was not really cleared"
++    );
++}
++
++#[test]
++fn removing_a_missing_store_reports_nothing_was_there() {
++    let dir = tempfile::tempdir().expect("temp dir");
++    assert!(!remove_store_at(&dir.path().join("never.json")).expect("remove"));
++}
++
++#[test]
++fn clearing_the_projects_dir_removes_every_store_and_backup() {
++    let dir = tempfile::tempdir().expect("temp dir");
++    for hash in ["1111", "2222", "3333"] {
++        std::fs::write(dir.path().join(format!("{hash}.json")), "{}").expect("store");
++        std::fs::write(dir.path().join(format!("{hash}.json.bak")), "{}").expect("bak");
++    }
++    // Something that is not a project store must be left alone.
++    std::fs::write(dir.path().join("index.json.keep"), "x").expect("other");
++
++    let removed = clear_projects_dir(dir.path()).expect("clear");
++    assert_eq!(removed, 3, "counts stores, not backups");
++
++    let left: Vec<_> = std::fs::read_dir(dir.path())
++        .expect("read")
++        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
++        .collect();
++    assert_eq!(
++        left,
++        vec!["index.json.keep".to_string()],
++        "only the non-store file survives"
++    );
++}
++
++#[test]
++fn clearing_a_missing_projects_dir_is_zero_not_an_error() {
++    let dir = tempfile::tempdir().expect("temp dir");
++    assert_eq!(
++        clear_projects_dir(&dir.path().join("no-such-projects")).expect("clear"),
++        0
++    );
++}
+diff --git a/src/cli/mod.rs b/src/cli/mod.rs
+index 932bdd0..ae10954 100644
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -10,6 +10,7 @@ pub mod hot_exec;
+ pub mod login;
+ pub mod macos_notification_broker;
+ pub mod mcp;
++pub mod memory_clean;
+ pub mod output;
+ pub mod proctitle;
+ pub mod provider_doctor;
