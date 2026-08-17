@@ -169,6 +169,35 @@ pub(super) async fn dispatch_swarm_await_completion(
     }
 }
 
+pub(super) async fn dispatch_monitor_matched(
+    event: &crate::bus::MonitorMatched,
+    sessions: &SessionAgents,
+    soft_interrupt_queues: &SessionInterruptQueues,
+) {
+    let content = crate::monitor::format_monitor_inject(
+        &event.monitor_id,
+        &event.kind,
+        &event.source,
+        &event.pattern,
+        &event.line,
+    );
+    if !queue_soft_interrupt_for_session(
+        &event.session_id,
+        content,
+        false,
+        SoftInterruptSource::BackgroundTask,
+        soft_interrupt_queues,
+        sessions,
+    )
+    .await
+    {
+        crate::logging::warn(&format!(
+            "Failed to inject monitor match for session {}",
+            event.session_id
+        ));
+    }
+}
+
 pub(super) async fn dispatch_background_task_progress(
     task: &crate::bus::BackgroundTaskProgressEvent,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,

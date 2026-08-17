@@ -183,3 +183,47 @@ async fn queue_soft_interrupt_for_session_persists_when_live_queue_is_unavailabl
         crate::env::remove_var("ARTERM_HOME");
     }
 }
+
+#[tokio::test]
+async fn dispatch_monitor_matched_persists_when_live_queue_is_unavailable() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let prev_home = std::env::var_os("ARTERM_HOME");
+    crate::env::set_var("ARTERM_HOME", temp.path());
+
+    let session_id = format!("ses-monitor-persist-{}", std::process::id());
+    crate::session::Session::create_with_id(session_id.clone(), None, None)
+        .save()
+        .expect("save session snapshot");
+
+    let queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    let sessions = Arc::new(RwLock::new(HashMap::new()));
+    let event = crate::bus::MonitorMatched {
+        monitor_id: "monabcd".to_string(),
+        session_id: session_id.clone(),
+        kind: "command".to_string(),
+        source: "tail -f log".to_string(),
+        pattern: "ERROR".to_string(),
+        line: "ERROR boom".to_string(),
+        match_count: 1,
+    };
+
+    super::dispatch_monitor_matched(&event, &sessions, &queues).await;
+
+    let persisted =
+        crate::soft_interrupt_store::load(&session_id).expect("load persisted interrupts");
+    assert_eq!(persisted.len(), 1);
+    assert!(
+        persisted[0].content.contains("Monitor `monabcd` matched."),
+        "got: {}",
+        persisted[0].content
+    );
+    assert!(persisted[0].content.contains("line: ERROR boom"));
+    assert_eq!(persisted[0].source, SoftInterruptSource::BackgroundTask);
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("ARTERM_HOME", prev_home);
+    } else {
+        crate::env::remove_var("ARTERM_HOME");
+    }
+}

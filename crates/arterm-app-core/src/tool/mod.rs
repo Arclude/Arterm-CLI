@@ -27,6 +27,7 @@ mod ls;
 mod lsp;
 pub mod mcp;
 mod memory;
+mod monitor;
 mod multiedit;
 mod open;
 mod patch;
@@ -87,6 +88,7 @@ const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
     "patch",
     "apply_patch",
     "bash",
+    "monitor",
     "open",
 ];
 
@@ -292,6 +294,7 @@ impl Registry {
             });
             Self::insert_tool_timed(&mut m, &mut timings, "lsp", lsp::LspTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "github", github::GithubTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "monitor", monitor::MonitorTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "bash", bash::BashTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "browser", browser::BrowserTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "open", open::OpenTool::new);

@@ -1702,6 +1702,41 @@ async fn plan_mode_blocks_bash_tool() {
 }
 
 #[tokio::test]
+async fn plan_mode_blocks_monitor_tool() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let session = "test-planmode-blocks-monitor";
+    super::set_plan_mode(session, true);
+
+    let ctx = ToolContext {
+        session_id: session.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+        sandbox_mode: "full-access".to_string(),
+    };
+
+    let result = registry
+        .execute(
+            "monitor",
+            serde_json::json!({"action":"start","command":"echo hi","intent":"watch"}),
+            ctx,
+        )
+        .await;
+    assert!(result.is_err(), "monitor should be blocked");
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Plan Mode is active")
+    );
+    super::set_plan_mode(session, false);
+}
+
+#[tokio::test]
 async fn plan_mode_allows_read_only_tools() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;

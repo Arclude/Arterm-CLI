@@ -228,6 +228,7 @@ pub(super) async fn handle_clear_session(
         register_background_tool_signal(&new_id, agent_guard.background_tool_signal());
     }
     remove_session_interrupt_queue(soft_interrupt_queues, client_session_id).await;
+    crate::monitor::global().stop_session(client_session_id);
 
     // `/clear` creates a genuinely fresh session. Do not migrate the old
     // session's swarm membership or plan participation to the replacement:
