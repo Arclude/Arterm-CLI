@@ -59,7 +59,7 @@ impl Tool for DiagnosticsTool {
     }
 
     fn description(&self) -> &str {
-        "Get compiler/linter diagnostics for the project: errors and warnings with file:line. Runs the right checker for the project type (cargo check for Rust, tsc for TypeScript, ruff for Python). Use after edits to verify code compiles/typechecks before claiming a change works. Read-only."
+        "Compiler/linter errors and warnings with file:line. Read-only."
     }
 
     fn parameters_schema(&self) -> Value {

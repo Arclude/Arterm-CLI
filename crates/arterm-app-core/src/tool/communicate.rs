@@ -2118,11 +2118,11 @@ impl Tool for CommunicateTool {
                 },
                 "agent": {
                     "type": "string",
-                    "description": "Custom agent name for spawn: loads .arterm/agents/<name>.md (or ~/.arterm/agents/<name>.md), prepends its prompt to the initial message, and fills model/effort/label from its frontmatter when unset."
+                    "description": "Custom agent persona: .arterm/agents/<name>.md prompt overlay for the spawned worker."
                 },
                 "isolate": {
                     "type": "boolean",
-                    "description": "Spawn into an isolated git worktree (new arterm/<slug> branch under .arterm/worktrees/). Use for build/test-heavy work that must not race the main checkout. Requires a git repo."
+                    "description": "Spawn into an isolated git worktree (arterm/<slug> branch under .arterm/worktrees/)."
                 },
                 "effort": {
                     "type": "string",

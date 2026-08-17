@@ -88,7 +88,7 @@ impl Tool for RepoMapTool {
     }
 
     fn description(&self) -> &str {
-        "Map the repository: a compact directory tree annotated with file line counts, plus top-level symbol outlines for the largest source files. Use it first when orienting in an unfamiliar repo, planning a refactor across files, or deciding where a change belongs; then drill into specific files with read/agentgrep. Read-only."
+        "Directory tree with line counts plus symbol outlines. Read-only."
     }
 
     fn parameters_schema(&self) -> Value {
