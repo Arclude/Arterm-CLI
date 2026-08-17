@@ -34,6 +34,7 @@ mod patch;
 mod permission_gate;
 mod read;
 mod repo_map;
+mod sandbox_boundary;
 pub mod selfdev;
 pub(crate) mod serde_coerce;
 mod session_search;

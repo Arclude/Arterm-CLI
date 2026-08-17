@@ -58,6 +58,7 @@ impl Tool for WriteTool {
         let params: WriteInput = serde_json::from_value(input)?;
 
         let path = ctx.resolve_path(Path::new(&params.file_path));
+        super::sandbox_boundary::ensure_writable(&ctx, &path)?;
 
         // Create parent directories if needed
         if let Some(parent) = path.parent()

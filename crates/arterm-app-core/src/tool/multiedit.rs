@@ -79,6 +79,7 @@ impl Tool for MultiEditTool {
         let params: MultiEditInput = serde_json::from_value(input)?;
 
         let path = ctx.resolve_path(Path::new(&params.file_path));
+        super::sandbox_boundary::ensure_writable(&ctx, &path)?;
 
         if !path.exists() {
             return Err(anyhow::anyhow!("File not found: {}", params.file_path));

@@ -56,16 +56,21 @@ impl Tool for UndoTool {
     async fn execute(&self, input: Value, ctx: ToolContext) -> anyhow::Result<ToolOutput> {
         let params: UndoInput = serde_json::from_value(input)?;
 
-        let cp = match params.file_path {
-            Some(ref rel) => {
-                let path = ctx.resolve_path(std::path::Path::new(rel));
-                checkpoint::GLOBAL.pop_for_session(&ctx.session_id, &path)
-            }
+        // Restoring writes (or deletes) a file, so it answers to the sandbox
+        // boundary like any other write. Judged on the peeked path, before the
+        // pop, so a refusal does not consume the checkpoint.
+        let target = match params.file_path {
+            Some(ref rel) => Some(ctx.resolve_path(std::path::Path::new(rel))),
             None => checkpoint::GLOBAL
                 .latest()
                 .filter(|cp| cp.session_id == ctx.session_id)
-                .and_then(|cp| checkpoint::GLOBAL.pop_for_session(&cp.session_id, &cp.file_path)),
+                .map(|cp| cp.file_path),
         };
+        if let Some(ref path) = target {
+            crate::tool::sandbox_boundary::ensure_writable(&ctx, path)?;
+        }
+
+        let cp = target.and_then(|path| checkpoint::GLOBAL.pop_for_session(&ctx.session_id, &path));
 
         let Some(cp) = cp else {
             return Ok(ToolOutput::new(

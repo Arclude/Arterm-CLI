@@ -75,6 +75,10 @@ impl Tool for PatchTool {
         let mut touched: Vec<std::path::PathBuf> = Vec::new();
         for patch in patches {
             let resolved_path = ctx.resolve_path(Path::new(&patch.path));
+            if let Err(err) = super::sandbox_boundary::ensure_writable(&ctx, &resolved_path) {
+                results.push(format!("✗ {}: {}", patch.path, err));
+                continue;
+            }
             // Checkpoint the pre-patch state so `undo` can restore it.
             super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &resolved_path);
             let result = apply_patch_with_diff(&patch, &resolved_path).await;
