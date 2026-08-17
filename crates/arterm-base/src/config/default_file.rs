@@ -638,13 +638,6 @@ desktop_notifications = true
 # telegram_chat_id = ""    # Your user/chat ID
 # telegram_reply_enabled = false  # Reply to bot messages to send directives
 
-# Discord notifications via Bot API (https://discord.com/developers)
-# discord_enabled = false
-# discord_bot_token = ""     # From Discord Developer Portal (prefer ARTERM_DISCORD_BOT_TOKEN env var)
-# discord_channel_id = ""    # Channel ID to post in
-# discord_bot_user_id = ""   # Bot's user ID (for filtering own messages)
-# discord_reply_enabled = false  # Messages in channel become agent directives
-
 # Jade cloud relay (outbound-only long polling, disabled by default).
 # Prefer environment variables for secrets:
 # ARTERM_JADE_RELAY_API_BASE, ARTERM_JADE_RELAY_TOKEN, ARTERM_JADE_RELAY_TOKEN_ID,

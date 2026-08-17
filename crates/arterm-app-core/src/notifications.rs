@@ -275,7 +275,7 @@ impl NotificationDispatcher {
             });
         }
 
-        // Message channels (Telegram, Discord, etc.) — uses DETAILED body
+        // Message channels (Telegram, Jade relay) — uses DETAILED body
         let channel_text = format!("*{}*\n\n{}", title, detailed_body);
         self.channels.send_all(&channel_text);
     }

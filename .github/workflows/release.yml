@@ -755,17 +755,6 @@ jobs:
             echo "Release ${GITHUB_REF_NAME} is already public; leaving it public."
           fi
 
-      # Releases created with GITHUB_TOKEN do not trigger `release: published`,
-      # but workflow_dispatch is allowed. Queue the dedicated, per-tag
-      # announcement workflow without letting Discord block package publishing.
-      - name: Queue Discord release announcement
-        id: discord_announcement
-        continue-on-error: true
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run discord-release.yml --ref "$DEFAULT_BRANCH" -f "tag=${GITHUB_REF_NAME}"
-
       # Pushes over HTTPS with a token rather than an SSH deploy key: the
       # Arclude organization has `deploy_keys_enabled_for_repositories: false`,
       # and turning that on would relax a security setting across every
@@ -976,13 +965,3 @@ jobs:
               --reason completed
             gh issue edit "$issue" --remove-label "$label" || true
           done
-
-      - name: Report Discord announcement queue failure
-        if: always() && steps.discord_announcement.outcome == 'failure'
-        run: |
-          # A warning, not a failure. The release is already public by
-          # this point, so failing here marks a successful release red
-          # and tells nobody anything actionable -- and it fires by
-          # default, since the dispatch targets the default branch and
-          # the announcement workflow may not be there yet.
-          echo "::warning::The release was published, but its Discord announcement could not be queued."

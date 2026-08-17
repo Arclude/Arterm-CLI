@@ -1061,7 +1061,7 @@ impl Tool for SendChannelMessageTool {
                 },
                 "channel": {
                     "type": "string",
-                    "description": "Optional: specific channel to send to (e.g. 'telegram', 'discord'). Omit to send to all."
+                    "description": "Optional: specific channel to send to (e.g. 'telegram'). Omit to send to all."
                 }
             },
             "required": ["message"]
@@ -1105,7 +1105,7 @@ impl Tool for SendChannelMessageTool {
             let channels = registry.send_enabled();
             if channels.is_empty() {
                 return Ok(ToolOutput::new(
-                    "No messaging channels configured. Enable telegram or discord in config.",
+                    "No messaging channels configured. Enable telegram in config.",
                 ));
             }
             let mut results = Vec::new();

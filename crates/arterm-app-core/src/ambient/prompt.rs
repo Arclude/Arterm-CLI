@@ -514,7 +514,7 @@ pub fn build_ambient_system_prompt(
          and when you finish significant work. Keep messages short and useful — \
          the user should be able to glance at their messages and know what's happening \
          without opening arterm. You can optionally target a specific channel \
-         (e.g. telegram, discord) or omit channel to send to all.\n",
+         (e.g. telegram) or omit channel to send to all.\n",
     );
 
     prompt

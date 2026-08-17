@@ -122,8 +122,6 @@ impl Config {
 - Email replies: {}
 - Telegram: {}
 - Telegram replies: {}
-- Discord: {}
-- Discord replies: {}
 
 *Edit the config file or set environment variables to customize.*
 *Environment variables (e.g., `ARTERM_SCROLL_UP_KEY`, `ARTERM_GATEWAY_ENABLED`) override file settings.*"#,
@@ -343,19 +341,6 @@ impl Config {
                 "disabled"
             },
             if self.safety.telegram_reply_enabled {
-                "enabled"
-            } else {
-                "disabled"
-            },
-            if self.safety.discord_enabled {
-                self.safety
-                    .discord_channel_id
-                    .as_deref()
-                    .unwrap_or("enabled (no channel_id)")
-            } else {
-                "disabled"
-            },
-            if self.safety.discord_reply_enabled {
                 "enabled"
             } else {
                 "disabled"

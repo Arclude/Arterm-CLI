@@ -609,21 +609,6 @@ impl Config {
                 self.safety.telegram_reply_enabled = parsed;
             }
         }
-        if let Ok(v) = std::env::var("ARTERM_DISCORD_BOT_TOKEN") {
-            self.safety.discord_bot_token = Some(v);
-            self.safety.discord_enabled = true;
-        }
-        if let Ok(v) = std::env::var("ARTERM_DISCORD_CHANNEL_ID") {
-            self.safety.discord_channel_id = Some(v);
-        }
-        if let Ok(v) = std::env::var("ARTERM_DISCORD_BOT_USER_ID") {
-            self.safety.discord_bot_user_id = Some(v);
-        }
-        if let Ok(v) = std::env::var("ARTERM_DISCORD_REPLY_ENABLED") {
-            if let Some(parsed) = parse_env_bool(&v) {
-                self.safety.discord_reply_enabled = parsed;
-            }
-        }
         // Jade cloud relay channel
         if let Ok(v) = std::env::var("ARTERM_JADE_RELAY_API_BASE") {
             self.safety.jade_relay_api_base = Some(v);
