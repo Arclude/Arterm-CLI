@@ -125,6 +125,9 @@ impl Tool for MultiEditTool {
             }
         }
 
+        // Checkpoint the pre-edit state so `undo` can restore it.
+        super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &path);
+
         // Write the result
         tokio::fs::write(&path, &content).await?;
 

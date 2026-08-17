@@ -6,6 +6,7 @@ mod bash;
 mod batch;
 mod bg;
 mod browser;
+pub mod checkpoint;
 mod communicate;
 #[cfg(target_os = "macos")]
 mod computer;
@@ -33,6 +34,7 @@ pub(crate) mod session_search_index;
 mod side_panel;
 mod skill;
 mod todo;
+mod undo;
 mod webfetch;
 mod websearch;
 mod write;
@@ -262,6 +264,7 @@ impl Registry {
                 side_panel::SidePanelTool::new,
             );
             Self::insert_tool_timed(&mut m, &mut timings, "edit", edit::EditTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "undo", undo::UndoTool::new);
             Self::insert_tool_timed(
                 &mut m,
                 &mut timings,
@@ -1370,5 +1373,7 @@ mod mcp_allow_list_tests {
     }
 }
 
+#[cfg(test)]
+mod checkpoint_e2e_tests;
 #[cfg(test)]
 mod tests;

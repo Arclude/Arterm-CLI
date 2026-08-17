@@ -74,6 +74,8 @@ impl Tool for PatchTool {
 
         for patch in patches {
             let resolved_path = ctx.resolve_path(Path::new(&patch.path));
+            // Checkpoint the pre-patch state so `undo` can restore it.
+            super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &resolved_path);
             let result = apply_patch_with_diff(&patch, &resolved_path).await;
             match result {
                 Ok((msg, diff)) => {

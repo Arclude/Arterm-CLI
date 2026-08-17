@@ -109,6 +109,9 @@ impl Tool for EditTool {
         // Find line number where edit starts
         let start_line = find_line_number(&content, &params.old_string);
 
+        // Checkpoint the pre-edit state so `undo` can restore it.
+        super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &path);
+
         // Write back
         tokio::fs::write(&path, &new_content).await?;
 

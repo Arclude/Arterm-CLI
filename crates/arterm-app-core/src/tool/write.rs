@@ -74,6 +74,10 @@ impl Tool for WriteTool {
             None
         };
 
+        // Checkpoint the pre-write state (including "file was absent") so
+        // `undo` can restore or delete it.
+        super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &path);
+
         // Write the file
         tokio::fs::write(&path, &params.content).await?;
 
