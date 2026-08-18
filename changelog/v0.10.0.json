@@ -1,0 +1,26 @@
+{
+  "version": "0.10.0",
+  "date": "2026-08-14",
+  "title": "Arterm's own version line",
+  "highlights": [
+    "MCP servers end to end: add, list and remove them from the CLI, and see them live in an interactive /mcp panel",
+    "Telemetry, tool discovery and self-update are now off unless you turn them on, and commands arterm runs are no longer handed your API keys",
+    "Sign in to xAI with a Grok subscription, with no API key"
+  ],
+  "improvements": [
+    "There is finally a working way to install arterm: a documented install command, a Homebrew tap and npm packages that are actually ours",
+    "/config edits the display settings on screen, and can turn on the live sessions manager",
+    "Logging in with an OpenAI-compatible provider now counts as being logged in",
+    "Starting arterm no longer rebinds your desktop's global shortcuts unless you ask it to",
+    "The onboarding screens describe what telemetry actually sends",
+    "The startup screen says where you left off, and a startup notice no longer reads as part of the conversation",
+    "Internal reliability work: the test suite runs to completion again"
+  ],
+  "fixes": [
+    "A provider that recommends a replacement model after a 404 is now followed exactly, instead of falling back to an older one",
+    "Onboarding no longer returns to the login screen when the only configured provider is an OpenAI-compatible one",
+    "Centered mode stays centered when the window shrinks, and leaves nothing behind in the corner",
+    "A terminal's late colour reply is no longer treated as something you typed",
+    "The URLs, packages and --help text no longer point at repositories and names that are not ours"
+  ]
+}
