@@ -1,0 +1,25 @@
+{
+  "version": "0.10.7",
+  "date": "2026-08-18",
+  "highlights": [
+    "A read-only plan mode: toggle /planmode and arterm explores and proposes without changing a single file",
+    "Five new tools — lsp for definitions, references and hover; github for issues, pull requests and comments; diagnostics for compiler and linter errors; repo_map for a repo-wide tree with symbol outlines; and monitor to watch a command or websocket and feed matches back into the turn",
+    "Every file-changing tool can now be undone, and can commit what it touched on its own"
+  ],
+  "improvements": [
+    "Permission rules are now per tool and per argument, written as deny, ask or allow, with deny outranking ask and ask outranking allow",
+    "Named config profiles: keep one set of settings per kind of work and pick it with --profile or ARTERM_PROFILE",
+    "Subagents can be given personas of your own, written as markdown files in .arterm/agents",
+    "Agents spawned into a swarm can each work in their own git worktree instead of sharing one checkout",
+    "Lifecycle hooks can now POST to an HTTP endpoint, or gate a turn by asking a model",
+    "Sessions extract what they learned at the end of a turn, so it is there for the next one",
+    "Tool descriptions are trimmed to their prompt budget, leaving more of the context window for your work",
+    "Windows ARM64 builds ship with embeddings again, and a missing platform can no longer leave a release quietly"
+  ],
+  "fixes": [
+    "A permission rule set to ask now refuses when nobody can be asked, instead of quietly allowing the call",
+    "The session list from another machine is no longer cut short by the handshake, so remote machines stop looking idle when they are not",
+    "device forget now accepts the fingerprint that device list printed",
+    "Updated h2 for RUSTSEC-2026-0258, where a peer could send empty data frames without bound"
+  ]
+}
