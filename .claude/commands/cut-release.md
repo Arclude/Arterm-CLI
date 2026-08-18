@@ -73,11 +73,17 @@ not match the tag. Fix that before continuing.
 
 ## 5. Commit the release metadata
 
-Commit **only** `changelog/`. `quick-release.sh` rejects a release commit that touches
-anything else (it permits `Cargo.toml` and `Cargo.lock` alongside it, but this repo
-does not bump them per release — `Cargo.toml` has been pinned at `9.1.0` since
-`c3a905c`, and the shipped version comes from the tag via `ARTERM_BUILD_SEMVER`).
-Do not bump `Cargo.toml` unless the user explicitly asks.
+Commit `changelog/` **and the version bump**: set `version` in `Cargo.toml` to the
+number without the `v`, then refresh `Cargo.lock` (`cargo update -p arterm --offline`).
+`quick-release.sh` rejects a release commit that touches anything beyond those three.
+
+The bump is not cosmetic. A released binary takes its version from the tag via
+`ARTERM_BUILD_SEMVER`, but a build made from source reports `Cargo.toml`'s version,
+and `version_is_newer` compares both as `(major, minor, patch)` numbers. While this
+file said `9.1.0` and the tags ran on `0.10.x`, every source build concluded it was
+already ahead of every release and no self-update was ever offered — silently, and
+only for the people who build from source. `require_version_matches_tag` in
+`quick-release.sh` now refuses to tag when the two disagree.
 
 Push it to `main` and wait for CI to go green before tagging.
 

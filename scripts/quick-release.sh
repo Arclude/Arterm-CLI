@@ -171,6 +171,34 @@ elapsed() {
 #
 # This is the cheapest place to close it: one lookup, before the tag exists.
 # After the tag is pushed the release is already building.
+# Refuse to tag a version the binary will not report.
+#
+# `Cargo.toml`'s version is what a build made from source reports, and
+# `version_is_newer` parses both sides into (major, minor, patch) and compares
+# them as numbers. While Cargo.toml said 9.1.0 and the tags ran on 0.10.x, every
+# build from source compared 9.1.0 against 0.10.7 and concluded it was already
+# ahead -- so no source build could ever self-update, and nothing said why.
+# Released binaries were fine, because release.yml passes the tag through
+# ARTERM_BUILD_SEMVER, which is exactly what kept it hidden.
+require_version_matches_tag() {
+    local declared
+    declared="$(python3 - <<'PYEOF'
+import re, pathlib
+text = pathlib.Path("Cargo.toml").read_text()
+match = re.search(r'^version = "([^"]+)"', text, re.M)
+print(match.group(1) if match else "")
+PYEOF
+)"
+    if [[ "$declared" != "$VERSION_NUM" ]]; then
+        echo "Error: Cargo.toml says version = \"$declared\", but this release is $VERSION." >&2
+        echo "       A build from source reports Cargo.toml's version, so leaving them" >&2
+        echo "       apart is what stops source builds from ever self-updating." >&2
+        echo "       Set version = \"$VERSION_NUM\" in Cargo.toml, refresh Cargo.lock," >&2
+        echo "       and commit it with the changelog entry." >&2
+        exit 1
+    fi
+}
+
 require_green_ci() {
     local head_commit branch run status conclusion
     head_commit="$(git rev-parse HEAD)"
@@ -215,6 +243,7 @@ require_green_ci() {
 }
 
 tag_and_push() {
+    require_version_matches_tag
     require_green_ci
     echo "▸ Tagging $VERSION..."
     local head_commit remote_tags remote_commit local_commit

@@ -21,7 +21,7 @@ irm https://arterm.dev/install.ps1 | iex
 
 The installer resolves the latest release, verifies the download against the
 release's `SHA256SUMS`, and puts the binary in `~/.local/bin` (no sudo). Set
-`ARTERM_INSTALL_DIR` to put it somewhere else, or `ARTERM_VERSION=v9.1.0` to
+`ARTERM_INSTALL_DIR` to put it somewhere else, or `ARTERM_VERSION=v0.10.7` to
 pin a release. Uninstall with `scripts/uninstall.sh`.
 
 ## Building
