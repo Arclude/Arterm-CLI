@@ -40,6 +40,7 @@ fn make_ctx(stdin_tx: Option<mpsc::UnboundedSender<StdinInputRequest>>) -> ToolC
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     }
 }
 
@@ -53,6 +54,7 @@ fn make_agent_ctx(signal: arterm_agent_runtime::InterruptSignal) -> ToolContext 
         graceful_shutdown_signal: Some(signal),
         execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     }
 }
 
@@ -887,6 +889,7 @@ fn gate_ctx(working_dir: &str) -> ToolContext {
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     }
 }
 
@@ -1103,4 +1106,36 @@ fn the_config_default_is_a_mode_the_bash_tool_sandboxes() {
         mode.is_sandboxed(),
         "default sandbox mode {default:?} parses but sandboxes nothing"
     );
+}
+
+/// Foreground and background share this helper, so a test that only covers
+/// `execute_foreground` would miss a regression that unsandboxes background
+/// commands again. The helper is the contract.
+#[test]
+fn sandbox_config_from_context_carries_configured_roots() {
+    let extra = tempfile::tempdir().unwrap();
+    let ctx = ToolContext {
+        session_id: "test-session".into(),
+        message_id: "test-msg".into(),
+        tool_call_id: "test-call".into(),
+        working_dir: Some(std::path::PathBuf::from("/tmp")),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: crate::tool::ToolExecutionMode::Direct,
+        sandbox_mode: "workspace-write".into(),
+        sandbox_writable_roots: vec![extra.path().to_path_buf()],
+    };
+    let config = sandbox_config_from_context(&ctx).expect("workspace-write is sandboxed");
+    assert_eq!(config.mode, arterm_sandbox::SandboxMode::WorkspaceWrite);
+    assert!(
+        config.writable_roots.contains(&extra.path().to_path_buf()),
+        "configured extra root must reach SandboxConfig: {:?}",
+        config.writable_roots
+    );
+}
+
+#[test]
+fn sandbox_config_from_context_is_none_when_unsandboxed() {
+    let ctx = make_ctx(None);
+    assert!(sandbox_config_from_context(&ctx).is_none());
 }

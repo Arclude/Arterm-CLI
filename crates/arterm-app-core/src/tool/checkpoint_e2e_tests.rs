@@ -15,6 +15,7 @@ fn ctx(session: &str, dir: &PathBuf) -> ToolContext {
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
         sandbox_mode: "full-access".into(),
+        ..Default::default()
     }
 }
 

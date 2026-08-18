@@ -252,6 +252,33 @@ pub struct Agent {
 }
 
 impl Agent {
+    /// The context one tool call from this agent runs in.
+    ///
+    /// Every turn loop -- streaming, non-streaming, and the direct
+    /// `execute_tool` path -- comes through here, so a turn cannot execute a
+    /// tool against a context somebody assembled by hand and left unsandboxed.
+    /// The sandbox itself is filled by [`crate::tool::tool_context`]; what this
+    /// adds is the pair only a live agent can supply: the channel a tool asks
+    /// for stdin on, and the signal that tells it the session is shutting down.
+    fn tool_context(
+        &self,
+        message_id: String,
+        tool_call_id: String,
+        execution_mode: ToolExecutionMode,
+    ) -> ToolContext {
+        ToolContext {
+            stdin_request_tx: self.stdin_request_tx.clone(),
+            graceful_shutdown_signal: Some(self.graceful_shutdown.clone()),
+            ..crate::tool::tool_context(
+                self.session.id.clone(),
+                message_id,
+                tool_call_id,
+                self.working_dir().map(PathBuf::from),
+                execution_mode,
+            )
+        }
+    }
+
     fn should_track_client_cache(&self) -> bool {
         match std::env::var("ARTERM_TRACK_CLIENT_CACHE") {
             Ok(value) => {

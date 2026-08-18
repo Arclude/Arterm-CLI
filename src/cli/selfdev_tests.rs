@@ -192,6 +192,7 @@ async fn test_selfdev_session_and_registry() {
         graceful_shutdown_signal: None,
         execution_mode: tool::ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     };
     let result = registry
         .execute("selfdev", serde_json::json!({"action": "status"}), ctx)

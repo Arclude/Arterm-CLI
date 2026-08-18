@@ -12,6 +12,7 @@ fn make_ctx(working_dir: std::path::PathBuf) -> ToolContext {
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     }
 }
 

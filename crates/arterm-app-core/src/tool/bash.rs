@@ -1,3 +1,4 @@
+use super::sandbox_boundary::sandbox_config_from_context;
 use super::{StdinInputRequest, Tool, ToolContext, ToolOutput};
 use crate::background::TaskResult;
 use crate::bus::{
@@ -566,6 +567,11 @@ macro_rules! apply_env_hygiene {
     }};
 }
 
+/// An unsandboxed shell command, which only tests still want: every production
+/// caller passes a `SandboxConfig` through [`build_shell_command_with_sandbox`]
+/// now that the detached wrapper does too. Kept for the tests about quoting and
+/// env hygiene, which a sandbox would only give a kernel dependency.
+#[cfg(test)]
 fn build_shell_command(cmd_str: &str) -> TokioCommand {
     build_shell_command_with_sandbox(cmd_str, None, None)
 }
@@ -613,8 +619,9 @@ fn build_shell_command_with_sandbox(
             let wd = working_dir.map(|p| p.to_path_buf());
             unsafe {
                 cmd.pre_exec(move || {
-                    let apply_config =
-                        arterm_sandbox::SandboxConfig::new(sb_config.mode, wd.clone());
+                    // Rebuild-from-mode dropped writable_roots; only cwd is overridden.
+                    let mut apply_config = sb_config.clone();
+                    apply_config.working_dir = wd.clone();
                     match arterm_sandbox::apply(&apply_config) {
                         Ok(result) => {
                             if !result.applied {
@@ -889,18 +896,7 @@ impl BashTool {
 
         let has_stdin_channel = ctx.stdin_request_tx.is_some();
 
-        // Parse sandbox mode from context and build sandbox config if active.
-        let sb_config = if !ctx.sandbox_mode.is_empty() {
-            match ctx.sandbox_mode.parse::<arterm_sandbox::SandboxMode>() {
-                Ok(mode) if mode.is_sandboxed() => Some(arterm_sandbox::SandboxConfig::new(
-                    mode,
-                    ctx.working_dir.clone(),
-                )),
-                _ => None,
-            }
-        } else {
-            None
-        };
+        let sb_config = sandbox_config_from_context(ctx);
 
         let mut command = build_shell_command_with_sandbox(
             &params.command,
@@ -1278,6 +1274,7 @@ impl BashTool {
         let working_dir = ctx.working_dir.clone();
         let timeout_ms = params.timeout.map(|timeout| timeout.min(600000));
         let timeout_duration = timeout_ms.map(Duration::from_millis);
+        let sb_config = sandbox_config_from_context(&ctx);
 
         let wake = params.wake;
         let notify = params.notify || wake;
@@ -1289,7 +1286,8 @@ impl BashTool {
                 notify,
                 wake,
 				move |output_path| async move {
-					let mut cmd = build_shell_command(&command);
+					let mut cmd =
+						build_shell_command_with_sandbox(&command, working_dir.as_deref(), sb_config.as_ref());
 					#[cfg(unix)]
 					unsafe {
 						cmd.pre_exec(|| {

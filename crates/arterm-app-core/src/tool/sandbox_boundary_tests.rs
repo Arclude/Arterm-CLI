@@ -15,7 +15,7 @@
 
 use super::*;
 use crate::tool::Tool;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -225,7 +225,7 @@ fn read_only_refuses_even_inside_the_workspace() {
     let boundary = Boundary::new(
         SandboxMode::Readonly,
         ws.path().to_path_buf(),
-        writable_roots(SandboxMode::Readonly, Some(ws.path())),
+        writable_roots(SandboxMode::Readonly, Some(ws.path()), &[]),
     );
     assert!(!is_allowed(&boundary, &ws.path().join("inside.txt")));
     assert!(
@@ -289,7 +289,7 @@ fn workspace_write_is_enforced_through_the_context() {
 #[test]
 fn workspace_write_keeps_the_temp_directory_writable() {
     let ws = workspace();
-    let roots = writable_roots(SandboxMode::WorkspaceWrite, Some(ws.path()));
+    let roots = writable_roots(SandboxMode::WorkspaceWrite, Some(ws.path()), &[]);
     assert!(
         roots.contains(&std::env::temp_dir()),
         "parity with SandboxConfig::writable_paths: {roots:?}"
@@ -305,7 +305,7 @@ fn workspace_write_keeps_the_always_writable_devices_but_not_the_rest_of_dev() {
     let boundary = Boundary::new(
         SandboxMode::WorkspaceWrite,
         ws.path().to_path_buf(),
-        writable_roots(SandboxMode::WorkspaceWrite, Some(ws.path())),
+        writable_roots(SandboxMode::WorkspaceWrite, Some(ws.path()), &[]),
     );
     assert!(is_allowed(&boundary, Path::new("/dev/null")));
     assert!(
@@ -320,8 +320,149 @@ fn the_scratch_directory_is_writable_when_the_environment_names_one() {
     let scratch = tempfile::tempdir().unwrap();
     let _guard = EnvVarGuard::set("ARTERM_SCRATCH_DIR", scratch.path());
     let ws = workspace();
-    let roots = writable_roots(SandboxMode::WorkspaceWrite, Some(ws.path()));
+    let roots = writable_roots(SandboxMode::WorkspaceWrite, Some(ws.path()), &[]);
     assert!(roots.contains(&scratch.path().to_path_buf()), "{roots:?}");
+}
+
+// ─── the configured extra roots ───────────────────────────────────────────
+
+#[test]
+fn no_configured_roots_leaves_the_writable_set_exactly_as_it_was() {
+    // The whole feature has to be invisible to everyone who does not use it.
+    let ws = workspace();
+    assert_eq!(
+        writable_roots(SandboxMode::WorkspaceWrite, Some(ws.path()), &[]),
+        writable_roots(
+            SandboxMode::WorkspaceWrite,
+            Some(ws.path()),
+            &configured_roots_within(SandboxMode::WorkspaceWrite, ws.path(), &[]),
+        ),
+    );
+}
+
+#[test]
+fn a_configured_root_joins_the_writable_set() {
+    // `sandboxed_workspace` is what makes "outside" mean outside: the temp
+    // exception is redirected, so a directory it did not name is genuinely
+    // beyond every writable root.
+    let sb = sandboxed_workspace();
+    let granted = sb.outside.join("granted");
+    let sibling = sb.outside.join("granted-evil");
+    std::fs::create_dir_all(&granted).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+
+    let roots = configured_roots_within(
+        SandboxMode::WorkspaceWrite,
+        &sb.workspace,
+        &[granted.clone()],
+    );
+    assert_eq!(roots, vec![granted.clone()]);
+
+    let boundary = Boundary::new(
+        SandboxMode::WorkspaceWrite,
+        sb.workspace.clone(),
+        writable_roots(SandboxMode::WorkspaceWrite, Some(&sb.workspace), &roots),
+    );
+    assert!(is_allowed(&boundary, &granted.join("notes.md")));
+    assert!(
+        !is_allowed(&boundary, &sb.outside.join("notes.md")),
+        "granting a directory must not grant its parent"
+    );
+    assert!(
+        !is_allowed(&boundary, &sibling.join("notes.md")),
+        "granting a directory must not grant its name-prefix siblings"
+    );
+}
+
+#[test]
+fn a_relative_configured_root_resolves_against_the_workspace() {
+    // Not against the process cwd: the key lives in a global config file, so
+    // the directory arterm happened to start in means nothing to it.
+    let ws = workspace();
+    let sub = ws.path().join("build-cache");
+    std::fs::create_dir_all(&sub).unwrap();
+    assert_eq!(
+        configured_roots_within(
+            SandboxMode::WorkspaceWrite,
+            ws.path(),
+            &[PathBuf::from("build-cache")],
+        ),
+        vec![sub],
+    );
+}
+
+#[test]
+fn a_configured_root_that_does_not_exist_grants_nothing() {
+    // Landlock cannot name a directory it cannot open, so honouring a missing
+    // root in-process would make `write` and `bash` disagree.
+    let ws = workspace();
+    assert!(
+        configured_roots_within(
+            SandboxMode::WorkspaceWrite,
+            ws.path(),
+            &[ws.path().join("typo"), PathBuf::from("/no/such/place")],
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn a_configured_root_that_is_a_file_grants_nothing() {
+    let ws = workspace();
+    let file = ws.path().join("not-a-dir.txt");
+    std::fs::write(&file, "").unwrap();
+    assert!(configured_roots_within(SandboxMode::WorkspaceWrite, ws.path(), &[file]).is_empty());
+}
+
+#[test]
+fn configured_roots_are_ignored_outside_workspace_write() {
+    let ws = workspace();
+    let extra = ws.path().to_path_buf();
+    for mode in [SandboxMode::Readonly, SandboxMode::FullAccess] {
+        assert!(
+            configured_roots_within(mode, ws.path(), &[extra.clone()]).is_empty(),
+            "{mode} must not gain writable roots from the config key"
+        );
+    }
+}
+
+#[test]
+fn read_only_ignores_a_configured_root_through_the_context() {
+    let sb = sandboxed_workspace();
+    let granted = sb.outside.join("granted");
+    std::fs::create_dir_all(&granted).unwrap();
+    let ctx = ctx_with_roots(&sb.workspace, "read-only", vec![granted.clone()]);
+    assert!(configured_roots(&ctx).is_empty());
+    assert!(matches!(
+        check(&ctx, &granted.join("file.txt")),
+        GateOutcome::Blocked { .. }
+    ));
+}
+
+#[test]
+fn a_configured_root_is_enforced_through_the_context() {
+    let sb = sandboxed_workspace();
+    let granted = sb.outside.join("granted");
+    std::fs::create_dir_all(&granted).unwrap();
+    let target = granted.join("file.txt");
+
+    assert!(
+        matches!(
+            check(&ctx_for(&sb.workspace, "workspace-write"), &target),
+            GateOutcome::Blocked { .. }
+        ),
+        "without the config key this directory is outside the sandbox"
+    );
+
+    let widened = ctx_with_roots(&sb.workspace, "workspace-write", vec![granted]);
+    assert!(matches!(check(&widened, &target), GateOutcome::Allow));
+    assert!(
+        matches!(
+            check(&widened, &sb.outside.join("file.txt")),
+            GateOutcome::Blocked { .. }
+        ),
+        "the grant is the named directory, not everything around it"
+    );
 }
 
 // ─── the refusal a user reads ─────────────────────────────────────────────
@@ -359,6 +500,34 @@ fn the_refusal_shows_where_a_symlink_actually_pointed() {
 }
 
 #[test]
+fn the_refusal_offers_the_narrow_option_before_the_sledgehammer() {
+    let ws = workspace();
+    let boundary = workspace_only(ws.path());
+    let message = refusal_message(&boundary, Path::new("/etc/passwd"));
+    let narrow = message
+        .find("sandbox_writable_roots")
+        .expect("the refusal should name the one-directory option: {message}");
+    let sledgehammer = message
+        .find("full-access")
+        .expect("the refusal should still mention the escape hatch");
+    assert!(
+        narrow < sledgehammer,
+        "the narrow option should be offered first: {message}"
+    );
+}
+
+#[test]
+fn the_read_only_refusal_does_not_offer_a_key_that_does_nothing_there() {
+    let ws = workspace();
+    let boundary = Boundary::new(SandboxMode::Readonly, ws.path().to_path_buf(), Vec::new());
+    let message = refusal_message(&boundary, &ws.path().join("inside.txt"));
+    assert!(
+        !message.contains("sandbox_writable_roots"),
+        "read-only ignores the key, so suggesting it would send the reader in circles: {message}"
+    );
+}
+
+#[test]
 fn the_read_only_refusal_says_which_mode_refused() {
     let ws = workspace();
     let boundary = Boundary::new(SandboxMode::Readonly, ws.path().to_path_buf(), Vec::new());
@@ -369,6 +538,14 @@ fn the_read_only_refusal_says_which_mode_refused() {
 // ─── the tools themselves ─────────────────────────────────────────────────
 
 fn ctx_for(working_dir: &Path, sandbox_mode: &str) -> ToolContext {
+    ctx_with_roots(working_dir, sandbox_mode, Vec::new())
+}
+
+fn ctx_with_roots(
+    working_dir: &Path,
+    sandbox_mode: &str,
+    sandbox_writable_roots: Vec<PathBuf>,
+) -> ToolContext {
     ToolContext {
         session_id: "sandbox-boundary-tests".into(),
         message_id: "m".into(),
@@ -378,6 +555,7 @@ fn ctx_for(working_dir: &Path, sandbox_mode: &str) -> ToolContext {
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::Direct,
         sandbox_mode: sandbox_mode.to_string(),
+        sandbox_writable_roots,
     }
 }
 
@@ -634,6 +812,114 @@ async fn undo_is_refused_in_read_only_and_keeps_its_checkpoint() {
     );
 }
 
+/// The test this feature would most likely ship broken without: one directory,
+/// two enforcement paths, and they have to answer the same.
+///
+/// `write` is checked in-process by `sandbox_boundary`; `bash` is checked by
+/// the kernel, through a Landlock ruleset built in `bash.rs`. A wiring that
+/// reached only one of them would still look green in every other test here.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn bash_and_write_agree_about_a_configured_root() {
+    if arterm_sandbox::landlock_abi_version() == 0 {
+        eprintln!("skipping: no Landlock on this kernel, so bash runs unsandboxed");
+        return;
+    }
+    let sb = sandboxed_workspace();
+    let granted = sb.outside.join("granted");
+    std::fs::create_dir_all(&granted).unwrap();
+    let ctx = ctx_with_roots(&sb.workspace, "workspace-write", vec![granted.clone()]);
+
+    // In-process path.
+    let from_write = granted.join("from-write.txt");
+    crate::tool::write::WriteTool::new()
+        .execute(
+            serde_json::json!({"file_path": from_write.display().to_string(), "content": "ok"}),
+            ctx.clone(),
+        )
+        .await
+        .expect("the configured root must be writable through `write`");
+    assert_eq!(std::fs::read_to_string(&from_write).unwrap(), "ok");
+
+    // Subprocess path, same context, same directory.
+    let from_bash = granted.join("from-bash.txt");
+    let allowed = crate::tool::bash::BashTool::new()
+        .execute(
+            serde_json::json!({"command": format!("echo ok > {}", from_bash.display())}),
+            ctx.clone(),
+        )
+        .await
+        .expect("bash reports command failures in its output, not as an error");
+    assert!(
+        from_bash.exists(),
+        "the configured root must be writable through `bash` too; bash said: {}",
+        allowed.output
+    );
+
+    // And the grant stops at that directory in both paths.
+    let refused = sb.outside.join("refused.txt");
+    let err = crate::tool::write::WriteTool::new()
+        .execute(
+            serde_json::json!({"file_path": refused.display().to_string(), "content": "no"}),
+            ctx.clone(),
+        )
+        .await
+        .expect_err("one configured root must not widen its parent for `write`");
+    assert!(err.to_string().contains("sandbox_mode"), "{err}");
+
+    let denied = crate::tool::bash::BashTool::new()
+        .execute(
+            serde_json::json!({"command": format!("echo no > {}", refused.display())}),
+            ctx,
+        )
+        .await
+        .expect("bash reports command failures in its output, not as an error");
+    assert!(
+        !refused.exists(),
+        "one configured root must not widen its parent for `bash`: {}",
+        denied.output
+    );
+}
+
+#[tokio::test]
+async fn write_tool_refuses_a_configured_root_that_does_not_exist() {
+    // The directory is named in config but never created, so nothing is
+    // granted -- rather than granting a path Landlock could never honour.
+    let sb = sandboxed_workspace();
+    let missing = sb.outside.join("never-created");
+    let ctx = ctx_with_roots(&sb.workspace, "workspace-write", vec![missing.clone()]);
+
+    let err = crate::tool::write::WriteTool::new()
+        .execute(
+            serde_json::json!({"file_path": missing.join("f.txt").display().to_string(),
+                               "content": "no"}),
+            ctx,
+        )
+        .await
+        .expect_err("a configured root that does not exist grants nothing");
+    assert!(err.to_string().contains("sandbox_mode"), "{err}");
+    assert!(!missing.exists());
+}
+
+#[tokio::test]
+async fn read_only_refuses_a_write_in_a_configured_root() {
+    let sb = sandboxed_workspace();
+    let granted = sb.outside.join("granted");
+    std::fs::create_dir_all(&granted).unwrap();
+    let target = granted.join("nope.txt");
+    let ctx = ctx_with_roots(&sb.workspace, "read-only", vec![granted]);
+
+    let err = crate::tool::write::WriteTool::new()
+        .execute(
+            serde_json::json!({"file_path": target.display().to_string(), "content": "nope"}),
+            ctx,
+        )
+        .await
+        .expect_err("read-only writes nothing anywhere, configured roots included");
+    assert!(err.to_string().contains("read-only"), "{err}");
+    assert!(!target.exists());
+}
+
 #[tokio::test]
 async fn a_refused_write_records_no_undo_checkpoint() {
     let sb = sandboxed_workspace();
@@ -653,4 +939,70 @@ async fn a_refused_write_records_no_undo_checkpoint() {
         before,
         "a refused write must leave no trace, not a checkpoint for a file it never touched"
     );
+}
+
+// ─── the constructor ──────────────────────────────────────────────────────
+
+/// The one production path that fills a context's sandbox, driven end to end.
+///
+/// Every test above builds its own `ToolContext`, so all of them would still
+/// pass if `tool_context` handed production a context with no sandbox in it --
+/// which is the shape the original bug had: the tools learned the boundary
+/// while the contexts reaching them stayed empty, and nothing observed the
+/// difference. This one writes a real config file, reads it back through the
+/// real cache, and checks what an actual call site receives.
+#[test]
+fn a_production_context_takes_both_sandbox_fields_from_the_config_file() {
+    let _guard = crate::storage::lock_test_env();
+    let prev_home = std::env::var_os("ARTERM_HOME");
+    let prev_mode = std::env::var_os("ARTERM_SANDBOX_MODE");
+    let home = tempfile::TempDir::new().expect("temp home");
+    let configured_root = home.path().join("notes");
+    std::fs::create_dir_all(&configured_root).expect("create the configured root");
+
+    crate::env::set_var("ARTERM_HOME", home.path());
+    // The env override outranks the file, and would mask what the file says.
+    crate::env::remove_var("ARTERM_SANDBOX_MODE");
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            "sandbox_mode = \"workspace-write\"\nsandbox_writable_roots = [\"{}\"]\n",
+            configured_root.display()
+        ),
+    )
+    .expect("write config");
+    crate::config::Config::invalidate_cache();
+
+    let ctx = tool_context(
+        "session".to_string(),
+        "message".to_string(),
+        "call".to_string(),
+        Some(home.path().to_path_buf()),
+        crate::tool::ToolExecutionMode::Direct,
+    );
+
+    assert_eq!(
+        ctx.sandbox_mode, "workspace-write",
+        "a context built for a tool call must carry the configured mode"
+    );
+    assert_eq!(
+        ctx.sandbox_writable_roots,
+        vec![configured_root.clone()],
+        "the configured roots must ride along with the mode, not be left behind"
+    );
+
+    // ... and the boundary the tools consult agrees, so the two fields are not
+    // merely present but wired to the thing that refuses a write.
+    let boundary = Boundary::from_context(&ctx).expect("workspace-write is enforced");
+    assert!(is_allowed(&boundary, &configured_root.join("scratch.txt")));
+    assert!(!is_allowed(&boundary, Path::new("/etc/arterm-escape")));
+
+    match prev_home {
+        Some(value) => crate::env::set_var("ARTERM_HOME", value),
+        None => crate::env::remove_var("ARTERM_HOME"),
+    }
+    if let Some(value) = prev_mode {
+        crate::env::set_var("ARTERM_SANDBOX_MODE", value);
+    }
+    crate::config::Config::invalidate_cache();
 }

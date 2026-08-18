@@ -99,7 +99,7 @@ pub struct StdinInputRequest {
     pub response_tx: tokio::sync::oneshot::Sender<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ToolContext {
     pub session_id: String,
     pub message_id: String,
@@ -112,11 +112,18 @@ pub struct ToolContext {
     /// or "full-access" (default). When set to a sandboxed mode, the bash tool
     /// applies Landlock (Linux) or Seatbelt (macOS) restrictions.
     pub sandbox_mode: String,
+    /// Extra directories a sandboxed session may write, from the
+    /// `sandbox_writable_roots` config key. Empty in every mode but
+    /// `workspace-write`, and empty by default. Entries may be relative, in
+    /// which case they mean "relative to `working_dir`"; `~` is already
+    /// expanded by the time they get here.
+    pub sandbox_writable_roots: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ToolExecutionMode {
     AgentTurn,
+    #[default]
     Direct,
 }
 
@@ -131,6 +138,7 @@ impl ToolContext {
             graceful_shutdown_signal: self.graceful_shutdown_signal.clone(),
             execution_mode: self.execution_mode,
             sandbox_mode: self.sandbox_mode.clone(),
+            sandbox_writable_roots: self.sandbox_writable_roots.clone(),
         }
     }
 

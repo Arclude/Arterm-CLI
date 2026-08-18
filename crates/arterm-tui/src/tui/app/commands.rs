@@ -704,16 +704,13 @@ fn launch_manual_subagent(app: &mut App, spec: ManualSubagentSpec) {
             title: None,
         }));
 
-        let ctx = crate::tool::ToolContext {
-            session_id: session_id.clone(),
-            message_id: message_id.clone(),
-            tool_call_id: tool_call_for_task.id.clone(),
-            working_dir: working_dir.as_deref().map(PathBuf::from),
-            stdin_request_tx: None,
-            graceful_shutdown_signal: None,
-            execution_mode: crate::tool::ToolExecutionMode::Direct,
-            sandbox_mode: crate::config::config().sandbox_mode.clone(),
-        };
+        let ctx = crate::tool::tool_context(
+            session_id.clone(),
+            message_id.clone(),
+            tool_call_for_task.id.clone(),
+            working_dir.as_deref().map(PathBuf::from),
+            crate::tool::ToolExecutionMode::Direct,
+        );
 
         let start = Instant::now();
         let result = registry

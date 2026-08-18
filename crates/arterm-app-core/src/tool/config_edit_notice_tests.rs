@@ -165,6 +165,7 @@ async fn the_write_tool_reports_config_changes_end_to_end() {
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     };
 
     let output = crate::tool::write::WriteTool
@@ -216,6 +217,7 @@ async fn apply_patch_reports_config_changes() {
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     };
 
     let patch_text = format!(

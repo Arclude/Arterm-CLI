@@ -533,16 +533,7 @@ impl Agent {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| format!("debug-{}", d.as_millis()))
             .unwrap_or_else(|_| "debug".to_string());
-        let ctx = ToolContext {
-            session_id: self.session.id.clone(),
-            message_id: self.session.id.clone(),
-            tool_call_id: call_id,
-            working_dir: self.working_dir().map(PathBuf::from),
-            stdin_request_tx: self.stdin_request_tx.clone(),
-            graceful_shutdown_signal: Some(self.graceful_shutdown.clone()),
-            execution_mode: ToolExecutionMode::Direct,
-            sandbox_mode: crate::config::config().sandbox_mode.clone(),
-        };
+        let ctx = self.tool_context(self.session.id.clone(), call_id, ToolExecutionMode::Direct);
         self.registry.execute(name, input, ctx).await
     }
 

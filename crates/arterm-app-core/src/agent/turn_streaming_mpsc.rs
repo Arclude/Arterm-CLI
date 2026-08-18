@@ -827,16 +827,11 @@ impl Agent {
                         input,
                     } => {
                         // Execute native tool and send result back to SDK bridge
-                        let ctx = ToolContext {
-                            session_id: self.session.id.clone(),
-                            message_id: self.session.id.clone(),
-                            tool_call_id: request_id.clone(),
-                            working_dir: self.working_dir().map(PathBuf::from),
-                            stdin_request_tx: self.stdin_request_tx.clone(),
-                            graceful_shutdown_signal: Some(self.graceful_shutdown.clone()),
-                            execution_mode: ToolExecutionMode::AgentTurn,
-                            sandbox_mode: crate::config::config().sandbox_mode.clone(),
-                        };
+                        let ctx = self.tool_context(
+                            self.session.id.clone(),
+                            request_id.clone(),
+                            ToolExecutionMode::AgentTurn,
+                        );
                         crate::telemetry::record_tool_call();
                         let tool_result = self
                             .registry
@@ -1345,16 +1340,11 @@ impl Agent {
                     // Fall through to local execution for native tools with SDK errors
                 }
 
-                let ctx = ToolContext {
-                    session_id: self.session.id.clone(),
-                    message_id: message_id.clone(),
-                    tool_call_id: tc.id.clone(),
-                    working_dir: self.working_dir().map(PathBuf::from),
-                    stdin_request_tx: self.stdin_request_tx.clone(),
-                    graceful_shutdown_signal: Some(self.graceful_shutdown.clone()),
-                    execution_mode: ToolExecutionMode::AgentTurn,
-                    sandbox_mode: crate::config::config().sandbox_mode.clone(),
-                };
+                let ctx = self.tool_context(
+                    message_id.clone(),
+                    tc.id.clone(),
+                    ToolExecutionMode::AgentTurn,
+                );
 
                 if trace {
                     eprintln!("[trace] tool_exec_start name={} id={}", tc.name, tc.id);

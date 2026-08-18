@@ -23,9 +23,16 @@
 //! - the session working directory,
 //! - the system temp directory (`std::env::temp_dir()`),
 //! - `$ARTERM_SCRATCH_DIR` when set,
+//! - the directories named by the `sandbox_writable_roots` config key,
 //! - the character devices in `ALWAYS_WRITABLE_DEVICES` (`/dev/null` and
 //!   friends), which hold no user data and which the Landlock policy allows for
 //!   the same reason.
+//!
+//! The fourth entry is where the parity is easiest to lose, so it is not
+//! mirrored but *shared*: [`configured_roots`] is the one function that turns
+//! the config key into directories, and `bash.rs` calls it to build the
+//! `SandboxConfig` it hands to Landlock. The two paths cannot disagree about
+//! which extra directories exist, because only one of them decides.
 //!
 //! `read-only` is the one deliberate divergence: Landlock still allows the temp
 //! directory there, because bash needs a working `TMPDIR` for its own internal
@@ -36,10 +43,47 @@
 //!
 //! [`SandboxConfig::writable_paths`]: arterm_sandbox::SandboxConfig
 
-use super::ToolContext;
 use super::permission_gate::GateOutcome;
+use super::{ToolContext, ToolExecutionMode};
 use arterm_sandbox::SandboxMode;
 use std::path::{Component, Path, PathBuf};
+
+/// The context a tool call runs in, with its sandbox read from the live config.
+///
+/// Every production call site builds its context here rather than writing a
+/// `ToolContext { .. }` literal, because the sandbox is two fields --
+/// `sandbox_mode` and `sandbox_writable_roots` -- and naming one while
+/// forgetting the other yields a session that reports a sandbox it is not
+/// enforcing. Filling them is not a step a call site can skip, because filling
+/// them is not a step a call site performs.
+///
+/// The remaining fields are written out rather than left to
+/// `..Default::default()` on purpose: a new field on [`ToolContext`] should
+/// stop the build here and make its author say what a tool call means by it.
+/// `stdin_request_tx` and `graceful_shutdown_signal` are the two an agent turn
+/// then fills in for itself -- see `Agent::tool_context`.
+///
+/// The three ids are in the same order as the struct declares them.
+pub fn tool_context(
+    session_id: String,
+    message_id: String,
+    tool_call_id: String,
+    working_dir: Option<PathBuf>,
+    execution_mode: ToolExecutionMode,
+) -> ToolContext {
+    let config = crate::config::config();
+    ToolContext {
+        session_id,
+        message_id,
+        tool_call_id,
+        working_dir,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode,
+        sandbox_mode: config.sandbox_mode.clone(),
+        sandbox_writable_roots: config.sandbox_writable_root_paths(),
+    }
+}
 
 /// How many symlinks one path may traverse before the boundary gives up and
 /// refuses. Matches the kernel's own `ELOOP` ceiling closely enough: past this
@@ -106,15 +150,9 @@ impl Boundary {
         if !mode.is_sandboxed() {
             return None;
         }
-        // A session that recorded no working directory is judged against the
-        // process cwd, which is where `ToolContext::resolve_path` would have
-        // put its relative writes anyway -- so the workspace it is confined to
-        // is the one it was already writing into.
-        let base = match ctx.working_dir.clone() {
-            Some(dir) => dir,
-            None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        };
-        let roots = writable_roots(mode, Some(&base));
+        let base = base_dir(ctx);
+        let extra = configured_roots_within(mode, &base, &ctx.sandbox_writable_roots);
+        let roots = writable_roots(mode, Some(&base), &extra);
         Some(Self::new(mode, base, roots))
     }
 
@@ -173,22 +211,31 @@ impl Boundary {
         if resolved != requested {
             message.push_str(&format!(" (which resolves to {})", resolved.display()));
         }
+        // The way out differs by mode, and naming the wrong one wastes the
+        // reader's time: `sandbox_writable_roots` widens `workspace-write` by
+        // one directory but does nothing at all in read-only, where the only
+        // answer is a different mode.
         match self.mode {
             SandboxMode::Readonly => {
-                message.push_str(". read-only mode modifies no files at all");
+                message.push_str(
+                    ". read-only mode modifies no files at all. This is the sandbox refusing \
+                     the write, not a missing file or a failed write -- nothing was changed on \
+                     disk. A session that needs to write files needs a different sandbox_mode \
+                     in config.toml.",
+                );
             }
             _ => {
                 message.push_str(&format!(
-                    ". It is outside every writable root: {}",
+                    ". It is outside every writable root: {}. This is the sandbox refusing the \
+                     write, not a missing file or a failed write -- nothing was changed on disk. \
+                     Write inside the workspace instead, or add the directory to \
+                     sandbox_writable_roots in config.toml to make just that one writable \
+                     (it must already exist) -- sandbox_mode = \"full-access\" turns the whole \
+                     sandbox off and is rarely what is wanted.",
                     self.roots_summary()
                 ));
             }
         }
-        message.push_str(
-            ". This is the sandbox refusing the write, not a missing file or a failed \
-             write -- nothing was changed on disk. Write inside the workspace instead, \
-             or set sandbox_mode = \"full-access\" in config.toml.",
-        );
         message
     }
 
@@ -206,10 +253,99 @@ impl Boundary {
     }
 }
 
+/// The kernel-level sandbox this context asks for, or `None` for none.
+///
+/// Lives here rather than in `bash.rs` because this module owns what the
+/// policy *is*; `bash.rs` only hands the result to `pre_exec`. Keeping both
+/// halves in one file is also what makes it obvious that they read the same
+/// [`configured_roots`].
+///
+/// A mode that does not parse yields `None`, i.e. no sandbox. That failure is
+/// open on purpose and [`Boundary::from_context`] does the same with the same
+/// string: a typo that silently disabled bash's sandbox while still stopping
+/// `write` would be a worse surprise than one that disables both.
+pub(super) fn sandbox_config_from_context(
+    ctx: &ToolContext,
+) -> Option<arterm_sandbox::SandboxConfig> {
+    let Ok(mode) = ctx.sandbox_mode.parse::<SandboxMode>() else {
+        return None;
+    };
+    if !mode.is_sandboxed() {
+        return None;
+    }
+    Some(
+        arterm_sandbox::SandboxConfig::new(mode, ctx.working_dir.clone())
+            .with_writable_roots(configured_roots(ctx)),
+    )
+}
+
+/// The directory a relative path is resolved against: the session working
+/// directory, or the process cwd when the session has none.
+///
+/// A session that recorded no working directory is judged against the process
+/// cwd, which is where `ToolContext::resolve_path` would have put its relative
+/// writes anyway -- so the workspace it is confined to is the one it was
+/// already writing into.
+fn base_dir(ctx: &ToolContext) -> PathBuf {
+    match ctx.working_dir.clone() {
+        Some(dir) => dir,
+        None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    }
+}
+
+/// The extra writable directories this session's `sandbox_writable_roots` asks
+/// for, ready to hand to a sandbox runtime.
+///
+/// **This is the shared half.** `bash.rs` calls it to build the `SandboxConfig`
+/// that becomes Landlock/Seatbelt rules, and [`Boundary::from_context`] calls
+/// it for the in-process check. One implementation, so a directory is writable
+/// through `bash` exactly when it is writable through `write`.
+pub(super) fn configured_roots(ctx: &ToolContext) -> Vec<PathBuf> {
+    let Ok(mode) = ctx.sandbox_mode.trim().parse::<SandboxMode>() else {
+        return Vec::new();
+    };
+    configured_roots_within(mode, &base_dir(ctx), &ctx.sandbox_writable_roots)
+}
+
+/// Two rules decide what a configured entry becomes, and both exist to keep
+/// the two enforcement paths honest:
+///
+/// - **Only `workspace-write` grants anything.** `read-only` writes no files
+///   anywhere, so widening it is meaningless; and `full-access` has no
+///   boundary to widen. Returning nothing here is what keeps the key out of
+///   read-only in *both* paths rather than in one of them.
+/// - **A directory that does not exist grants nothing.** Landlock can only
+///   name a directory it can open, so a missing root is silently absent from
+///   the kernel's ruleset no matter what we pass it. Honouring it in-process
+///   would mean `write ~/typo/x` succeeds while `bash` is refused -- the exact
+///   disagreement this module exists to prevent. A typo therefore grants
+///   nothing, which is also the safer way to be wrong; the fix is to create
+///   the directory.
+fn configured_roots_within(mode: SandboxMode, base: &Path, configured: &[PathBuf]) -> Vec<PathBuf> {
+    if mode != SandboxMode::WorkspaceWrite {
+        return Vec::new();
+    }
+    configured
+        .iter()
+        .map(|root| {
+            if root.is_absolute() {
+                root.clone()
+            } else {
+                base.join(root)
+            }
+        })
+        .filter(|root| root.is_dir())
+        .collect()
+}
+
 /// The directories a write may land in, mirroring `writable_paths` in
 /// `arterm-sandbox`. See the module comment for why read-only keeps none of
 /// them.
-fn writable_roots(mode: SandboxMode, working_dir: Option<&Path>) -> Vec<PathBuf> {
+fn writable_roots(
+    mode: SandboxMode,
+    working_dir: Option<&Path>,
+    extra: &[PathBuf],
+) -> Vec<PathBuf> {
     if mode == SandboxMode::Readonly {
         return Vec::new();
     }
@@ -224,6 +360,7 @@ fn writable_roots(mode: SandboxMode, working_dir: Option<&Path>) -> Vec<PathBuf>
     {
         roots.push(scratch);
     }
+    roots.extend(extra.iter().cloned());
     roots.extend(ALWAYS_WRITABLE_DEVICES.iter().map(PathBuf::from));
     roots
 }

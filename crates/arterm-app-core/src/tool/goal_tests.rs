@@ -20,6 +20,7 @@ async fn initiative_tool_create_and_resume_round_trip() {
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     };
 
     let mut bus_rx = Bus::global().subscribe();
@@ -102,6 +103,7 @@ async fn initiative_tool_list_does_not_open_side_panel_by_default() {
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     };
 
     let list = tool
@@ -155,6 +157,7 @@ async fn initiative_tool_update_refreshes_open_overview_without_stealing_focus()
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     };
 
     // The user opens the overview explicitly (e.g. via /goals); the tool

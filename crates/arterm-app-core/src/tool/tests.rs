@@ -6,6 +6,22 @@ use crate::provider::{EventStream, Provider};
 use async_trait::async_trait;
 use serde_json::Value;
 
+/// The context these tests hand to `Registry::execute`.
+///
+/// Only the session and the directory ever differ; the rest is the shape of a
+/// direct, non-agent tool call. The sandbox is left at its default, which is
+/// off -- these tests are about tool resolution, policy and output handling,
+/// and the boundary has its own tests in `sandbox_boundary_tests`.
+fn test_ctx(session_id: &str, working_dir: Option<std::path::PathBuf>) -> ToolContext {
+    ToolContext {
+        session_id: session_id.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir,
+        ..Default::default()
+    }
+}
+
 struct MockProvider;
 
 #[async_trait]
@@ -212,16 +228,7 @@ fn test_resolve_tool_name_oauth_aliases() {
 async fn test_batch_resolves_function_namespaced_tools() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
-    let ctx = ToolContext {
-        session_id: "test-batch-function-namespace".to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(std::env::temp_dir()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx("test-batch-function-namespace", Some(std::env::temp_dir()));
 
     let result = registry
         .execute(
@@ -248,16 +255,10 @@ async fn test_batch_resolves_function_namespaced_tools() {
 async fn test_batch_rejects_function_namespaced_batch_recursion() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
-    let ctx = ToolContext {
-        session_id: "test-batch-function-namespace-recursion".to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(std::env::temp_dir()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx(
+        "test-batch-function-namespace-recursion",
+        Some(std::env::temp_dir()),
+    );
 
     let error = registry
         .execute(
@@ -279,16 +280,7 @@ async fn test_batch_resolves_oauth_names() {
     let registry = Registry::new(provider).await;
     let temp_dir = std::env::temp_dir();
 
-    let ctx = ToolContext {
-        session_id: "test".to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(temp_dir),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx("test", Some(temp_dir));
 
     let result = registry
         .execute("shell_exec", serde_json::json!({"command": "true"}), ctx)
@@ -304,16 +296,7 @@ async fn registry_execute_enforces_session_tool_policy_after_alias_resolution() 
     let session_id = "test-policy-deny";
     set_session_tool_policy(session_id, None, HashSet::from(["bash".to_string()]));
 
-    let ctx = ToolContext {
-        session_id: session_id.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(temp_dir.clone()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx(session_id, Some(temp_dir.clone()));
 
     let result = registry
         .execute("shell_exec", serde_json::json!({"command": "true"}), ctx)
@@ -355,16 +338,7 @@ async fn registry_execute_pre_tool_hook_blocks_and_allows() {
     // re-checks env every 500ms; force a reload so the hook is visible now.
     crate::config::invalidate_config_cache();
 
-    let ctx = || ToolContext {
-        session_id: "test-pre-tool-hook".to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(std::env::temp_dir()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = || test_ctx("test-pre-tool-hook", Some(std::env::temp_dir()));
 
     let blocked = registry
         .execute(
@@ -962,16 +936,7 @@ async fn unknown_tool_error_lists_available_tools_and_suggestions() {
     let registry = Registry::new(provider).await;
     registry.register_ambient_tools().await;
 
-    let ctx = ToolContext {
-        session_id: "test-unknown-tool".to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: None,
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx("test-unknown-tool", None);
     let err = registry
         .execute("ToolSearch", serde_json::json!({}), ctx)
         .await
@@ -1194,16 +1159,7 @@ async fn execute_big_output(input: Value) -> String {
         )
         .await;
 
-    let ctx = ToolContext {
-        session_id: "test-context-guard-execute".to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(std::env::temp_dir()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx("test-context-guard-execute", Some(std::env::temp_dir()));
 
     registry
         .execute("big_output", input, ctx)
@@ -1347,15 +1303,11 @@ async fn test_batch_guards_both_its_subcalls_and_its_own_aggregate() {
         )
         .await;
 
-    let ctx = |name: &str| ToolContext {
-        session_id: format!("test-batch-context-guard-{name}"),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(std::env::temp_dir()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
+    let ctx = |name: &str| {
+        test_ctx(
+            &format!("test-batch-context-guard-{name}"),
+            Some(std::env::temp_dir()),
+        )
     };
     let calls = serde_json::json!([
         { "tool": "big_output", "intent": "one" },
@@ -1642,16 +1594,7 @@ async fn plan_mode_blocks_edit_tool() {
     let session = "test-planmode-blocks-edit";
     super::set_plan_mode(session, true);
 
-    let ctx = ToolContext {
-        session_id: session.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: None,
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx(session, None);
 
     let result = registry
         .execute(
@@ -1677,16 +1620,7 @@ async fn plan_mode_blocks_bash_tool() {
     let session = "test-planmode-blocks-bash";
     super::set_plan_mode(session, true);
 
-    let ctx = ToolContext {
-        session_id: session.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: None,
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx(session, None);
 
     let result = registry
         .execute("bash", serde_json::json!({"command": "echo hi"}), ctx)
@@ -1708,16 +1642,7 @@ async fn plan_mode_blocks_monitor_tool() {
     let session = "test-planmode-blocks-monitor";
     super::set_plan_mode(session, true);
 
-    let ctx = ToolContext {
-        session_id: session.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: None,
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx(session, None);
 
     let result = registry
         .execute(
@@ -1743,16 +1668,7 @@ async fn plan_mode_allows_read_only_tools() {
     let session = "test-planmode-allows-read";
     super::set_plan_mode(session, true);
 
-    let ctx = ToolContext {
-        session_id: session.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: None,
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx(session, None);
 
     let result = registry.execute("ls", serde_json::json!({}), ctx).await;
     if let Err(ref e) = result {
@@ -1771,16 +1687,7 @@ async fn plan_mode_off_allows_all_tools() {
     let session = "test-planmode-off";
     super::set_plan_mode(session, false);
 
-    let ctx = ToolContext {
-        session_id: session.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: None,
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-        sandbox_mode: "full-access".to_string(),
-    };
+    let ctx = test_ctx(session, None);
 
     let result = registry
         .execute(

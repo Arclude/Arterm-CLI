@@ -12,6 +12,7 @@ fn test_ctx(root: &Path) -> ToolContext {
         graceful_shutdown_signal: None,
         execution_mode: super::super::ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     }
 }
 

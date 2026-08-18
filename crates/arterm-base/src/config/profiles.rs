@@ -29,6 +29,11 @@ pub struct ProfileConfig {
     pub anthropic_reasoning_effort: Option<String>,
     /// Sandbox mode: "full-access" | "workspace-write" | "read-only".
     pub sandbox_mode: Option<String>,
+    /// Extra writable directories for `workspace-write`. Replaces the base
+    /// list when set, including with an empty list: a profile that wants a
+    /// narrower sandbox has to be able to take roots away, not only add them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_writable_roots: Option<Vec<String>>,
     /// Commit touched files after file-mutating tools.
     pub git_auto_commit: Option<bool>,
     /// Built-in tool exposure profile: "full" | "minimal" | "none".
@@ -106,6 +111,9 @@ pub fn apply_profile(config: &mut Config, name: &str) -> anyhow::Result<()> {
     if let Some(mode) = &profile.sandbox_mode {
         config.sandbox_mode = mode.clone();
     }
+    if let Some(roots) = &profile.sandbox_writable_roots {
+        config.sandbox_writable_roots = roots.clone();
+    }
     if let Some(auto) = profile.git_auto_commit {
         config.git_auto_commit = auto;
     }
@@ -166,16 +174,19 @@ mod tests {
         let mut cfg = profile(ProfileConfig {
             default_model: Some("m2".into()),
             sandbox_mode: Some("workspace-write".into()),
+            sandbox_writable_roots: Some(vec!["~/notes".into()]),
             git_auto_commit: Some(true),
             ..Default::default()
         });
         cfg.provider.default_model = Some("m1".into());
         cfg.sandbox_mode = "full-access".into();
+        cfg.sandbox_writable_roots = vec!["/opt/shared".into()];
         cfg.provider.openai_reasoning_effort = Some("high".into());
 
         apply_profile(&mut cfg, "test").unwrap();
         assert_eq!(cfg.provider.default_model.as_deref(), Some("m2"));
         assert_eq!(cfg.sandbox_mode, "workspace-write");
+        assert_eq!(cfg.sandbox_writable_roots, vec!["~/notes".to_string()]);
         assert!(cfg.git_auto_commit);
         // Untouched fields keep base values.
         assert_eq!(
@@ -183,6 +194,30 @@ mod tests {
             Some("high")
         );
         assert_eq!(cfg.provider.default_provider, None);
+    }
+
+    #[test]
+    fn an_empty_profile_roots_list_clears_the_base() {
+        // Replace, do not merge: a profile that wants a narrower sandbox has
+        // to be able to take a granted directory away.
+        let mut cfg = profile(ProfileConfig {
+            sandbox_writable_roots: Some(vec![]),
+            ..Default::default()
+        });
+        cfg.sandbox_writable_roots = vec!["~/notes".into()];
+        apply_profile(&mut cfg, "test").unwrap();
+        assert!(cfg.sandbox_writable_roots.is_empty());
+    }
+
+    #[test]
+    fn omitted_profile_roots_leave_the_base_alone() {
+        let mut cfg = profile(ProfileConfig {
+            sandbox_mode: Some("read-only".into()),
+            ..Default::default()
+        });
+        cfg.sandbox_writable_roots = vec!["~/notes".into()];
+        apply_profile(&mut cfg, "test").unwrap();
+        assert_eq!(cfg.sandbox_writable_roots, vec!["~/notes".to_string()]);
     }
 
     #[test]

@@ -523,6 +523,24 @@ pub struct Config {
     #[serde(default = "default_sandbox_mode")]
     pub sandbox_mode: String,
 
+    /// Directories a `workspace-write` session may write on top of the working
+    /// directory, the temp dir and `$ARTERM_SCRATCH_DIR`.
+    ///
+    /// Empty by default, and empty means exactly "grant nothing" -- so unlike
+    /// [`Self::sandbox_mode`] there is nothing for `apply_defaults` to resolve:
+    /// an absent key and an empty list are the same state, which is today's
+    /// behaviour. It exists because the only way to make one more directory
+    /// writable used to be `sandbox_mode = "full-access"`, which turns the
+    /// whole sandbox off.
+    ///
+    /// Entries are kept as written rather than as resolved paths: config saves
+    /// serialize the whole struct, so storing `/home/you/notes` where the user
+    /// typed `~/notes` would freeze one machine's home directory into a file
+    /// that syncs to another. See [`Self::sandbox_writable_root_paths`] for how
+    /// a value is read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sandbox_writable_roots: Vec<String>,
+
     /// Commit touched files after each successful file-mutating tool run
     /// (edit/write/multiedit/patch/apply_patch), with an `arterm:` commit
     /// prefix. Only the tool's own files are staged and only when they were
@@ -784,6 +802,10 @@ mod tests;
 #[path = "config_color_tests.rs"]
 mod color_tests;
 
+#[cfg(test)]
+#[path = "config/sandbox_roots_tests.rs"]
+mod sandbox_roots_tests;
+
 /// Whether integration discovery settings carry no information beyond the shipped
 /// default, so `[sponsors]` can be left out of written config files.
 ///
@@ -818,7 +840,51 @@ pub fn default_sandbox_mode() -> String {
     "workspace-write".to_string()
 }
 
+/// Turn one `sandbox_writable_roots` entry into the path it names, or `None`
+/// when it names nothing.
+///
+/// Two spellings are resolved here because a person writing a directory into a
+/// config file writes them without thinking:
+///
+/// - `~` and `~/notes` mean the home directory, the way every shell reads
+///   them. Taken literally they would name a directory called `~` next to the
+///   working directory and grant nothing, which is a silent failure -- and the
+///   sandbox is the wrong place to fail silently.
+/// - a bare `~user` is *not* expanded. Resolving another account's home needs
+///   the password database, and a wrong guess would hand out a real directory
+///   rather than none; `~user` therefore stays literal and is refused by the
+///   existence check downstream.
+///
+/// A relative entry is left relative on purpose: it is resolved against the
+/// **session working directory** where it is used, not against whatever
+/// directory the process happened to start in. `sandbox_writable_roots` lives
+/// in a global config file, so the process cwd is meaningless to it while the
+/// workspace is the thing the user was thinking about.
+pub fn expand_sandbox_writable_root(raw: &str) -> Option<PathBuf> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw == "~" {
+        return dirs::home_dir();
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return dirs::home_dir().map(|home| home.join(rest));
+    }
+    Some(PathBuf::from(raw))
+}
+
 impl Config {
+    /// The configured extra writable roots, with `~` expanded and empty
+    /// entries dropped. Relative entries stay relative; see
+    /// [`expand_sandbox_writable_root`].
+    pub fn sandbox_writable_root_paths(&self) -> Vec<PathBuf> {
+        self.sandbox_writable_roots
+            .iter()
+            .filter_map(|raw| expand_sandbox_writable_root(raw))
+            .collect()
+    }
+
     /// Resolve fields whose "unset" value is not their disabled value.
     ///
     /// Called after the file, the profile and the environment have all had

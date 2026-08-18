@@ -640,6 +640,20 @@ prevent_sleep_while_streaming = true
 # Set ARTERM_SANDBOX_MODE env var to override at runtime.
 sandbox_mode = "workspace-write"
 
+# Extra directories "workspace-write" may write, on top of the working
+# directory, temp dirs and $ARTERM_SCRATCH_DIR. Empty by default: this grants
+# nothing unless you ask for it. It exists so that needing one more directory
+# does not mean switching the whole sandbox off with "full-access".
+#
+#   - "~/notes" expands to your home directory; "~other" does not expand.
+#   - A relative entry is resolved against the session working directory.
+#   - A directory that does not exist is ignored (create it first) -- Landlock
+#     can only grant a directory that exists, and the in-process file tools
+#     follow the same rule so both refuse the same paths.
+#   - "read-only" ignores this list entirely: it writes nothing anywhere.
+#
+# sandbox_writable_roots = ["~/.cache/arterm-builds", "/opt/shared-artifacts"]
+
 # Granular tool permission rules, evaluated for every tool call.
 # Each rule: "<verb> Tool(<specifier>)" with verb one of deny / ask / allow.
 #   - deny  blocks the call outright,

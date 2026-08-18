@@ -344,6 +344,7 @@ mod tests {
             graceful_shutdown_signal: None,
             execution_mode: crate::tool::ToolExecutionMode::Direct,
             sandbox_mode: "full-access".to_string(),
+            ..Default::default()
         };
 
         (ctx, base, previous_home)

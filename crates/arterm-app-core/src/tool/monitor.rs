@@ -223,6 +223,7 @@ mod tests {
             graceful_shutdown_signal: None,
             execution_mode: crate::tool::ToolExecutionMode::Direct,
             sandbox_mode: "full-access".into(),
+            ..Default::default()
         }
     }
 

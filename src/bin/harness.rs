@@ -85,6 +85,7 @@ async fn main() -> Result<()> {
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     };
 
     let mut cases = Vec::new();

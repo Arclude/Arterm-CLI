@@ -47,6 +47,7 @@ async fn side_panel_tool_writes_page() {
                 graceful_shutdown_signal: None,
                 execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
                 sandbox_mode: "full-access".to_string(),
+                ..Default::default()
             },
         )
         .await
@@ -79,6 +80,7 @@ async fn side_panel_tool_loads_file_with_derived_page_id() {
                 graceful_shutdown_signal: None,
                 execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
                 sandbox_mode: "full-access".to_string(),
+                ..Default::default()
             },
         )
         .await

@@ -342,6 +342,14 @@ pub fn display_settings() -> &'static [Setting] {
         // to turn it off that is not "find config.toml and learn a key". Every
         // other excluded setting has its own command (`/login`, `/model`); this
         // one had nothing.
+        //
+        // Its companion key `sandbox_writable_roots` is deliberately NOT here.
+        // A `Setting` is a closed list of values the overlay cycles through
+        // (`values`, `current_index`), and a list of arbitrary filesystem paths
+        // is neither closed nor cyclable -- offering it here would mean a row
+        // that cannot be edited, which is worse than no row. It stays a
+        // config.toml key, and the sandbox's own refusal message names it at
+        // the moment someone needs it.
         Setting {
             key: "sandbox_mode",
             help: "Restrict what agent-run bash commands may write and connect to.",

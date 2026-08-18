@@ -19,6 +19,7 @@ fn ctx() -> ToolContext {
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
         sandbox_mode: "full-access".to_string(),
+        ..Default::default()
     }
 }
 
