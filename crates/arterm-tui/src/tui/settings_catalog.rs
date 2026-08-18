@@ -343,6 +343,12 @@ pub fn display_settings() -> &'static [Setting] {
         // other excluded setting has its own command (`/login`, `/model`); this
         // one had nothing.
         //
+        // Changing it here writes config.toml like any other row, but the
+        // sandbox is resolved once per process, so this row is the rare one
+        // that does not take effect until restart. The alternative is a
+        // running session able to widen its own sandbox, which is the thing
+        // the sandbox is for -- so the help text says so instead.
+        //
         // Its companion key `sandbox_writable_roots` is deliberately NOT here.
         // A `Setting` is a closed list of values the overlay cycles through
         // (`values`, `current_index`), and a list of arbitrary filesystem paths
@@ -352,7 +358,8 @@ pub fn display_settings() -> &'static [Setting] {
         // the moment someone needs it.
         Setting {
             key: "sandbox_mode",
-            help: "Restrict what agent-run bash commands may write and connect to.",
+            help: "Restrict what agent-run bash commands may write and connect to. \
+                   Takes effect on restart.",
             values: &["workspace-write", "read-only", "full-access"],
             read: |c| {
                 let mode = c.sandbox_mode.trim();

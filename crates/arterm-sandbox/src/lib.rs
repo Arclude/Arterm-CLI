@@ -46,18 +46,35 @@ pub fn apply(config: &SandboxConfig) -> Result<SandboxResult, String> {
         linux::apply_landlock(config)
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        macos::generate_seatbelt_profile(config)
-            .map(|profile| SandboxResult::applied(format!("seatbelt profile: {profile}")))
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(not(target_os = "linux"))]
     {
         let _ = config;
-        Ok(SandboxResult::skipped(
-            "sandbox not supported on this platform",
-        ))
+        Ok(SandboxResult::skipped(no_sandbox_here()))
+    }
+}
+
+/// Why this platform restricts nothing from a `pre_exec` hook.
+///
+/// macOS is called out separately because it is the one that used to claim
+/// otherwise. This branch built a Seatbelt profile string here and reported
+/// `applied(...)` for having built it -- but `apply` runs after `fork`, and
+/// Seatbelt is applied by wrapping the command with `sandbox-exec` when it is
+/// *spawned*, which no production code does. There is no "restrict the calling
+/// process" syscall to reach for the way `landlock_restrict_self` is reached
+/// for on Linux. So every sandboxed macOS session ran unrestricted while
+/// reporting a sandbox, in the one field callers read to decide whether to
+/// warn -- there was not even a line of output to notice it by.
+/// `macos::generate_seatbelt_profile` stays as the policy a future wrapper
+/// needs; what it does not stay as is an answer to this question.
+#[cfg(not(target_os = "linux"))]
+fn no_sandbox_here() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Seatbelt applies by wrapping the command with sandbox-exec, which this process does not do yet"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "sandbox not supported on this platform"
     }
 }
 
@@ -66,7 +83,12 @@ pub fn apply(config: &SandboxConfig) -> Result<SandboxResult, String> {
 #[cfg(target_os = "linux")]
 mod linux;
 
-#[cfg(target_os = "macos")]
+// Not gated on the target: the profile is a string, built from paths and a
+// mode, with nothing macOS-specific in the building of it. Compiled everywhere
+// so that its tests -- above all the one that pastes a hostile path into it --
+// run on every platform CI builds, instead of only on the one job that could
+// not catch the bug before it shipped.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod macos;
 
 /// Generate a macOS Seatbelt profile string for the given config.
@@ -95,8 +117,11 @@ pub fn is_available() -> bool {
 
     #[cfg(target_os = "macos")]
     {
-        // sandbox-exec ships with macOS
-        true
+        // `sandbox-exec` ships with macOS, but shipping is not the question
+        // this answers: nothing here runs it, so no command this crate helps
+        // spawn is restricted. Claiming availability would put the same lie
+        // `apply` used to tell behind a second name.
+        false
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -107,6 +132,23 @@ pub fn is_available() -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// The floor clamps with `min`, so the variant order *is* the policy.
+    ///
+    /// Nothing else in the code says out loud that read-only grants less than
+    /// workspace-write, which grants less than full-access. Reorder the enum and
+    /// every clamp silently reverses -- a floor of workspace-write would start
+    /// permitting full-access -- while every existing test still passes, because
+    /// they all name modes rather than compare them.
+    #[test]
+    fn mode_order_is_strictest_first() {
+        use super::SandboxMode::*;
+        assert!(Readonly < WorkspaceWrite);
+        assert!(WorkspaceWrite < FullAccess);
+        assert_eq!(FullAccess.strictest(WorkspaceWrite), WorkspaceWrite);
+        assert_eq!(WorkspaceWrite.strictest(Readonly), Readonly);
+        assert_eq!(FullAccess.strictest(FullAccess), FullAccess);
+    }
+
     use super::*;
 
     #[test]

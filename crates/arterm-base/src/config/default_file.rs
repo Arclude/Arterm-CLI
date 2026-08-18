@@ -630,14 +630,34 @@ prevent_sleep_while_streaming = true
 # sandbox off is something you write down rather than something a stale config
 # does for you.
 #
-# Linux uses Landlock LSM (kernel >= 5.13; egress needs >= 6.7). macOS uses
-# Seatbelt (sandbox-exec). On a kernel without Landlock the command still runs,
-# unsandboxed, and says so on stderr.
+# Linux uses Landlock LSM (kernel >= 5.13; egress needs >= 6.7). On a kernel
+# without Landlock the command still runs, unsandboxed, and says so on stderr.
+#
+# macOS and Windows have NO sandbox here yet. macOS would need each command
+# wrapped in sandbox-exec and nothing does that, so a sandboxed mode restricts
+# nothing on either platform; the file tools' own boundary still applies, but
+# commands run through bash do not. Treat a mode set there as a statement of
+# intent, not as enforcement.
 #
 # Known limit: Landlock filters TCP only. UDP -- including DNS and QUIC/HTTP-3
 # on port 443 -- is not restricted in any mode.
 #
 # Set ARTERM_SANDBOX_MODE env var to override at runtime.
+#
+# Read once, when the process starts. Editing this file does not loosen a
+# session already running -- a sandbox a session can widen from inside itself
+# is not one. Restart to change it.
+#
+# ARTERM_SANDBOX_FLOOR is the mode this file may not be looser than. It lives in
+# the launch environment rather than here because an agent writes this file
+# (that is how "change this setting" works), and a policy the agent can rewrite
+# is not a policy. Setting it lets a session choose read-only but never
+# full-access:
+#
+#   ARTERM_SANDBOX_FLOOR=workspace-write arterm
+#
+# A value that does not parse resolves to "read-only", not to "no floor", so a
+# typo is loud instead of silently removing the protection you asked for.
 sandbox_mode = "workspace-write"
 
 # Extra directories "workspace-write" may write, on top of the working

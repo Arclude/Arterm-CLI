@@ -47,8 +47,110 @@ use super::permission_gate::GateOutcome;
 use super::{ToolContext, ToolExecutionMode};
 use arterm_sandbox::SandboxMode;
 use std::path::{Component, Path, PathBuf};
+use std::sync::RwLock;
 
-/// The context a tool call runs in, with its sandbox read from the live config.
+/// The environment variable naming the mode a session may not be looser than.
+///
+/// The point of a floor is that it is set by whoever *starts* arterm and lives
+/// somewhere the session cannot rewrite. `config.toml` does not qualify:
+/// `config_edit_notice` documents the agent writing that file as the ordinary
+/// way a setting gets changed, so the policy and the thing the policy restrains
+/// share a surface. A child process cannot reach into its parent's environment,
+/// so this one is out of reach of everything a session can run.
+///
+/// This is the shape of OpenSandbox's `/var/egress/rules/deny.always`, cut down
+/// to what applies here: an operator layer the policy author cannot outrank.
+/// The difference is only that arterm has no outer box to put it in, so the
+/// launch environment is the outermost thing there is.
+const SANDBOX_FLOOR_ENV: &str = "ARTERM_SANDBOX_FLOOR";
+
+/// The sandbox every tool call in this process runs under.
+///
+/// Resolved once and then kept, which is the second half of what makes the
+/// floor mean anything. `config()` reloads from disk on a short throttle, so
+/// before this a session read `sandbox_mode` afresh on every single tool call:
+/// writing `full-access` into `config.toml` unsandboxed the *next* call, in the
+/// same session, seconds later. Freezing it makes `sandbox_mode` a
+/// restart-required setting, which is what a policy has to be when the thing it
+/// governs can edit files.
+static RESOLVED: RwLock<Option<ResolvedSandbox>> = RwLock::new(None);
+
+#[derive(Clone)]
+struct ResolvedSandbox {
+    mode: String,
+    writable_roots: Vec<PathBuf>,
+}
+
+/// The floor this process was started with, or `None` when none was named.
+///
+/// An unparseable value resolves to the strictest mode rather than to no floor.
+/// A typo in the one setting whose job is to not be weakened must not be the
+/// difference between a sandbox and none; `read-only` is loud, immediate and
+/// harmless, so the operator finds out on the first command instead of never.
+fn floor_from_env() -> Option<SandboxMode> {
+    let raw = std::env::var_os(SANDBOX_FLOOR_ENV)?;
+    let raw = raw.to_string_lossy();
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw.parse().unwrap_or(SandboxMode::Readonly))
+}
+
+/// Read the config and clamp it to the floor.
+fn resolve_sandbox() -> ResolvedSandbox {
+    let config = crate::config::config();
+    let mode = match floor_from_env() {
+        // An unparseable configured mode is `full-access` here rather than an
+        // error, matching what the boundary and bash already do with one -- but
+        // it is then clamped like any other, so a floor still holds over it.
+        Some(floor) => {
+            let configured = config
+                .sandbox_mode
+                .trim()
+                .parse::<SandboxMode>()
+                .unwrap_or(SandboxMode::FullAccess);
+            configured.strictest(floor).to_string()
+        }
+        None => config.sandbox_mode.clone(),
+    };
+    ResolvedSandbox {
+        mode,
+        writable_roots: config.sandbox_writable_root_paths(),
+    }
+}
+
+/// The frozen sandbox, resolving it on the first call.
+fn resolved_sandbox() -> ResolvedSandbox {
+    if let Ok(guard) = RESOLVED.read()
+        && let Some(resolved) = guard.as_ref()
+    {
+        return resolved.clone();
+    }
+    let fresh = resolve_sandbox();
+    let mut guard = RESOLVED
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Another thread may have resolved between the read and the write; the
+    // first answer is the one that stands, so this never replaces it.
+    guard.get_or_insert(fresh).clone()
+}
+
+/// Forget the frozen sandbox so the next call resolves again.
+///
+/// Tests only, and only because freezing is the behaviour under test: a test
+/// that sets up a config has to be able to reach a process that has not read
+/// one yet. Nothing in production may call this -- re-resolving is precisely
+/// the door this module closed.
+#[cfg(test)]
+pub(crate) fn forget_resolved_sandbox_for_test() {
+    let mut guard = RESOLVED
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = None;
+}
+
+/// The context a tool call runs in, carrying this process's frozen sandbox.
 ///
 /// Every production call site builds its context here rather than writing a
 /// `ToolContext { .. }` literal, because the sandbox is two fields --
@@ -63,6 +165,10 @@ use std::path::{Component, Path, PathBuf};
 /// `stdin_request_tx` and `graceful_shutdown_signal` are the two an agent turn
 /// then fills in for itself -- see `Agent::tool_context`.
 ///
+/// The sandbox itself comes from [`resolved_sandbox`], not from `config()`
+/// directly, so it is the one this process started with rather than whatever
+/// `config.toml` says at the moment of the call.
+///
 /// The three ids are in the same order as the struct declares them.
 pub fn tool_context(
     session_id: String,
@@ -71,7 +177,7 @@ pub fn tool_context(
     working_dir: Option<PathBuf>,
     execution_mode: ToolExecutionMode,
 ) -> ToolContext {
-    let config = crate::config::config();
+    let sandbox = resolved_sandbox();
     ToolContext {
         session_id,
         message_id,
@@ -80,8 +186,8 @@ pub fn tool_context(
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode,
-        sandbox_mode: config.sandbox_mode.clone(),
-        sandbox_writable_roots: config.sandbox_writable_root_paths(),
+        sandbox_mode: sandbox.mode,
+        sandbox_writable_roots: sandbox.writable_roots,
     }
 }
 
@@ -189,6 +295,22 @@ impl Boundary {
                 };
             }
         };
+        if is_active_config_file(&resolved) {
+            return GateOutcome::Blocked {
+                reason: "sandbox boundary: the sandbox policy is not writable from inside it",
+                message: format!(
+                    "sandbox_mode = \"{}\" refused this write: {} is the config file this \
+                     process reads its own sandbox policy from. Writing it is how a session \
+                     would widen or switch off the sandbox it is running under, so the \
+                     boundary refuses it even when it sits inside a writable root -- being \
+                     inside the workspace is exactly the case this exists for. Nothing was \
+                     changed on disk. A person can still edit the file directly or through \
+                     /config; a session that must edit it needs sandbox_mode = \"full-access\".",
+                    self.mode,
+                    resolved.display()
+                ),
+            };
+        }
         if self.permits(&resolved) {
             return GateOutcome::Allow;
         }
@@ -379,6 +501,37 @@ fn writable_roots(
 /// be a symlink is expanded before the next one is appended, and `..` is
 /// applied to the already-resolved prefix -- which is what the kernel does, and
 /// the reason `a/..` where `a` is a symlink to `/x` means `/`, not `.`.
+/// Whether a write lands on the config file this process reads its policy from.
+///
+/// This is the one deny that outranks a granted root, and it is here because
+/// the workspace is frequently the place the config file lives -- a session
+/// working in the home directory has `~/.arterm/config.toml` inside its own
+/// writable root, and every other check in this module would wave it through.
+/// `config_edit_notice` documents the agent writing that file as the ordinary
+/// way a setting changes, so without this the policy is editable by the thing
+/// the policy restrains.
+///
+/// Modelled on OpenSandbox's `deny.always`, which is merged ahead of the user's
+/// own rules so no rule of theirs can widen past it. The freeze in
+/// [`resolved_sandbox`] is the other half: this stops the file being written,
+/// that stops a file written some other way from taking effect mid-session.
+///
+/// The comparison is against the *resolved* path, so a symlink aimed at the
+/// config file is the same answer as naming it.
+fn is_active_config_file(resolved: &Path) -> bool {
+    let Some(configured) = crate::config::Config::path() else {
+        return false;
+    };
+    // Resolved the same way the write was, or the two spellings of one file
+    // would not match. A config file that does not exist yet resolves to
+    // itself, which is the correct answer rather than an error: creating it is
+    // as much a policy write as replacing it.
+    match resolve(&configured, Path::new("/")) {
+        Ok(resolved_config) => resolved_config == resolved,
+        Err(_) => configured == resolved,
+    }
+}
+
 fn resolve(path: &Path, base: &Path) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()

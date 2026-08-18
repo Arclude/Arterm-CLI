@@ -951,33 +951,99 @@ async fn a_refused_write_records_no_undo_checkpoint() {
 /// while the contexts reaching them stayed empty, and nothing observed the
 /// difference. This one writes a real config file, reads it back through the
 /// real cache, and checks what an actual call site receives.
+/// A process that has read no config yet, with a home of its own.
+///
+/// Four tests below need the same three things -- an `ARTERM_HOME` nothing else
+/// is using, an environment with no sandbox variables left over from another
+/// test, and a process whose sandbox has not been frozen yet -- and all three
+/// have to be put back afterwards or the next test inherits them. Restoring
+/// happens in `Drop` so that it also happens when an assertion fails.
+struct FreshProcess {
+    home: tempfile::TempDir,
+    prev_home: Option<std::ffi::OsString>,
+    prev_mode: Option<std::ffi::OsString>,
+    prev_floor: Option<std::ffi::OsString>,
+}
+
+impl FreshProcess {
+    fn new() -> Self {
+        let fresh = Self {
+            home: tempfile::TempDir::new().expect("temp home"),
+            prev_home: std::env::var_os("ARTERM_HOME"),
+            prev_mode: std::env::var_os("ARTERM_SANDBOX_MODE"),
+            prev_floor: std::env::var_os("ARTERM_SANDBOX_FLOOR"),
+        };
+        crate::env::set_var("ARTERM_HOME", fresh.home.path());
+        // Both env settings outrank the config file, so leaving either in place
+        // would mask what the file under test says.
+        crate::env::remove_var("ARTERM_SANDBOX_MODE");
+        crate::env::remove_var("ARTERM_SANDBOX_FLOOR");
+        forget_resolved_sandbox_for_test();
+        fresh
+    }
+
+    fn path(&self) -> &Path {
+        self.home.path()
+    }
+
+    /// Write the config file this process reads, and make the next read see it.
+    fn write_config(&self, body: &str) {
+        std::fs::write(self.home.path().join("config.toml"), body).expect("write config");
+        crate::config::Config::invalidate_cache();
+    }
+
+    fn set_floor(&self, floor: &str) {
+        crate::env::set_var("ARTERM_SANDBOX_FLOOR", floor);
+        forget_resolved_sandbox_for_test();
+    }
+}
+
+impl Drop for FreshProcess {
+    fn drop(&mut self) {
+        restore("ARTERM_HOME", self.prev_home.take());
+        restore("ARTERM_SANDBOX_MODE", self.prev_mode.take());
+        restore("ARTERM_SANDBOX_FLOOR", self.prev_floor.take());
+        crate::config::Config::invalidate_cache();
+        forget_resolved_sandbox_for_test();
+    }
+}
+
+fn restore(key: &str, previous: Option<std::ffi::OsString>) {
+    match previous {
+        Some(value) => crate::env::set_var(key, value),
+        None => crate::env::remove_var(key),
+    }
+}
+
+/// The mode a freshly built production context carries.
+fn resolved_mode() -> String {
+    tool_context(
+        "session".to_string(),
+        "message".to_string(),
+        "call".to_string(),
+        None,
+        crate::tool::ToolExecutionMode::Direct,
+    )
+    .sandbox_mode
+}
+
 #[test]
 fn a_production_context_takes_both_sandbox_fields_from_the_config_file() {
     let _guard = crate::storage::lock_test_env();
-    let prev_home = std::env::var_os("ARTERM_HOME");
-    let prev_mode = std::env::var_os("ARTERM_SANDBOX_MODE");
-    let home = tempfile::TempDir::new().expect("temp home");
-    let configured_root = home.path().join("notes");
+    let process = FreshProcess::new();
+    let configured_root = process.path().join("notes");
     std::fs::create_dir_all(&configured_root).expect("create the configured root");
-
-    crate::env::set_var("ARTERM_HOME", home.path());
-    // The env override outranks the file, and would mask what the file says.
-    crate::env::remove_var("ARTERM_SANDBOX_MODE");
-    std::fs::write(
-        home.path().join("config.toml"),
-        format!(
-            "sandbox_mode = \"workspace-write\"\nsandbox_writable_roots = [\"{}\"]\n",
-            configured_root.display()
-        ),
-    )
-    .expect("write config");
-    crate::config::Config::invalidate_cache();
+    process.write_config(&format!(
+        "sandbox_mode = \"workspace-write\"\nsandbox_writable_roots = [\"{}\"]\n",
+        configured_root.display()
+    ));
+    let home = process.path().to_path_buf();
 
     let ctx = tool_context(
         "session".to_string(),
         "message".to_string(),
         "call".to_string(),
-        Some(home.path().to_path_buf()),
+        Some(home.clone()),
         crate::tool::ToolExecutionMode::Direct,
     );
 
@@ -996,13 +1062,137 @@ fn a_production_context_takes_both_sandbox_fields_from_the_config_file() {
     let boundary = Boundary::from_context(&ctx).expect("workspace-write is enforced");
     assert!(is_allowed(&boundary, &configured_root.join("scratch.txt")));
     assert!(!is_allowed(&boundary, Path::new("/etc/arterm-escape")));
+}
 
-    match prev_home {
-        Some(value) => crate::env::set_var("ARTERM_HOME", value),
-        None => crate::env::remove_var("ARTERM_HOME"),
-    }
-    if let Some(value) = prev_mode {
-        crate::env::set_var("ARTERM_SANDBOX_MODE", value);
-    }
-    crate::config::Config::invalidate_cache();
+/// The floor is the setting the setting cannot outrank.
+///
+/// `config.toml` is writable by the agent by design, so a mode that lives only
+/// there is a lock whose key is inside the room. `ARTERM_SANDBOX_FLOOR` is read
+/// from the launch environment, which a child process cannot reach into.
+#[test]
+fn a_floor_is_not_widened_by_the_config_file() {
+    let _guard = crate::storage::lock_test_env();
+    let process = FreshProcess::new();
+    process.write_config("sandbox_mode = \"full-access\"\n");
+    process.set_floor("workspace-write");
+
+    assert_eq!(
+        resolved_mode(),
+        "workspace-write",
+        "a config file asking for full-access must not get past the floor"
+    );
+}
+
+/// A floor is a floor, not a fixed value: asking for less is still allowed.
+#[test]
+fn a_config_file_may_still_be_stricter_than_the_floor() {
+    let _guard = crate::storage::lock_test_env();
+    let process = FreshProcess::new();
+    process.write_config("sandbox_mode = \"read-only\"\n");
+    process.set_floor("workspace-write");
+
+    assert_eq!(resolved_mode(), "read-only");
+}
+
+/// A typo in the floor must not be the difference between a sandbox and none.
+///
+/// Every other unparseable mode in this codebase fails open, deliberately and
+/// with a test to say so. The floor is the one place that would be backwards:
+/// it exists to be the value nobody can weaken, so a value nobody can read
+/// becomes the strictest mode, which the operator notices on the first command.
+#[test]
+fn an_unparseable_floor_is_the_strictest_mode_rather_than_no_floor() {
+    let _guard = crate::storage::lock_test_env();
+    let process = FreshProcess::new();
+    process.write_config("sandbox_mode = \"full-access\"\n");
+    process.set_floor("workspace-wirte");
+
+    assert_eq!(resolved_mode(), "read-only");
+}
+
+/// Rewriting the config mid-session does not loosen the session doing it.
+///
+/// `config()` reloads from disk on a throttle, and the sandbox used to be read
+/// from it on every single tool call -- so a session that wrote `full-access`
+/// into its own config file ran the next command unsandboxed, seconds later,
+/// without restarting. The sandbox is resolved once per process now.
+#[test]
+fn the_sandbox_does_not_loosen_when_the_config_file_changes() {
+    let _guard = crate::storage::lock_test_env();
+    let process = FreshProcess::new();
+    process.write_config("sandbox_mode = \"workspace-write\"\n");
+    assert_eq!(resolved_mode(), "workspace-write");
+
+    // Exactly what a session would do to free itself, config cache and all.
+    process.write_config("sandbox_mode = \"full-access\"\n");
+
+    assert_eq!(
+        resolved_mode(),
+        "workspace-write",
+        "the mode this process started with is the mode it keeps"
+    );
+    assert_eq!(
+        crate::config::config().sandbox_mode,
+        "full-access",
+        "the config file really did change -- the freeze is what held, not a stale read"
+    );
+}
+
+/// The policy file is refused even when it sits inside a writable root.
+///
+/// A session whose working directory is the home directory has
+/// `~/.arterm/config.toml` inside its own workspace, and every other check here
+/// would allow it. This is the one deny that outranks a granted root.
+#[test]
+fn the_config_file_is_refused_even_inside_the_workspace() {
+    let _guard = crate::storage::lock_test_env();
+    let process = FreshProcess::new();
+    process.write_config("sandbox_mode = \"workspace-write\"\n");
+    let home = process.path().to_path_buf();
+
+    let ctx = tool_context(
+        "session".to_string(),
+        "message".to_string(),
+        "call".to_string(),
+        Some(home.clone()),
+        crate::tool::ToolExecutionMode::Direct,
+    );
+    let boundary = Boundary::from_context(&ctx).expect("workspace-write is enforced");
+
+    assert!(
+        is_allowed(&boundary, &home.join("ordinary.txt")),
+        "the workspace is still writable; only the policy file is not"
+    );
+    let message = refusal_message(&boundary, &home.join("config.toml"));
+    assert!(
+        message.contains("sandbox policy") || message.contains("sandbox"),
+        "{message}"
+    );
+    assert!(
+        message.contains("config.toml"),
+        "the refusal should name the file it refused: {message}"
+    );
+}
+
+/// Naming the policy file through a symlink is naming the policy file.
+#[cfg(unix)]
+#[test]
+fn a_symlink_aimed_at_the_config_file_is_refused_too() {
+    let _guard = crate::storage::lock_test_env();
+    let process = FreshProcess::new();
+    process.write_config("sandbox_mode = \"workspace-write\"\n");
+    let home = process.path().to_path_buf();
+    let disguise = home.join("just-a-file.txt");
+    symlink(&home.join("config.toml"), &disguise);
+
+    let ctx = tool_context(
+        "session".to_string(),
+        "message".to_string(),
+        "call".to_string(),
+        Some(home),
+        crate::tool::ToolExecutionMode::Direct,
+    );
+    let boundary = Boundary::from_context(&ctx).expect("workspace-write is enforced");
+
+    assert!(!is_allowed(&boundary, &disguise));
 }

@@ -12,7 +12,13 @@
 use std::path::PathBuf;
 
 /// The sandbox filesystem policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// **The variant order is the policy order**, strictest first, and `Ord` is
+/// derived from it. That is what lets a floor be expressed as
+/// [`SandboxMode::strictest`] rather than as a table somebody has to remember
+/// to extend. Reordering these variants silently reverses which mode wins a
+/// clamp, so `mode_order_is_strictest_first` pins it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SandboxMode {
     /// No filesystem writes, no network access. Read-only exploration.
     Readonly,
@@ -26,6 +32,15 @@ pub enum SandboxMode {
 impl SandboxMode {
     pub fn is_sandboxed(self) -> bool {
         !matches!(self, SandboxMode::FullAccess)
+    }
+
+    /// Whichever of the two grants less.
+    ///
+    /// Used to clamp a requested mode against a floor: the answer is never
+    /// looser than either input, so a setting can tighten a floor and cannot
+    /// widen one.
+    pub fn strictest(self, other: Self) -> Self {
+        self.min(other)
     }
 }
 
