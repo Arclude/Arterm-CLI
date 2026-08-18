@@ -9,9 +9,8 @@ use serde_json::Value;
 /// The context these tests hand to `Registry::execute`.
 ///
 /// Only the session and the directory ever differ; the rest is the shape of a
-/// direct, non-agent tool call. The sandbox is left at its default, which is
-/// off -- these tests are about tool resolution, policy and output handling,
-/// and the boundary has its own tests in `sandbox_boundary_tests`.
+/// direct, non-agent tool call: these tests are about tool resolution, policy
+/// and output handling.
 fn test_ctx(session_id: &str, working_dir: Option<std::path::PathBuf>) -> ToolContext {
     ToolContext {
         session_id: session_id.to_string(),

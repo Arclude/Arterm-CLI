@@ -704,7 +704,7 @@ fn launch_manual_subagent(app: &mut App, spec: ManualSubagentSpec) {
             title: None,
         }));
 
-        let ctx = crate::tool::tool_context(
+        let ctx = crate::tool::ToolContext::new(
             session_id.clone(),
             message_id.clone(),
             tool_call_for_task.id.clone(),

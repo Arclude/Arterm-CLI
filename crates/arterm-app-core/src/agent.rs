@@ -269,7 +269,7 @@ impl Agent {
         ToolContext {
             stdin_request_tx: self.stdin_request_tx.clone(),
             graceful_shutdown_signal: Some(self.graceful_shutdown.clone()),
-            ..crate::tool::tool_context(
+            ..ToolContext::new(
                 self.session.id.clone(),
                 message_id,
                 tool_call_id,

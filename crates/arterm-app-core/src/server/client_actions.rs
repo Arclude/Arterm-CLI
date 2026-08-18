@@ -314,7 +314,7 @@ pub(super) fn handle_run_subagent(
             )
         };
 
-        let ctx = crate::tool::tool_context(
+        let ctx = crate::tool::ToolContext::new(
             session_id,
             message_id,
             tool_call_id.clone(),

@@ -66,10 +66,6 @@ impl Tool for UndoTool {
                 .filter(|cp| cp.session_id == ctx.session_id)
                 .map(|cp| cp.file_path),
         };
-        if let Some(ref path) = target {
-            crate::tool::sandbox_boundary::ensure_writable(&ctx, path)?;
-        }
-
         let cp = target.and_then(|path| checkpoint::GLOBAL.pop_for_session(&ctx.session_id, &path));
 
         let Some(cp) = cp else {
@@ -104,8 +100,6 @@ mod tests {
             stdin_request_tx: None,
             graceful_shutdown_signal: None,
             execution_mode: crate::tool::ToolExecutionMode::Direct,
-            sandbox_mode: "full-access".into(),
-            ..Default::default()
         }
     }
 

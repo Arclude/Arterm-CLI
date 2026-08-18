@@ -615,65 +615,6 @@ bind_addr = "0.0.0.0"
 # Set ARTERM_DISABLE_POWER_INHIBIT=1 to force-disable regardless of this setting.
 prevent_sleep_while_streaming = true
 
-# OS-level sandbox for bash commands. Restricts filesystem and outbound network
-# access for agent-spawned commands. Does not affect the interactive TUI or
-# arterm's own operations.
-#
-# Modes:
-#   "workspace-write" - Default. Writes limited to the working directory, temp
-#                       dirs and harmless devices (/dev/null and friends);
-#                       outbound TCP limited to DNS/HTTP/HTTPS.
-#   "read-only"       - No filesystem writes outside temp; no outbound TCP.
-#   "full-access"     - Off. No restrictions.
-#
-# An empty value means "unset" and resolves to the default, so switching the
-# sandbox off is something you write down rather than something a stale config
-# does for you.
-#
-# Linux uses Landlock LSM (kernel >= 5.13; egress needs >= 6.7). On a kernel
-# without Landlock the command still runs, unsandboxed, and says so on stderr.
-#
-# macOS and Windows have NO sandbox here yet. macOS would need each command
-# wrapped in sandbox-exec and nothing does that, so a sandboxed mode restricts
-# nothing on either platform; the file tools' own boundary still applies, but
-# commands run through bash do not. Treat a mode set there as a statement of
-# intent, not as enforcement.
-#
-# Known limit: Landlock filters TCP only. UDP -- including DNS and QUIC/HTTP-3
-# on port 443 -- is not restricted in any mode.
-#
-# Set ARTERM_SANDBOX_MODE env var to override at runtime.
-#
-# Read once, when the process starts. Editing this file does not loosen a
-# session already running -- a sandbox a session can widen from inside itself
-# is not one. Restart to change it.
-#
-# ARTERM_SANDBOX_FLOOR is the mode this file may not be looser than. It lives in
-# the launch environment rather than here because an agent writes this file
-# (that is how "change this setting" works), and a policy the agent can rewrite
-# is not a policy. Setting it lets a session choose read-only but never
-# full-access:
-#
-#   ARTERM_SANDBOX_FLOOR=workspace-write arterm
-#
-# A value that does not parse resolves to "read-only", not to "no floor", so a
-# typo is loud instead of silently removing the protection you asked for.
-sandbox_mode = "workspace-write"
-
-# Extra directories "workspace-write" may write, on top of the working
-# directory, temp dirs and $ARTERM_SCRATCH_DIR. Empty by default: this grants
-# nothing unless you ask for it. It exists so that needing one more directory
-# does not mean switching the whole sandbox off with "full-access".
-#
-#   - "~/notes" expands to your home directory; "~other" does not expand.
-#   - A relative entry is resolved against the session working directory.
-#   - A directory that does not exist is ignored (create it first) -- Landlock
-#     can only grant a directory that exists, and the in-process file tools
-#     follow the same rule so both refuse the same paths.
-#   - "read-only" ignores this list entirely: it writes nothing anywhere.
-#
-# sandbox_writable_roots = ["~/.cache/arterm-builds", "/opt/shared-artifacts"]
-
 # Granular tool permission rules, evaluated for every tool call.
 # Each rule: "<verb> Tool(<specifier>)" with verb one of deny / ask / allow.
 #   - deny  blocks the call outright,

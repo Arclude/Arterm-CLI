@@ -93,10 +93,6 @@ impl Tool for ApplyPatchTool {
             match hunk {
                 PatchHunk::AddFile { path, contents } => {
                     let resolved = ctx.resolve_path(Path::new(path));
-                    if let Err(err) = super::sandbox_boundary::ensure_writable(&ctx, &resolved) {
-                        results.push(format!("✗ {}: {}", path, err));
-                        continue;
-                    }
                     // Checkpoint (records "file absent") so `undo` can remove it.
                     super::checkpoint::GLOBAL.snapshot_and_record(&ctx.session_id, &resolved);
                     if let Some(parent) = resolved.parent() {
@@ -121,12 +117,6 @@ impl Tool for ApplyPatchTool {
                 }
                 PatchHunk::DeleteFile { path } => {
                     let resolved = ctx.resolve_path(Path::new(path));
-                    // A delete is a modification: it answers to the sandbox
-                    // boundary like every other write.
-                    if let Err(err) = super::sandbox_boundary::ensure_writable(&ctx, &resolved) {
-                        results.push(format!("✗ {}: {}", path, err));
-                        continue;
-                    }
                     // `resolve_path` passes absolute paths through unchanged, so
                     // a patch can name any file on disk. The bash gate does not
                     // cover this path, so apply the same absolute deny here
@@ -173,20 +163,6 @@ impl Tool for ApplyPatchTool {
                     chunks,
                 } => {
                     let resolved = ctx.resolve_path(Path::new(path));
-                    // Both ends of a move are writes, so both are judged before
-                    // either one happens.
-                    let destination = move_to
-                        .as_ref()
-                        .map(|dest| ctx.resolve_path(Path::new(dest)));
-                    let boundary = super::sandbox_boundary::ensure_writable(&ctx, &resolved)
-                        .and_then(|()| match &destination {
-                            Some(dest) => super::sandbox_boundary::ensure_writable(&ctx, dest),
-                            None => Ok(()),
-                        });
-                    if let Err(err) = boundary {
-                        results.push(format!("✗ {}: {}", path, err));
-                        continue;
-                    }
                     match apply_update_chunks(&resolved, chunks).await {
                         Ok((old_contents, new_contents)) => {
                             let diff = generate_diff_summary(&old_contents, &new_contents);

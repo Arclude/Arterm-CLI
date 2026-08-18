@@ -34,7 +34,6 @@ mod patch;
 mod permission_gate;
 mod read;
 mod repo_map;
-mod sandbox_boundary;
 pub mod selfdev;
 pub(crate) mod serde_coerce;
 mod session_search;
@@ -69,7 +68,6 @@ use tokio::sync::RwLock;
 pub(crate) use arterm_tool_core::intent_schema_property;
 pub use arterm_tool_core::{StdinInputRequest, Tool, ToolContext, ToolExecutionMode};
 pub use arterm_tool_types::{ToolImage, ToolOutput};
-pub use sandbox_boundary::tool_context;
 pub(crate) use session_search::spawn_recent_index_warmup;
 
 #[derive(Clone, Debug, Default)]
@@ -1423,7 +1421,6 @@ mod permission_gate_tests {
             stdin_request_tx: None,
             graceful_shutdown_signal: None,
             execution_mode: ToolExecutionMode::Direct,
-            ..Default::default()
         }
     }
 

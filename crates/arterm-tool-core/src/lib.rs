@@ -108,16 +108,6 @@ pub struct ToolContext {
     pub stdin_request_tx: Option<tokio::sync::mpsc::UnboundedSender<StdinInputRequest>>,
     pub graceful_shutdown_signal: Option<InterruptSignal>,
     pub execution_mode: ToolExecutionMode,
-    /// OS-level sandbox mode for bash commands: "read-only", "workspace-write",
-    /// or "full-access" (default). When set to a sandboxed mode, the bash tool
-    /// applies Landlock (Linux) or Seatbelt (macOS) restrictions.
-    pub sandbox_mode: String,
-    /// Extra directories a sandboxed session may write, from the
-    /// `sandbox_writable_roots` config key. Empty in every mode but
-    /// `workspace-write`, and empty by default. Entries may be relative, in
-    /// which case they mean "relative to `working_dir`"; `~` is already
-    /// expanded by the time they get here.
-    pub sandbox_writable_roots: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -128,6 +118,33 @@ pub enum ToolExecutionMode {
 }
 
 impl ToolContext {
+    /// The context a tool call runs in.
+    ///
+    /// The fields are written out rather than left to `..Default::default()` on
+    /// purpose: a field added later should stop the build here and make its
+    /// author say what a tool call means by it. `stdin_request_tx` and
+    /// `graceful_shutdown_signal` are the two only a live agent can supply --
+    /// see `Agent::tool_context` -- so they start empty.
+    ///
+    /// The three ids are in the same order as the struct declares them.
+    pub fn new(
+        session_id: String,
+        message_id: String,
+        tool_call_id: String,
+        working_dir: Option<PathBuf>,
+        execution_mode: ToolExecutionMode,
+    ) -> Self {
+        Self {
+            session_id,
+            message_id,
+            tool_call_id,
+            working_dir,
+            stdin_request_tx: None,
+            graceful_shutdown_signal: None,
+            execution_mode,
+        }
+    }
+
     pub fn for_subcall(&self, tool_call_id: String) -> Self {
         Self {
             session_id: self.session_id.clone(),
@@ -137,8 +154,6 @@ impl ToolContext {
             stdin_request_tx: self.stdin_request_tx.clone(),
             graceful_shutdown_signal: self.graceful_shutdown_signal.clone(),
             execution_mode: self.execution_mode,
-            sandbox_mode: self.sandbox_mode.clone(),
-            sandbox_writable_roots: self.sandbox_writable_roots.clone(),
         }
     }
 

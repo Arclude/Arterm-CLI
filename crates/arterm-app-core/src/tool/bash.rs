@@ -1,4 +1,3 @@
-use super::sandbox_boundary::sandbox_config_from_context;
 use super::{StdinInputRequest, Tool, ToolContext, ToolOutput};
 use crate::background::TaskResult;
 use crate::bus::{
@@ -567,24 +566,8 @@ macro_rules! apply_env_hygiene {
     }};
 }
 
-/// An unsandboxed shell command, which only tests still want: every production
-/// caller passes a `SandboxConfig` through [`build_shell_command_with_sandbox`]
-/// now that the detached wrapper does too. Kept for the tests about quoting and
-/// env hygiene, which a sandbox would only give a kernel dependency.
-#[cfg(test)]
+/// Build the shell command a bash tool call runs.
 fn build_shell_command(cmd_str: &str) -> TokioCommand {
-    build_shell_command_with_sandbox(cmd_str, None, None)
-}
-
-/// Build a shell command, optionally applying OS-level sandboxing.
-///
-/// When `sandbox_mode` is set (and not `FullAccess`), a `pre_exec` hook is
-/// installed that applies Landlock (Linux) restrictions to the child process.
-fn build_shell_command_with_sandbox(
-    cmd_str: &str,
-    working_dir: Option<&std::path::Path>,
-    sandbox_config: Option<&arterm_sandbox::SandboxConfig>,
-) -> TokioCommand {
     #[cfg(windows)]
     {
         let mut cmd = TokioCommand::new("cmd.exe");
@@ -601,7 +584,6 @@ fn build_shell_command_with_sandbox(
         // selects the documented quote handling used with this form.
         cmd.args(["/D", "/S", "/C"])
             .raw_arg(format!("\"{cmd_str}\""));
-        let _ = (working_dir, sandbox_config); // sandbox not supported on Windows yet
         cmd
     }
     #[cfg(not(windows))]
@@ -610,38 +592,6 @@ fn build_shell_command_with_sandbox(
         apply_env_hygiene!(cmd);
         cmd.arg("-c").arg(cmd_str);
         configure_tool_scratch(&mut cmd);
-
-        // Apply OS-level sandbox if configured.
-        if let Some(config) = sandbox_config
-            && config.mode.is_sandboxed()
-        {
-            let sb_config = config.clone();
-            let wd = working_dir.map(|p| p.to_path_buf());
-            unsafe {
-                cmd.pre_exec(move || {
-                    // Rebuild-from-mode dropped writable_roots; only cwd is overridden.
-                    let mut apply_config = sb_config.clone();
-                    apply_config.working_dir = wd.clone();
-                    match arterm_sandbox::apply(&apply_config) {
-                        Ok(result) => {
-                            if !result.applied {
-                                eprintln!("arterm sandbox: {}", result.message);
-                            }
-                            Ok(())
-                        }
-                        Err(e) => {
-                            eprintln!("arterm sandbox error: {e}");
-                            // Return error to abort exec - the sandbox
-                            // failed and we don't want to run unsandboxed.
-                            Err(std::io::Error::new(
-                                std::io::ErrorKind::PermissionDenied,
-                                format!("arterm sandbox error: {e}"),
-                            ))
-                        }
-                    }
-                });
-            }
-        }
         cmd
     }
 }
@@ -662,7 +612,7 @@ fn build_detached_shell_wrapper(command: &str) -> StdCommand {
 }
 
 fn format_command_output(mut output: String, exit_code: Option<i32>, command: &str) -> String {
-    // Failure-coupled and evidence-coupled, the same shape as the sandbox's
+    // Failure-coupled and evidence-coupled, the same shape as the checkpoint's
     // confinement note. A command that succeeded was not short of anything, and
     // almost every session has a key in its environment — so an unconditional
     // note would append a credentials line to every failing test run in the
@@ -896,13 +846,7 @@ impl BashTool {
 
         let has_stdin_channel = ctx.stdin_request_tx.is_some();
 
-        let sb_config = sandbox_config_from_context(ctx);
-
-        let mut command = build_shell_command_with_sandbox(
-            &params.command,
-            ctx.working_dir.as_deref(),
-            sb_config.as_ref(),
-        );
+        let mut command = build_shell_command(&params.command);
         command
             .kill_on_drop(true)
             .stdout(Stdio::piped())
@@ -1103,14 +1047,6 @@ impl BashTool {
 
     #[cfg(unix)]
     fn supports_reload_persistence(&self, ctx: &ToolContext) -> bool {
-        // Don't use the reload-persistable path when sandboxed, because the
-        // detached wrapper does not go through build_shell_command_with_sandbox.
-        if !ctx.sandbox_mode.is_empty()
-            && let Ok(mode) = ctx.sandbox_mode.parse::<arterm_sandbox::SandboxMode>()
-            && mode.is_sandboxed()
-        {
-            return false;
-        }
         matches!(
             ctx.execution_mode,
             crate::tool::ToolExecutionMode::AgentTurn
@@ -1274,7 +1210,6 @@ impl BashTool {
         let working_dir = ctx.working_dir.clone();
         let timeout_ms = params.timeout.map(|timeout| timeout.min(600000));
         let timeout_duration = timeout_ms.map(Duration::from_millis);
-        let sb_config = sandbox_config_from_context(&ctx);
 
         let wake = params.wake;
         let notify = params.notify || wake;
@@ -1286,8 +1221,7 @@ impl BashTool {
                 notify,
                 wake,
 				move |output_path| async move {
-					let mut cmd =
-						build_shell_command_with_sandbox(&command, working_dir.as_deref(), sb_config.as_ref());
+					let mut cmd = build_shell_command(&command);
 					#[cfg(unix)]
 					unsafe {
 						cmd.pre_exec(|| {

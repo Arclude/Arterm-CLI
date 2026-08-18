@@ -970,7 +970,7 @@ impl App {
                                         input,
                                     } => {
                                         // Execute native tool and send result back to SDK bridge
-                                        let ctx = crate::tool::tool_context(
+                                        let ctx = crate::tool::ToolContext::new(
                                             self.session_id().to_string(),
                                             self.session_id().to_string(),
                                             request_id.clone(),
@@ -1253,7 +1253,7 @@ impl App {
                 }
 
                 // Execute locally
-                let ctx = crate::tool::tool_context(
+                let ctx = crate::tool::ToolContext::new(
                     self.session.id.clone(),
                     message_id.clone(),
                     tc.id.clone(),

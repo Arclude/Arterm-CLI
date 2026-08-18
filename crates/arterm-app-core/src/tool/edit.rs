@@ -75,8 +75,6 @@ impl Tool for EditTool {
         }
 
         let path = ctx.resolve_path(Path::new(&params.file_path));
-        super::sandbox_boundary::ensure_writable(&ctx, &path)?;
-
         if !path.exists() {
             return Err(anyhow::anyhow!("File not found: {}", params.file_path));
         }

@@ -458,14 +458,6 @@ impl Config {
         hook_env_override(&mut self.hooks.pre_tool, "ARTERM_HOOK_PRE_TOOL");
         hook_env_override(&mut self.hooks.post_tool, "ARTERM_HOOK_POST_TOOL");
 
-        // OS-level sandbox mode override
-        if let Ok(v) = std::env::var("ARTERM_SANDBOX_MODE") {
-            let trimmed = v.trim();
-            if !trimmed.is_empty() {
-                self.sandbox_mode = trimmed.to_string();
-            }
-        }
-
         // Git auto-commit override (see tool::git_auto_commit)
         if let Ok(v) = std::env::var("ARTERM_GIT_AUTO_COMMIT") {
             match v.trim().to_ascii_lowercase().as_str() {

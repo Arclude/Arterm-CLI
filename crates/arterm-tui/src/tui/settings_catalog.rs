@@ -6,10 +6,10 @@
 //! every entry knows its key, what it does, which values are legal, and how to
 //! read and write itself on a [`Config`].
 //!
-//! Scope is deliberately `[display]`. Provider credentials, sandbox paths and
-//! launch hotkeys all have their own commands (`/login`, `/model`,
-//! `setup-hotkey`) and a wrong value there breaks a session rather than a
-//! colour; a settings list that mixes the two invites exactly that mistake.
+//! Scope is deliberately `[display]`. Provider credentials and launch hotkeys
+//! all have their own commands (`/login`, `/model`, `setup-hotkey`) and a wrong
+//! value there breaks a session rather than a colour; a settings list that
+//! mixes the two invites exactly that mistake.
 //!
 //! # Writing
 //!
@@ -335,48 +335,6 @@ pub fn display_settings() -> &'static [Setting] {
                 parse_bool(v)
                     .map(|b| c.display.compact_notifications = b)
                     .is_some()
-            },
-        },
-        // The one non-`[display]` entry, and it earns the exception: the
-        // sandbox is on by default, so the person it inconveniences needs a way
-        // to turn it off that is not "find config.toml and learn a key". Every
-        // other excluded setting has its own command (`/login`, `/model`); this
-        // one had nothing.
-        //
-        // Changing it here writes config.toml like any other row, but the
-        // sandbox is resolved once per process, so this row is the rare one
-        // that does not take effect until restart. The alternative is a
-        // running session able to widen its own sandbox, which is the thing
-        // the sandbox is for -- so the help text says so instead.
-        //
-        // Its companion key `sandbox_writable_roots` is deliberately NOT here.
-        // A `Setting` is a closed list of values the overlay cycles through
-        // (`values`, `current_index`), and a list of arbitrary filesystem paths
-        // is neither closed nor cyclable -- offering it here would mean a row
-        // that cannot be edited, which is worse than no row. It stays a
-        // config.toml key, and the sandbox's own refusal message names it at
-        // the moment someone needs it.
-        Setting {
-            key: "sandbox_mode",
-            help: "Restrict what agent-run bash commands may write and connect to. \
-                   Takes effect on restart.",
-            values: &["workspace-write", "read-only", "full-access"],
-            read: |c| {
-                let mode = c.sandbox_mode.trim();
-                if mode.is_empty() {
-                    // Empty means unset, and `apply_defaults` resolves it on
-                    // load; show what is in force, not the blank in the file.
-                    crate::config::default_sandbox_mode()
-                } else {
-                    mode.to_string()
-                }
-            },
-            write: |c, v| {
-                if !matches!(v, "workspace-write" | "read-only" | "full-access") {
-                    return false;
-                }
-                c.sandbox_mode = v.to_string();
-                true
             },
         },
         Setting {

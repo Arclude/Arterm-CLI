@@ -28,7 +28,6 @@ members = [
     "crates/arterm-compaction-core",
     "crates/arterm-config-types",
     "crates/arterm-command-risk",
-    "crates/arterm-sandbox",
     "crates/arterm-core",
     "crates/arterm-fuzzy",
     "crates/arterm-harness-api",
