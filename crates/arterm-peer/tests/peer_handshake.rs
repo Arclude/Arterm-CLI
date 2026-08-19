@@ -794,6 +794,70 @@ async fn a_paired_device_can_list_a_peers_sessions_without_opening_one() {
     }
 }
 
+/// The live flag is what the other machine's Active list reads. It has to
+/// survive the real TLS list, not just a local struct copy: a saved row
+/// must stay idle, and an open TUI must stay live, even when the last
+/// turn is old.
+#[tokio::test]
+async fn a_peer_list_keeps_the_live_flag_on_the_wire() {
+    let host = Device::new();
+    let guest = Device::new();
+    host.trusts(&guest, "guest");
+    guest.trusts(&host, "host");
+
+    let advertised = vec![RemoteServerSummary {
+        name: "camp".to_string(),
+        icon: "⛺".to_string(),
+        version: "v0.10.16-dev".to_string(),
+        sessions: vec!["session_open".to_string(), "session_old".to_string()],
+        details: vec![
+            arterm_peer::RemoteSessionSummary {
+                id: "session_open".to_string(),
+                short_name: "sauropod".to_string(),
+                title: "Open Windows chat".to_string(),
+                last_message_at_ms: 1_000,
+                is_active: true,
+                ..Default::default()
+            },
+            arterm_peer::RemoteSessionSummary {
+                id: "session_old".to_string(),
+                short_name: "owl".to_string(),
+                title: "Saved Windows chat".to_string(),
+                last_message_at_ms: 1_000,
+                is_active: false,
+                ..Default::default()
+            },
+        ],
+    }];
+
+    let (addr, listening) =
+        listen_once_with_sessions(&host, SubnetPolicy::ThisMachine, advertised).await;
+    let reported = list_peer_sessions(&guest.credentials(), &target_for(&host, addr))
+        .await
+        .expect("a paired device should be able to list a peer's sessions");
+
+    let details = &reported[0].details;
+    assert_eq!(details.len(), 2);
+    let open = details
+        .iter()
+        .find(|row| row.id == "session_open")
+        .expect("open row");
+    let old = details
+        .iter()
+        .find(|row| row.id == "session_old")
+        .expect("saved row");
+    assert!(open.is_active, "an open TUI must still look live after TLS");
+    assert!(
+        !old.is_active,
+        "a saved session must not look live after TLS"
+    );
+
+    match listening.await.expect("the listener task") {
+        Admitted::Listed { peer_name, .. } => assert_eq!(peer_name, "guest"),
+        other => panic!("a List query should be admitted as Listed, got {other:?}"),
+    }
+}
+
 /// The list that used to be impossible.
 ///
 /// The reply was read under the handshake's 4 KiB cap, so a machine with more
