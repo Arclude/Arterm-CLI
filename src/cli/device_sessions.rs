@@ -312,4 +312,59 @@ mod tests {
         let summary = session_summary_from(info("session_open"), &live);
         assert!(summary.is_active);
     }
+
+    #[test]
+    fn local_session_summaries_mark_only_running_processes_live() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("ARTERM_HOME");
+        crate::env::set_var("ARTERM_HOME", temp.path());
+        crate::tui::session_picker::invalidate_session_list_cache();
+
+        let id = "session_fox_livewire".to_string();
+        let mut session = crate::session::Session::create_with_id(
+            id.clone(),
+            None,
+            Some("Open chat".to_string()),
+        );
+        session.add_message(
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "hello from this machine".to_string(),
+                cache_control: None,
+            }],
+        );
+        session.mark_active();
+
+        let summaries = local_session_summaries();
+        let open = summaries
+            .iter()
+            .flat_map(|server| server.details.iter())
+            .find(|row| row.id == id)
+            .expect("saved session must be listed");
+        assert!(
+            open.is_active,
+            "a TUI that just marked itself active must look live to a peer"
+        );
+
+        session.mark_closed();
+        crate::tui::session_picker::invalidate_session_list_cache();
+        let summaries = local_session_summaries();
+        let closed = summaries
+            .iter()
+            .flat_map(|server| server.details.iter())
+            .find(|row| row.id == id)
+            .expect("closed session still lists");
+        assert!(
+            !closed.is_active,
+            "closing the TUI must drop the live flag even if last_active_at stays on disk"
+        );
+
+        if let Some(prev_home) = prev_home {
+            crate::env::set_var("ARTERM_HOME", prev_home);
+        } else {
+            crate::env::remove_var("ARTERM_HOME");
+        }
+        crate::tui::session_picker::invalidate_session_list_cache();
+    }
 }

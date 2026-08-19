@@ -262,6 +262,119 @@ fn left_arrow_on_empty_input_is_a_noop_unless_opted_in() {
 }
 
 #[test]
+fn left_arrow_on_empty_input_opens_active_picker_when_opted_in() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("ARTERM_HOME");
+    crate::env::set_var("ARTERM_HOME", temp.path());
+    std::fs::write(
+        temp.path().join("config.toml"),
+        "[display]\nactive_sessions_manager = true\n",
+    )
+    .expect("write config");
+    crate::config::invalidate_config_cache();
+
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let _rt = runtime.enter();
+    let mut app = create_test_app();
+    assert!(app.input.is_empty());
+    assert_eq!(app.cursor_pos, 0);
+    assert!(app.maybe_open_active_sessions_on_left());
+    assert!(app.session_picker_overlay.is_some());
+    assert_eq!(app.session_picker_mode, SessionPickerMode::ActiveSessions);
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("ARTERM_HOME", prev_home);
+    } else {
+        crate::env::remove_var("ARTERM_HOME");
+    }
+    crate::config::invalidate_config_cache();
+}
+
+#[test]
+fn active_picker_reseed_keeps_only_live_remote_rows() {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let _guard = runtime.enter();
+    let mut app = create_test_app();
+    app.input = "/active".to_string();
+    app.submit_input();
+
+    let now = chrono::Utc::now();
+    let mut live = crate::tui::session_picker::SessionInfo {
+        id: "session_windows_live".to_string(),
+        parent_id: None,
+        short_name: "sauropod".to_string(),
+        icon: "s".to_string(),
+        title: "Open Windows chat".to_string(),
+        message_count: 1,
+        user_message_count: 1,
+        assistant_message_count: 0,
+        created_at: now,
+        last_message_time: now - chrono::Duration::hours(6),
+        last_active_at: Some(now),
+        working_dir: None,
+        model: None,
+        provider_key: None,
+        is_canary: false,
+        is_debug: false,
+        saved: false,
+        save_label: None,
+        status: crate::session::SessionStatus::Closed,
+        needs_catchup: false,
+        estimated_tokens: 0,
+        first_user_prompt: None,
+        messages_preview: Vec::new(),
+        search_index: "sauropod island".to_string(),
+        server_name: Some("island".to_string()),
+        server_icon: None,
+        source: crate::tui::session_picker::SessionSource::Arterm,
+        resume_target: crate::tui::session_picker::ResumeTarget::ArtermSession {
+            session_id: "session_windows_live".to_string(),
+        },
+        external_path: None,
+    };
+    let mut stale = live.clone();
+    stale.id = "session_windows_old".to_string();
+    stale.short_name = "owl".to_string();
+    stale.title = "Old Windows chat".to_string();
+    stale.last_active_at = None;
+    stale.search_index = "owl island".to_string();
+    stale.resume_target = crate::tui::session_picker::ResumeTarget::ArtermSession {
+        session_id: "session_windows_old".to_string(),
+    };
+    live.last_active_at = Some(now);
+
+    {
+        let picker = app.session_picker_overlay.as_ref().expect("overlay");
+        picker.borrow_mut().reseed_grouped(
+            vec![crate::tui::session_picker::ServerGroup {
+                name: "Remote devices".to_string(),
+                icon: "🖧".to_string(),
+                version: String::new(),
+                git_hash: String::new(),
+                is_running: true,
+                sessions: vec![live, stale],
+            }],
+            Vec::new(),
+        );
+    }
+
+    let picker = app.session_picker_overlay.as_ref().expect("overlay");
+    let picker = picker.borrow();
+    let visible: Vec<String> = picker
+        .visible_session_iter()
+        .map(|session| session.id.clone())
+        .collect();
+    assert_eq!(visible, vec!["session_windows_live".to_string()]);
+    assert_eq!(
+        picker
+            .remote_device_for_session("session_windows_live")
+            .as_deref(),
+        Some("island")
+    );
+}
+
+#[test]
 fn test_resize_redraw_is_debounced() {
     let mut app = create_test_app();
 
