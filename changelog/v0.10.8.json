@@ -1,0 +1,11 @@
+{
+  "version": "0.10.8",
+  "date": "2026-08-19",
+  "highlights": [
+    "An open chat on a paired machine now shows up in the left-arrow Active list, so you can switch to it without running device connect"
+  ],
+  "fixes": [
+    "A Windows TUI that is actually open is no longer hidden on Linux, and leftover saved sessions no longer all look live",
+    "Source builds report the same version line as the tags, so they can see a newer release again"
+  ]
+}
