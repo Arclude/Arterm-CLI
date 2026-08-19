@@ -373,47 +373,50 @@ mod tests {
     /// list uses. A live process stays live; a leftover disk stamp does not.
     #[tokio::test(flavor = "multi_thread")]
     async fn device_listen_answers_with_live_flags_from_this_machine() {
-        let _guard = crate::storage::lock_test_env();
         let temp = tempfile::tempdir().expect("tempdir");
-        let prev_home = std::env::var_os("ARTERM_HOME");
-        crate::env::set_var("ARTERM_HOME", temp.path());
-        crate::tui::session_picker::invalidate_session_list_cache();
+        let (prev_home, live_id, idle_id, snapshot) = {
+            let _guard = crate::storage::lock_test_env();
+            let prev_home = std::env::var_os("ARTERM_HOME");
+            crate::env::set_var("ARTERM_HOME", temp.path());
+            crate::tui::session_picker::invalidate_session_list_cache();
 
-        let live_id = "session_fox_listen".to_string();
-        let idle_id = "session_owl_saved".to_string();
-        let mut live = crate::session::Session::create_with_id(
-            live_id.clone(),
-            None,
-            Some("Open chat".to_string()),
-        );
-        live.add_message(
-            crate::message::Role::User,
-            vec![crate::message::ContentBlock::Text {
-                text: "hello from this machine".to_string(),
-                cache_control: None,
-            }],
-        );
-        live.mark_active();
+            let live_id = "session_fox_listen".to_string();
+            let idle_id = "session_owl_saved".to_string();
+            let mut live = crate::session::Session::create_with_id(
+                live_id.clone(),
+                None,
+                Some("Open chat".to_string()),
+            );
+            live.add_message(
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "hello from this machine".to_string(),
+                    cache_control: None,
+                }],
+            );
+            live.mark_active();
 
-        let mut idle = crate::session::Session::create_with_id(
-            idle_id.clone(),
-            None,
-            Some("Saved chat".to_string()),
-        );
-        idle.add_message(
-            crate::message::Role::User,
-            vec![crate::message::ContentBlock::Text {
-                text: "an old turn".to_string(),
-                cache_control: None,
-            }],
-        );
-        idle.mark_active();
-        idle.mark_closed();
-        idle.save().expect("save closed session");
-        crate::tui::session_picker::invalidate_session_list_cache();
-        // Snapshot on this thread: `load_sessions_grouped` cannot block inside
-        // the current-thread runtime the listener task would otherwise use.
-        let snapshot = local_session_summaries();
+            let mut idle = crate::session::Session::create_with_id(
+                idle_id.clone(),
+                None,
+                Some("Saved chat".to_string()),
+            );
+            idle.add_message(
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "an old turn".to_string(),
+                    cache_control: None,
+                }],
+            );
+            idle.mark_active();
+            idle.mark_closed();
+            idle.save().expect("save closed session");
+            crate::tui::session_picker::invalidate_session_list_cache();
+            // Snapshot on this thread: `load_sessions_grouped` cannot block inside
+            // the current-thread runtime the listener task would otherwise use.
+            let snapshot = local_session_summaries();
+            (prev_home, live_id, idle_id, snapshot)
+        };
 
         let host_dir = temp.path().join("host-device");
         let guest_dir = temp.path().join("guest-device");

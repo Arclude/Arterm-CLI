@@ -71,32 +71,35 @@ fn a_peer_list_feeds_the_active_filter() {
 /// saved one does not.
 #[tokio::test(flavor = "multi_thread")]
 async fn fetch_feeds_the_active_filter_from_a_paired_listener() {
-    let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("ARTERM_HOME");
-    crate::env::set_var("ARTERM_HOME", temp.path());
+    let (prev_home, host, host_gate, advertised) = {
+        let _guard = crate::storage::lock_test_env();
+        let prev_home = std::env::var_os("ARTERM_HOME");
+        crate::env::set_var("ARTERM_HOME", temp.path());
 
-    let host_dir = temp.path().join("host-device");
-    std::fs::create_dir_all(&host_dir).expect("host dir");
-    let host = arterm_device::DeviceIdentity::load_or_create_in(&host_dir).expect("host");
-    let guest = arterm_device::DeviceIdentity::load_or_create().expect("guest");
-    let host_gate = arterm_peer::gate::TrustGate::in_dir(&host_dir);
-    host_gate
-        .record_pairing(&guest.fingerprint(), "guest", None)
-        .expect("host trusts this machine");
+        let host_dir = temp.path().join("host-device");
+        std::fs::create_dir_all(&host_dir).expect("host dir");
+        let host = arterm_device::DeviceIdentity::load_or_create_in(&host_dir).expect("host");
+        let guest = arterm_device::DeviceIdentity::load_or_create().expect("guest");
+        let host_gate = arterm_peer::gate::TrustGate::in_dir(&host_dir);
+        host_gate
+            .record_pairing(&guest.fingerprint(), "guest", None)
+            .expect("host trusts this machine");
 
-    let advertised = vec![arterm_peer::RemoteServerSummary {
-        name: "camp".to_string(),
-        icon: "⛺".to_string(),
-        version: "v0.10.16-dev".to_string(),
-        sessions: vec!["session_open".to_string(), "session_old".to_string()],
-        details: vec![summary("session_open"), {
-            let mut idle = summary("session_old");
-            idle.is_active = false;
-            idle.last_message_at_ms = 1_000_000_000_000;
-            idle
-        }],
-    }];
+        let advertised = vec![arterm_peer::RemoteServerSummary {
+            name: "camp".to_string(),
+            icon: "⛺".to_string(),
+            version: "v0.10.16-dev".to_string(),
+            sessions: vec!["session_open".to_string(), "session_old".to_string()],
+            details: vec![summary("session_open"), {
+                let mut idle = summary("session_old");
+                idle.is_active = false;
+                idle.last_message_at_ms = 1_000_000_000_000;
+                idle
+            }],
+        }];
+        (prev_home, host, host_gate, advertised)
+    };
     let host_creds = arterm_peer::tls::PeerCredentials::from_identity(&host).expect("host creds");
     let bind: std::net::SocketAddr = "127.0.0.1:0".parse().expect("bind");
     let listener = arterm_peer::listen::PeerListener::bind_with_policy(
