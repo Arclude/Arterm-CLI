@@ -45,7 +45,7 @@ fn active_filter_includes_paired_device_sessions_without_local_presence() {
     let mut picker = SessionPicker::new(vec![remote, local]);
     picker.activate_active_filter();
     let visible: Vec<&str> = picker
-        .visible_session_iter()
+        .visible_session_iter_for_test()
         .map(|session| session.id.as_str())
         .collect();
     assert_eq!(visible, vec!["session_windows"]);
@@ -64,7 +64,7 @@ fn active_filter_includes_idle_live_remote_row() {
     let mut picker = SessionPicker::new(vec![remote]);
     picker.activate_active_filter();
     let visible: Vec<&str> = picker
-        .visible_session_iter()
+        .visible_session_iter_for_test()
         .map(|session| session.id.as_str())
         .collect();
     assert_eq!(visible, vec!["session_idle"]);
@@ -76,7 +76,7 @@ fn active_filter_hides_stale_paired_device_history() {
     let remote = remote_row("session_old", "192.168.1.108:7644", false, old_ms);
     let mut picker = SessionPicker::new(vec![remote]);
     picker.activate_active_filter();
-    assert!(picker.visible_session_iter().next().is_none());
+    assert!(picker.visible_session_iter_for_test().next().is_none());
 }
 
 #[test]

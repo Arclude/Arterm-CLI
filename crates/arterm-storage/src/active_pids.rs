@@ -151,14 +151,10 @@ fn process_is_running(pid: u32) -> bool {
     // here? Treating any non-zero pid as live left leftover files on
     // Windows looking like open chats, which then showed up as live on
     // a paired machine.
-    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-    const SYNCHRONIZE: u32 = 0x0010_0000;
-    const WAIT_TIMEOUT: u32 = 258;
-    extern "system" {
-        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
-        fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
-        fn WaitForSingleObject(handle: *mut std::ffi::c_void, millis: u32) -> u32;
-    }
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, SYNCHRONIZE, WaitForSingleObject,
+    };
     unsafe {
         let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
