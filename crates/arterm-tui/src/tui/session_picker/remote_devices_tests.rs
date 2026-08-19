@@ -42,6 +42,30 @@ fn an_idle_flag_leaves_last_active_at_empty() {
     assert!(info.last_active_at.is_none());
 }
 
+/// The public path: a peer's session list becomes picker rows, then the
+/// Active filter. A live flag survives an old last turn; a saved row
+/// without one does not.
+#[test]
+fn a_peer_list_feeds_the_active_filter() {
+    let live = session_info_from(&summary("ses_live"), "island");
+    let mut idle = summary("ses_old");
+    idle.is_active = false;
+    idle.last_message_at_ms = 1_000_000_000_000;
+    let idle = session_info_from(&idle, "island");
+
+    let mut picker = super::super::SessionPicker::new(vec![live, idle]);
+    picker.activate_active_filter();
+    let visible: Vec<&str> = picker
+        .visible_session_iter()
+        .map(|session| session.id.as_str())
+        .collect();
+    assert_eq!(visible, vec!["ses_live"]);
+    assert_eq!(
+        picker.remote_device_for_session("ses_live").as_deref(),
+        Some("island")
+    );
+}
+
 /// The device is the only thing telling two machines apart under one heading,
 /// so it has to be on the row itself.
 #[test]
