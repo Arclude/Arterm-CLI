@@ -36,3 +36,5 @@ impl Drop for EnvVarGuard {
 
 #[path = "cases.rs"]
 mod cases;
+#[path = "mark_active_persist.rs"]
+mod mark_active_persist;

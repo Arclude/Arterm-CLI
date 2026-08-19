@@ -573,11 +573,6 @@ impl SessionPicker {
         changed
     }
 
-    /// Whether the session has a live process right now.
-    pub(super) fn session_is_live(&self, session: &SessionInfo) -> bool {
-        self.live_presence.contains_key(&session.id)
-    }
-
     fn selected_live_claude_target(&self) -> Option<ResumeTarget> {
         let session = self.selected_session()?;
         if session.source != SessionSource::ClaudeCode || !self.session_is_live(session) {

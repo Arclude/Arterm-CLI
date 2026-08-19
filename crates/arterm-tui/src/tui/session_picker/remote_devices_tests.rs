@@ -25,6 +25,137 @@ fn summary(id: &str) -> RemoteSessionSummary {
     }
 }
 
+/// The peer's live flag is what the Active list reads. A current peer only
+/// sets it when a process is still running; the row must not invent one
+/// from recency on this side.
+#[test]
+fn an_active_flag_becomes_last_active_at() {
+    let info = session_info_from(&summary("ses_a"), "island");
+    assert!(info.last_active_at.is_some());
+}
+
+#[test]
+fn an_idle_flag_leaves_last_active_at_empty() {
+    let mut idle = summary("ses_b");
+    idle.is_active = false;
+    let info = session_info_from(&idle, "island");
+    assert!(info.last_active_at.is_none());
+}
+
+/// The public path: a peer's session list becomes picker rows, then the
+/// Active filter. A live flag survives an old last turn; a saved row
+/// without one does not.
+#[test]
+fn a_peer_list_feeds_the_active_filter() {
+    let live = session_info_from(&summary("ses_live"), "island");
+    let mut idle = summary("ses_old");
+    idle.is_active = false;
+    idle.last_message_at_ms = 1_000_000_000_000;
+    let idle = session_info_from(&idle, "island");
+
+    let mut picker = super::super::SessionPicker::new(vec![live, idle]);
+    picker.activate_active_filter();
+    let visible: Vec<&str> = picker
+        .visible_session_iter()
+        .map(|session| session.id.as_str())
+        .collect();
+    assert_eq!(visible, vec!["ses_live"]);
+    assert_eq!(
+        picker.remote_device_for_session("ses_live").as_deref(),
+        Some("island")
+    );
+}
+
+/// The left-arrow load path: this machine asks a paired listener the same
+/// way `/active` does, then filters to live rows. An open TUI stays; a
+/// saved one does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_feeds_the_active_filter_from_a_paired_listener() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (prev_home, host, host_gate, advertised) = {
+        let _guard = crate::storage::lock_test_env();
+        let prev_home = std::env::var_os("ARTERM_HOME");
+        crate::env::set_var("ARTERM_HOME", temp.path());
+
+        let host_dir = temp.path().join("host-device");
+        std::fs::create_dir_all(&host_dir).expect("host dir");
+        let host = arterm_device::DeviceIdentity::load_or_create_in(&host_dir).expect("host");
+        let guest = arterm_device::DeviceIdentity::load_or_create().expect("guest");
+        let host_gate = arterm_peer::gate::TrustGate::in_dir(&host_dir);
+        host_gate
+            .record_pairing(&guest.fingerprint(), "guest", None)
+            .expect("host trusts this machine");
+
+        let advertised = vec![arterm_peer::RemoteServerSummary {
+            name: "camp".to_string(),
+            icon: "⛺".to_string(),
+            version: "v0.10.16-dev".to_string(),
+            sessions: vec!["session_open".to_string(), "session_old".to_string()],
+            details: vec![summary("session_open"), {
+                let mut idle = summary("session_old");
+                idle.is_active = false;
+                idle.last_message_at_ms = 1_000_000_000_000;
+                idle
+            }],
+        }];
+        (prev_home, host, host_gate, advertised)
+    };
+    let host_creds = arterm_peer::tls::PeerCredentials::from_identity(&host).expect("host creds");
+    let bind: std::net::SocketAddr = "127.0.0.1:0".parse().expect("bind");
+    let listener = arterm_peer::listen::PeerListener::bind_with_policy(
+        bind,
+        &host_creds,
+        host_gate,
+        arterm_peer::subnet::SubnetPolicy::ThisMachine,
+    )
+    .await
+    .expect("bind")
+    .with_local_sessions(std::sync::Arc::new(move || advertised.clone()));
+    let addr = listener.local_addr();
+    let serving = tokio::spawn(async move {
+        match listener.accept().await.expect("accept") {
+            arterm_peer::listen::Arrival::Pending(pending) => listener
+                .admitter()
+                .establish(pending)
+                .await
+                .expect("establish"),
+            other => panic!("expected a pending peer, got {other:?}"),
+        }
+    });
+
+    let mut trust = arterm_device::TrustStore::load().expect("trust store");
+    trust
+        .trust(arterm_device::TrustedDevice {
+            fingerprint: host.fingerprint().to_hex(),
+            name: "island".to_string(),
+            address: Some(addr.to_string()),
+            paired_at: "now".to_string(),
+        })
+        .expect("pair island");
+
+    let group = fetch().await.expect("paired listener must contribute rows");
+    serving.abort();
+    assert_eq!(group.name, REMOTE_GROUP_NAME);
+
+    let mut picker = super::super::SessionPicker::new_grouped(vec![group], Vec::new());
+    picker.activate_active_filter();
+    let visible: Vec<&str> = picker
+        .visible_session_iter()
+        .map(|session| session.id.as_str())
+        .collect();
+    assert_eq!(visible, vec!["session_open"]);
+    assert_eq!(
+        picker.remote_device_for_session("session_open").as_deref(),
+        Some("island")
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("ARTERM_HOME", prev_home);
+    } else {
+        crate::env::remove_var("ARTERM_HOME");
+    }
+}
+
 /// The device is the only thing telling two machines apart under one heading,
 /// so it has to be on the row itself.
 #[test]

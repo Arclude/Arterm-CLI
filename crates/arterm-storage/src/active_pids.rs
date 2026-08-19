@@ -142,7 +142,32 @@ fn process_is_running(pid: u32) -> bool {
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn process_is_running(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    // Same question `kill(pid, 0)` asks on Unix: is this process still
+    // here? Treating any non-zero pid as live left leftover files on
+    // Windows looking like open chats, which then showed up as live on
+    // a paired machine.
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        ok != 0 && exit_code == STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn process_is_running(pid: u32) -> bool {
     // Best-effort fallback for platforms where this low-level storage crate does
     // not have a process API. The active PID file is still useful, and stale
@@ -274,6 +299,13 @@ mod tests {
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn process_is_running_sees_this_process_and_rejects_a_dead_pid() {
+        assert!(process_is_running(std::process::id()));
+        assert!(!process_is_running(0));
+        assert!(!process_is_running(999_999));
     }
 
     #[test]

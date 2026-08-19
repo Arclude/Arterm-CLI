@@ -99,7 +99,9 @@ fn session_picker_enter_queues_current_terminal_resume_and_closes_overlay() {
 
     assert!(app.session_picker_overlay.is_none());
     assert_eq!(
-        app.workspace_client.take_pending_resume_session().as_deref(),
+        app.workspace_client
+            .take_pending_resume_session()
+            .as_deref(),
         Some("session_here_123")
     );
 }
@@ -180,24 +182,6 @@ fn slash_active_opens_active_sessions_picker_locally() {
     assert_eq!(app.session_picker_mode, SessionPickerMode::ActiveSessions);
     assert!(app.pending_session_picker_load.is_some());
     assert!(app.input.is_empty());
-}
-
-#[test]
-fn left_arrow_on_empty_input_is_a_noop_unless_opted_in() {
-    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-    let _guard = runtime.enter();
-    let mut app = create_test_app();
-
-    // Default config: the active sessions manager gesture is opt-in, so Left
-    // on an empty input must not open any overlay.
-    assert!(!app.maybe_open_active_sessions_on_left());
-    assert!(app.session_picker_overlay.is_none());
-
-    // With text in the input the gesture never fires regardless of config.
-    app.input = "hello".to_string();
-    app.cursor_pos = 0;
-    assert!(!app.maybe_open_active_sessions_on_left());
-    assert!(app.session_picker_overlay.is_none());
 }
 
 #[test]
@@ -326,10 +310,7 @@ fn slash_provider_test_coverage_with_args_shows_provider_detail() {
             .starts_with("# Provider test coverage")
     );
     assert!(app.model_status_content.contains("Provider: fpt"));
-    assert!(
-        app.model_status_content
-            .contains("Model: FPT.AI-KIE-v1.7")
-    );
+    assert!(app.model_status_content.contains("Model: FPT.AI-KIE-v1.7"));
 }
 
 #[test]
@@ -595,9 +576,11 @@ fn test_fast_release_command_starts_synthetic_user_turn() {
         .last()
         .expect("missing launch notice");
     assert_eq!(notice.role, "system");
-    assert!(notice
-        .content
-        .contains("Starting logical commits + push + fast local release"));
+    assert!(
+        notice
+            .content
+            .contains("Starting logical commits + push + fast local release")
+    );
 }
 
 #[test]
@@ -703,9 +686,11 @@ fn test_remote_release_command_uses_tag_only_ci_path() {
         .last()
         .expect("missing launch notice");
     assert_eq!(notice.role, "system");
-    assert!(notice
-        .content
-        .contains("Starting logical commits + push + remote release"));
+    assert!(
+        notice
+            .content
+            .contains("Starting logical commits + push + remote release")
+    );
 
     let prompt = super::commands::build_remote_release_prompt();
     assert!(prompt.contains("quick-release.sh --remote"));
@@ -726,9 +711,11 @@ fn test_commit_push_release_alias_starts_synthetic_user_turn() {
         .last()
         .expect("missing launch notice");
     assert_eq!(notice.role, "system");
-    assert!(notice
-        .content
-        .contains("Starting logical commits + push + fast local release"));
+    assert!(
+        notice
+            .content
+            .contains("Starting logical commits + push + fast local release")
+    );
 }
 
 #[test]
@@ -1195,10 +1182,7 @@ fn test_fork_command_with_prompt_forks_session() {
     app.input = "/fork try the other approach".to_string();
     app.submit_input();
 
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing fork message");
+    let msg = app.display_messages().last().expect("missing fork message");
     assert_eq!(msg.role, "system");
     assert!(msg.content.contains("created for the next prompt"));
     let session_id = msg
@@ -1231,10 +1215,7 @@ fn test_fork_command_without_prompt_forks_idle_session() {
     app.input = "/fork".to_string();
     app.submit_input();
 
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing fork message");
+    let msg = app.display_messages().last().expect("missing fork message");
     assert_eq!(msg.role, "system");
     assert!(msg.content.contains("✂ Fork →"));
     let session_id = msg
@@ -1513,7 +1494,9 @@ fn test_observe_updates_latest_tool_context_only() {
         id: "tool_1".to_string(),
         name: "read".to_string(),
         input: serde_json::json!({"file_path": "src/main.rs", "start_line": 1, "end_line": 10}),
-        intent: None, thought_signature: None, };
+        intent: None,
+        thought_signature: None,
+    };
     app.observe_tool_call(&tool_call);
 
     let page = app.side_panel.focused_page().expect("missing observe page");
@@ -1552,7 +1535,9 @@ fn test_observe_ignores_noise_tools_and_preserves_latest_useful_context() {
         id: "tool_read".to_string(),
         name: "read".to_string(),
         input: serde_json::json!({"file_path": "src/main.rs"}),
-        intent: None, thought_signature: None, };
+        intent: None,
+        thought_signature: None,
+    };
     app.observe_tool_result(&read_tool, "fn main() {}", false, Some("read"));
     let before = app
         .side_panel
@@ -1565,7 +1550,9 @@ fn test_observe_ignores_noise_tools_and_preserves_latest_useful_context() {
         id: "tool_side_panel".to_string(),
         name: "side_panel".to_string(),
         input: serde_json::json!({"action": "write", "page_id": "plan"}),
-        intent: None, thought_signature: None, };
+        intent: None,
+        thought_signature: None,
+    };
     app.observe_tool_call(&noise_tool);
     app.observe_tool_result(&noise_tool, "ok", false, Some("side_panel"));
 

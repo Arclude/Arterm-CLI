@@ -16,7 +16,7 @@
 //! the registry), `arterm-session-aggregation` speaks
 //! [`crate::registry::ServerInfo`]. The CLI owns both, so the mapping is its job.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use arterm_device::{DeviceIdentity, Fingerprint, TrustStore, TrustedDevice};
@@ -49,10 +49,23 @@ pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
     let Ok((groups, orphans)) = crate::tui::session_picker::load_sessions_grouped() else {
         return Vec::new();
     };
+    // Live means a running process, the same signal the left-arrow Active
+    // list uses locally. A disk stamp or SessionStatus::Active is leftover
+    // from the last time the TUI opened, and would mark every saved
+    // session live on the other machine.
+    let live_ids = live_session_ids();
 
     let mut summaries: Vec<RemoteServerSummary> = groups
         .into_iter()
-        .map(|group| summary_from_sessions(group.name, group.icon, group.version, group.sessions))
+        .map(|group| {
+            summary_from_sessions(
+                group.name,
+                group.icon,
+                group.version,
+                group.sessions,
+                &live_ids,
+            )
+        })
         .collect();
 
     // Sessions whose server is no longer registered still live on disk and
@@ -64,16 +77,28 @@ pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
             "📁".to_string(),
             String::new(),
             orphans,
+            &live_ids,
         ));
     }
 
     summaries
 }
 
+/// Session ids with a live process on this machine.
+fn live_session_ids() -> HashSet<String> {
+    crate::session::user_session_presence()
+        .into_iter()
+        .map(|presence| presence.session_id)
+        .collect()
+}
+
 /// A local `SessionInfo` trimmed for the wire.
-fn session_summary_from(info: crate::tui::session_picker::SessionInfo) -> RemoteSessionSummary {
+fn session_summary_from(
+    info: crate::tui::session_picker::SessionInfo,
+    live_ids: &HashSet<String>,
+) -> RemoteSessionSummary {
     RemoteSessionSummary {
-        id: info.id,
+        id: info.id.clone(),
         short_name: info.short_name,
         icon: info.icon,
         title: info.title,
@@ -88,7 +113,7 @@ fn session_summary_from(info: crate::tui::session_picker::SessionInfo) -> Remote
         working_dir: info.working_dir,
         model: info.model,
         estimated_tokens: info.estimated_tokens,
-        is_active: info.last_active_at.is_some(),
+        is_active: live_ids.contains(&info.id),
     }
 }
 
@@ -201,9 +226,12 @@ fn summary_from_sessions(
     icon: String,
     version: String,
     sessions: Vec<crate::tui::session_picker::SessionInfo>,
+    live_ids: &HashSet<String>,
 ) -> RemoteServerSummary {
-    let details: Vec<RemoteSessionSummary> =
-        sessions.into_iter().map(session_summary_from).collect();
+    let details: Vec<RemoteSessionSummary> = sessions
+        .into_iter()
+        .map(|info| session_summary_from(info, live_ids))
+        .collect();
     RemoteServerSummary {
         name,
         icon,
@@ -223,5 +251,248 @@ fn server_info_from(summary: RemoteServerSummary) -> ServerInfo {
         version: summary.version,
         sessions: summary.sessions,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::SessionStatus;
+    use crate::tui::session_picker::{ResumeTarget, SessionInfo, SessionSource};
+    use chrono::Utc;
+
+    fn info(id: &str) -> SessionInfo {
+        SessionInfo {
+            id: id.to_string(),
+            parent_id: None,
+            short_name: "sauropod".to_string(),
+            icon: "s".to_string(),
+            title: "Windows chat".to_string(),
+            message_count: 2,
+            user_message_count: 1,
+            assistant_message_count: 1,
+            created_at: Utc::now(),
+            last_message_time: Utc::now(),
+            last_active_at: Some(Utc::now()),
+            working_dir: None,
+            model: None,
+            provider_key: None,
+            is_canary: false,
+            is_debug: false,
+            saved: false,
+            save_label: None,
+            status: SessionStatus::Active,
+            needs_catchup: false,
+            estimated_tokens: 0,
+            first_user_prompt: Some("hello".to_string()),
+            messages_preview: Vec::new(),
+            search_index: "sauropod".to_string(),
+            server_name: None,
+            server_icon: None,
+            source: SessionSource::Arterm,
+            resume_target: ResumeTarget::ArtermSession {
+                session_id: id.to_string(),
+            },
+            external_path: None,
+        }
+    }
+
+    #[test]
+    fn a_saved_session_is_not_live_without_a_running_process() {
+        let summary = session_summary_from(info("session_old"), &HashSet::new());
+        assert!(
+            !summary.is_active,
+            "a disk stamp or Active status is leftover, not live"
+        );
+    }
+
+    #[test]
+    fn a_running_process_is_the_live_flag() {
+        let live = HashSet::from(["session_open".to_string()]);
+        let summary = session_summary_from(info("session_open"), &live);
+        assert!(summary.is_active);
+    }
+
+    #[test]
+    fn local_session_summaries_mark_only_running_processes_live() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("ARTERM_HOME");
+        crate::env::set_var("ARTERM_HOME", temp.path());
+        crate::tui::session_picker::invalidate_session_list_cache();
+
+        let id = "session_fox_livewire".to_string();
+        let mut session = crate::session::Session::create_with_id(
+            id.clone(),
+            None,
+            Some("Open chat".to_string()),
+        );
+        session.add_message(
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "hello from this machine".to_string(),
+                cache_control: None,
+            }],
+        );
+        session.mark_active();
+
+        let summaries = local_session_summaries();
+        let open = summaries
+            .iter()
+            .flat_map(|server| server.details.iter())
+            .find(|row| row.id == id)
+            .expect("saved session must be listed");
+        assert!(
+            open.is_active,
+            "a TUI that just marked itself active must look live to a peer"
+        );
+
+        session.mark_closed();
+        crate::tui::session_picker::invalidate_session_list_cache();
+        let summaries = local_session_summaries();
+        let closed = summaries
+            .iter()
+            .flat_map(|server| server.details.iter())
+            .find(|row| row.id == id)
+            .expect("closed session still lists");
+        assert!(
+            !closed.is_active,
+            "closing the TUI must drop the live flag even if last_active_at stays on disk"
+        );
+
+        if let Some(prev_home) = prev_home {
+            crate::env::set_var("ARTERM_HOME", prev_home);
+        } else {
+            crate::env::remove_var("ARTERM_HOME");
+        }
+        crate::tui::session_picker::invalidate_session_list_cache();
+    }
+
+    /// The public listen path: the same function `arterm device listen` answers
+    /// with, over real TLS, then the same conversion the left-arrow Active
+    /// list uses. A live process stays live; a leftover disk stamp does not.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn device_listen_answers_with_live_flags_from_this_machine() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (prev_home, live_id, idle_id, snapshot) = {
+            let _guard = crate::storage::lock_test_env();
+            let prev_home = std::env::var_os("ARTERM_HOME");
+            crate::env::set_var("ARTERM_HOME", temp.path());
+            crate::tui::session_picker::invalidate_session_list_cache();
+
+            let live_id = "session_fox_listen".to_string();
+            let idle_id = "session_owl_saved".to_string();
+            let mut live = crate::session::Session::create_with_id(
+                live_id.clone(),
+                None,
+                Some("Open chat".to_string()),
+            );
+            live.add_message(
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "hello from this machine".to_string(),
+                    cache_control: None,
+                }],
+            );
+            live.mark_active();
+
+            let mut idle = crate::session::Session::create_with_id(
+                idle_id.clone(),
+                None,
+                Some("Saved chat".to_string()),
+            );
+            idle.add_message(
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "an old turn".to_string(),
+                    cache_control: None,
+                }],
+            );
+            idle.mark_active();
+            idle.mark_closed();
+            idle.save().expect("save closed session");
+            crate::tui::session_picker::invalidate_session_list_cache();
+            // Snapshot on this thread: `load_sessions_grouped` cannot block inside
+            // the current-thread runtime the listener task would otherwise use.
+            let snapshot = local_session_summaries();
+            (prev_home, live_id, idle_id, snapshot)
+        };
+
+        let host_dir = temp.path().join("host-device");
+        let guest_dir = temp.path().join("guest-device");
+        std::fs::create_dir_all(&host_dir).expect("host dir");
+        std::fs::create_dir_all(&guest_dir).expect("guest dir");
+        let host = arterm_device::DeviceIdentity::load_or_create_in(&host_dir).expect("host");
+        let guest = arterm_device::DeviceIdentity::load_or_create_in(&guest_dir).expect("guest");
+        let host_gate = arterm_peer::gate::TrustGate::in_dir(&host_dir);
+        let guest_gate = arterm_peer::gate::TrustGate::in_dir(&guest_dir);
+        host_gate
+            .record_pairing(&guest.fingerprint(), "guest", None)
+            .expect("host trusts guest");
+        guest_gate
+            .record_pairing(&host.fingerprint(), "host", None)
+            .expect("guest trusts host");
+
+        let host_creds =
+            arterm_peer::tls::PeerCredentials::from_identity(&host).expect("host creds");
+        let guest_creds =
+            arterm_peer::tls::PeerCredentials::from_identity(&guest).expect("guest creds");
+        let bind: std::net::SocketAddr = "127.0.0.1:0".parse().expect("bind");
+        let listener = arterm_peer::listen::PeerListener::bind_with_policy(
+            bind,
+            &host_creds,
+            host_gate,
+            arterm_peer::subnet::SubnetPolicy::ThisMachine,
+        )
+        .await
+        .expect("bind")
+        .with_local_sessions(std::sync::Arc::new(move || snapshot.clone()));
+        let addr = listener.local_addr();
+        let serving = tokio::spawn(async move {
+            match listener.accept().await.expect("accept") {
+                arterm_peer::listen::Arrival::Pending(pending) => listener
+                    .admitter()
+                    .establish(pending)
+                    .await
+                    .expect("establish"),
+                other => panic!("expected a pending peer, got {other:?}"),
+            }
+        });
+
+        let reported = list_peer_sessions(
+            &guest_creds,
+            &PeerTarget {
+                address: addr.to_string(),
+                fingerprint: host.fingerprint(),
+            },
+        )
+        .await
+        .expect("list sessions over TLS");
+        serving.abort();
+
+        let details: Vec<_> = reported
+            .iter()
+            .flat_map(|server| server.details.iter())
+            .collect();
+        let open = details
+            .iter()
+            .find(|row| row.id == live_id)
+            .expect("open session listed");
+        let saved = details
+            .iter()
+            .find(|row| row.id == idle_id)
+            .expect("saved session listed");
+        assert!(open.is_active, "listen must report the open TUI as live");
+        assert!(
+            !saved.is_active,
+            "listen must not report a closed session as live"
+        );
+
+        if let Some(prev_home) = prev_home {
+            crate::env::set_var("ARTERM_HOME", prev_home);
+        } else {
+            crate::env::remove_var("ARTERM_HOME");
+        }
+        crate::tui::session_picker::invalidate_session_list_cache();
     }
 }

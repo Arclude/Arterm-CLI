@@ -1041,14 +1041,9 @@ request in this new forked session, using the inherited conversation only as con
         self.status = SessionStatus::Error { message };
     }
 
-    /// Mark session as active (e.g., when resuming)
+    /// Mark session as active
     pub fn mark_active(&mut self) {
-        self.status = SessionStatus::Active;
-        let pid = std::process::id();
-        self.last_pid = Some(pid);
-        self.last_active_at = Some(Utc::now());
-        register_active_pid(&self.id, pid);
-        self.sync_internal_presence_flag();
+        self.mark_active_with_pid(std::process::id());
     }
 
     /// Mark session as active for a specific PID
@@ -1058,6 +1053,9 @@ request in this new forked session, using the inherited conversation only as con
         self.last_active_at = Some(Utc::now());
         register_active_pid(&self.id, pid);
         self.sync_internal_presence_flag();
+        if let Err(error) = self.save() {
+            crate::logging::warn(&format!("persist {} failed: {error:#}", self.id));
+        }
     }
 
     /// Keep the on-disk internal-session flag in sync with this session's
