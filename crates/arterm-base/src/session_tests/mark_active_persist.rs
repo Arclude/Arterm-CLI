@@ -24,4 +24,3 @@ fn mark_active_writes_last_active_at_to_disk() -> Result<()> {
     );
     Ok(())
 }
-

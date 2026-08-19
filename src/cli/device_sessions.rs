@@ -430,7 +430,8 @@ mod tests {
             .record_pairing(&host.fingerprint(), "host", None)
             .expect("guest trusts host");
 
-        let host_creds = arterm_peer::tls::PeerCredentials::from_identity(&host).expect("host creds");
+        let host_creds =
+            arterm_peer::tls::PeerCredentials::from_identity(&host).expect("host creds");
         let guest_creds =
             arterm_peer::tls::PeerCredentials::from_identity(&guest).expect("guest creds");
         let bind: std::net::SocketAddr = "127.0.0.1:0".parse().expect("bind");

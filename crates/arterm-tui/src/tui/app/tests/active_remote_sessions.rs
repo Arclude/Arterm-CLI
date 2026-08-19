@@ -408,4 +408,3 @@ fn active_picker_reseed_keeps_only_live_remote_rows() {
         Some("island")
     );
 }
-

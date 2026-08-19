@@ -31,7 +31,12 @@ fn remote_row(
 #[test]
 fn active_filter_includes_paired_device_sessions_without_local_presence() {
     let now_ms = Utc::now().timestamp_millis();
-    let remote = remote_row("session_windows", "192.168.1.108:7644", false, now_ms - 120_000);
+    let remote = remote_row(
+        "session_windows",
+        "192.168.1.108:7644",
+        false,
+        now_ms - 120_000,
+    );
     let local = {
         let mut row = remote_row("session_dead", "local", false, now_ms);
         row.server_name = None;

@@ -90,15 +90,12 @@ async fn fetch_feeds_the_active_filter_from_a_paired_listener() {
         icon: "⛺".to_string(),
         version: "v0.10.16-dev".to_string(),
         sessions: vec!["session_open".to_string(), "session_old".to_string()],
-        details: vec![
-            summary("session_open"),
-            {
-                let mut idle = summary("session_old");
-                idle.is_active = false;
-                idle.last_message_at_ms = 1_000_000_000_000;
-                idle
-            },
-        ],
+        details: vec![summary("session_open"), {
+            let mut idle = summary("session_old");
+            idle.is_active = false;
+            idle.last_message_at_ms = 1_000_000_000_000;
+            idle
+        }],
     }];
     let host_creds = arterm_peer::tls::PeerCredentials::from_identity(&host).expect("host creds");
     let bind: std::net::SocketAddr = "127.0.0.1:0".parse().expect("bind");
