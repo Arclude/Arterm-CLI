@@ -573,8 +573,17 @@ impl SessionPicker {
         changed
     }
 
-    /// Whether the session has a live process right now.
+    /// Whether the session is live right now.
+    ///
+    /// Local rows come from this machine's process registry. Rows from a
+    /// paired device cannot: that registry is local. A current peer sets
+    /// `last_active_at` only when a process is still running there. Older
+    /// peers leave it empty even while a TUI is open, so a recent last
+    /// turn is the fallback — not the whole saved history.
     pub(super) fn session_is_live(&self, session: &SessionInfo) -> bool {
+        if session.server_name.is_some() {
+            return remote_session_is_live(session);
+        }
         self.live_presence.contains_key(&session.id)
     }
 
@@ -2581,6 +2590,22 @@ pub fn pick_session() -> Result<Option<PickerResult>> {
 
     let picker = SessionPicker::new_grouped(server_groups, orphan_sessions);
     picker.run()
+}
+
+/// How recent a paired-device row must be to count as live when the peer
+/// did not send `is_active`.
+const REMOTE_LIVE_WINDOW: chrono::Duration = chrono::Duration::minutes(30);
+
+fn remote_session_is_live(session: &SessionInfo) -> bool {
+    // `last_active_at` here is the peer's live flag, not a recency stamp.
+    // A current peer only sets it when a process is still running, so an
+    // idle open TUI still counts. Recency is only for older peers that
+    // never set the flag.
+    if session.last_active_at.is_some() {
+        return true;
+    }
+    let now = chrono::Utc::now();
+    now.signed_duration_since(session.last_message_time) <= REMOTE_LIVE_WINDOW
 }
 
 #[cfg(test)]

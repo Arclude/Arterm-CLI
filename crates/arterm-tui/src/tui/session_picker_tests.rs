@@ -911,6 +911,81 @@ fn test_active_filter_shows_only_live_sessions_ready_before_working() {
 }
 
 #[test]
+fn active_filter_includes_paired_device_sessions_without_local_presence() {
+    let mut remote = make_session("session_windows", "sauropod", false, SessionStatus::Closed);
+    remote.server_name = Some("192.168.1.108:7644".to_string());
+    remote.last_active_at = None;
+    remote.last_message_time = Utc::now() - ChronoDuration::minutes(2);
+
+    let local_dead = make_session("session_dead", "dead", false, SessionStatus::Closed);
+    let mut picker = SessionPicker::new(vec![remote, local_dead]);
+    picker.activate_active_filter();
+
+    let visible: Vec<&str> = picker
+        .visible_session_iter()
+        .map(|session| session.id.as_str())
+        .collect();
+    assert_eq!(visible, vec!["session_windows"]);
+    assert_eq!(
+        picker
+            .remote_device_for_session("session_windows")
+            .as_deref(),
+        Some("192.168.1.108:7644")
+    );
+}
+
+#[test]
+fn active_filter_includes_idle_live_remote_row() {
+    let mut remote = make_session("session_idle", "island", false, SessionStatus::Closed);
+    remote.server_name = Some("island".to_string());
+    remote.last_active_at = Some(Utc::now());
+    remote.last_message_time = Utc::now() - ChronoDuration::hours(6);
+
+    let mut picker = SessionPicker::new(vec![remote]);
+    picker.activate_active_filter();
+    let visible: Vec<&str> = picker
+        .visible_session_iter()
+        .map(|session| session.id.as_str())
+        .collect();
+    assert_eq!(visible, vec!["session_idle"]);
+}
+
+#[test]
+fn active_filter_hides_stale_paired_device_history() {
+    let mut remote = make_session("session_old", "owl", false, SessionStatus::Closed);
+    remote.server_name = Some("192.168.1.108:7644".to_string());
+    remote.last_active_at = None;
+    remote.last_message_time = Utc::now() - ChronoDuration::hours(6);
+
+    let mut picker = SessionPicker::new(vec![remote]);
+    picker.activate_active_filter();
+    assert!(picker.visible_session_iter().next().is_none());
+}
+
+#[test]
+fn remote_device_for_session_reads_grouped_rows() {
+    let mut remote = make_session("session_windows", "sauropod", false, SessionStatus::Active);
+    remote.server_name = Some("island".to_string());
+    let picker = SessionPicker::new_grouped(
+        vec![ServerGroup {
+            name: "Remote devices".to_string(),
+            icon: "🖧".to_string(),
+            version: String::new(),
+            git_hash: String::new(),
+            is_running: true,
+            sessions: vec![remote],
+        }],
+        Vec::new(),
+    );
+    assert_eq!(
+        picker
+            .remote_device_for_session("session_windows")
+            .as_deref(),
+        Some("island")
+    );
+}
+
+#[test]
 fn test_active_rows_render_working_and_ready_badges() {
     let live_working = make_session("session_working", "alpha", false, SessionStatus::Active);
     let live_ready = make_session("session_ready", "beta", false, SessionStatus::Closed);

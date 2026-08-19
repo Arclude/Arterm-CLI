@@ -16,7 +16,7 @@
 //! the registry), `arterm-session-aggregation` speaks
 //! [`crate::registry::ServerInfo`]. The CLI owns both, so the mapping is its job.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use arterm_device::{DeviceIdentity, Fingerprint, TrustStore, TrustedDevice};
@@ -49,10 +49,23 @@ pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
     let Ok((groups, orphans)) = crate::tui::session_picker::load_sessions_grouped() else {
         return Vec::new();
     };
+    // Live means a running process, the same signal the left-arrow Active
+    // list uses locally. A disk stamp or SessionStatus::Active is leftover
+    // from the last time the TUI opened, and would mark every saved
+    // session live on the other machine.
+    let live_ids = live_session_ids();
 
     let mut summaries: Vec<RemoteServerSummary> = groups
         .into_iter()
-        .map(|group| summary_from_sessions(group.name, group.icon, group.version, group.sessions))
+        .map(|group| {
+            summary_from_sessions(
+                group.name,
+                group.icon,
+                group.version,
+                group.sessions,
+                &live_ids,
+            )
+        })
         .collect();
 
     // Sessions whose server is no longer registered still live on disk and
@@ -64,16 +77,28 @@ pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
             "📁".to_string(),
             String::new(),
             orphans,
+            &live_ids,
         ));
     }
 
     summaries
 }
 
+/// Session ids with a live process on this machine.
+fn live_session_ids() -> HashSet<String> {
+    crate::session::user_session_presence()
+        .into_iter()
+        .map(|presence| presence.session_id)
+        .collect()
+}
+
 /// A local `SessionInfo` trimmed for the wire.
-fn session_summary_from(info: crate::tui::session_picker::SessionInfo) -> RemoteSessionSummary {
+fn session_summary_from(
+    info: crate::tui::session_picker::SessionInfo,
+    live_ids: &HashSet<String>,
+) -> RemoteSessionSummary {
     RemoteSessionSummary {
-        id: info.id,
+        id: info.id.clone(),
         short_name: info.short_name,
         icon: info.icon,
         title: info.title,
@@ -88,7 +113,7 @@ fn session_summary_from(info: crate::tui::session_picker::SessionInfo) -> Remote
         working_dir: info.working_dir,
         model: info.model,
         estimated_tokens: info.estimated_tokens,
-        is_active: info.last_active_at.is_some(),
+        is_active: live_ids.contains(&info.id),
     }
 }
 
@@ -201,9 +226,12 @@ fn summary_from_sessions(
     icon: String,
     version: String,
     sessions: Vec<crate::tui::session_picker::SessionInfo>,
+    live_ids: &HashSet<String>,
 ) -> RemoteServerSummary {
-    let details: Vec<RemoteSessionSummary> =
-        sessions.into_iter().map(session_summary_from).collect();
+    let details: Vec<RemoteSessionSummary> = sessions
+        .into_iter()
+        .map(|info| session_summary_from(info, live_ids))
+        .collect();
     RemoteServerSummary {
         name,
         icon,
@@ -223,5 +251,65 @@ fn server_info_from(summary: RemoteServerSummary) -> ServerInfo {
         version: summary.version,
         sessions: summary.sessions,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::SessionStatus;
+    use crate::tui::session_picker::{ResumeTarget, SessionInfo, SessionSource};
+    use chrono::Utc;
+
+    fn info(id: &str) -> SessionInfo {
+        SessionInfo {
+            id: id.to_string(),
+            parent_id: None,
+            short_name: "sauropod".to_string(),
+            icon: "s".to_string(),
+            title: "Windows chat".to_string(),
+            message_count: 2,
+            user_message_count: 1,
+            assistant_message_count: 1,
+            created_at: Utc::now(),
+            last_message_time: Utc::now(),
+            last_active_at: Some(Utc::now()),
+            working_dir: None,
+            model: None,
+            provider_key: None,
+            is_canary: false,
+            is_debug: false,
+            saved: false,
+            save_label: None,
+            status: SessionStatus::Active,
+            needs_catchup: false,
+            estimated_tokens: 0,
+            first_user_prompt: Some("hello".to_string()),
+            messages_preview: Vec::new(),
+            search_index: "sauropod".to_string(),
+            server_name: None,
+            server_icon: None,
+            source: SessionSource::Arterm,
+            resume_target: ResumeTarget::ArtermSession {
+                session_id: id.to_string(),
+            },
+            external_path: None,
+        }
+    }
+
+    #[test]
+    fn a_saved_session_is_not_live_without_a_running_process() {
+        let summary = session_summary_from(info("session_old"), &HashSet::new());
+        assert!(
+            !summary.is_active,
+            "a disk stamp or Active status is leftover, not live"
+        );
+    }
+
+    #[test]
+    fn a_running_process_is_the_live_flag() {
+        let live = HashSet::from(["session_open".to_string()]);
+        let summary = session_summary_from(info("session_open"), &live);
+        assert!(summary.is_active);
     }
 }

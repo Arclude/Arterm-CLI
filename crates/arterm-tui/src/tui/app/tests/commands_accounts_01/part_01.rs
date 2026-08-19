@@ -105,6 +105,67 @@ fn session_picker_enter_queues_current_terminal_resume_and_closes_overlay() {
 }
 
 #[test]
+fn selecting_a_paired_device_row_does_not_resume_it_locally() {
+    let mut app = create_test_app();
+    app.session_picker_mode = SessionPickerMode::ActiveSessions;
+    let remote = crate::tui::session_picker::SessionInfo {
+        id: "session_windows".to_string(),
+        parent_id: None,
+        short_name: "sauropod".to_string(),
+        icon: "s".to_string(),
+        title: "Windows chat".to_string(),
+        message_count: 1,
+        user_message_count: 1,
+        assistant_message_count: 0,
+        created_at: chrono::Utc::now(),
+        last_message_time: chrono::Utc::now(),
+        last_active_at: Some(chrono::Utc::now()),
+        working_dir: None,
+        model: None,
+        provider_key: None,
+        is_canary: false,
+        is_debug: false,
+        saved: false,
+        save_label: None,
+        status: crate::session::SessionStatus::Active,
+        needs_catchup: false,
+        estimated_tokens: 0,
+        first_user_prompt: None,
+        messages_preview: Vec::new(),
+        search_index: "sauropod".to_string(),
+        server_name: Some("island".to_string()),
+        server_icon: None,
+        source: crate::tui::session_picker::SessionSource::Arterm,
+        resume_target: crate::tui::session_picker::ResumeTarget::ArtermSession {
+            session_id: "session_windows".to_string(),
+        },
+        external_path: None,
+    };
+    app.session_picker_overlay = Some(RefCell::new(
+        crate::tui::session_picker::SessionPicker::new(vec![remote]),
+    ));
+
+    app.handle_session_picker_key(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::empty(),
+    )
+    .expect("session picker enter should succeed");
+
+    assert!(
+        app.workspace_client.take_pending_resume_session().is_none(),
+        "a Windows row must not resume on this machine"
+    );
+    assert!(
+        app.workspace_client.take_pending_peer_switch().is_none(),
+        "an unpaired name cannot stand up a relay"
+    );
+    assert!(
+        app.session_picker_overlay.is_some(),
+        "the picker stays open so the user can pick something else"
+    );
+}
+
+#[test]
 fn slash_resume_opens_session_picker_overlay_locally() {
     let runtime = tokio::runtime::Runtime::new().expect("test runtime");
     let _guard = runtime.enter();

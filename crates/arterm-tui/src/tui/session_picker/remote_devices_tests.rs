@@ -25,6 +25,23 @@ fn summary(id: &str) -> RemoteSessionSummary {
     }
 }
 
+/// The peer's live flag is what the Active list reads. A current peer only
+/// sets it when a process is still running; the row must not invent one
+/// from recency on this side.
+#[test]
+fn an_active_flag_becomes_last_active_at() {
+    let info = session_info_from(&summary("ses_a"), "island");
+    assert!(info.last_active_at.is_some());
+}
+
+#[test]
+fn an_idle_flag_leaves_last_active_at_empty() {
+    let mut idle = summary("ses_b");
+    idle.is_active = false;
+    let info = session_info_from(&idle, "island");
+    assert!(info.last_active_at.is_none());
+}
+
 /// The device is the only thing telling two machines apart under one heading,
 /// so it has to be on the row itself.
 #[test]

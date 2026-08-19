@@ -1049,6 +1049,9 @@ request in this new forked session, using the inherited conversation only as con
         self.last_active_at = Some(Utc::now());
         register_active_pid(&self.id, pid);
         self.sync_internal_presence_flag();
+        // A peer lists this session from disk. If the stamp stays in memory
+        // only, the other machine never sees the TUI as live.
+        let _ = self.save();
     }
 
     /// Mark session as active for a specific PID
@@ -1058,6 +1061,7 @@ request in this new forked session, using the inherited conversation only as con
         self.last_active_at = Some(Utc::now());
         register_active_pid(&self.id, pid);
         self.sync_internal_presence_flag();
+        let _ = self.save();
     }
 
     /// Keep the on-disk internal-session flag in sync with this session's

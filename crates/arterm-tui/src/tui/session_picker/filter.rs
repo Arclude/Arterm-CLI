@@ -416,6 +416,8 @@ impl SessionPicker {
         self.all_server_groups
             .iter()
             .flat_map(|group| group.sessions.iter())
+            .chain(self.all_sessions.iter())
+            .chain(self.all_orphan_sessions.iter())
             .find(|session| session.id == session_id)
             .and_then(|session| session.server_name.clone())
     }
