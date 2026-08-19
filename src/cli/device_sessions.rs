@@ -488,7 +488,6 @@ mod tests {
             "listen must not report a closed session as live"
         );
 
-        live.mark_closed();
         if let Some(prev_home) = prev_home {
             crate::env::set_var("ARTERM_HOME", prev_home);
         } else {
