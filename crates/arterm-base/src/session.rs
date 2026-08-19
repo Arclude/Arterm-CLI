@@ -1043,15 +1043,7 @@ request in this new forked session, using the inherited conversation only as con
 
     /// Mark session as active (e.g., when resuming)
     pub fn mark_active(&mut self) {
-        self.status = SessionStatus::Active;
-        let pid = std::process::id();
-        self.last_pid = Some(pid);
-        self.last_active_at = Some(Utc::now());
-        register_active_pid(&self.id, pid);
-        self.sync_internal_presence_flag();
-        // A peer lists this session from disk. If the stamp stays in memory
-        // only, the other machine never sees the TUI as live.
-        let _ = self.save();
+        self.mark_active_with_pid(std::process::id());
     }
 
     /// Mark session as active for a specific PID

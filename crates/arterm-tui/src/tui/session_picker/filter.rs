@@ -2,6 +2,13 @@ use super::loading::session_matches_picker_query;
 use super::*;
 
 impl SessionPicker {
+    pub(super) fn session_is_live(&self, session: &SessionInfo) -> bool {
+        if session.server_name.is_some() {
+            return remote_session_is_live(session);
+        }
+        self.live_presence.contains_key(&session.id)
+    }
+
     fn normalized_search_query(query: &str) -> String {
         query.trim().to_lowercase()
     }
@@ -421,4 +428,11 @@ impl SessionPicker {
             .find(|session| session.id == session_id)
             .and_then(|session| session.server_name.clone())
     }
+}
+
+const REMOTE_LIVE_WINDOW: chrono::Duration = chrono::Duration::minutes(30);
+
+pub(super) fn remote_session_is_live(session: &SessionInfo) -> bool {
+    session.last_active_at.is_some()
+        || chrono::Utc::now().signed_duration_since(session.last_message_time) <= REMOTE_LIVE_WINDOW
 }

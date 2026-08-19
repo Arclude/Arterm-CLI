@@ -156,3 +156,7 @@ fn from_epoch_ms(ms: i64) -> DateTime<Utc> {
 #[cfg(test)]
 #[path = "remote_devices_tests.rs"]
 mod remote_devices_tests;
+
+#[cfg(test)]
+#[path = "../session_picker_remote_live_tests.rs"]
+mod remote_live_tests;

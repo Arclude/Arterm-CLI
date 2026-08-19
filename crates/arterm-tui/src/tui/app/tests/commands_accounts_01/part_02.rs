@@ -343,3 +343,5 @@ fn test_usage_enter_requests_report_with_inline_view() {
     );
     assert!(app.usage_report_refreshing);
 }
+
+include!("../active_remote_sessions.rs");
