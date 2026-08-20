@@ -7,6 +7,17 @@ fn desired_nofile_soft_limit_only_raises_when_possible() {
     assert_eq!(desired_nofile_soft_limit(1024, 4096, 8192), Some(4096));
 }
 
+#[test]
+fn client_cwd_is_absolute_on_unix_and_windows() {
+    assert!(super::client_cwd_is_absolute("/home/agent/project"));
+    assert!(super::client_cwd_is_absolute(r"C:\Users\agent\project"));
+    assert!(super::client_cwd_is_absolute("C:/Users/agent/project"));
+    assert!(super::client_cwd_is_absolute(r"\\server\share\project"));
+    assert!(!super::client_cwd_is_absolute("relative/project"));
+    assert!(!super::client_cwd_is_absolute("C:relative"));
+    assert!(!super::client_cwd_is_absolute(""));
+}
+
 #[cfg(unix)]
 #[test]
 fn spawn_detached_creates_new_session() {

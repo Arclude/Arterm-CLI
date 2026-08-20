@@ -133,13 +133,15 @@ impl SubnetPolicy {
 /// `192.168.1.100/24` on a real machine, purely because "C" sorts before "w" —
 /// and a peer on the LAN cannot reach a VPN's point-to-point address, so both
 /// `listen` and the address baked into `invite` pointed somewhere unreachable
-/// with no error anywhere. Every VPN client on the machine is a chance to lose
-/// that coin toss.
+/// with no error anywhere. Ranking private addresses equally then did the same
+/// with Docker: `br-*` `172.22.0.1/16` sorts before `wlan0` `192.168.1.100/24`,
+/// and a peer on the LAN cannot reach a container bridge. Tighter prefixes win
+/// among private addresses so the LAN `/24` beats the Docker `/16`.
 pub fn default_bind_ip() -> Result<IpAddr> {
     let interfaces =
         if_addrs::get_if_addrs().context("reading this machine's network interfaces")?;
 
-    let mut candidates: Vec<(u8, &str, Ipv4Addr)> = interfaces
+    let mut candidates: Vec<(u16, &str, Ipv4Addr)> = interfaces
         .iter()
         .filter_map(|interface| match &interface.addr {
             if_addrs::IfAddr::V4(v4) if is_bindable_v4(v4.ip) => {
@@ -168,13 +170,15 @@ pub fn default_bind_ip() -> Result<IpAddr> {
 /// A `/32` is a point-to-point address handed out by a VPN. It is reachable
 /// only through that tunnel, which is exactly not the local network two paired
 /// machines are looking for each other on, so it ranks below anything sitting
-/// on a real subnet. A private address on a real subnet is the LAN case this is
-/// for and ranks highest.
-fn bind_rank_v4(v4: &if_addrs::Ifv4Addr) -> u8 {
-    if v4.netmask == Ipv4Addr::new(255, 255, 255, 255) {
+/// on a real subnet. Among real subnets a private address beats a public one,
+/// and a tighter prefix beats a wider one: a LAN `/24` must outrank a Docker
+/// bridge `/16`, or interface-name order sends `listen` to `172.22.0.1`.
+fn bind_rank_v4(v4: &if_addrs::Ifv4Addr) -> u16 {
+    if v4.prefixlen >= 32 || v4.netmask == Ipv4Addr::new(255, 255, 255, 255) {
         return 0;
     }
-    if v4.ip.is_private() { 2 } else { 1 }
+    let class: u16 = if v4.ip.is_private() { 2 } else { 1 };
+    class * 256 + u16::from(v4.prefixlen)
 }
 
 /// Whether an address is worth binding a peer listener to.

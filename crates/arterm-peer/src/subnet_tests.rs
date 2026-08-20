@@ -193,6 +193,29 @@ fn a_private_subnet_outranks_a_public_one() {
     assert!(bind_rank_v4(&private) > bind_rank_v4(&public));
 }
 
+/// Docker and libvirt bridges sit in `172.16/12` as `/16`s. Rank 2 for every
+/// private address used to pick them over `wlan0` because `br-*` sorts first.
+#[test]
+fn a_lan_slash_24_outranks_a_docker_slash_16() {
+    let lan = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("192.168.1.100").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.255.255.0").expect("valid mask"),
+        prefixlen: 24,
+        broadcast: None,
+    };
+    let docker = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("172.22.0.1").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.255.0.0").expect("valid mask"),
+        prefixlen: 16,
+        broadcast: None,
+    };
+
+    assert!(
+        bind_rank_v4(&lan) > bind_rank_v4(&docker),
+        "a LAN /24 must outrank a container bridge /16, whatever the interfaces are called"
+    );
+}
+
 /// A machine with only a VPN still has to be able to listen somewhere: ranking
 /// last is not the same as being excluded.
 #[test]

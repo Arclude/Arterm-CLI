@@ -808,7 +808,7 @@ fn subscribe_request(working_dir: Option<&str>) -> Request {
 
 #[test]
 fn initial_subscribe_requires_an_absolute_client_working_dir() {
-    for invalid in [None, Some(""), Some("relative/project")] {
+    for invalid in [None, Some(""), Some("relative/project"), Some("C:relative")] {
         let error = initial_subscribe_working_dir(&subscribe_request(invalid))
             .expect_err("invalid client cwd must be rejected before session creation");
         assert!(error.contains("working_dir") || error.contains("working directory"));
@@ -819,6 +819,16 @@ fn initial_subscribe_requires_an_absolute_client_working_dir() {
         initial_subscribe_working_dir(&subscribe_request(absolute.to_str()))
             .expect("absolute client cwd"),
         absolute.to_string_lossy()
+    );
+    assert_eq!(
+        initial_subscribe_working_dir(&subscribe_request(Some(r"C:\Users\agent\project")))
+            .expect("windows client cwd is absolute on any host"),
+        r"C:\Users\agent\project"
+    );
+    assert_eq!(
+        initial_subscribe_working_dir(&subscribe_request(Some("/home/agent/project")))
+            .expect("unix client cwd is absolute on any host"),
+        "/home/agent/project"
     );
 
     let error = initial_subscribe_working_dir(&Request::GetState { id: 2 })

@@ -63,7 +63,6 @@ use anyhow::Result;
 use arterm_agent_runtime::{InterruptSignal, SoftInterruptSource, StreamError};
 use futures::FutureExt;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -82,7 +81,7 @@ fn required_subscribe_working_dir(working_dir: Option<&str>) -> std::result::Res
         .map(str::trim)
         .filter(|dir| !dir.is_empty())
         .ok_or_else(|| "Subscribe requires the client's working directory".to_string())?;
-    if !Path::new(working_dir).is_absolute() {
+    if !crate::platform::client_cwd_is_absolute(working_dir) {
         return Err("Subscribe working_dir must be an absolute path".to_string());
     }
     Ok(working_dir)
