@@ -1447,3 +1447,466 @@ async fn execute_file_field_and_path_field_scope_differently() {
         path_file.output
     );
 }
+
+/// Relative `ToolContext.working_dir` is not canonicalized. At OS open time the
+/// crate binds roots with `rg Command::current_dir(root)`, `WalkBuilder::new(root)`,
+/// and outline `root.join(file)`, so a relative working_dir is interpreted against
+/// the *process* cwd, not a frozen absolute session root.
+fn write_marker_tree(root: &Path, marker_fn: &str) {
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::write(
+        root.join("src/app.rs"),
+        format!("pub fn {marker_fn}() {{}}\nfn sibling_{marker_fn}() {{}}\n"),
+    )
+    .expect("app.rs");
+    fs::write(
+        root.join("src/other.rs"),
+        format!("pub fn other_{marker_fn}() {{}}\n"),
+    )
+    .expect("other.rs");
+}
+
+fn assert_modes_hit_marker(ctx: &ToolContext, marker: &str, decoy: &str) {
+    let tool = AgentGrepTool::new();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+
+    for (label, input) in [
+        (
+            "grep path omitted",
+            json!({"mode": "grep", "query": marker, "type": "rs", "max_regions": 8}),
+        ),
+        (
+            "grep path=src",
+            json!({"mode": "grep", "query": marker, "path": "src", "type": "rs", "max_regions": 8}),
+        ),
+        (
+            "find path omitted",
+            json!({"mode": "find", "query": "app", "max_files": 5}),
+        ),
+        (
+            "find path=src",
+            json!({"mode": "find", "query": "app", "path": "src", "max_files": 5}),
+        ),
+        (
+            "outline path omitted",
+            json!({"mode": "outline", "file": "src/app.rs"}),
+        ),
+        (
+            "outline path=src",
+            json!({"mode": "outline", "file": "app.rs", "path": "src"}),
+        ),
+        (
+            "trace path omitted",
+            json!({
+                "mode": "trace",
+                "terms": [format!("subject:{marker}"), "relation:implementation"],
+                "max_files": 3,
+                "max_regions": 3
+            }),
+        ),
+        (
+            "trace path=src",
+            json!({
+                "mode": "trace",
+                "terms": [format!("subject:{marker}"), "relation:implementation"],
+                "path": "src",
+                "max_files": 3,
+                "max_regions": 3
+            }),
+        ),
+    ] {
+        let out = rt
+            .block_on(tool.execute(input, ctx.clone()))
+            .unwrap_or_else(|err| panic!("{label} failed: {err}"));
+        assert!(
+            !out.output.contains(decoy),
+            "{label} leaked decoy marker: {}",
+            out.output
+        );
+        // find may rank by filename; outline/trace may only show structure. Accept
+        // either the marker body or the session file path, but never the decoy.
+        let ok = out.output.contains(marker)
+            || out.output.contains("app.rs")
+            || out.output.contains("src/");
+        assert!(ok, "{label} missed intended tree: {}", out.output);
+    }
+}
+
+#[test]
+fn relative_dot_working_dir_binds_to_process_cwd_all_modes() {
+    // working_dir="." means "process cwd now". Markers live only under the process
+    // cwd tree; a sibling decoy is not on the search root unless path resolution
+    // escapes (it must not).
+    let lock = process_cwd_lock();
+    let session = tempfile::tempdir().expect("session");
+    let decoy = tempfile::tempdir().expect("decoy");
+    write_marker_tree(session.path(), "session_dot_marker");
+    write_marker_tree(decoy.path(), "decoy_dot_marker");
+
+    let previous = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    std::env::set_current_dir(session.path()).expect("chdir session");
+    let _restore = scopeguard_cwd(previous, lock);
+
+    let mut ctx = test_ctx(Path::new("/unused"));
+    ctx.working_dir = Some(PathBuf::from("."));
+
+    // resolve_search_root keeps the relative literal.
+    assert_eq!(
+        resolve_search_root(&ctx, None).expect("root"),
+        PathBuf::from(".")
+    );
+    let grep_args = build_grep_args(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("session_dot_marker".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some("src".into()),
+            glob: None,
+            file_type: Some("rs".into()),
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: None,
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("args");
+    // base "." + "src" stays process-cwd-relative ("./src" or "src").
+    let root = PathBuf::from(grep_args.path.as_deref().expect("path"));
+    assert!(
+        !root.is_absolute(),
+        "path=src under working_dir=. must stay relative for OS open, got {root:?}"
+    );
+    assert!(
+        root.ends_with("src"),
+        "expected relative src root, got {root:?}"
+    );
+
+    // Direct crate call: relative root opens against process cwd.
+    let result = ::agentgrep::search::run_grep(
+        &root,
+        &GrepArgs {
+            query: "session_dot_marker".into(),
+            regex: false,
+            file_type: Some("rs".into()),
+            json: false,
+            paths_only: false,
+            hidden: false,
+            no_ignore: false,
+            path: grep_args.path.clone(),
+            glob: None,
+        },
+    )
+    .expect("run_grep relative");
+    assert!(
+        result.total_matches > 0,
+        "rg/WalkBuilder relative root must hit process cwd tree"
+    );
+    assert!(
+        result.root.contains("src"),
+        "GrepResult.root is root.display(), got {}",
+        result.root
+    );
+
+    assert_modes_hit_marker(&ctx, "session_dot_marker", "decoy_dot_marker");
+}
+
+#[test]
+fn relative_rel_proj_working_dir_binds_via_process_cwd_parent() {
+    // Layout:
+    //   parent/rel_proj/src  <- intended markers (working_dir = "rel_proj")
+    //   parent/src           <- decoy markers at process cwd
+    let lock = process_cwd_lock();
+    let parent = tempfile::tempdir().expect("parent");
+    let intended = parent.path().join("rel_proj");
+    write_marker_tree(&intended, "rel_proj_marker");
+    write_marker_tree(parent.path(), "decoy_parent_marker");
+
+    let previous = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    std::env::set_current_dir(parent.path()).expect("chdir parent");
+    let _restore = scopeguard_cwd(previous, lock);
+
+    let mut ctx = test_ctx(Path::new("/unused"));
+    ctx.working_dir = Some(PathBuf::from("rel_proj"));
+
+    assert_eq!(
+        resolve_search_root(&ctx, None).expect("root"),
+        PathBuf::from("rel_proj")
+    );
+    assert!(
+        resolve_search_root(&ctx, None)
+            .unwrap()
+            .join("src/app.rs")
+            .is_file(),
+        "outline-style root.join must open rel_proj via process cwd"
+    );
+
+    let grep_args = build_grep_args(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("rel_proj_marker".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some("src".into()),
+            glob: None,
+            file_type: Some("rs".into()),
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: None,
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("args");
+    let root = PathBuf::from(grep_args.path.as_deref().unwrap());
+    assert_eq!(root, PathBuf::from("rel_proj").join("src"));
+    assert!(!root.is_absolute());
+
+    let hit = ::agentgrep::search::run_grep(
+        &root,
+        &GrepArgs {
+            query: "rel_proj_marker".into(),
+            regex: false,
+            file_type: Some("rs".into()),
+            json: false,
+            paths_only: false,
+            hidden: false,
+            no_ignore: false,
+            path: grep_args.path.clone(),
+            glob: None,
+        },
+    )
+    .expect("grep rel_proj/src");
+    assert!(hit.total_matches > 0, "must find intended marker");
+    let miss = ::agentgrep::search::run_grep(
+        &root,
+        &GrepArgs {
+            query: "decoy_parent_marker".into(),
+            regex: false,
+            file_type: Some("rs".into()),
+            json: false,
+            paths_only: false,
+            hidden: false,
+            no_ignore: false,
+            path: grep_args.path.clone(),
+            glob: None,
+        },
+    )
+    .expect("grep decoy query");
+    assert_eq!(
+        miss.total_matches, 0,
+        "decoy at process cwd root must not be inside rel_proj/src"
+    );
+
+    assert_modes_hit_marker(&ctx, "rel_proj_marker", "decoy_parent_marker");
+}
+
+#[test]
+fn relative_rel_proj_working_dir_misses_when_process_cwd_is_elsewhere() {
+    // Session author meant intended/rel_proj, but stored the relative string
+    // "rel_proj" while the process cwd is a different decoy that also has rel_proj.
+    let lock = process_cwd_lock();
+    let intended_parent = tempfile::tempdir().expect("intended parent");
+    let decoy_parent = tempfile::tempdir().expect("decoy parent");
+    write_marker_tree(
+        &intended_parent.path().join("rel_proj"),
+        "intended_rel_marker",
+    );
+    write_marker_tree(&decoy_parent.path().join("rel_proj"), "decoy_rel_marker");
+    write_marker_tree(decoy_parent.path(), "decoy_cwd_marker");
+
+    let previous = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    std::env::set_current_dir(decoy_parent.path()).expect("chdir decoy");
+    let _restore = scopeguard_cwd(previous, lock);
+
+    let mut ctx = test_ctx(Path::new("/unused"));
+    ctx.working_dir = Some(PathBuf::from("rel_proj"));
+
+    let tool = AgentGrepTool::new();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+
+    for (label, input) in [
+        (
+            "grep omitted",
+            json!({"mode": "grep", "query": "marker", "type": "rs", "max_regions": 8}),
+        ),
+        (
+            "grep src",
+            json!({"mode": "grep", "query": "marker", "path": "src", "type": "rs", "max_regions": 8}),
+        ),
+        (
+            "find omitted",
+            json!({"mode": "find", "query": "app", "max_files": 5}),
+        ),
+        (
+            "outline",
+            json!({"mode": "outline", "file": "src/app.rs"}),
+        ),
+    ] {
+        let out = rt
+            .block_on(tool.execute(input, ctx.clone()))
+            .unwrap_or_else(|err| panic!("{label}: {err}"));
+        assert!(
+            out.output.contains("decoy_rel_marker")
+                || out.output.contains("app.rs")
+                || out.output.contains("decoy"),
+            "{label} should bind via process cwd decoy/rel_proj: {}",
+            out.output
+        );
+        assert!(
+            !out.output.contains("intended_rel_marker"),
+            "{label} must not reach the absolute intended tree when working_dir is relative: {}",
+            out.output
+        );
+    }
+}
+
+#[test]
+fn absolute_working_dir_with_dot_segment_keeps_display_in_grep_result_root() {
+    // working_dir="/abs/session/." is absolute, so resolve_path stays off process
+    // cwd, but neither wrapper nor crate strips the trailing "/." for GrepResult.root.
+    let lock = process_cwd_lock();
+    let session = tempfile::tempdir().expect("session");
+    let decoy = tempfile::tempdir().expect("decoy");
+    write_marker_tree(session.path(), "abs_dot_marker");
+    write_marker_tree(decoy.path(), "decoy_abs_marker");
+
+    let previous = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    std::env::set_current_dir(decoy.path()).expect("chdir decoy");
+    let _restore = scopeguard_cwd(previous, lock);
+
+    let dotted = session.path().join(".");
+    let mut ctx = test_ctx(Path::new("/unused"));
+    ctx.working_dir = Some(dotted.clone());
+
+    let omitted_root = resolve_search_root(&ctx, None).expect("root");
+    assert_eq!(omitted_root, dotted);
+    assert!(
+        omitted_root.as_os_str().to_string_lossy().ends_with(".")
+            || omitted_root.ends_with("."),
+        "trailing /. must not be stripped by resolve_search_root: {omitted_root:?}"
+    );
+
+    let grep_args = build_grep_args(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("abs_dot_marker".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some("src".into()),
+            glob: None,
+            file_type: Some("rs".into()),
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: None,
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("args");
+    let root_str = grep_args.path.clone().expect("path");
+    // display keeps the "/." join form (…/./src), not a cleaned canonical path.
+    assert!(
+        root_str.contains(".") || PathBuf::from(&root_str).components().any(|c| matches!(c, std::path::Component::CurDir)),
+        "joined root should retain CurDir segment from working_dir=/abs/.: {root_str}"
+    );
+
+    let result = ::agentgrep::search::run_grep(
+        Path::new(&root_str),
+        &GrepArgs {
+            query: "abs_dot_marker".into(),
+            regex: false,
+            file_type: Some("rs".into()),
+            json: false,
+            paths_only: false,
+            hidden: false,
+            no_ignore: false,
+            path: Some(root_str.clone()),
+            glob: None,
+        },
+    )
+    .expect("grep abs/.");
+    assert!(result.total_matches > 0, "absolute /. root must still open");
+    assert_eq!(
+        result.root, root_str,
+        "GrepResult.root is root.display() with no strip/canonicalize"
+    );
+    assert!(
+        !result.root.contains(decoy.path().to_string_lossy().as_ref()),
+        "must not bind to process cwd decoy"
+    );
+
+    // Tool path also finds the session marker, not the decoy.
+    let out = execute_linked_agentgrep(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("abs_dot_marker".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some("src".into()),
+            glob: None,
+            file_type: Some("rs".into()),
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: Some(8),
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+        None,
+    )
+    .expect("tool grep");
+    assert!(out.output.contains("abs_dot_marker"), "{}", out.output);
+    assert!(!out.output.contains("decoy_abs_marker"), "{}", out.output);
+}
+
+/// Restore process cwd when the owning test ends (including on panic).
+fn scopeguard_cwd(
+    previous: PathBuf,
+    lock: std::sync::MutexGuard<'static, ()>,
+) -> CwdRestore {
+    CwdRestore { previous, _lock: lock }
+}
+
+struct CwdRestore {
+    previous: PathBuf,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for CwdRestore {
+    fn drop(&mut self) {
+        let fallback = PathBuf::from("/");
+        let target = if self.previous.exists() {
+            self.previous.as_path()
+        } else {
+            fallback.as_path()
+        };
+        let _ = std::env::set_current_dir(target);
+    }
+}
