@@ -182,11 +182,15 @@ impl PeerAdmitter {
         // port is the guess. Either way the value is advisory — the fingerprint
         // is the identity, and a stale address means "try elsewhere", never
         // "different device".
-        let advertised = Some(format!(
-            "{}:{}",
-            peer_addr.ip(),
-            hello.listen_port().unwrap_or(crate::DEFAULT_PEER_PORT)
-        ));
+        //
+        // Format via SocketAddr so IPv6 is bracketed (`[::1]:7644`). A bare
+        // `::1:7644` is ambiguous as host:port and is not what invite/join
+        // advertise or what dial's lookup_host path is written against.
+        let advertised = {
+            let mut remembered = peer_addr;
+            remembered.set_port(hello.listen_port().unwrap_or(crate::DEFAULT_PEER_PORT));
+            Some(remembered.to_string())
+        };
 
         match admission {
             Admission::Trusted(device) => {
