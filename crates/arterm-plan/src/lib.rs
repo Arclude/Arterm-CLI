@@ -4,9 +4,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 /// Hard upper bound for one swarm's durable plan graph. A plan is coordination
 /// state, not an append-only activity log; without a bound, repeated seed,
 /// expand, inject, and approve calls can retain and broadcast thousands of
-/// stale nodes forever. This is four times the live swarm-member cap and well
-/// above normal deep graphs while bounding server, disk, and per-client state.
-pub const MAX_PLAN_ITEMS: usize = 1024;
+/// stale nodes forever. Deep residual cascades (peer/bind/IPv6 audits) routinely
+/// exceed 1k nodes; 2048 is eight times the live swarm-member cap and still
+/// bounds server, disk, and per-client state.
+pub const MAX_PLAN_ITEMS: usize = 2048;
 
 pub mod bridge;
 pub mod dag;
