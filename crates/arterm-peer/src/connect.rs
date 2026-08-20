@@ -26,7 +26,12 @@ use crate::subnet;
 use crate::tls::{PeerCredentials, client_config};
 
 /// How long the far end gets to answer before this is called unreachable.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+///
+/// Applied once per chosen address for the TCP connect, the TLS handshake, and
+/// the first protocol line. There is no second try on another candidate: when
+/// the first local address refuses or this budget elapses, the dial fails even
+/// if a later DNS result would have worked (see [`first_local_candidate`]).
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The device to reach, and the certificate that will prove it is that device.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -263,10 +268,7 @@ async fn dial(
     let config = client_config(credentials, target.fingerprint.clone())?;
     let connector = TlsConnector::from(Arc::new(config));
 
-    let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
-        .await
-        .with_context(|| format!("connecting to {peer_addr} timed out"))?
-        .with_context(|| format!("connecting to {peer_addr}"))?;
+    let tcp = connect_tcp(peer_addr).await?;
 
     // The certificate names the machine, not the address, and the verifier
     // ignores this value entirely — the fingerprint is the check. It is
@@ -282,6 +284,35 @@ async fn dial(
             )
         })?;
     Ok((stream, peer_addr))
+}
+
+/// Single TCP connect to one already-chosen address under [`CONNECT_TIMEOUT`].
+///
+/// No Happy Eyeballs and no walk of remaining DNS results: a refuse or timeout
+/// here is terminal for the dial, matching production `dial`.
+pub(crate) async fn connect_tcp(peer_addr: SocketAddr) -> Result<TcpStream> {
+    timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
+        .await
+        .with_context(|| format!("connecting to {peer_addr} timed out"))?
+        .with_context(|| format!("connecting to {peer_addr}"))
+}
+
+/// First DNS/lookup candidate that sits on one of `networks`.
+///
+/// **First-local-candidate-wins:** candidates are scanned in the order the
+/// resolver returned them. The first address that passes [`subnet::is_local_peer`]
+/// is the only one dialled. A later A/AAAA that would actually reach the peer is
+/// never tried, even when the winner refuses or times out under
+/// [`CONNECT_TIMEOUT`]. That is the dual-stack multihome failure mode when a
+/// peer publishes both a LAN A and a GUA AAAA but listens only on IPv4.
+pub(crate) fn first_local_candidate(
+    candidates: &[SocketAddr],
+    networks: &[subnet::LocalNetwork],
+) -> Option<SocketAddr> {
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| subnet::is_local_peer(networks, candidate.ip()))
 }
 
 /// Resolve `address` and keep only a destination on this machine's network.
@@ -300,17 +331,18 @@ async fn resolve_local_address(address: &str) -> Result<SocketAddr> {
     }
 
     let networks = subnet::local_networks()?;
-    match candidates
-        .iter()
-        .find(|candidate| subnet::is_local_peer(&networks, candidate.ip()))
-    {
-        Some(local) => Ok(*local),
+    match first_local_candidate(&candidates, &networks) {
+        Some(local) => Ok(local),
         None => anyhow::bail!(
             "{address} is not on any network this machine is on — peer sessions are restricted \
              to the local network, so connect both machines to the same one"
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "connect_tests.rs"]
+mod connect_tests;
 
 /// Splice one already-accepted local stream onto a fresh link to the peer.
 ///
