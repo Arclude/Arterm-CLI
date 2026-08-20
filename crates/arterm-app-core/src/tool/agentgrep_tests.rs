@@ -1,6 +1,17 @@
 use super::*;
 use chrono::Duration;
 use std::fs;
+use std::sync::{Mutex, OnceLock};
+
+/// `std::env::set_current_dir` is process-global. Serialize the tests that
+/// deliberately point process cwd at a decoy tree so parallel libtest workers
+/// cannot stomp each other mid-assertion.
+fn process_cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn test_ctx(root: &Path) -> ToolContext {
     ToolContext {
@@ -977,5 +988,462 @@ fn grep_defaults_to_a_bounded_match_count() {
          of {} would clip",
         result.total_matches,
         DEFAULT_GREP_MAX_REGIONS
+    );
+}
+
+/// RAII restore for process cwd. Dropping always chdirs back so a panic cannot
+/// strand later tests on a deleted tempfile path.
+struct CwdGuard {
+    previous: PathBuf,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl CwdGuard {
+    fn chdir_to(decoy: &Path) -> Self {
+        let lock = process_cwd_lock();
+        // If a prior test left us on a deleted path, jump to a stable root first.
+        let previous = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        std::env::set_current_dir(decoy).expect("chdir to decoy");
+        Self {
+            previous,
+            _lock: lock,
+        }
+    }
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let fallback = PathBuf::from("/");
+        let target = if self.previous.exists() {
+            self.previous.as_path()
+        } else {
+            fallback.as_path()
+        };
+        let _ = std::env::set_current_dir(target);
+    }
+}
+
+/// Build a session tree under `session` and a decoy tree under `decoy`, then
+/// point process cwd at the decoy so relative paths must resolve via
+/// `ToolContext.working_dir` rather than the server process cwd.
+fn session_and_decoy_trees() -> (tempfile::TempDir, tempfile::TempDir, CwdGuard) {
+    let session = tempfile::tempdir().expect("session tempdir");
+    let decoy = tempfile::tempdir().expect("decoy tempdir");
+
+    fs::create_dir_all(session.path().join("src")).expect("session src");
+    fs::write(
+        session.path().join("src/app.rs"),
+        "pub fn session_marker() {}\nfn sibling_only_in_session() {}\n",
+    )
+    .expect("session file");
+    fs::write(
+        session.path().join("src/other.rs"),
+        "pub fn other_marker() {}\n",
+    )
+    .expect("session sibling");
+
+    fs::create_dir_all(decoy.path().join("src")).expect("decoy src");
+    fs::write(
+        decoy.path().join("src/app.rs"),
+        "pub fn decoy_marker() { panic!(\"process-cwd leak\") }\n",
+    )
+    .expect("decoy file");
+
+    let guard = CwdGuard::chdir_to(decoy.path());
+    (session, decoy, guard)
+}
+
+#[test]
+fn resolve_path_arg_joins_relative_paths_to_session_working_dir_not_process_cwd() {
+    let (session, _decoy, _cwd) = session_and_decoy_trees();
+    let ctx = test_ctx(session.path());
+
+    let resolved = resolve_path_arg(&ctx, "src/app.rs");
+    assert_eq!(resolved, session.path().join("src/app.rs"));
+    assert!(
+        resolved.is_file(),
+        "relative path must hit the session tree even when process cwd is the decoy"
+    );
+
+    // Empty string is still "relative": join(base, "") == base.
+    let empty = resolve_path_arg(&ctx, "");
+    assert_eq!(empty, session.path());
+}
+
+#[test]
+fn build_args_resolve_relative_path_roots_against_session_working_dir() {
+    let (session, _decoy, _cwd) = session_and_decoy_trees();
+    let ctx = test_ctx(session.path());
+    let expected_src = session.path().join("src").display().to_string();
+
+    let grep = build_grep_args(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("session_marker".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some("src".into()),
+            glob: None,
+            file_type: Some("rs".into()),
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: None,
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("grep args");
+    assert_eq!(grep.path.as_deref(), Some(expected_src.as_str()));
+
+    let find = build_find_args(
+        &AgentGrepInput {
+            mode: "find".into(),
+            query: Some("app".into()),
+            file: None,
+            terms: None,
+            regex: None,
+            path: Some("src".into()),
+            glob: None,
+            file_type: None,
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: None,
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("find args");
+    assert_eq!(find.path.as_deref(), Some(expected_src.as_str()));
+
+    let (smart, _) = build_smart_args_and_query(
+        &AgentGrepInput {
+            mode: "trace".into(),
+            query: None,
+            file: None,
+            terms: Some(vec![
+                "subject:session_marker".into(),
+                "relation:implementation".into(),
+            ]),
+            regex: None,
+            path: Some("src".into()),
+            glob: None,
+            file_type: None,
+            hidden: None,
+            no_ignore: None,
+            max_files: Some(2),
+            max_regions: Some(2),
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+        None,
+    )
+    .expect("trace args");
+    assert_eq!(smart.path.as_deref(), Some(expected_src.as_str()));
+
+    // path="" is relative and resolves to the session root (not process cwd).
+    let empty_path = build_grep_args(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("session_marker".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some(String::new()),
+            glob: None,
+            file_type: None,
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: None,
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("empty path grep args");
+    // PathBuf::join(base, "") keeps a trailing separator on Unix; compare as paths.
+    let empty_resolved = PathBuf::from(empty_path.path.expect("empty path root"));
+    assert_eq!(
+        empty_resolved,
+        session.path(),
+        "path=\"\" must resolve to the session root, not process cwd"
+    );
+}
+
+#[test]
+fn outline_relative_file_is_joined_to_session_root_not_process_cwd() {
+    let (session, _decoy, _cwd) = session_and_decoy_trees();
+    let ctx = test_ctx(session.path());
+
+    // build_outline_args keeps a relative `file` literal; run_outline joins it
+    // onto resolve_search_root(...), which must be the session working_dir.
+    let params = AgentGrepInput {
+        mode: "outline".into(),
+        query: None,
+        file: Some("src/app.rs".into()),
+        terms: None,
+        regex: None,
+        path: None,
+        glob: None,
+        file_type: None,
+        hidden: None,
+        no_ignore: None,
+        max_files: None,
+        max_regions: None,
+        full_region: None,
+        debug_plan: None,
+        debug_score: None,
+        paths_only: None,
+    };
+    let args = build_outline_args(&params, &ctx, None).expect("outline args");
+    assert_eq!(args.file, "src/app.rs");
+    assert_eq!(args.path, None);
+
+    let root = resolve_search_root(&ctx, args.path.as_deref()).expect("outline root");
+    assert_eq!(root, session.path());
+    let joined = root.join(&args.file);
+    assert_eq!(joined, session.path().join("src/app.rs"));
+    assert!(joined.is_file());
+
+    let output = execute_linked_agentgrep(&params, &ctx, None).expect("outline execute");
+    assert!(
+        output.output.contains("session_marker") || output.output.contains("app.rs"),
+        "outline must read the session file, got: {}",
+        output.output
+    );
+    assert!(
+        !output.output.contains("decoy_marker"),
+        "outline must not read the process-cwd decoy: {}",
+        output.output
+    );
+}
+
+#[test]
+fn missing_working_dir_allows_absolute_path_and_file_execute() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(temp.path().join("src")).expect("mkdir");
+    let absolute = temp.path().join("src/app.rs");
+    fs::write(&absolute, "pub fn absolute_only() {}\n").expect("write");
+
+    let mut ctx = test_ctx(Path::new("/unused"));
+    ctx.working_dir = None;
+
+    // Relative path without a session cwd must still fail.
+    let relative_err = run_agentgrep_blocking(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("absolute_only".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some("src".into()),
+            glob: None,
+            file_type: None,
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: None,
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect_err("relative path without working_dir must fail");
+    assert!(
+        relative_err
+            .to_string()
+            .contains("session working directory"),
+        "{relative_err}"
+    );
+
+    let via_path = run_agentgrep_blocking(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("absolute_only".into()),
+            file: None,
+            terms: None,
+            regex: Some(false),
+            path: Some(absolute.display().to_string()),
+            glob: None,
+            file_type: None,
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: Some(5),
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("absolute path without working_dir");
+    assert!(
+        via_path.output.contains("absolute_only"),
+        "{}",
+        via_path.output
+    );
+
+    let via_file = run_agentgrep_blocking(
+        &AgentGrepInput {
+            mode: "grep".into(),
+            query: Some("absolute_only".into()),
+            file: Some(absolute.display().to_string()),
+            terms: None,
+            regex: Some(false),
+            path: None,
+            glob: None,
+            file_type: None,
+            hidden: None,
+            no_ignore: None,
+            max_files: None,
+            max_regions: Some(5),
+            full_region: None,
+            debug_plan: None,
+            debug_score: None,
+            paths_only: None,
+        },
+        &ctx,
+    )
+    .expect("absolute file without working_dir");
+    assert!(
+        via_file.output.contains("absolute_only"),
+        "{}",
+        via_file.output
+    );
+}
+
+#[tokio::test]
+async fn execute_modes_honor_session_working_dir_when_process_cwd_differs() {
+    let (session, _decoy, _cwd) = session_and_decoy_trees();
+    let ctx = test_ctx(session.path());
+    let tool = AgentGrepTool::new();
+
+    let grep = tool
+        .execute(
+            json!({"mode": "grep", "query": "session_marker", "path": "src", "type": "rs"}),
+            ctx.clone(),
+        )
+        .await
+        .expect("grep");
+    assert!(grep.output.contains("session_marker"), "{}", grep.output);
+    assert!(!grep.output.contains("decoy_marker"), "{}", grep.output);
+
+    let find = tool
+        .execute(
+            json!({"mode": "find", "query": "app", "path": "src"}),
+            ctx.clone(),
+        )
+        .await
+        .expect("find");
+    assert!(
+        find.output.contains("app.rs") || find.output.to_lowercase().contains("app"),
+        "{}",
+        find.output
+    );
+    assert!(!find.output.contains("decoy_marker"), "{}", find.output);
+
+    let outline = tool
+        .execute(
+            json!({"mode": "outline", "file": "src/app.rs"}),
+            ctx.clone(),
+        )
+        .await
+        .expect("outline");
+    assert!(
+        outline.output.contains("session_marker") || outline.output.contains("app.rs"),
+        "{}",
+        outline.output
+    );
+    assert!(!outline.output.contains("decoy_marker"), "{}", outline.output);
+
+    let trace = tool
+        .execute(
+            json!({
+                "mode": "trace",
+                "terms": ["subject:session_marker", "relation:implementation"],
+                "path": "src",
+                "max_files": 2,
+                "max_regions": 2
+            }),
+            ctx,
+        )
+        .await
+        .expect("trace");
+    assert!(
+        !trace.output.contains("decoy_marker"),
+        "trace must not hit process cwd: {}",
+        trace.output
+    );
+}
+
+#[tokio::test]
+async fn execute_file_field_and_path_field_scope_differently() {
+    let (session, _decoy, _cwd) = session_and_decoy_trees();
+    let ctx = test_ctx(session.path());
+    let tool = AgentGrepTool::new();
+
+    // file= scopes to one exact file (sibling must not match).
+    let file_scoped = tool
+        .execute(
+            json!({"mode": "grep", "query": "marker", "file": "src/app.rs"}),
+            ctx.clone(),
+        )
+        .await
+        .expect("file-scoped grep");
+    assert!(
+        file_scoped.output.contains("app.rs"),
+        "{}",
+        file_scoped.output
+    );
+    assert!(
+        !file_scoped.output.contains("other.rs"),
+        "file= must not scan siblings: {}",
+        file_scoped.output
+    );
+
+    // path= directory scopes to the directory (both files may match).
+    let path_scoped = tool
+        .execute(
+            json!({"mode": "grep", "query": "marker", "path": "src"}),
+            ctx.clone(),
+        )
+        .await
+        .expect("path-scoped grep");
+    assert!(
+        path_scoped.output.contains("app.rs") || path_scoped.output.contains("other.rs"),
+        "{}",
+        path_scoped.output
+    );
+
+    // path= file scopes like an exact file via parent+glob + retain filter.
+    let path_file = tool
+        .execute(
+            json!({"mode": "grep", "query": "marker", "path": "src/app.rs"}),
+            ctx,
+        )
+        .await
+        .expect("path-as-file grep");
+    assert!(path_file.output.contains("app.rs"), "{}", path_file.output);
+    assert!(
+        !path_file.output.contains("other.rs"),
+        "path=file must not scan siblings: {}",
+        path_file.output
     );
 }
