@@ -10,9 +10,9 @@
 //! pick the first `is_local_peer` match and dial that single address under
 //! [`super::CONNECT_TIMEOUT`] with no fallback.
 
-use super::{CONNECT_TIMEOUT, connect_tcp, first_local_candidate};
+use super::{CONNECT_TIMEOUT, connect_tcp, first_local_candidate, resolve_local_address};
 use crate::subnet::{self, LocalNetwork, is_local_peer};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -600,6 +600,260 @@ async fn case4_working_v4_wins_over_correct_scoped_fe80_by_order_and_connects() 
             );
         }
         _ => unreachable!(),
+    }
+}
+
+/// Live case 5 (string-layer gap): producer path
+/// `advertised = set_port(...).to_string()` (listen.rs) must rehydrate through
+/// `lookup_host` / `resolve_local_address` with the same ip+scope_id+port, then
+/// `connect_tcp` must reach a listener on that scoped addr. Unscoped / scope-0
+/// Display of the same ip must not count as equivalent success.
+#[tokio::test]
+async fn case5_advertised_display_string_lookup_rehydrates_scope_and_connects() {
+    let Some((ll_ip, ifindex, _lan_v4, _networks)) = live_ll_and_v4() else {
+        eprintln!("skip case5 string dial: no scoped fe80 topology");
+        return;
+    };
+
+    // Bind first so the free port is real; then rebuild the producer string the
+    // same way listen.rs:192-195 does (set_port on a full SocketAddr, Display).
+    let bind = SocketAddr::V6(SocketAddrV6::new(ll_ip, 0, 0, ifindex));
+    let listener = TcpListener::bind(bind)
+        .await
+        .expect("bind scoped fe80 for advertised-string case");
+    let ll_addr = listener.local_addr().expect("ll local_addr");
+    let port = ll_addr.port();
+    match ll_addr {
+        SocketAddr::V6(v6) => {
+            assert_eq!(v6.ip(), &ll_ip);
+            assert_eq!(v6.scope_id(), ifindex, "listener must keep correct ifindex");
+        }
+        other => panic!("expected V6 listener, got {other}"),
+    }
+
+    // Mirror listen.rs advertised formatting exactly:
+    //   let mut remembered = peer_addr;
+    //   remembered.set_port(hello.listen_port().unwrap_or(DEFAULT));
+    //   remembered.to_string()
+    let mut remembered = SocketAddr::V6(SocketAddrV6::new(ll_ip, 9, 0, ifindex));
+    remembered.set_port(port);
+    assert!(
+        matches!(remembered, SocketAddr::V6(v6) if v6.scope_id() == ifindex),
+        "set_port must retain scope_id={ifindex}, got {remembered}"
+    );
+    let advertised = remembered.to_string();
+    eprintln!("case5 advertised (producer Display) = {advertised:?}");
+    assert!(
+        advertised.contains('%'),
+        "Linux producer Display must embed zone/scope, got {advertised}"
+    );
+    assert!(
+        advertised.starts_with('[') && advertised.contains("]:"),
+        "producer Display must be bracketed V6 socket form, got {advertised}"
+    );
+
+    // Unscoped / scope-0 controls of the same ip:port — must not be treated as
+    // equivalent success if connect fails or scope rehydrates as 0.
+    let unscoped_display = format!("[{ll_ip}]:{port}");
+    let scope0 = SocketAddr::V6(SocketAddrV6::new(ll_ip, port, 0, 0));
+    let scope0_display = scope0.to_string();
+    eprintln!("case5 unscoped control Display = {unscoped_display:?}");
+    eprintln!("case5 scope0 Display = {scope0_display:?}");
+    assert_ne!(
+        advertised, unscoped_display,
+        "scoped producer string must differ from bare unscoped Display"
+    );
+    assert!(
+        !scope0_display.contains('%')
+            || matches!(scope0, SocketAddr::V6(v6) if v6.scope_id() == 0),
+        "scope0 Display should not carry a live ifindex zone"
+    );
+
+    // 1) tokio lookup_host on the advertised trust-store string.
+    let looked_up: Vec<SocketAddr> = tokio::net::lookup_host(advertised.as_str())
+        .await
+        .unwrap_or_else(|e| panic!("lookup_host({advertised:?}) failed: {e}"))
+        .collect();
+    assert!(
+        !looked_up.is_empty(),
+        "lookup_host({advertised:?}) returned no candidates"
+    );
+    eprintln!("case5 lookup_host candidates = {looked_up:?}");
+    let first = looked_up[0];
+    match first {
+        SocketAddr::V6(v6) => {
+            assert_eq!(v6.ip(), &ll_ip, "lookup ip must match live fe80");
+            assert_eq!(
+                v6.port(),
+                port,
+                "lookup port must match advertised port"
+            );
+            assert_eq!(
+                v6.scope_id(),
+                ifindex,
+                "lookup_host must rehydrate scope_id={ifindex} from {advertised}, got scope {}",
+                v6.scope_id()
+            );
+        }
+        other => panic!("lookup_host must return V6, got {other} from {advertised}"),
+    }
+
+    // 2) Production resolve_local_address (lookup_host + first_local_candidate).
+    let resolved = resolve_local_address(&advertised)
+        .await
+        .unwrap_or_else(|e| panic!("resolve_local_address({advertised:?}) failed: {e:#}"));
+    eprintln!("case5 resolve_local_address = {resolved:?}");
+    match resolved {
+        SocketAddr::V6(v6) => {
+            assert_eq!(v6.ip(), &ll_ip);
+            assert_eq!(v6.port(), port);
+            assert_eq!(
+                v6.scope_id(),
+                ifindex,
+                "resolve_local_address must retain scope_id={ifindex} from {advertised}"
+            );
+        }
+        other => panic!("resolve_local_address must return V6, got {other}"),
+    }
+
+    // Accept loop on the scoped listener.
+    let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel::<SocketAddr>();
+    tokio::spawn(async move {
+        loop {
+            match listener.accept().await {
+                Ok((mut stream, peer)) => {
+                    let mut buf = [0u8; 1];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = seen_tx.send(peer);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // 3) Dial the lookup/resolve result (production connect_tcp, no SocketAddr bypass
+    // of the string layer for candidate selection).
+    let started = Instant::now();
+    let mut stream = connect_tcp(resolved)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "connect_tcp after resolve_local_address({advertised:?}) failed: {e:#}"
+            )
+        });
+    stream.write_all(b"S").await.unwrap();
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "scoped string dial must not wait out CONNECT_TIMEOUT; took {elapsed:?}"
+    );
+
+    let peer = tokio::time::timeout(Duration::from_secs(2), seen_rx.recv())
+        .await
+        .expect("scoped listener should accept string-path dial")
+        .expect("accept channel open");
+    eprintln!("case5 accepted peer = {peer:?}");
+    match peer {
+        SocketAddr::V6(v6) => {
+            assert_eq!(
+                v6.scope_id(),
+                ifindex,
+                "accepted peer scope must match ifindex={ifindex}"
+            );
+            assert!(
+                v6.ip().is_unicast_link_local(),
+                "accepted peer must be link-local, got {}",
+                v6.ip()
+            );
+        }
+        other => panic!("accepted peer must be V6 LL, got {other}"),
+    }
+
+    // 4) Contrast: unscoped string + scope-0 must not be equivalent success.
+    let unscoped_lookup = tokio::net::lookup_host(unscoped_display.as_str()).await;
+    let unscoped_resolved = match unscoped_lookup {
+        Ok(iter) => {
+            let cands: Vec<_> = iter.collect();
+            eprintln!("case5 unscoped lookup candidates = {cands:?}");
+            cands.into_iter().next()
+        }
+        Err(e) => {
+            eprintln!("case5 unscoped lookup_host failed (acceptable control): {e}");
+            None
+        }
+    };
+    if let Some(SocketAddr::V6(v6)) = unscoped_resolved {
+        assert_eq!(
+            v6.scope_id(),
+            0,
+            "unscoped Display must not magically gain ifindex={ifindex}, got {}",
+            v6.scope_id()
+        );
+    }
+    // Direct scope-0 SocketAddr dial (what you get if zone is stripped).
+    let scope0_dial = connect_tcp(scope0).await;
+    eprintln!(
+        "case5 scope0 connect_tcp({scope0}) => {}",
+        match &scope0_dial {
+            Ok(_) => "Ok".to_string(),
+            Err(e) => format!("Err({e:#})"),
+        }
+    );
+    // And the unscoped string through production resolve if it parses.
+    let unscoped_via_resolve = resolve_local_address(&unscoped_display).await;
+    eprintln!(
+        "case5 unscoped resolve_local_address({unscoped_display:?}) => {}",
+        match &unscoped_via_resolve {
+            Ok(a) => format!("Ok({a})"),
+            Err(e) => format!("Err({e:#})"),
+        }
+    );
+    let unscoped_connect = match unscoped_via_resolve {
+        Ok(addr) => {
+            assert!(
+                matches!(addr, SocketAddr::V6(v6) if v6.scope_id() == 0)
+                    || !matches!(addr, SocketAddr::V6(_)),
+                "unscoped resolve must not yield live scope_id={ifindex}, got {addr}"
+            );
+            Some(connect_tcp(addr).await)
+        }
+        Err(_) => None,
+    };
+    if let Some(ref r) = unscoped_connect {
+        eprintln!(
+            "case5 unscoped connect_tcp => {}",
+            match r {
+                Ok(_) => "Ok",
+                Err(_) => "Err",
+            }
+        );
+    }
+
+    // Success on the producer string path is already proven above. Controls must
+    // not also succeed with a retained live scope — that would collapse the gap.
+    // If a control connect somehow succeeds, the accepted peer still must not be
+    // counted as proof that unscoped == scoped (scope would be 0 or connect is
+    // a different failure mode). Require: scoped string path succeeded AND
+    // (scope0 dial failed OR unscoped resolve kept scope 0).
+    let scoped_string_path_ok = true;
+    let control_not_equivalent = scope0_dial.is_err()
+        || unscoped_resolved
+            .map(|a| matches!(a, SocketAddr::V6(v6) if v6.scope_id() == 0))
+            .unwrap_or(true);
+    assert!(
+        scoped_string_path_ok && control_not_equivalent,
+        "producer Display {advertised:?} dial-safe, but control must not look equivalent \
+         (scope0_dial_ok={}, unscoped={unscoped_resolved:?})",
+        scope0_dial.is_ok()
+    );
+    // Stronger: if scope0 connect succeeded, that would be surprising on Linux for
+    // true LL without zone — flag it but the unequal-scope assertion above is the
+    // contractual contrast. Prefer failure of scope0 dial when LL requires zone.
+    if scope0_dial.is_ok() {
+        eprintln!(
+            "case5 WARNING: scope0 connect unexpectedly succeeded; still not equivalent \
+             because resolve of unscoped keeps scope_id=0 and differs from {advertised}"
+        );
     }
 }
 

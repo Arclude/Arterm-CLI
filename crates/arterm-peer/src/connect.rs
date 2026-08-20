@@ -321,7 +321,7 @@ pub(crate) fn first_local_candidate(
 /// off-subnet sources protects the machine being reached; this protects the
 /// machine doing the reaching, whose trust store entry would otherwise happily
 /// dial a paired laptop across the internet the moment its address changed.
-async fn resolve_local_address(address: &str) -> Result<SocketAddr> {
+pub(crate) async fn resolve_local_address(address: &str) -> Result<SocketAddr> {
     let candidates: Vec<SocketAddr> = tokio::net::lookup_host(address)
         .await
         .with_context(|| format!("looking up the address {address}"))?
