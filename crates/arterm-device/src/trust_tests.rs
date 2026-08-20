@@ -197,3 +197,74 @@ fn lookup_matches_on_the_full_fingerprint() {
     assert!(trust.find(&known).is_some());
     assert!(trust.find(&unknown).is_none());
 }
+
+fn device_at(fingerprint: &str, name: &str, address: &str) -> TrustedDevice {
+    TrustedDevice {
+        fingerprint: fingerprint.to_string(),
+        name: name.to_string(),
+        address: Some(address.to_string()),
+        paired_at: "2026-08-16T00:00:00Z".to_string(),
+    }
+}
+
+/// Zone-bearing last-known addresses must survive the real trusted.json write
+/// path. `TrustedDevice.address` is advisory dial text; stripping `%ifname` or
+/// a numeric scope would make the next connect unable to reach link-local
+/// peers even though the pairing itself is intact.
+#[test]
+fn zone_bearing_addresses_survive_trust_store_disk_round_trip() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("trusted.json");
+
+    let bare_ifname = "fe80::a%wlan0:7644";
+    let bracket_numeric = "[fe80::b%42]:7644";
+    let bare_fp = "a".repeat(64);
+    let bracket_fp = "b".repeat(64);
+
+    {
+        let mut trust = TrustStore::load_at(path.clone()).expect("loading empty trust store");
+        trust
+            .trust(device_at(&bare_fp, "bare-zone", bare_ifname))
+            .expect("trust bare %ifname");
+        trust
+            .trust(device_at(&bracket_fp, "bracket-zone", bracket_numeric))
+            .expect("trust bracket numeric");
+    }
+
+    // Assert against the file on disk first so a pure in-memory clone cannot
+    // satisfy the test if save ever started normalising addresses.
+    let on_disk = std::fs::read_to_string(&path).expect("reading trusted.json bytes");
+    assert!(
+        on_disk.contains(bare_ifname),
+        "trusted.json must keep bare %ifname zone text verbatim, got:\n{on_disk}"
+    );
+    assert!(
+        on_disk.contains(bracket_numeric),
+        "trusted.json must keep bracket numeric zone text verbatim, got:\n{on_disk}"
+    );
+    assert!(
+        on_disk.contains('%'),
+        "zone separator must not be stripped from trusted.json, got:\n{on_disk}"
+    );
+
+    let reloaded = TrustStore::load_at(path).expect("reloading from disk");
+    assert_eq!(reloaded.devices().len(), 2);
+
+    let bare = reloaded
+        .find_by_name_or_fingerprint("bare-zone")
+        .expect("bare-zone device");
+    assert_eq!(
+        bare.address.as_deref(),
+        Some(bare_ifname),
+        "bare %ifname must round-trip through TrustStore save/load"
+    );
+
+    let bracket = reloaded
+        .find_by_name_or_fingerprint("bracket-zone")
+        .expect("bracket-zone device");
+    assert_eq!(
+        bracket.address.as_deref(),
+        Some(bracket_numeric),
+        "bracket numeric zone must round-trip through TrustStore save/load"
+    );
+}

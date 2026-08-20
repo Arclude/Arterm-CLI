@@ -185,3 +185,59 @@ fn the_file_is_readable_only_by_its_owner() {
         "a file holding live pairing secrets must not be group or world readable"
     );
 }
+
+/// Zone-bearing link-local addresses must survive the real joins.json write
+/// path, not only an in-memory clone of `PendingJoin`. Both spellings that
+/// dial accepts (bare `%ifname` and bracketed numeric `%N`) are opaque string
+/// payload here: save/load must not normalise, strip, or re-encode the zone.
+#[test]
+fn zone_bearing_addresses_survive_joins_json_disk_round_trip() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("joins.json");
+
+    // Bare interface name (common on invite tokens typed/pasted by a person)
+    // and bracketed numeric scope (what SocketAddr::to_string often emits).
+    let bare_ifname = "fe80::1%eth0:7644";
+    let bracket_numeric = "[fe80::2%3]:7644";
+
+    let bare_invite = invite_from(b"bare-zone-peer", bare_ifname);
+    let bracket_invite = invite_from(b"bracket-zone-peer", bracket_numeric);
+
+    {
+        let mut joins = PendingJoins::load_at(path.clone()).expect("loading empty store");
+        joins.record(&bare_invite).expect("recording bare %ifname");
+        joins
+            .record(&bracket_invite)
+            .expect("recording bracket numeric");
+    }
+
+    // Live disk bytes, not the still-open in-memory store: prove serde wrote
+    // the zone markers through, rather than only keeping them in RAM.
+    let on_disk = std::fs::read_to_string(&path).expect("reading joins.json bytes");
+    assert!(
+        on_disk.contains(bare_ifname),
+        "joins.json must keep bare %ifname zone text verbatim, got:\n{on_disk}"
+    );
+    assert!(
+        on_disk.contains(bracket_numeric),
+        "joins.json must keep bracket numeric zone text verbatim, got:\n{on_disk}"
+    );
+    assert!(
+        on_disk.contains('%'),
+        "zone separator must not be stripped from joins.json, got:\n{on_disk}"
+    );
+
+    // Drop every handle, then load_at from the path alone.
+    let reloaded = PendingJoins::load_at(path).expect("reloading from disk");
+    assert_eq!(
+        reloaded.address_for(&bare_invite.fingerprint),
+        Some(bare_ifname),
+        "bare %ifname must round-trip through PendingJoins save/load"
+    );
+    assert_eq!(
+        reloaded.address_for(&bracket_invite.fingerprint),
+        Some(bracket_numeric),
+        "bracket numeric zone must round-trip through PendingJoins save/load"
+    );
+    assert_eq!(reloaded.active().len(), 2);
+}
