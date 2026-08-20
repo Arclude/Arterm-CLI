@@ -317,4 +317,140 @@ mod tests {
         assert!(store.pop_for_session("s1", &p).is_none());
         assert!(store.pop_for_session("s2", &p).is_some());
     }
+
+    /// Writers pass `resolve_path` output into `snapshot_and_record` with no
+    /// canonicalize. PathBuf equality is component-wise, so `dir/file` and
+    /// `dir/sub/../file` (same inode) are different keys — undo by the other
+    /// spelling misses. (Note: `dir/./file` can compare equal on some Path
+    /// normalizations; `..` is the reliable same-inode unequal spelling.)
+    #[test]
+    fn noncanonical_path_spellings_are_distinct_keys() {
+        let store = CheckpointStore::new();
+        let dir = std::env::temp_dir().join(format!(
+            "arterm-cp-noncanon-{}-{}",
+            std::process::id(),
+            "dotdot"
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let spelling_a = dir.join("file.txt");
+        std::fs::write(&spelling_a, "on disk").unwrap();
+        let spelling_b = dir.join("sub").join("..").join("file.txt");
+        assert_ne!(
+            spelling_a.as_os_str(),
+            spelling_b.as_os_str(),
+            "proof requires unequal PathBuf bytes for same inode spellings: {spelling_a:?} vs {spelling_b:?}"
+        );
+        assert_ne!(
+            spelling_a, spelling_b,
+            "PathBuf PartialEq must treat spellings as distinct keys"
+        );
+        assert_eq!(
+            std::fs::canonicalize(&spelling_a).unwrap(),
+            std::fs::canonicalize(&spelling_b).unwrap(),
+            "spellings must resolve to one inode"
+        );
+
+        assert!(store.snapshot_and_record("s-noncanon", &spelling_a));
+        assert!(
+            store.pop_for_session("s-noncanon", &spelling_b).is_none(),
+            "pop by spelling B must miss checkpoint keyed as spelling A"
+        );
+        assert!(
+            store.pop_for_session("s-noncanon", &spelling_a).is_some(),
+            "pop by original spelling A must still find it"
+        );
+    }
+
+    #[test]
+    fn noncanonical_symlink_spelling_is_distinct_key() {
+        let store = CheckpointStore::new();
+        let dir = std::env::temp_dir().join(format!(
+            "arterm-cp-noncanon-{}-{}",
+            std::process::id(),
+            "sym"
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let spelling_a = dir.join("target.txt");
+        std::fs::write(&spelling_a, "via real path").unwrap();
+        let spelling_b = dir.join("alias.txt");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&spelling_a, &spelling_b).expect("symlink");
+        #[cfg(not(unix))]
+        {
+            // Windows: still prove with `./` if symlink creation is restricted.
+            let _ = spelling_b;
+            let spelling_b = dir.join(".").join("target.txt");
+            assert!(store.snapshot_and_record("s-sym", &spelling_a));
+            assert!(store.pop_for_session("s-sym", &spelling_b).is_none());
+            assert!(store.pop_for_session("s-sym", &spelling_a).is_some());
+            return;
+        }
+
+        assert_ne!(spelling_a, spelling_b);
+        assert_eq!(
+            std::fs::canonicalize(&spelling_a).unwrap(),
+            std::fs::canonicalize(&spelling_b).unwrap()
+        );
+        assert!(store.snapshot_and_record("s-sym", &spelling_a));
+        assert!(
+            store.pop_for_session("s-sym", &spelling_b).is_none(),
+            "symlink path must not match real-path checkpoint key"
+        );
+        assert!(store.pop_for_session("s-sym", &spelling_a).is_some());
+    }
+
+    /// MAX_SNAPSHOTS_PER_FILE is per PathBuf spelling, not per inode: filling
+    /// A and B each to the cap retains 2× the bound.
+    #[test]
+    fn max_snapshots_bound_is_per_spelling_not_inode() {
+        let store = CheckpointStore::new();
+        let dir = std::env::temp_dir().join(format!(
+            "arterm-cp-noncanon-bound-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let spelling_a = dir.join("shared.txt");
+        std::fs::write(&spelling_a, "x").unwrap();
+        let spelling_b = dir.join("sub").join("..").join("shared.txt");
+        assert_ne!(spelling_a, spelling_b);
+
+        for i in 0..MAX_SNAPSHOTS_PER_FILE {
+            store.record(Checkpoint {
+                file_path: spelling_a.clone(),
+                pre_content: Some(vec![b'A', i as u8]),
+                created_at: i as u64,
+                session_id: "s1".into(),
+            });
+            store.record(Checkpoint {
+                file_path: spelling_b.clone(),
+                pre_content: Some(vec![b'B', i as u8]),
+                created_at: 100 + i as u64,
+                session_id: "s1".into(),
+            });
+        }
+        assert_eq!(
+            store.len(),
+            MAX_SNAPSHOTS_PER_FILE * 2,
+            "each spelling keeps its own full bound"
+        );
+        // One more on A alone must not evict B's history.
+        store.record(Checkpoint {
+            file_path: spelling_a.clone(),
+            pre_content: Some(b"A-extra".to_vec()),
+            created_at: 200,
+            session_id: "s1".into(),
+        });
+        assert_eq!(store.len(), MAX_SNAPSHOTS_PER_FILE * 2);
+        assert_eq!(
+            store
+                .pop_for(&spelling_b)
+                .and_then(|c| c.pre_content)
+                .map(|b| b[0]),
+            Some(b'B'),
+            "B stack untouched when A rolls"
+        );
+    }
 }
