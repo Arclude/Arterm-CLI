@@ -183,9 +183,12 @@ impl PeerAdmitter {
         // is the identity, and a stale address means "try elsewhere", never
         // "different device".
         //
-        // Format via SocketAddr so IPv6 is bracketed (`[::1]:7644`). A bare
-        // `::1:7644` is ambiguous as host:port and is not what invite/join
-        // advertise or what dial's lookup_host path is written against.
+        // Format via the full SocketAddr, not `peer_addr.ip()`. SocketAddr keeps
+        // IPv6 bracketed (`[::1]:7644`) and, on Linux, keeps a link-local
+        // scope_id in the string (`[fe80::x%3]:7644`). `set_port` does not
+        // clear that scope. A bare `ip():port` form is ambiguous for V6 and
+        // drops the zone, which is what discovery's `SocketAddr::new(from.ip(),
+        // port)` path does and is not what dial's lookup_host path needs.
         let advertised = {
             let mut remembered = peer_addr;
             remembered.set_port(hello.listen_port().unwrap_or(crate::DEFAULT_PEER_PORT));
