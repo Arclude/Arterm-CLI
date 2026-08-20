@@ -279,6 +279,202 @@ async fn scenario_b_v4_first_connects_while_dead_aaaa_is_never_tried() {
     );
 }
 
+/// Live case 3: peer listens on the host's own scoped fe80 (correct ifindex),
+/// candidates ordered [correct scoped LL, working V4]. Production
+/// [`first_local_candidate`] must pick LL, and [`connect_tcp`] must reach the
+/// LL listener (V4 must stay quiet).
+fn live_ll_and_v4() -> Option<(Ipv6Addr, u32, Ipv4Addr, Vec<LocalNetwork>)> {
+    let networks = subnet::local_networks().ok()?;
+    let interfaces = if_addrs::get_if_addrs().ok()?;
+
+    let preferred = ["wlan0", "enp2s0", "eth0"];
+    let mut ll_rows: Vec<(Ipv6Addr, u32, String, Option<Ipv4Addr>)> = Vec::new();
+
+    for iface in &interfaces {
+        let name = iface.name.as_str();
+        if name == "lo"
+            || name.starts_with("docker")
+            || name.starts_with("br-")
+            || name.starts_with("veth")
+            || name == "CloudflareWARP"
+        {
+            continue;
+        }
+        match &iface.addr {
+            if_addrs::IfAddr::V6(v6) if v6.ip.is_unicast_link_local() => {
+                let idx = iface.index.unwrap_or(0);
+                if idx == 0 {
+                    continue;
+                }
+                // Pair any V4 on the same interface name if we already saw it,
+                // else fill later.
+                let v4_on_iface = interfaces.iter().find_map(|other| {
+                    if other.name != iface.name {
+                        return None;
+                    }
+                    match &other.addr {
+                        if_addrs::IfAddr::V4(v4)
+                            if v4.ip.is_private() && !v4.ip.is_loopback() =>
+                        {
+                            Some(v4.ip)
+                        }
+                        _ => None,
+                    }
+                });
+                ll_rows.push((v6.ip, idx, name.to_string(), v4_on_iface));
+            }
+            _ => {}
+        }
+    }
+
+    // Prefer wlan0/enp2s0 with a private V4 on the same iface.
+    for want in preferred {
+        if let Some((ip, idx, _name, Some(v4))) =
+            ll_rows.iter().find(|( _, _, n, v4)| n == want && v4.is_some())
+        {
+            assert!(
+                is_local_peer(&networks, IpAddr::V6(*ip)),
+                "fe80 on {want} must be local once if-addrs link-local is on"
+            );
+            assert!(is_local_peer(&networks, IpAddr::V4(*v4)));
+            return Some((*ip, *idx, *v4, networks));
+        }
+    }
+    // Any non-virtual LL + any private V4 on the host.
+    let (ip, idx, _name, maybe_v4) = ll_rows.into_iter().next()?;
+    let v4 = maybe_v4.or_else(|| {
+        interfaces.iter().find_map(|iface| match &iface.addr {
+            if_addrs::IfAddr::V4(v4) if v4.ip.is_private() && !v4.ip.is_loopback() => Some(v4.ip),
+            _ => None,
+        })
+    })?;
+    assert!(is_local_peer(&networks, IpAddr::V6(ip)));
+    assert!(is_local_peer(&networks, IpAddr::V4(v4)));
+    Some((ip, idx, v4, networks))
+}
+
+#[tokio::test]
+async fn case3_correct_scoped_fe80_wins_over_working_v4_and_connects() {
+    let Some((ll_ip, ifindex, lan_v4, networks)) = live_ll_and_v4() else {
+        eprintln!("skip case3 live dial: no scoped fe80 + private V4 topology");
+        return;
+    };
+
+    // Listener ONLY on the correct scoped fe80 (same ifindex the dial will use).
+    let bind = SocketAddr::V6(std::net::SocketAddrV6::new(ll_ip, 0, 0, ifindex));
+    let listener = TcpListener::bind(bind)
+        .await
+        .expect("bind scoped correct fe80");
+    let ll_addr = listener.local_addr().expect("ll local_addr");
+    let port = ll_addr.port();
+    match ll_addr {
+        SocketAddr::V6(v6) => {
+            assert_eq!(v6.ip(), &ll_ip);
+            assert_eq!(v6.scope_id(), ifindex, "listener must keep correct ifindex");
+        }
+        other => panic!("expected V6 listener, got {other}"),
+    }
+
+    // Also bind a quiet V4 control socket on the same port so we can prove the
+    // dial never falls through to V4 (and that V4 itself is reachable alone).
+    let v4_listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(lan_v4), port))
+        .await
+        .expect("bind working V4 on same port");
+    assert_eq!(v4_listener.local_addr().unwrap().port(), port);
+
+    let correct_ll = ll_addr;
+    let working_v4 = sock(IpAddr::V4(lan_v4), port);
+    assert!(is_local_peer(&networks, correct_ll.ip()));
+    assert!(is_local_peer(&networks, working_v4.ip()));
+
+    // Candidates: [correct scoped fe80, working V4] → LL must win first-local.
+    let chosen = first_local_candidate(&[correct_ll, working_v4], &networks)
+        .expect("both candidates local");
+    assert_eq!(
+        chosen, correct_ll,
+        "case3: correct scoped fe80 must beat later working V4"
+    );
+    assert!(
+        matches!(chosen, SocketAddr::V6(v6) if v6.scope_id() == ifindex),
+        "chosen must retain scope_id={ifindex}, got {chosen}"
+    );
+
+    let (ll_seen_tx, mut ll_seen_rx) = tokio::sync::mpsc::unbounded_channel::<SocketAddr>();
+    let (v4_seen_tx, mut v4_seen_rx) = tokio::sync::mpsc::unbounded_channel::<SocketAddr>();
+    tokio::spawn(async move {
+        loop {
+            match listener.accept().await {
+                Ok((mut stream, peer)) => {
+                    let mut buf = [0u8; 1];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = ll_seen_tx.send(peer);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    tokio::spawn(async move {
+        loop {
+            match v4_listener.accept().await {
+                Ok((mut stream, peer)) => {
+                    let mut buf = [0u8; 1];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = v4_seen_tx.send(peer);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let started = Instant::now();
+    let mut stream = connect_tcp(chosen)
+        .await
+        .expect("case3 connect_tcp must succeed on correct scoped fe80");
+    stream.write_all(b"L").await.unwrap();
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "LL hit must not wait out CONNECT_TIMEOUT; took {elapsed:?}"
+    );
+
+    let peer = tokio::time::timeout(Duration::from_secs(2), ll_seen_rx.recv())
+        .await
+        .expect("LL listener should accept the dial")
+        .expect("LL accept channel open");
+    assert!(
+        peer.is_ipv6(),
+        "accept must be on LL listener, got peer={peer}"
+    );
+    match peer {
+        SocketAddr::V6(v6) => {
+            assert_eq!(v6.scope_id(), ifindex, "accepted peer scope must match");
+            assert!(
+                v6.ip().is_unicast_link_local(),
+                "accepted peer must be link-local, got {}",
+                v6.ip()
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    // No V4 fallback: working V4 listener must stay quiet while LL was dialled.
+    assert!(
+        v4_seen_rx.try_recv().is_err(),
+        "V4 listener must stay quiet when first candidate is live LL (no fallback to V4)"
+    );
+
+    // Positive control: the discarded V4 candidate is itself viable.
+    let mut ok = connect_tcp(working_v4)
+        .await
+        .expect("working V4 candidate must connect alone");
+    ok.write_all(b"V").await.unwrap();
+    let v4_peer = tokio::time::timeout(Duration::from_secs(2), v4_seen_rx.recv())
+        .await
+        .expect("V4 listener should see the control dial")
+        .expect("V4 accept channel open");
+    assert!(v4_peer.is_ipv4(), "control dial peer {v4_peer}");
+}
+
 #[test]
 fn connect_timeout_is_fifteen_seconds() {
     // Documented production budget for TCP/TLS/first-line. Changing it changes
