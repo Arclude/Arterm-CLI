@@ -790,6 +790,65 @@ async fn the_listener_refuses_to_bind_the_wildcard_address() {
     );
 }
 
+/// IPv6 unspecified (`::` / `[::]:0`) is the dual-stack sibling of `0.0.0.0`.
+/// `is_wildcard` is the sole pre-bind gate in `bind_with_policy`, so both
+/// parse forms must refuse with the same message shape and never reach
+/// `TcpListener::bind` (which could otherwise open a dual-stack any-bind).
+#[tokio::test]
+async fn the_listener_refuses_to_bind_the_ipv6_wildcard_address() {
+    use std::net::IpAddr;
+
+    let host = Device::new();
+    // Bracketed hostport parses as SocketAddr directly. Bare `::` is what the
+    // CLI accepts as an IP-only flag (IpAddr + default port), matching
+    // device_peer::resolve_bind_address.
+    let cases: [(&str, SocketAddr); 2] = [
+        (
+            "[::]:0",
+            "[::]:0".parse().expect("bracketed IPv6 wildcard hostport"),
+        ),
+        (
+            "::",
+            SocketAddr::new(
+                "::".parse::<IpAddr>().expect("bare IPv6 unspecified"),
+                arterm_peer::DEFAULT_PEER_PORT,
+            ),
+        ),
+    ];
+    for (raw, wildcard) in cases {
+        assert!(
+            wildcard.ip().is_unspecified(),
+            "{raw:?} should be the IPv6 unspecified address, got {}",
+            wildcard.ip()
+        );
+        let error = match PeerListener::bind_with_policy(
+            wildcard,
+            &host.credentials(),
+            host.gate(),
+            SubnetPolicy::ThisMachine,
+        )
+        .await
+        {
+            Ok(_listener) => panic!("IPv6 wildcard {raw:?} must not bind"),
+            Err(error) => error,
+        };
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("refusing to bind"),
+            "IPv6 wildcard {raw:?} must use the same refusal as V4, got: {text}"
+        );
+        assert!(
+            text.contains("::"),
+            "refusal should name the IPv6 unspecified address, got: {text}"
+        );
+        // Must fail before TCP bind (no "binding the peer listener to …" OS error).
+        assert!(
+            !text.contains("binding the peer listener to"),
+            "is_wildcard must be the sole gate; OS bind must not run for {raw:?}: {text}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Wrong machine, wrong version
 // ---------------------------------------------------------------------------
