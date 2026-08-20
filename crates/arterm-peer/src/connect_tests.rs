@@ -475,6 +475,134 @@ async fn case3_correct_scoped_fe80_wins_over_working_v4_and_connects() {
     assert!(v4_peer.is_ipv4(), "control dial peer {v4_peer}");
 }
 
+/// Live case 4 (order control / inverse of case 3): peer listens on both a
+/// working V4 and the host's own scoped fe80 (correct ifindex). Candidates
+/// ordered [working V4, correct scoped LL]. Production [`first_local_candidate`]
+/// must pick V4 purely by order, and [`connect_tcp`] must reach the V4
+/// listener (LL must stay quiet during the ordered dial).
+#[tokio::test]
+async fn case4_working_v4_wins_over_correct_scoped_fe80_by_order_and_connects() {
+    let Some((ll_ip, ifindex, lan_v4, networks)) = live_ll_and_v4() else {
+        eprintln!("skip case4 live dial: no scoped fe80 + private V4 topology");
+        return;
+    };
+
+    // Bind V4 first so we own a free port, then LL on the same port.
+    let v4_listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(lan_v4), 0))
+        .await
+        .expect("bind working V4");
+    let v4_addr = v4_listener.local_addr().expect("v4 local_addr");
+    let port = v4_addr.port();
+    assert!(v4_addr.is_ipv4());
+
+    let bind_ll = SocketAddr::V6(std::net::SocketAddrV6::new(ll_ip, port, 0, ifindex));
+    let ll_listener = TcpListener::bind(bind_ll)
+        .await
+        .expect("bind scoped correct fe80 on same port");
+    let ll_addr = ll_listener.local_addr().expect("ll local_addr");
+    match ll_addr {
+        SocketAddr::V6(v6) => {
+            assert_eq!(v6.ip(), &ll_ip);
+            assert_eq!(v6.port(), port);
+            assert_eq!(v6.scope_id(), ifindex, "listener must keep correct ifindex");
+        }
+        other => panic!("expected V6 listener, got {other}"),
+    }
+
+    let working_v4 = sock(IpAddr::V4(lan_v4), port);
+    let correct_ll = ll_addr;
+    assert!(is_local_peer(&networks, working_v4.ip()));
+    assert!(is_local_peer(&networks, correct_ll.ip()));
+
+    // Candidates: [working V4, correct scoped fe80] → V4 must win first-local.
+    let chosen = first_local_candidate(&[working_v4, correct_ll], &networks)
+        .expect("both candidates local");
+    assert_eq!(
+        chosen, working_v4,
+        "case4: working V4 must beat later correct scoped fe80 purely by order"
+    );
+    assert!(
+        chosen.is_ipv4(),
+        "chosen must be V4 by order control, got {chosen}"
+    );
+
+    let (v4_seen_tx, mut v4_seen_rx) = tokio::sync::mpsc::unbounded_channel::<SocketAddr>();
+    let (ll_seen_tx, mut ll_seen_rx) = tokio::sync::mpsc::unbounded_channel::<SocketAddr>();
+    tokio::spawn(async move {
+        loop {
+            match v4_listener.accept().await {
+                Ok((mut stream, peer)) => {
+                    let mut buf = [0u8; 1];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = v4_seen_tx.send(peer);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    tokio::spawn(async move {
+        loop {
+            match ll_listener.accept().await {
+                Ok((mut stream, peer)) => {
+                    let mut buf = [0u8; 1];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = ll_seen_tx.send(peer);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let started = Instant::now();
+    let mut stream = connect_tcp(chosen)
+        .await
+        .expect("case4 connect_tcp must succeed on working V4");
+    stream.write_all(b"V").await.unwrap();
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "V4 hit must not wait out CONNECT_TIMEOUT; took {elapsed:?}"
+    );
+
+    let peer = tokio::time::timeout(Duration::from_secs(2), v4_seen_rx.recv())
+        .await
+        .expect("V4 listener should accept the dial")
+        .expect("V4 accept channel open");
+    assert!(
+        peer.is_ipv4(),
+        "accept must be on V4 listener, got peer={peer}"
+    );
+
+    // No LL fallback: correct scoped fe80 listener must stay quiet while V4 was dialled.
+    assert!(
+        ll_seen_rx.try_recv().is_err(),
+        "LL listener must stay quiet when first candidate is working V4 (order-only, no fallback)"
+    );
+
+    // Positive control: the discarded LL candidate is itself viable (proves order,
+    // not LL unreachability, is why V4 won).
+    let mut ok = connect_tcp(correct_ll)
+        .await
+        .expect("correct scoped fe80 candidate must connect alone");
+    ok.write_all(b"L").await.unwrap();
+    let ll_peer = tokio::time::timeout(Duration::from_secs(2), ll_seen_rx.recv())
+        .await
+        .expect("LL listener should see the control dial")
+        .expect("LL accept channel open");
+    assert!(ll_peer.is_ipv6(), "control dial peer {ll_peer}");
+    match ll_peer {
+        SocketAddr::V6(v6) => {
+            assert_eq!(v6.scope_id(), ifindex, "control peer scope must match");
+            assert!(
+                v6.ip().is_unicast_link_local(),
+                "control peer must be link-local, got {}",
+                v6.ip()
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
 #[test]
 fn connect_timeout_is_fifteen_seconds() {
     // Documented production budget for TCP/TLS/first-line. Changing it changes
