@@ -1601,7 +1601,7 @@ fn cwd_from_params(params: &Value) -> std::result::Result<PathBuf, String> {
         Some(cwd) if !cwd.trim().is_empty() => PathBuf::from(cwd),
         _ => std::env::current_dir().map_err(|err| err.to_string())?,
     };
-    if !cwd.is_absolute() {
+    if !crate::platform::client_cwd_is_absolute(&cwd.to_string_lossy()) {
         return Err(format!("ACP cwd must be absolute: {}", cwd.display()));
     }
     Ok(cwd)
@@ -1977,6 +1977,12 @@ mod tests {
         assert!(cwd_from_params(&params).is_err());
         let params = json!({"cwd": "/tmp"});
         assert_eq!(cwd_from_params(&params).unwrap(), Path::new("/tmp"));
+        // Host-neutral: a Windows absolute cwd is valid even when this process is Unix.
+        let params = json!({"cwd": r"C:\Users\agent\project"});
+        assert_eq!(
+            cwd_from_params(&params).unwrap(),
+            Path::new(r"C:\Users\agent\project")
+        );
     }
 
     #[test]
