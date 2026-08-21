@@ -57,6 +57,7 @@ mod commands;
 mod commands_colors;
 mod commands_dispatch;
 mod commands_improve;
+mod commands_init;
 mod commands_mcp;
 mod commands_overnight;
 mod commands_plan;

@@ -94,6 +94,60 @@ fn test_load_agents_md_files_uses_sandboxed_global_files() {
 }
 
 #[test]
+fn load_agents_md_falls_back_to_claude_md_when_agents_md_is_missing() {
+    let project_dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        project_dir.path().join("CLAUDE.md"),
+        "claude briefing for this repo",
+    )
+    .unwrap();
+
+    let (content, info) = load_agents_md_files_from_dir(Some(project_dir.path()));
+    assert!(info.has_project_agents_md);
+    let content = content.expect("project briefing content");
+    assert!(content.contains("# Project Instructions (CLAUDE.md)"));
+    assert!(content.contains("claude briefing for this repo"));
+}
+
+#[test]
+fn load_agents_md_prefers_agents_md_over_claude_md() {
+    let project_dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(project_dir.path().join("AGENTS.md"), "arterm briefing").unwrap();
+    std::fs::write(project_dir.path().join("CLAUDE.md"), "claude briefing").unwrap();
+
+    let (content, info) = load_agents_md_files_from_dir(Some(project_dir.path()));
+    assert!(info.has_project_agents_md);
+    let content = content.expect("project briefing content");
+    assert!(content.contains("# Project Instructions (AGENTS.md)"));
+    assert!(content.contains("arterm briefing"));
+    assert!(!content.contains("claude briefing"));
+}
+
+#[test]
+fn empty_agents_md_falls_back_to_claude_md() {
+    let project_dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(project_dir.path().join("AGENTS.md"), "  \n").unwrap();
+    std::fs::write(project_dir.path().join("CLAUDE.md"), "claude briefing").unwrap();
+
+    let (content, info) = load_agents_md_files_from_dir(Some(project_dir.path()));
+    assert!(info.has_project_agents_md);
+    let content = content.expect("project briefing content");
+    assert!(content.contains("# Project Instructions (CLAUDE.md)"));
+    assert!(content.contains("claude briefing"));
+}
+
+#[test]
+fn whitespace_only_briefing_files_load_nothing() {
+    let project_dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(project_dir.path().join("AGENTS.md"), "\n").unwrap();
+    std::fs::write(project_dir.path().join("CLAUDE.md"), "   ").unwrap();
+
+    let (content, info) = load_agents_md_files_from_dir(Some(project_dir.path()));
+    assert!(!info.has_project_agents_md);
+    assert!(content.is_none());
+}
+
+#[test]
 fn test_session_context_includes_time_timezone_and_system_info() {
     let context = build_session_context(None);
     assert!(context.contains("# Session Context"));

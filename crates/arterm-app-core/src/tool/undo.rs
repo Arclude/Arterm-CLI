@@ -185,4 +185,56 @@ mod tests {
         assert!(out.output.contains("No checkpoint"));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "x");
     }
+
+    /// Compound failure: writer keyed checkpoint as spelling A; user/agent
+    /// passes spelling B (same inode via `sub/../file`) → No checkpoint,
+    /// file unchanged.
+    #[tokio::test]
+    async fn undo_misses_when_file_path_spelling_differs_from_checkpoint_key() {
+        let dir = std::env::temp_dir().join(format!(
+            "arterm-undo-noncanon-{}-{}",
+            std::process::id(),
+            "dotdot"
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let spelling_a = dir.join("edited.txt");
+        std::fs::write(&spelling_a, "after edit").unwrap();
+        let spelling_b = dir.join("sub").join("..").join("edited.txt");
+        assert_ne!(spelling_a, spelling_b);
+        assert_eq!(
+            std::fs::canonicalize(&spelling_a).unwrap(),
+            std::fs::canonicalize(&spelling_b).unwrap()
+        );
+
+        checkpoint::GLOBAL.record(Checkpoint {
+            file_path: spelling_a.clone(),
+            pre_content: Some(b"before edit".to_vec()),
+            created_at: 99,
+            session_id: "undo-test-session".into(),
+        });
+
+        let out = UndoTool::new()
+            .execute(
+                json!({
+                    "intent": "test",
+                    "file_path": spelling_b.to_str().unwrap()
+                }),
+                ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            out.output.contains("No checkpoint"),
+            "expected miss for spelling B, got: {}",
+            out.output
+        );
+        assert_eq!(
+            std::fs::read_to_string(&spelling_a).unwrap(),
+            "after edit",
+            "file must stay unrestored when undo key misses"
+        );
+        // Cleanup so GLOBAL does not leak into other tests that share session id.
+        let _ = checkpoint::GLOBAL.pop_for_session("undo-test-session", &spelling_a);
+    }
 }

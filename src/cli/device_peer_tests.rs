@@ -41,7 +41,67 @@ fn an_address_without_a_port_gets_the_default_one() {
 #[test]
 fn a_v6_address_and_port_is_taken_as_given() {
     let bound = resolve_bind_address(Some("[::1]:9000")).expect("a valid address");
+    assert_eq!(bound.to_string(), "[::1]:9000");
     assert_eq!(bound.port(), 9000);
+    assert!(bound.is_ipv6());
+}
+
+/// Bare loopback V6 is a normal interface name: fill the default peer port.
+#[test]
+fn a_bare_v6_loopback_gets_the_default_port() {
+    let bound = resolve_bind_address(Some("::1")).expect("bare ::1 is an IP");
+    assert_eq!(bound.ip().to_string(), "::1");
+    assert_eq!(bound.port(), DEFAULT_PEER_PORT);
+    assert!(bound.is_ipv6());
+}
+
+/// Global bare V6 (no brackets, no port) must parse the same way as bare V4.
+#[test]
+fn a_bare_global_v6_gets_the_default_port() {
+    let bound = resolve_bind_address(Some("2001:db8::1")).expect("bare global V6 is an IP");
+    assert_eq!(bound.ip().to_string(), "2001:db8::1");
+    assert_eq!(bound.port(), DEFAULT_PEER_PORT);
+    assert!(bound.is_ipv6());
+}
+
+/// `::1:9000` is ambiguous: Rust's `IpAddr` reads it as hextets ending in `9000`,
+/// not as host `::1` with port 9000. Bracketed form is required for a port.
+#[test]
+fn ambiguous_unbracketed_v6_with_trailing_number_is_an_ip_not_a_hostport() {
+    let bound = resolve_bind_address(Some("::1:9000")).expect("IpAddr accepts ::1:9000");
+    assert_eq!(
+        bound.ip().to_string(),
+        "::1:9000",
+        "unbracketed form is one IPv6 address, not [::1] plus a port"
+    );
+    assert_eq!(bound.port(), DEFAULT_PEER_PORT);
+    assert_ne!(bound.port(), 9000);
+}
+
+/// Parse must accept the V6 wildcard hostport. Bind refusal is PeerListener's job.
+#[test]
+fn bracketed_v6_wildcard_with_port_parses_successfully() {
+    let bound = resolve_bind_address(Some("[::]:9000")).expect("syntax is valid");
+    assert_eq!(bound.to_string(), "[::]:9000");
+    assert!(bound.ip().is_unspecified());
+    assert!(subnet::is_wildcard(bound.ip()));
+}
+
+/// Bare `::` is a valid IP that gets the default port; wildcard policy is later.
+#[test]
+fn bare_v6_wildcard_parses_with_the_default_port() {
+    let bound = resolve_bind_address(Some("::")).expect("bare :: is an IP");
+    assert!(bound.ip().is_unspecified());
+    assert_eq!(bound.port(), DEFAULT_PEER_PORT);
+    assert!(subnet::is_wildcard(bound.ip()));
+}
+
+#[test]
+fn v4_mapped_v6_hostport_is_taken_as_given() {
+    let bound =
+        resolve_bind_address(Some("[::ffff:192.168.1.5]:9")).expect("v4-mapped V6 hostport");
+    assert_eq!(bound.to_string(), "[::ffff:192.168.1.5]:9");
+    assert_eq!(bound.port(), 9);
     assert!(bound.is_ipv6());
 }
 
@@ -52,6 +112,19 @@ fn something_that_is_not_an_address_says_what_one_looks_like() {
         format!("{error:#}").contains("192.168.1.5:7644"),
         "the error should show the shape expected, got: {error:#}"
     );
+}
+
+/// Hostnames stay rejected: only literal addresses are accepted for bind.
+#[test]
+fn invalid_hostname_still_errors() {
+    for bad in ["localhost", "my-laptop.local", "example.com:7644", ""] {
+        let error = resolve_bind_address(Some(bad)).expect_err(bad);
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("neither an address") || text.contains("192.168.1.5:7644"),
+            "hostname {bad:?} must stay a parse error, got: {text}"
+        );
+    }
 }
 
 #[test]

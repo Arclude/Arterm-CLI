@@ -26,7 +26,12 @@ use crate::subnet;
 use crate::tls::{PeerCredentials, client_config};
 
 /// How long the far end gets to answer before this is called unreachable.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+///
+/// Applied once per chosen address for the TCP connect, the TLS handshake, and
+/// the first protocol line. There is no second try on another candidate: when
+/// the first local address refuses or this budget elapses, the dial fails even
+/// if a later DNS result would have worked (see [`first_local_candidate`]).
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The device to reach, and the certificate that will prove it is that device.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -263,10 +268,7 @@ async fn dial(
     let config = client_config(credentials, target.fingerprint.clone())?;
     let connector = TlsConnector::from(Arc::new(config));
 
-    let tcp = timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
-        .await
-        .with_context(|| format!("connecting to {peer_addr} timed out"))?
-        .with_context(|| format!("connecting to {peer_addr}"))?;
+    let tcp = connect_tcp(peer_addr).await?;
 
     // The certificate names the machine, not the address, and the verifier
     // ignores this value entirely — the fingerprint is the check. It is
@@ -284,13 +286,111 @@ async fn dial(
     Ok((stream, peer_addr))
 }
 
+/// Single TCP connect to one already-chosen address under [`CONNECT_TIMEOUT`].
+///
+/// No Happy Eyeballs and no walk of remaining DNS results: a refuse or timeout
+/// here is terminal for the dial, matching production `dial`.
+///
+/// After connect, TCP_NODELAY and SO_KEEPALIVE are applied so a post-hello
+/// `copy_bidirectional` relay cannot sit forever on a half-dead peer with no
+/// transport signal (dial timeouts alone only cover the first 15s).
+pub(crate) async fn connect_tcp(peer_addr: SocketAddr) -> Result<TcpStream> {
+    let stream = timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
+        .await
+        .with_context(|| format!("connecting to {peer_addr} timed out"))?
+        .with_context(|| format!("connecting to {peer_addr}"))?;
+    apply_established_tcp_options(&stream);
+    Ok(stream)
+}
+
+/// Best-effort transport options for an established peer TCP socket.
+///
+/// Failures are reported to stderr but never fatal: the link is still usable
+/// without them, and some platforms or sandboxes reject keepalive knobs.
+pub(crate) fn apply_established_tcp_options(stream: &TcpStream) {
+    if let Err(error) = stream.set_nodelay(true) {
+        eprintln!("arterm-peer: failed to set TCP_NODELAY: {error}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: raw fd is owned by `stream` for the duration of this call;
+        // setsockopt only toggles socket options and does not transfer ownership.
+        let fd = stream.as_raw_fd();
+        // Report setsockopt failures once per call site instead of discarding
+        // them: a peer stuck on keepalive-less sockets is a real diagnosable
+        // bug, not noise.
+        fn tune(
+            fd: std::os::fd::RawFd,
+            level: libc::c_int,
+            name: libc::c_int,
+            value: libc::c_int,
+            label: &str,
+        ) {
+            // SAFETY: same fd-liveness argument as the caller; `value` is a
+            // local `c_int` whose address is only read for the call's duration.
+            let rc = unsafe {
+                libc::setsockopt(
+                    fd,
+                    level,
+                    name,
+                    &value as *const _ as *const libc::c_void,
+                    std::mem::size_of_val(&value) as libc::socklen_t,
+                )
+            };
+            if rc != 0 {
+                let errno = std::io::Error::last_os_error();
+                eprintln!("arterm-peer: failed to set {label}: {errno}");
+            }
+        }
+        let on: libc::c_int = 1;
+        tune(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE, on, "SO_KEEPALIVE");
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            // Start probes after 30s idle; repeat every 10s.
+            tune(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_KEEPIDLE,
+                30,
+                "TCP_KEEPIDLE",
+            );
+            tune(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_KEEPINTVL,
+                10,
+                "TCP_KEEPINTVL",
+            );
+        }
+    }
+}
+
+/// First DNS/lookup candidate that sits on one of `networks`.
+///
+/// **First-local-candidate-wins:** candidates are scanned in the order the
+/// resolver returned them. The first address that passes [`subnet::is_local_peer`]
+/// is the only one dialled. A later A/AAAA that would actually reach the peer is
+/// never tried, even when the winner refuses or times out under
+/// [`CONNECT_TIMEOUT`]. That is the dual-stack multihome failure mode when a
+/// peer publishes both a LAN A and a GUA AAAA but listens only on IPv4.
+pub(crate) fn first_local_candidate(
+    candidates: &[SocketAddr],
+    networks: &[subnet::LocalNetwork],
+) -> Option<SocketAddr> {
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| subnet::is_local_peer(networks, candidate.ip()))
+}
+
 /// Resolve `address` and keep only a destination on this machine's network.
 ///
 /// The same-subnet rule is enforced on this side too. A listener refusing
 /// off-subnet sources protects the machine being reached; this protects the
 /// machine doing the reaching, whose trust store entry would otherwise happily
 /// dial a paired laptop across the internet the moment its address changed.
-async fn resolve_local_address(address: &str) -> Result<SocketAddr> {
+pub(crate) async fn resolve_local_address(address: &str) -> Result<SocketAddr> {
     let candidates: Vec<SocketAddr> = tokio::net::lookup_host(address)
         .await
         .with_context(|| format!("looking up the address {address}"))?
@@ -300,17 +400,18 @@ async fn resolve_local_address(address: &str) -> Result<SocketAddr> {
     }
 
     let networks = subnet::local_networks()?;
-    match candidates
-        .iter()
-        .find(|candidate| subnet::is_local_peer(&networks, candidate.ip()))
-    {
-        Some(local) => Ok(*local),
+    match first_local_candidate(&candidates, &networks) {
+        Some(local) => Ok(local),
         None => anyhow::bail!(
             "{address} is not on any network this machine is on — peer sessions are restricted \
              to the local network, so connect both machines to the same one"
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "connect_tests.rs"]
+mod connect_tests;
 
 /// Splice one already-accepted local stream onto a fresh link to the peer.
 ///

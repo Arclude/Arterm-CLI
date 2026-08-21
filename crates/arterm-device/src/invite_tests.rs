@@ -11,6 +11,47 @@ fn a_token_round_trips() {
     assert_eq!(parsed, invite);
 }
 
+/// Scoped link-local dial text carries `%` and often `[]`. The token grammar
+/// only splits on `#` then `.` after the scheme, so those address characters
+/// must survive mint → to_token → parse without being treated as separators.
+#[test]
+fn scoped_ipv6_addresses_round_trip_through_tokens() {
+    for address in [
+        "[fe80::x%3]:7644",
+        "fe80::x%wlan0:7644",
+        "[fe80::a:b:c:d%42]:7644",
+        "fe80::1%eth0:7644",
+    ] {
+        let invite = Invite::mint(address, fingerprint()).expect("mint");
+        assert_eq!(invite.address, address);
+
+        let token = invite.to_token();
+        assert!(
+            token.starts_with(&format!("arterm://{address}#")),
+            "address must sit between scheme and '#', got {token}"
+        );
+        assert!(
+            token.contains('%'),
+            "zone marker must remain literal in the token, got {token}"
+        );
+        // Grammar: one '#' after the opaque address, then fingerprint.secret.
+        assert_eq!(
+            token.matches('#').count(),
+            1,
+            "scoped address must not invent extra '#', got {token}"
+        );
+
+        let parsed = Invite::parse(&token).expect("parse");
+        assert_eq!(parsed, invite);
+        assert_eq!(parsed.address, address);
+        assert!(
+            parsed.address.contains('%'),
+            "parsed address must keep the zone id, got {}",
+            parsed.address
+        );
+    }
+}
+
 #[test]
 fn a_token_carries_the_address_the_fingerprint_and_the_secret() {
     // All three are load-bearing: without the fingerprint the first connection

@@ -182,11 +182,18 @@ impl PeerAdmitter {
         // port is the guess. Either way the value is advisory — the fingerprint
         // is the identity, and a stale address means "try elsewhere", never
         // "different device".
-        let advertised = Some(format!(
-            "{}:{}",
-            peer_addr.ip(),
-            hello.listen_port().unwrap_or(crate::DEFAULT_PEER_PORT)
-        ));
+        //
+        // Format via the full SocketAddr, not `peer_addr.ip()`. SocketAddr keeps
+        // IPv6 bracketed (`[::1]:7644`) and, on Linux, keeps a link-local
+        // scope_id in the string (`[fe80::x%3]:7644`). `set_port` does not
+        // clear that scope. A bare `ip():port` form is ambiguous for V6 and
+        // drops the zone, which is what discovery's `SocketAddr::new(from.ip(),
+        // port)` path does and is not what dial's lookup_host path needs.
+        let advertised = {
+            let mut remembered = peer_addr;
+            remembered.set_port(hello.listen_port().unwrap_or(crate::DEFAULT_PEER_PORT));
+            Some(remembered.to_string())
+        };
 
         match admission {
             Admission::Trusted(device) => {
@@ -488,6 +495,7 @@ impl PeerListener {
             return Ok(reject_arrival(peer_addr, RejectionReason::OutsideSubnet));
         }
 
+        crate::connect::apply_established_tcp_options(&stream);
         Ok(Arrival::Pending(PendingPeer { stream, peer_addr }))
     }
 }

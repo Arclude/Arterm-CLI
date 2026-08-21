@@ -1,8 +1,8 @@
 {
-  "total": 3305,
+  "total": 3303,
   "totals_by_pattern": {
     "dot_ok": 1229,
-    "let_underscore": 1231,
+    "let_underscore": 1229,
     "unwrap_or_default": 845
   },
   "tracked_files": {
@@ -393,7 +393,7 @@
     },
     "crates/arterm-app-core/src/tool/bash.rs": {
       "dot_ok": 16,
-      "let_underscore": 13,
+      "let_underscore": 12,
       "unwrap_or_default": 4
     },
     "crates/arterm-app-core/src/tool/bg.rs": {

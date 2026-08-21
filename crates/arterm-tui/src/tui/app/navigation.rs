@@ -1476,6 +1476,15 @@ impl App {
             }
         }
 
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && let Some(chip) = super::super::ui::last_jump_to_bottom_area()
+            && super::super::layout_utils::point_in_rect(mouse.column, mouse.row, chip)
+        {
+            self.follow_chat_bottom();
+            self.request_full_repaint();
+            finish_mouse_event!(false, "jump_to_bottom_chip");
+        }
+
         let clicked_main_chat = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
             && !over_diff_pane
             && !over_diagram

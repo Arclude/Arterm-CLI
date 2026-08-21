@@ -13,7 +13,10 @@ description = "Mutually authenticated TLS transport between two paired arterm ma
 anyhow = "1"
 arterm-device = { path = "../arterm-device" }
 chrono = { version = "0.4", features = ["serde"] }
-if-addrs = "0.15"
+# link-local: without it if-addrs drops every fe80:: address, so
+# local_networks() / first_local_candidate never admit scoped LL peers.
+if-addrs = { version = "0.15", features = ["link-local"] }
+libc = "0.2"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

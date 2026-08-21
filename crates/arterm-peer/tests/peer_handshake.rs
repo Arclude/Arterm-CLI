@@ -253,6 +253,125 @@ async fn a_connection_refreshes_the_address_recorded_for_the_peer() {
     assert_eq!(guest_entry.address.as_deref(), Some("127.0.0.1:9999"));
 }
 
+/// IPv6 is a first-class peer path: bind, dial with a bracketed hostport,
+/// mutual TLS via `ServerName::IpAddress`, and a trust-store refresh that
+/// keeps the brackets so the recorded address can be dialled back.
+#[tokio::test]
+async fn ipv6_loopback_pairs_lists_and_records_a_bracketed_hostport() {
+    let host = Device::new();
+    let guest = Device::new();
+    guest.trusts(&host, "host");
+    let secret = {
+        let mut invites = PendingInvites::load_at(host.path().join("invites.json"))
+            .expect("loading pending invites");
+        // Address in the invite is advisory for the join side; the listener
+        // binds [::1]:0 below and the guest dials the concrete port.
+        let invite =
+            Invite::mint("[::1]:7644", host.identity.fingerprint()).expect("minting an invite");
+        invites.record(&invite).expect("recording the invite");
+        invite.secret
+    };
+
+    let bind: SocketAddr = "[::1]:0".parse().expect("a valid IPv6 bind address");
+    let advertised_sessions = vec![RemoteServerSummary {
+        name: "forge-v6".to_string(),
+        icon: "🔥".to_string(),
+        version: "v0.10.11-dev".to_string(),
+        sessions: vec!["fox".to_string()],
+        details: Vec::new(),
+    }];
+    let listener = PeerListener::bind_with_policy(
+        bind,
+        &host.credentials(),
+        host.gate(),
+        SubnetPolicy::ThisMachine,
+    )
+    .await
+    .expect("binding the peer listener on [::1]")
+    .with_local_sessions(std::sync::Arc::new({
+        let sessions = advertised_sessions.clone();
+        move || sessions.clone()
+    }));
+    let addr = listener.local_addr();
+    assert!(addr.is_ipv6(), "listener must be on IPv6, got {addr}");
+    assert!(
+        addr.to_string().starts_with("[::1]:"),
+        "SocketAddr Display should bracket V6, got {addr}"
+    );
+
+    // Pairing connection first.
+    let listening = {
+        let admitter = listener.admitter();
+        tokio::spawn(async move {
+            match listener.accept().await.expect("accepting") {
+                Arrival::Pending(pending) => admitter.establish(pending).await.expect("establish"),
+                Arrival::Rejected(rejection) => Admitted::Rejected(rejection),
+            }
+        })
+    };
+    let link = connect_to_peer(
+        &guest.credentials(),
+        &target_for(&host, addr),
+        Some(&secret),
+        Some(9999),
+    )
+    .await
+    .expect("a live invite should pair over IPv6 loopback");
+    assert!(link.paired_now);
+    assert!(link.peer_addr.is_ipv6());
+
+    let session = match listening.await.expect("the listener task") {
+        Admitted::Session(session) => session,
+        Admitted::Rejected(rejection) => panic!("IPv6 pair refused: {}", rejection.reason),
+        Admitted::Listed { .. } => panic!("expected a session from pairing"),
+    };
+    assert!(session.paired_now);
+    assert_eq!(session.fingerprint, guest.identity.fingerprint());
+    assert_eq!(session.peer_addr.ip().to_string(), "::1");
+
+    let recorded = host.trust_store();
+    let guest_entry = recorded
+        .find(&guest.identity.fingerprint())
+        .expect("host records the guest after pairing");
+    assert_eq!(
+        guest_entry.address.as_deref(),
+        Some("[::1]:9999"),
+        "admit must refresh a bracketed V6 hostport, not bare ::1:port"
+    );
+
+    // List sessions on a fresh IPv6 accept without opening a session.
+    let listener = PeerListener::bind_with_policy(
+        bind,
+        &host.credentials(),
+        host.gate(),
+        SubnetPolicy::ThisMachine,
+    )
+    .await
+    .expect("rebinding on [::1]")
+    .with_local_sessions(std::sync::Arc::new({
+        let sessions = advertised_sessions.clone();
+        move || sessions.clone()
+    }));
+    let addr = listener.local_addr();
+    let listening = {
+        let admitter = listener.admitter();
+        tokio::spawn(async move {
+            match listener.accept().await.expect("accepting") {
+                Arrival::Pending(pending) => admitter.establish(pending).await.expect("establish"),
+                Arrival::Rejected(rejection) => Admitted::Rejected(rejection),
+            }
+        })
+    };
+    let reported = list_peer_sessions(&guest.credentials(), &target_for(&host, addr))
+        .await
+        .expect("a paired device should list sessions over IPv6");
+    assert_eq!(reported, advertised_sessions);
+    match listening.await.expect("the listener task") {
+        Admitted::Listed { peer_name, .. } => assert_eq!(peer_name, guest.identity.name()),
+        other => panic!("expected Listed over IPv6, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Reciprocal pairing
 // ---------------------------------------------------------------------------
@@ -669,6 +788,65 @@ async fn the_listener_refuses_to_bind_the_wildcard_address() {
         format!("{error:#}").contains("refusing to bind"),
         "the refusal should say why, got: {error:#}"
     );
+}
+
+/// IPv6 unspecified (`::` / `[::]:0`) is the dual-stack sibling of `0.0.0.0`.
+/// `is_wildcard` is the sole pre-bind gate in `bind_with_policy`, so both
+/// parse forms must refuse with the same message shape and never reach
+/// `TcpListener::bind` (which could otherwise open a dual-stack any-bind).
+#[tokio::test]
+async fn the_listener_refuses_to_bind_the_ipv6_wildcard_address() {
+    use std::net::IpAddr;
+
+    let host = Device::new();
+    // Bracketed hostport parses as SocketAddr directly. Bare `::` is what the
+    // CLI accepts as an IP-only flag (IpAddr + default port), matching
+    // device_peer::resolve_bind_address.
+    let cases: [(&str, SocketAddr); 2] = [
+        (
+            "[::]:0",
+            "[::]:0".parse().expect("bracketed IPv6 wildcard hostport"),
+        ),
+        (
+            "::",
+            SocketAddr::new(
+                "::".parse::<IpAddr>().expect("bare IPv6 unspecified"),
+                arterm_peer::DEFAULT_PEER_PORT,
+            ),
+        ),
+    ];
+    for (raw, wildcard) in cases {
+        assert!(
+            wildcard.ip().is_unspecified(),
+            "{raw:?} should be the IPv6 unspecified address, got {}",
+            wildcard.ip()
+        );
+        let error = match PeerListener::bind_with_policy(
+            wildcard,
+            &host.credentials(),
+            host.gate(),
+            SubnetPolicy::ThisMachine,
+        )
+        .await
+        {
+            Ok(_listener) => panic!("IPv6 wildcard {raw:?} must not bind"),
+            Err(error) => error,
+        };
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("refusing to bind"),
+            "IPv6 wildcard {raw:?} must use the same refusal as V4, got: {text}"
+        );
+        assert!(
+            text.contains("::"),
+            "refusal should name the IPv6 unspecified address, got: {text}"
+        );
+        // Must fail before TCP bind (no "binding the peer listener to …" OS error).
+        assert!(
+            !text.contains("binding the peer listener to"),
+            "is_wildcard must be the sole gate; OS bind must not run for {raw:?}: {text}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

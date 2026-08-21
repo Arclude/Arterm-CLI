@@ -272,23 +272,11 @@ fn parse_and_prepare_args() -> Result<Args> {
 
 fn validate_remote_working_dir(remote_working_dir: Option<&str>) -> Result<()> {
     if let Some(remote_working_dir) = remote_working_dir
-        && !remote_working_dir_is_absolute(remote_working_dir)
+        && !crate::platform::client_cwd_is_absolute(remote_working_dir)
     {
         anyhow::bail!("--remote-working-dir must be an absolute path");
     }
     Ok(())
-}
-
-fn remote_working_dir_is_absolute(path: &str) -> bool {
-    if path.starts_with('/') || path.starts_with('\\') {
-        return true;
-    }
-
-    let bytes = path.as_bytes();
-    bytes.len() >= 3
-        && bytes[1] == b':'
-        && (bytes[2] == b'/' || bytes[2] == b'\\')
-        && bytes[0].is_ascii_alphabetic()
 }
 
 fn spawn_background_update_check(args: &Args) {

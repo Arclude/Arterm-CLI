@@ -431,6 +431,25 @@ fn spawn_replacement_process(
     cmd.spawn()
 }
 
+/// Whether a client-reported working directory is absolute on Unix or Windows.
+///
+/// `Path::is_absolute` follows this host. A Windows TUI sending
+/// `C:\Users\...` to a Linux daemon, or a Linux TUI sending `/home/...` to a
+/// Windows daemon, therefore fails the check, the daemon closes the socket, and
+/// the TUI reconnects forever.
+pub fn client_cwd_is_absolute(path: &str) -> bool {
+    let path = path.trim();
+    if path.starts_with('/') || path.starts_with('\\') {
+        return true;
+    }
+
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+}
+
 /// Replace the current process with a new command (exec on Unix).
 ///
 /// On Unix, this calls exec() which never returns on success.

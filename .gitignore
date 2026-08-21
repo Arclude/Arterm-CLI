@@ -31,3 +31,9 @@ captures/
 /*.avif
 /*.mp4
 /*.png
+
+# Overnight / swarm probe scratch (IPSW extracts, fe80 matrices, gate notes).
+# Lives in-repo for agent convenience but must never be committed (~tens of k files).
+/.arterm-scratch/
+/ll_remember_verify/
+/tokoll/

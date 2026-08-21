@@ -409,6 +409,19 @@ async fn pair_with(row: &DeviceRow, code: &str) -> Result<()> {
         secret: code.to_string(),
     };
 
+    // Dial and complete pairing BEFORE writing trust / PendingJoins.
+    // Trusting first left permanent trust + pending-join residue when dial or
+    // handshake failed (no rollback path).
+    let credentials = PeerCredentials::from_identity(&identity)?;
+    let target = PeerTarget {
+        address: row.address.clone(),
+        fingerprint: row.fingerprint.clone(),
+    };
+    let link = connect_to_peer(&credentials, &target, Some(code), Some(DEFAULT_PEER_PORT)).await?;
+    if !link.paired_now {
+        anyhow::bail!("the code was not accepted");
+    }
+
     let mut trust = TrustStore::load().context("loading the trust store")?;
     trust.trust(arterm_device::TrustedDevice {
         fingerprint: row.fingerprint.to_hex(),
@@ -419,16 +432,6 @@ async fn pair_with(row: &DeviceRow, code: &str) -> Result<()> {
     PendingJoins::load()
         .context("loading pending joins")?
         .record(&invite)?;
-
-    let credentials = PeerCredentials::from_identity(&identity)?;
-    let target = PeerTarget {
-        address: row.address.clone(),
-        fingerprint: row.fingerprint.clone(),
-    };
-    let link = connect_to_peer(&credentials, &target, Some(code), Some(DEFAULT_PEER_PORT)).await?;
-    if !link.paired_now {
-        anyhow::bail!("the code was not accepted");
-    }
     Ok(())
 }
 

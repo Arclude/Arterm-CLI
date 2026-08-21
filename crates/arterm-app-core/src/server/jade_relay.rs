@@ -1109,11 +1109,20 @@ fn provider_key_for_launch_model(
 }
 
 fn create_launch_session(request: &LaunchRequest) -> Result<(String, PathBuf)> {
-    let cwd = request
+    let cwd = match request
         .working_dir
         .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        Some(dir) if !crate::platform::client_cwd_is_absolute(dir) => {
+            // Relative launch dirs would resolve against the relay process cwd and
+            // then be written into Session.working_dir as that relative string.
+            anyhow::bail!("launch working_dir must be an absolute path: {dir}");
+        }
+        Some(dir) => PathBuf::from(dir),
+        None => std::env::current_dir().context("reading the jade relay process cwd")?,
+    };
     if !cwd.is_dir() {
         anyhow::bail!("launch working_dir is not a directory: {}", cwd.display());
     }
@@ -1390,6 +1399,24 @@ mod tests {
         assert_eq!(parsed.model.as_deref(), Some("openai:gpt-test"));
         assert_eq!(parsed.provider_key.as_deref(), Some("openai"));
         assert!(parsed.selfdev);
+    }
+
+    #[test]
+    fn create_launch_session_rejects_relative_working_dir() {
+        let request = LaunchRequest {
+            text: "launch".to_string(),
+            working_dir: Some("relative/project".to_string()),
+            model: None,
+            provider_key: None,
+            selfdev: false,
+        };
+        let error = create_launch_session(&request).expect_err("relative launch cwd");
+        assert!(
+            error
+                .to_string()
+                .contains("launch working_dir must be an absolute path"),
+            "{error}"
+        );
     }
 
     #[test]

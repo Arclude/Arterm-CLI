@@ -1840,3 +1840,117 @@ fn command_palette_open_does_not_move_existing_rows() {
     }
     assert!(checked >= 3, "expected transcript rows to sample:\n{before}");
 }
+
+#[test]
+fn jump_to_bottom_chip_appears_when_scrolled_up() {
+    let _lock = scroll_render_test_lock();
+    let (mut app, mut terminal) = create_scroll_test_app(100, 24, 0, 40);
+    let at_bottom = render_and_snap(&app, &mut terminal);
+    assert!(
+        !at_bottom.contains("Jump to bottom"),
+        "chip must stay hidden while pinned to the latest messages:\n{at_bottom}"
+    );
+    assert!(crate::tui::ui::last_max_scroll() > 2);
+
+    app.scroll_up(8);
+    let scrolled = render_and_snap(&app, &mut terminal);
+    assert!(app.auto_scroll_paused);
+    assert!(
+        scrolled.contains("Jump to bottom"),
+        "chip should appear after scrolling up:\n{scrolled}"
+    );
+    assert!(
+        scrolled.contains("Ctrl+End"),
+        "chip should mention Ctrl+End:\n{scrolled}"
+    );
+}
+
+#[test]
+fn jump_to_bottom_chip_click_and_ctrl_end_resume_follow() {
+    let _lock = scroll_render_test_lock();
+    let (mut app, mut terminal) = create_scroll_test_app(100, 24, 0, 40);
+    let _ = render_and_snap(&app, &mut terminal);
+    app.scroll_up(8);
+    let _ = render_and_snap(&app, &mut terminal);
+    assert!(app.auto_scroll_paused);
+    let chip = crate::tui::ui::last_jump_to_bottom_area().expect("chip hitbox after render");
+
+    app.handle_mouse_event(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: chip.x + chip.width / 2,
+        row: chip.y,
+        modifiers: KeyModifiers::empty(),
+    });
+    assert!(
+        !app.auto_scroll_paused,
+        "clicking the chip should jump to the latest messages"
+    );
+    assert_eq!(app.scroll_offset, 0);
+
+    app.scroll_up(8);
+    assert!(app.auto_scroll_paused);
+    app.handle_key(KeyCode::End, KeyModifiers::CONTROL)
+        .expect("Ctrl+End should jump to bottom");
+    assert!(!app.auto_scroll_paused);
+    assert_eq!(app.scroll_offset, 0);
+
+    let after = render_and_snap(&app, &mut terminal);
+    assert!(
+        !after.contains("Jump to bottom"),
+        "chip should hide once following the latest messages:\n{after}"
+    );
+}
+
+#[test]
+fn ctrl_end_at_bottom_does_not_steal_caret() {
+    let _lock = scroll_render_test_lock();
+    let (mut app, mut terminal) = create_scroll_test_app(100, 24, 0, 40);
+    let _ = render_and_snap(&app, &mut terminal);
+    app.input = "draft".to_string();
+    app.cursor_pos = 2;
+    assert!(!app.auto_scroll_paused);
+    app.handle_key(KeyCode::End, KeyModifiers::CONTROL)
+        .expect("Ctrl+End at tail should not jump");
+    assert_eq!(
+        app.cursor_pos, 2,
+        "Ctrl+End while already at the latest messages must not move the caret"
+    );
+    assert!(!app.auto_scroll_paused);
+}
+
+#[test]
+fn jump_to_bottom_click_miss_does_not_follow() {
+    let _lock = scroll_render_test_lock();
+    let (mut app, mut terminal) = create_scroll_test_app(100, 24, 0, 40);
+    let _ = render_and_snap(&app, &mut terminal);
+    app.scroll_up(8);
+    let _ = render_and_snap(&app, &mut terminal);
+    let chip = crate::tui::ui::last_jump_to_bottom_area().expect("chip hitbox");
+    app.handle_mouse_event(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: chip.x.saturating_sub(2),
+        row: chip.y,
+        modifiers: KeyModifiers::empty(),
+    });
+    assert!(
+        app.auto_scroll_paused,
+        "a click beside the chip must not jump to bottom"
+    );
+}
+
+#[test]
+fn jump_to_bottom_chip_geometry_centers_above_input() {
+    let input = ratatui::layout::Rect::new(0, 10, 40, 3);
+    let frame = ratatui::layout::Rect::new(0, 0, 40, 20);
+    let rect = crate::tui::ui::jump_to_bottom_overlay_rect(input, frame).expect("room above input");
+    assert_eq!(rect.height, 1);
+    assert_eq!(rect.y, 9);
+    assert!(rect.x > 0);
+    assert!(rect.x + rect.width <= 40);
+
+    let no_room = crate::tui::ui::jump_to_bottom_overlay_rect(
+        ratatui::layout::Rect::new(0, 0, 40, 2),
+        ratatui::layout::Rect::new(0, 0, 40, 20),
+    );
+    assert!(no_room.is_none());
+}

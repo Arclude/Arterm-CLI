@@ -58,10 +58,14 @@ pub(super) async fn create_headless_session(
 
     let working_dir = if let Some(path_str) = command.strip_prefix("create_session:") {
         let path_str = path_str.trim();
-        if !path_str.is_empty() {
-            Some(std::path::PathBuf::from(path_str))
-        } else {
+        if path_str.is_empty() {
             None
+        } else if !crate::platform::client_cwd_is_absolute(path_str) {
+            // Same host-neutral rule as Subscribe: a relative path here would be
+            // interpreted against the daemon cwd and persisted into the session.
+            anyhow::bail!("create_session working_dir must be an absolute path: {path_str}");
+        } else {
+            Some(std::path::PathBuf::from(path_str))
         }
     } else {
         None

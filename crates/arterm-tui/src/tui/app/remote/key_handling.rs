@@ -572,6 +572,15 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    if modifiers.contains(KeyModifiers::CONTROL)
+        && !modifiers.contains(KeyModifiers::SHIFT)
+        && matches!(code, KeyCode::End)
+        && app.auto_scroll_paused
+    {
+        app.follow_chat_bottom();
+        return Ok(());
+    }
+
     if let Some(amount) = app.scroll_keys.scroll_amount(code, modifiers) {
         if amount < 0 {
             app.scroll_up((-amount) as usize);
@@ -2217,6 +2226,32 @@ async fn handle_remote_key_internal(
                         ));
                         let _ = begin_remote_send(app, remote, prompt, vec![], true, None, true, 0)
                             .await;
+                    }
+                    return Ok(());
+                }
+
+                if let Some(command) = app_mod::commands::parse_init_command(trimmed) {
+                    match command {
+                        Err(error) => {
+                            app.push_display_message(DisplayMessage::error(error));
+                        }
+                        Ok(()) => {
+                            let prompt = app_mod::commands::build_init_prompt();
+                            if app.is_processing {
+                                remote.cancel_with_reason("slash_init").await?;
+                                app.set_status_notice("Interrupting for /init...");
+                                app.push_display_message(DisplayMessage::system(
+                                    app_mod::commands::init_launch_notice(true),
+                                ));
+                                app.queued_messages.push(prompt);
+                            } else {
+                                app.push_display_message(DisplayMessage::system(
+                                    app_mod::commands::init_launch_notice(false),
+                                ));
+                                begin_remote_send(app, remote, prompt, vec![], true, None, true, 0)
+                                    .await?;
+                            }
+                        }
                     }
                     return Ok(());
                 }

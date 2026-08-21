@@ -133,28 +133,44 @@ impl SubnetPolicy {
 /// `192.168.1.100/24` on a real machine, purely because "C" sorts before "w" —
 /// and a peer on the LAN cannot reach a VPN's point-to-point address, so both
 /// `listen` and the address baked into `invite` pointed somewhere unreachable
-/// with no error anywhere. Every VPN client on the machine is a chance to lose
-/// that coin toss.
+/// with no error anywhere. Ranking private addresses equally then did the same
+/// with Docker: `br-*` `172.22.0.1/16` sorts before `wlan0` `192.168.1.100/24`,
+/// and a peer on the LAN cannot reach a container bridge. Tighter prefixes win
+/// among private addresses so the LAN `/24` beats the Docker `/16`.
 pub fn default_bind_ip() -> Result<IpAddr> {
     let interfaces =
         if_addrs::get_if_addrs().context("reading this machine's network interfaces")?;
+    let default_ifaces = default_route_ifaces();
 
-    let mut candidates: Vec<(u8, &str, Ipv4Addr)> = interfaces
+    let mut candidates: Vec<(u16, u8, &str, Ipv4Addr)> = interfaces
         .iter()
         .filter_map(|interface| match &interface.addr {
             if_addrs::IfAddr::V4(v4) if is_bindable_v4(v4.ip) => {
-                Some((bind_rank_v4(v4), interface.name.as_str(), v4.ip))
+                let on_default = if default_ifaces.iter().any(|name| name == &interface.name) {
+                    1u8
+                } else {
+                    0u8
+                };
+                Some((bind_rank_v4(v4), on_default, interface.name.as_str(), v4.ip))
             }
             _ => None,
         })
         .collect();
 
-    // Best rank first; interface name breaks ties so the choice is stable
-    // between runs on a machine with several equally good addresses.
-    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+    // Best subnet rank first. When ranks tie (e.g. two LAN /24s), prefer the
+    // interface that carries the default route over lexicographic name order
+    // (enp2s0 must not beat wlan0 solely because "e" < "w"). Name is still
+    // the final stable tie-break.
+    candidates.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(right.2))
+    });
 
     match candidates.first() {
-        Some((_, _, ip)) => Ok(IpAddr::V4(*ip)),
+        Some((_, _, _, ip)) => Ok(IpAddr::V4(*ip)),
         None => anyhow::bail!(
             "this machine has no non-loopback IPv4 address, so there is no local network to \
              listen on — connect it to the network, or pass `--address <ip>:<port>` to choose \
@@ -163,18 +179,48 @@ pub fn default_bind_ip() -> Result<IpAddr> {
     }
 }
 
+/// Interface names that currently carry a default IPv4 route, if readable.
+///
+/// Linux: `/proc/net/route` (destination 00000000). Other platforms return
+/// empty and fall back to name-only ties — better than inventing a wrong metric.
+fn default_route_ifaces() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(text) = std::fs::read_to_string("/proc/net/route") else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for line in text.lines().skip(1) {
+            let mut cols = line.split_whitespace();
+            let Some(iface) = cols.next() else { continue };
+            let Some(dest) = cols.next() else { continue };
+            // Destination 00000000 is the default route.
+            if dest == "00000000" {
+                out.push(iface.to_string());
+            }
+        }
+        out
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
+    }
+}
+
 /// How good an address is for a peer listener, higher is better.
 ///
 /// A `/32` is a point-to-point address handed out by a VPN. It is reachable
 /// only through that tunnel, which is exactly not the local network two paired
 /// machines are looking for each other on, so it ranks below anything sitting
-/// on a real subnet. A private address on a real subnet is the LAN case this is
-/// for and ranks highest.
-fn bind_rank_v4(v4: &if_addrs::Ifv4Addr) -> u8 {
-    if v4.netmask == Ipv4Addr::new(255, 255, 255, 255) {
+/// on a real subnet. Among real subnets a private address beats a public one,
+/// and a tighter prefix beats a wider one: a LAN `/24` must outrank a Docker
+/// bridge `/16`, or interface-name order sends `listen` to `172.22.0.1`.
+fn bind_rank_v4(v4: &if_addrs::Ifv4Addr) -> u16 {
+    if v4.prefixlen >= 32 || v4.netmask == Ipv4Addr::new(255, 255, 255, 255) {
         return 0;
     }
-    if v4.ip.is_private() { 2 } else { 1 }
+    let class: u16 = if v4.ip.is_private() { 2 } else { 1 };
+    class * 256 + u16::from(v4.prefixlen)
 }
 
 /// Whether an address is worth binding a peer listener to.

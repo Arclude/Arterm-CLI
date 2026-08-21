@@ -320,7 +320,10 @@ fn peer_address(
     )
 }
 
-/// Parse `--address`, filling in the default port and refusing the wildcard.
+/// Parse `--address`, filling in the default port when only an IP is given.
+///
+/// Wildcard refusal (`0.0.0.0` / `::`) lives in [`PeerListener::bind`], not here,
+/// so callers can distinguish "bad syntax" from "parsed but not bindable".
 fn resolve_bind_address(address: Option<&str>) -> Result<SocketAddr> {
     let Some(address) = address else {
         let ip = subnet::default_bind_ip()?;

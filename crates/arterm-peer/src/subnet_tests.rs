@@ -116,6 +116,45 @@ fn a_fixed_policy_answers_from_its_own_list() {
     assert!(!nowhere.admits(v4("127.0.0.1")).expect("policy answers"));
 }
 
+/// PeerListener::accept asks the policy with `peer_addr.ip()` only, so a Fixed
+/// fe80::/64 list must admit every link-local peer IP regardless of the
+/// SocketAddrV6 scope_id / interface the kernel attached on arrival.
+#[test]
+fn a_fixed_fe80_slash_64_admits_any_link_local_ip_regardless_of_scope() {
+    use std::net::{SocketAddr, SocketAddrV6};
+
+    let policy = SubnetPolicy::Fixed(vec![LocalNetwork::new(v6("fe80::1"), 64)]);
+
+    for peer in [
+        "fe80::1",
+        "fe80::abcd",
+        "fe80::dead:beef",
+        "fe80::ffff:ffff:ffff:ffff",
+    ] {
+        assert!(
+            policy.admits(v6(peer)).expect("policy answers"),
+            "{peer} is inside fe80::/64"
+        );
+    }
+    assert!(!policy.admits(v6("fe81::1")).expect("policy answers"));
+    assert!(!policy.admits(v6("fd00::1")).expect("policy answers"));
+
+    // Same IP under different zone ids is still the same IpAddr after .ip().
+    for scope_id in [0u32, 1, 2, 42, u32::MAX] {
+        let addr = SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::from_str("fe80::a:b:c:d").expect("valid address"),
+            7644,
+            0,
+            scope_id,
+        ));
+        assert_eq!(addr.ip(), v6("fe80::a:b:c:d"));
+        assert!(
+            policy.admits(addr.ip()).expect("policy answers"),
+            "scope_id={scope_id} must not affect Fixed fe80::/64 admission"
+        );
+    }
+}
+
 /// This machine is on at least loopback, whatever else it is plugged into, so
 /// the interface read has one answer that is true everywhere the suite runs.
 #[test]
@@ -191,6 +230,29 @@ fn a_private_subnet_outranks_a_public_one() {
     };
 
     assert!(bind_rank_v4(&private) > bind_rank_v4(&public));
+}
+
+/// Docker and libvirt bridges sit in `172.16/12` as `/16`s. Rank 2 for every
+/// private address used to pick them over `wlan0` because `br-*` sorts first.
+#[test]
+fn a_lan_slash_24_outranks_a_docker_slash_16() {
+    let lan = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("192.168.1.100").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.255.255.0").expect("valid mask"),
+        prefixlen: 24,
+        broadcast: None,
+    };
+    let docker = if_addrs::Ifv4Addr {
+        ip: Ipv4Addr::from_str("172.22.0.1").expect("valid address"),
+        netmask: Ipv4Addr::from_str("255.255.0.0").expect("valid mask"),
+        prefixlen: 16,
+        broadcast: None,
+    };
+
+    assert!(
+        bind_rank_v4(&lan) > bind_rank_v4(&docker),
+        "a LAN /24 must outrank a container bridge /16, whatever the interfaces are called"
+    );
 }
 
 /// A machine with only a VPN still has to be able to listen somewhere: ranking

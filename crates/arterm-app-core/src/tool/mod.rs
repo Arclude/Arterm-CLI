@@ -1404,6 +1404,8 @@ mod mcp_allow_list_tests {
 #[cfg(test)]
 mod checkpoint_e2e_tests;
 #[cfg(test)]
+mod session_cwd_path_tests;
+#[cfg(test)]
 mod permission_gate_tests {
     use super::bash::BashTool;
     use super::{CompactionManager, Registry, Tool, ToolContext, ToolExecutionMode};

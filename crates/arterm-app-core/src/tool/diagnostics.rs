@@ -93,8 +93,8 @@ impl Tool for DiagnosticsTool {
             .map_err(|e| anyhow::anyhow!("invalid diagnostics input: {e}"))?;
         let target = input
             .path
-            .clone()
-            .map(PathBuf::from)
+            .as_deref()
+            .map(|p| ctx.resolve_path(std::path::Path::new(p)))
             .or_else(|| ctx.working_dir.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         let root = find_project_root(&target);

@@ -145,6 +145,21 @@ pub(super) async fn send_request_with_timeout(
     }
 }
 
+/// Remove an isolate worktree on a failed spawn, logging rather than
+/// swallowing the cleanup error: the error the caller sees must stay about
+/// the spawn itself, while a leftover worktree is still recorded in the log.
+pub(super) fn cleanup_isolate_worktree(isolate: Option<&(std::path::PathBuf, std::path::PathBuf)>) {
+    if let Some((base, wt_path)) = isolate
+        && let Err(err) = crate::worktree::remove_worktree(base, wt_path)
+    {
+        crate::logging::warn(&format!(
+            "Failed to remove isolate worktree {}: {}",
+            wt_path.display(),
+            err
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{SERVER_NOT_RUNNING, connect_swarm_socket};

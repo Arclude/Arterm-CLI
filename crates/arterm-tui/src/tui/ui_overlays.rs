@@ -277,6 +277,10 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
         "Draft a plan-only proposal as a plan card (no edits)",
     ));
     lines.push(help_entry(
+        "/init",
+        "Generate or update AGENTS.md for this project",
+    ));
+    lines.push(help_entry(
         "/improve",
         "Autonomously improve the repo until returns diminish",
     ));
@@ -459,6 +463,10 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
     lines.push(Line::from(Span::styled("  Navigation", section_style)));
     lines.push(Line::from(""));
     lines.push(key_entry("PageUp / PageDown", "Scroll history"));
+    lines.push(key_entry(
+        "Ctrl+End",
+        "Jump to the latest messages (also the Jump to bottom chip)",
+    ));
     lines.push(key_entry("Up / Down", "Scroll history (when input empty)"));
     lines.push(key_entry(
         "Ctrl+J / Ctrl+K",
