@@ -1928,6 +1928,15 @@ pub(super) fn handle_navigation_shortcuts(
         return true;
     }
 
+    if modifiers.contains(KeyModifiers::CONTROL)
+        && !modifiers.contains(KeyModifiers::SHIFT)
+        && matches!(code, KeyCode::End)
+        && app.auto_scroll_paused
+    {
+        app.follow_chat_bottom();
+        return true;
+    }
+
     if app.toggle_keys.diff_mode_cycle.matches(code, modifiers) {
         app.diff_mode = app.diff_mode.cycle();
         if !app.diff_pane_visible() {
@@ -1951,6 +1960,10 @@ pub(super) fn is_scroll_only_key(app: &App, code: KeyCode, modifiers: KeyModifie
         || App::ctrl_side_panel_ratio_preset(&code, modifiers).is_some()
         || App::ctrl_prompt_rank(&code, modifiers).is_some()
         || app.scroll_keys.is_bookmark(code, modifiers)
+        || (modifiers.contains(KeyModifiers::CONTROL)
+            && !modifiers.contains(KeyModifiers::SHIFT)
+            && matches!(code, KeyCode::End)
+            && app.auto_scroll_paused)
         || (modifiers.contains(KeyModifiers::ALT)
             && matches!(code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&'g')))
     {

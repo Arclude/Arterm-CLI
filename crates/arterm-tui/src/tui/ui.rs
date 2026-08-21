@@ -32,7 +32,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-#[cfg(test)]
 use unicode_width::UnicodeWidthStr;
 #[path = "ui_animations.rs"]
 mod animations;
@@ -238,6 +237,7 @@ thread_local! {
     static TEST_LAST_USER_PROMPT_POSITIONS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     static TEST_LAST_LAYOUT: RefCell<Option<LayoutSnapshot>> = const { RefCell::new(None) };
     static TEST_LAST_STATUS_AREA: RefCell<Option<Rect>> = const { RefCell::new(None) };
+    static TEST_LAST_JUMP_TO_BOTTOM_AREA: RefCell<Option<Rect>> = const { RefCell::new(None) };
     static TEST_VISIBLE_COPY_TARGETS: RefCell<Vec<VisibleCopyTarget>> = RefCell::new(Vec::new());
     static TEST_VISIBLE_EXPAND_EDIT_BADGE: Cell<bool> = const { Cell::new(false) };
     static TEST_VISIBLE_EXPAND_EDIT_BADGE_LINE: Cell<Option<usize>> = const { Cell::new(None) };
@@ -1346,6 +1346,63 @@ pub(crate) fn last_status_area() -> Option<Rect> {
             .ok()
             .and_then(|snapshot| *snapshot)
     }
+}
+
+#[cfg(not(test))]
+static LAST_JUMP_TO_BOTTOM_AREA: OnceLock<Mutex<Option<Rect>>> = OnceLock::new();
+
+#[cfg(not(test))]
+fn last_jump_to_bottom_area_state() -> &'static Mutex<Option<Rect>> {
+    LAST_JUMP_TO_BOTTOM_AREA.get_or_init(|| Mutex::new(None))
+}
+
+pub(crate) fn record_jump_to_bottom_area(area: Option<Rect>) {
+    #[cfg(test)]
+    {
+        TEST_LAST_JUMP_TO_BOTTOM_AREA.with(|snapshot| {
+            *snapshot.borrow_mut() = area;
+        });
+        return;
+    }
+    #[cfg(not(test))]
+    {
+        if let Ok(mut snapshot) = last_jump_to_bottom_area_state().lock() {
+            *snapshot = area;
+        }
+    }
+}
+
+pub(crate) fn last_jump_to_bottom_area() -> Option<Rect> {
+    #[cfg(test)]
+    {
+        return TEST_LAST_JUMP_TO_BOTTOM_AREA.with(|snapshot| *snapshot.borrow());
+    }
+    #[cfg(not(test))]
+    {
+        last_jump_to_bottom_area_state()
+            .lock()
+            .ok()
+            .and_then(|snapshot| *snapshot)
+    }
+}
+
+/// Label shown on the jump-to-bottom overlay (GitHub Copilot-style).
+pub(crate) const JUMP_TO_BOTTOM_LABEL: &str = "Jump to bottom  (Ctrl+End)  ↓";
+
+pub(crate) fn jump_to_bottom_overlay_rect(input_area: Rect, frame_area: Rect) -> Option<Rect> {
+    if input_area.width < 8 || input_area.height == 0 {
+        return None;
+    }
+    let label_width = unicode_width::UnicodeWidthStr::width(JUMP_TO_BOTTOM_LABEL) as u16;
+    let width = label_width.saturating_add(4).min(input_area.width);
+    if width == 0 {
+        return None;
+    }
+    let x = input_area.x + input_area.width.saturating_sub(width) / 2;
+    if input_area.y <= frame_area.y {
+        return None;
+    }
+    Some(Rect::new(x, input_area.y.saturating_sub(1), width, 1))
 }
 
 use frame_metrics::{
@@ -2610,6 +2667,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     if area.width == 0 || area.height == 0 {
         return;
     }
+    record_jump_to_bottom_area(None);
 
     let total_start = Instant::now();
     reset_frame_perf_stats();
@@ -3553,6 +3611,10 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // Ctrl+R reverse prompt-history search overlay (drawn after the command
     // palette so it wins when both could be visible).
     input_ui::draw_prompt_history_search_overlay(frame, app, chunks[7]);
+
+    // GitHub Copilot-style jump-to-bottom chip. Drawn last among non-modal
+    // overlays so it sits above the transcript tail, just over the composer.
+    input_ui::draw_jump_to_bottom_overlay(frame, app, chunks[7]);
 
     // A pending destructive confirmation outranks every other late overlay: it
     // is modal, and it is drawn over the transcript it is about to delete from.

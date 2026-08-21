@@ -572,6 +572,15 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    if modifiers.contains(KeyModifiers::CONTROL)
+        && !modifiers.contains(KeyModifiers::SHIFT)
+        && matches!(code, KeyCode::End)
+        && app.auto_scroll_paused
+    {
+        app.follow_chat_bottom();
+        return Ok(());
+    }
+
     if let Some(amount) = app.scroll_keys.scroll_amount(code, modifiers) {
         if amount < 0 {
             app.scroll_up((-amount) as usize);

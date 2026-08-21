@@ -393,6 +393,11 @@ pub(super) fn build_registry(inputs: &RegistryInputs<'_>) -> Vec<KnownHotkey> {
         "insert a newline",
     ));
     out.push(KnownHotkey::new(
+        key(KeyCode::End, KeyModifiers::CONTROL),
+        "jump_to_bottom",
+        "jump the chat back to the latest messages",
+    ));
+    out.push(KnownHotkey::new(
         key(KeyCode::Up, KeyModifiers::CONTROL),
         "prompt_recall",
         "recall queued prompt / prompt history",
