@@ -92,4 +92,45 @@ mod tests {
         assert!(prompt.contains("under ~200 lines"));
         assert!(prompt.contains("If `AGENTS.md` already exists, improve it in place"));
     }
+
+    #[test]
+    fn init_is_wired_on_local_and_remote_paths() {
+        assert!(
+            include_str!("commands.rs").contains("parse_init_command(trimmed)"),
+            "local session dispatch does not handle /init"
+        );
+        assert!(
+            include_str!("remote/key_handling.rs").contains("parse_init_command(trimmed)"),
+            "remote key path does not handle /init"
+        );
+        assert!(
+            include_str!("state_ui_input_helpers.rs").contains(r#""/init""#),
+            "/init is not registered in the command palette"
+        );
+        assert!(
+            include_str!("../ui_overlays.rs").contains(r#""/init""#),
+            "/help does not list /init"
+        );
+        assert!(
+            include_str!("input_help.rs").contains(r#""init""#),
+            "/init has no detailed command help"
+        );
+    }
+
+    #[test]
+    fn init_does_not_steal_initiatives_in_session_dispatch() {
+        let session = include_str!("commands.rs");
+        let init_at = session
+            .find("parse_init_command(trimmed)")
+            .expect("local /init dispatch");
+        let goals_at = session
+            .find("handle_goals_command(app, trimmed)")
+            .expect("local /initiatives dispatch");
+        assert!(
+            init_at < goals_at,
+            "/init must be claimed before /initiatives so the names stay distinct"
+        );
+        assert_eq!(parse_init_command("/initiatives"), None);
+        assert_eq!(parse_init_command("/initiatives resume"), None);
+    }
 }

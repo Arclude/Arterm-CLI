@@ -847,15 +847,13 @@ pub fn load_agents_md_files_from_dir(working_dir: Option<&Path>) -> (Option<Stri
 
     // Helper to load a file if it exists, returns (formatted_content, raw_size)
     let load_file = |path: &Path, label: &str| -> Option<(String, usize)> {
-        if path.exists() {
-            std::fs::read_to_string(path).ok().map(|content| {
-                let raw_size = content.len();
-                let formatted = format!("# {}\n\n{}", label, content.trim());
-                (formatted, raw_size)
-            })
-        } else {
-            None
+        let content = std::fs::read_to_string(path).ok()?;
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return None;
         }
+        let raw_size = content.len();
+        Some((format!("# {}\n\n{}", label, trimmed), raw_size))
     };
 
     // Project-level files (from specified working directory or current directory)
