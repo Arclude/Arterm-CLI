@@ -146,20 +146,12 @@ pub fn default_bind_ip() -> Result<IpAddr> {
         .iter()
         .filter_map(|interface| match &interface.addr {
             if_addrs::IfAddr::V4(v4) if is_bindable_v4(v4.ip) => {
-                let on_default = if default_ifaces
-                    .iter()
-                    .any(|name| name == &interface.name)
-                {
+                let on_default = if default_ifaces.iter().any(|name| name == &interface.name) {
                     1u8
                 } else {
                     0u8
                 };
-                Some((
-                    bind_rank_v4(v4),
-                    on_default,
-                    interface.name.as_str(),
-                    v4.ip,
-                ))
+                Some((bind_rank_v4(v4), on_default, interface.name.as_str(), v4.ip))
             }
             _ => None,
         })

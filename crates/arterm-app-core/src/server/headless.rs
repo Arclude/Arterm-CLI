@@ -63,9 +63,7 @@ pub(super) async fn create_headless_session(
         } else if !crate::platform::client_cwd_is_absolute(path_str) {
             // Same host-neutral rule as Subscribe: a relative path here would be
             // interpreted against the daemon cwd and persisted into the session.
-            anyhow::bail!(
-                "create_session working_dir must be an absolute path: {path_str}"
-            );
+            anyhow::bail!("create_session working_dir must be an absolute path: {path_str}");
         } else {
             Some(std::path::PathBuf::from(path_str))
         }

@@ -125,7 +125,12 @@ fn a_fixed_fe80_slash_64_admits_any_link_local_ip_regardless_of_scope() {
 
     let policy = SubnetPolicy::Fixed(vec![LocalNetwork::new(v6("fe80::1"), 64)]);
 
-    for peer in ["fe80::1", "fe80::abcd", "fe80::dead:beef", "fe80::ffff:ffff:ffff:ffff"] {
+    for peer in [
+        "fe80::1",
+        "fe80::abcd",
+        "fe80::dead:beef",
+        "fe80::ffff:ffff:ffff:ffff",
+    ] {
         assert!(
             policy.admits(v6(peer)).expect("policy answers"),
             "{peer} is inside fe80::/64"

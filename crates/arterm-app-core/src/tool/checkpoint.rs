@@ -406,10 +406,8 @@ mod tests {
     #[test]
     fn max_snapshots_bound_is_per_spelling_not_inode() {
         let store = CheckpointStore::new();
-        let dir = std::env::temp_dir().join(format!(
-            "arterm-cp-noncanon-bound-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("arterm-cp-noncanon-bound-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         let spelling_a = dir.join("shared.txt");

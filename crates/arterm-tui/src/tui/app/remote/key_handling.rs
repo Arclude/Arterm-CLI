@@ -2249,7 +2249,14 @@ async fn handle_remote_key_internal(
                                     app_mod::commands::init_launch_notice(false),
                                 ));
                                 let _ = begin_remote_send(
-                                    app, remote, prompt, vec![], true, None, true, 0,
+                                    app,
+                                    remote,
+                                    prompt,
+                                    vec![],
+                                    true,
+                                    None,
+                                    true,
+                                    0,
                                 )
                                 .await;
                             }

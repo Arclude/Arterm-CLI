@@ -157,9 +157,7 @@ async fn read_and_ls_resolve_relative_path_via_session_working_dir() {
 }
 
 #[tokio::test]
-async fn repo_map_relative_path_does_not_join_session_working_dir() {
-    // Documented gap: repo_map takes PathBuf::from(path) without ctx.resolve_path,
-    // so a relative path is interpreted against process cwd.
+async fn repo_map_relative_path_joins_session_working_dir() {
     let (session, decoy, _cwd) = session_and_decoy();
     let ctx = test_ctx(session.path());
 
@@ -171,30 +169,22 @@ async fn repo_map_relative_path_does_not_join_session_working_dir() {
         .await
         .expect("repo_map");
 
-    if out.output.contains("root:") {
-        assert!(
-            out.output
-                .contains(&decoy.path().join("src").display().to_string())
-                || !out
-                    .output
-                    .contains(&session.path().join("src").display().to_string()),
-            "repo_map root should be decoy-relative (process cwd), got: {}",
-            out.output
-        );
-    } else {
-        // Empty/no-source still must not claim the session tree as root.
-        assert!(
-            !out.output
-                .contains(&session.path().join("src").display().to_string()),
-            "repo_map must not silently use session root for relative path: {}",
-            out.output
-        );
-    }
+    assert!(
+        out.output
+            .contains(&session.path().join("src").display().to_string()),
+        "repo_map relative path should resolve via session working_dir, got: {}",
+        out.output
+    );
+    assert!(
+        !out.output
+            .contains(&decoy.path().join("src").display().to_string()),
+        "repo_map must not follow process cwd for relative path: {}",
+        out.output
+    );
 }
 
 #[tokio::test]
-async fn diagnostics_relative_path_does_not_join_session_working_dir() {
-    // Same gap as repo_map: PathBuf::from without resolve_path.
+async fn diagnostics_relative_path_joins_session_working_dir() {
     let (session, decoy, _cwd) = session_and_decoy();
     let ctx = test_ctx(session.path());
 
@@ -203,15 +193,10 @@ async fn diagnostics_relative_path_does_not_join_session_working_dir() {
         .await
         .expect("diagnostics");
 
-    let mentions_decoy = out
-        .output
-        .contains(decoy.path().display().to_string().as_str());
-    let mentions_session = out
-        .output
-        .contains(session.path().display().to_string().as_str());
     assert!(
-        mentions_decoy || !mentions_session,
-        "expected diagnostics relative path to follow process cwd (bug), got: {}",
+        !out.output
+            .contains(decoy.path().display().to_string().as_str()),
+        "diagnostics relative path must not follow process cwd, got: {}",
         out.output
     );
 }

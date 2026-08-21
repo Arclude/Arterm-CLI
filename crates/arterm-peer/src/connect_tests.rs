@@ -152,7 +152,10 @@ async fn scenario_a_dead_aaaa_times_out_or_refuses_without_falling_back_to_v4() 
 
     // Dead AAAA in the same GUA /64 (unused host id). ND failure → timeout up to CONNECT_TIMEOUT.
     // Own GUA closed port would refuse immediately; either way there is no V4 fallback.
-    let dead_aaaa = sock(IpAddr::V6(gua_in_same_prefix(gua_v6, 0x00c0_ffee_dead)), port);
+    let dead_aaaa = sock(
+        IpAddr::V6(gua_in_same_prefix(gua_v6, 0x00c0_ffee_dead)),
+        port,
+    );
     let live_a = sock(IpAddr::V4(lan_v4), port);
     assert!(is_local_peer(&networks, dead_aaaa.ip()));
     assert!(is_local_peer(&networks, live_a.ip()));
@@ -236,7 +239,10 @@ async fn scenario_b_v4_first_connects_while_dead_aaaa_is_never_tried() {
         .expect("bind V4-only peer");
     let v4_addr = listener.local_addr().unwrap();
     let port = v4_addr.port();
-    let dead_aaaa = sock(IpAddr::V6(gua_in_same_prefix(gua_v6, 0x00c0_ffee_dead)), port);
+    let dead_aaaa = sock(
+        IpAddr::V6(gua_in_same_prefix(gua_v6, 0x00c0_ffee_dead)),
+        port,
+    );
     let live_a = sock(IpAddr::V4(lan_v4), port);
 
     let chosen = first_local_candidate(&[live_a, dead_aaaa], &networks).unwrap();
@@ -313,9 +319,7 @@ fn live_ll_and_v4() -> Option<(Ipv6Addr, u32, Ipv4Addr, Vec<LocalNetwork>)> {
                         return None;
                     }
                     match &other.addr {
-                        if_addrs::IfAddr::V4(v4)
-                            if v4.ip.is_private() && !v4.ip.is_loopback() =>
-                        {
+                        if_addrs::IfAddr::V4(v4) if v4.ip.is_private() && !v4.ip.is_loopback() => {
                             Some(v4.ip)
                         }
                         _ => None,
@@ -329,8 +333,9 @@ fn live_ll_and_v4() -> Option<(Ipv6Addr, u32, Ipv4Addr, Vec<LocalNetwork>)> {
 
     // Prefer wlan0/enp2s0 with a private V4 on the same iface.
     for want in preferred {
-        if let Some((ip, idx, _name, Some(v4))) =
-            ll_rows.iter().find(|( _, _, n, v4)| n == want && v4.is_some())
+        if let Some((ip, idx, _name, Some(v4))) = ll_rows
+            .iter()
+            .find(|(_, _, n, v4)| n == want && v4.is_some())
         {
             assert!(
                 is_local_peer(&networks, IpAddr::V6(*ip)),
@@ -388,8 +393,8 @@ async fn case3_correct_scoped_fe80_wins_over_working_v4_and_connects() {
     assert!(is_local_peer(&networks, working_v4.ip()));
 
     // Candidates: [correct scoped fe80, working V4] → LL must win first-local.
-    let chosen = first_local_candidate(&[correct_ll, working_v4], &networks)
-        .expect("both candidates local");
+    let chosen =
+        first_local_candidate(&[correct_ll, working_v4], &networks).expect("both candidates local");
     assert_eq!(
         chosen, correct_ll,
         "case3: correct scoped fe80 must beat later working V4"
@@ -515,8 +520,8 @@ async fn case4_working_v4_wins_over_correct_scoped_fe80_by_order_and_connects() 
     assert!(is_local_peer(&networks, correct_ll.ip()));
 
     // Candidates: [working V4, correct scoped fe80] → V4 must win first-local.
-    let chosen = first_local_candidate(&[working_v4, correct_ll], &networks)
-        .expect("both candidates local");
+    let chosen =
+        first_local_candidate(&[working_v4, correct_ll], &networks).expect("both candidates local");
     assert_eq!(
         chosen, working_v4,
         "case4: working V4 must beat later correct scoped fe80 purely by order"
@@ -664,8 +669,7 @@ async fn case5_advertised_display_string_lookup_rehydrates_scope_and_connects() 
         "scoped producer string must differ from bare unscoped Display"
     );
     assert!(
-        !scope0_display.contains('%')
-            || matches!(scope0, SocketAddr::V6(v6) if v6.scope_id() == 0),
+        !scope0_display.contains('%') || matches!(scope0, SocketAddr::V6(v6) if v6.scope_id() == 0),
         "scope0 Display should not carry a live ifindex zone"
     );
 
@@ -683,11 +687,7 @@ async fn case5_advertised_display_string_lookup_rehydrates_scope_and_connects() 
     match first {
         SocketAddr::V6(v6) => {
             assert_eq!(v6.ip(), &ll_ip, "lookup ip must match live fe80");
-            assert_eq!(
-                v6.port(),
-                port,
-                "lookup port must match advertised port"
-            );
+            assert_eq!(v6.port(), port, "lookup port must match advertised port");
             assert_eq!(
                 v6.scope_id(),
                 ifindex,
@@ -734,13 +734,9 @@ async fn case5_advertised_display_string_lookup_rehydrates_scope_and_connects() 
     // 3) Dial the lookup/resolve result (production connect_tcp, no SocketAddr bypass
     // of the string layer for candidate selection).
     let started = Instant::now();
-    let mut stream = connect_tcp(resolved)
-        .await
-        .unwrap_or_else(|e| {
-            panic!(
-                "connect_tcp after resolve_local_address({advertised:?}) failed: {e:#}"
-            )
-        });
+    let mut stream = connect_tcp(resolved).await.unwrap_or_else(|e| {
+        panic!("connect_tcp after resolve_local_address({advertised:?}) failed: {e:#}")
+    });
     stream.write_all(b"S").await.unwrap();
     let elapsed = started.elapsed();
     assert!(

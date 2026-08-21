@@ -1109,7 +1109,12 @@ fn provider_key_for_launch_model(
 }
 
 fn create_launch_session(request: &LaunchRequest) -> Result<(String, PathBuf)> {
-    let cwd = match request.working_dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+    let cwd = match request
+        .working_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
         Some(dir) if !crate::platform::client_cwd_is_absolute(dir) => {
             // Relative launch dirs would resolve against the relay process cwd and
             // then be written into Session.working_dir as that relative string.

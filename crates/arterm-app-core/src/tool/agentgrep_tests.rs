@@ -1371,7 +1371,11 @@ async fn execute_modes_honor_session_working_dir_when_process_cwd_differs() {
         "{}",
         outline.output
     );
-    assert!(!outline.output.contains("decoy_marker"), "{}", outline.output);
+    assert!(
+        !outline.output.contains("decoy_marker"),
+        "{}",
+        outline.output
+    );
 
     let trace = tool
         .execute(
@@ -1755,10 +1759,7 @@ fn relative_rel_proj_working_dir_misses_when_process_cwd_is_elsewhere() {
             "find omitted",
             json!({"mode": "find", "query": "app", "max_files": 5}),
         ),
-        (
-            "outline",
-            json!({"mode": "outline", "file": "src/app.rs"}),
-        ),
+        ("outline", json!({"mode": "outline", "file": "src/app.rs"})),
     ] {
         let out = rt
             .block_on(tool.execute(input, ctx.clone()))
@@ -1799,8 +1800,7 @@ fn absolute_working_dir_with_dot_segment_keeps_display_in_grep_result_root() {
     let omitted_root = resolve_search_root(&ctx, None).expect("root");
     assert_eq!(omitted_root, dotted);
     assert!(
-        omitted_root.as_os_str().to_string_lossy().ends_with(".")
-            || omitted_root.ends_with("."),
+        omitted_root.as_os_str().to_string_lossy().ends_with(".") || omitted_root.ends_with("."),
         "trailing /. must not be stripped by resolve_search_root: {omitted_root:?}"
     );
 
@@ -1829,7 +1829,10 @@ fn absolute_working_dir_with_dot_segment_keeps_display_in_grep_result_root() {
     let root_str = grep_args.path.clone().expect("path");
     // display keeps the "/." join form (…/./src), not a cleaned canonical path.
     assert!(
-        root_str.contains(".") || PathBuf::from(&root_str).components().any(|c| matches!(c, std::path::Component::CurDir)),
+        root_str.contains(".")
+            || PathBuf::from(&root_str)
+                .components()
+                .any(|c| matches!(c, std::path::Component::CurDir)),
         "joined root should retain CurDir segment from working_dir=/abs/.: {root_str}"
     );
 
@@ -1854,7 +1857,9 @@ fn absolute_working_dir_with_dot_segment_keeps_display_in_grep_result_root() {
         "GrepResult.root is root.display() with no strip/canonicalize"
     );
     assert!(
-        !result.root.contains(decoy.path().to_string_lossy().as_ref()),
+        !result
+            .root
+            .contains(decoy.path().to_string_lossy().as_ref()),
         "must not bind to process cwd decoy"
     );
 
@@ -1887,11 +1892,11 @@ fn absolute_working_dir_with_dot_segment_keeps_display_in_grep_result_root() {
 }
 
 /// Restore process cwd when the owning test ends (including on panic).
-fn scopeguard_cwd(
-    previous: PathBuf,
-    lock: std::sync::MutexGuard<'static, ()>,
-) -> CwdRestore {
-    CwdRestore { previous, _lock: lock }
+fn scopeguard_cwd(previous: PathBuf, lock: std::sync::MutexGuard<'static, ()>) -> CwdRestore {
+    CwdRestore {
+        previous,
+        _lock: lock,
+    }
 }
 
 struct CwdRestore {
