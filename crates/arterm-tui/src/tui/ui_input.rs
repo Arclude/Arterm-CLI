@@ -234,15 +234,13 @@ pub(super) fn draw_command_suggestions_overlay(frame: &mut Frame, app: &dyn TuiS
 }
 
 pub(super) fn draw_jump_to_bottom_overlay(frame: &mut Frame, app: &dyn TuiState, input_area: Rect) {
-    if !app.auto_scroll_paused() {
-        super::record_jump_to_bottom_area(None);
-        return;
-    }
-    let Some(rect) = super::jump_to_bottom_overlay_rect(input_area, frame.area()) else {
-        super::record_jump_to_bottom_area(None);
-        return;
+    let rect = if app.auto_scroll_paused() {
+        super::jump_to_bottom_overlay_rect(input_area, frame.area())
+    } else {
+        None
     };
-    super::record_jump_to_bottom_area(Some(rect));
+    super::record_jump_to_bottom_area(rect);
+    let Some(rect) = rect else { return };
     let label = format!(" {} ", super::JUMP_TO_BOTTOM_LABEL);
     frame.render_widget(ratatui::widgets::Clear, rect);
     frame.render_widget(

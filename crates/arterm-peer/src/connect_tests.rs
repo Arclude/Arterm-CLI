@@ -192,9 +192,17 @@ async fn scenario_a_dead_aaaa_times_out_or_refuses_without_falling_back_to_v4() 
     let refused = err.contains("Connection refused")
         || err.contains("connection refused")
         || err.contains("os error 111");
+    // No-route/unreachable is a host-level rejection of the dead address (e.g.
+    // sandboxes and CI runners without IPv6 egress), equivalent in outcome to
+    // a refuse: the dial still failed without touching the V4 fallback.
+    let unreachable = err.contains("No route to host")
+        || err.contains("Host unreachable")
+        || err.contains("Network unreachable")
+        || err.contains("os error 113")
+        || err.contains("os error 101");
     assert!(
-        timed_out || refused,
-        "expected refuse or CONNECT_TIMEOUT failure, got: {err}"
+        timed_out || refused || unreachable,
+        "expected refuse, unreachable, or CONNECT_TIMEOUT failure, got: {err}"
     );
     if timed_out {
         // CONNECT_TIMEOUT is the production budget; allow a little scheduling slack.

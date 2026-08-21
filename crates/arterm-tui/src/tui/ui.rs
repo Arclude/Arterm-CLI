@@ -1351,9 +1351,17 @@ pub(crate) fn last_status_area() -> Option<Rect> {
 #[cfg(not(test))]
 static LAST_JUMP_TO_BOTTOM_AREA: OnceLock<Mutex<Option<Rect>>> = OnceLock::new();
 
+/// Shared snapshot access; recovers a poisoned lock (logged) rather than
+/// silently dropping the overlay: its value is still the best answer.
 #[cfg(not(test))]
-fn last_jump_to_bottom_area_state() -> &'static Mutex<Option<Rect>> {
-    LAST_JUMP_TO_BOTTOM_AREA.get_or_init(|| Mutex::new(None))
+fn jump_area_lock() -> std::sync::MutexGuard<'static, Option<Rect>> {
+    LAST_JUMP_TO_BOTTOM_AREA
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|poisoned| {
+            crate::logging::warn("jump-to-bottom area lock poisoned; recovering");
+            poisoned.into_inner()
+        })
 }
 
 pub(crate) fn record_jump_to_bottom_area(area: Option<Rect>) {
@@ -1366,9 +1374,7 @@ pub(crate) fn record_jump_to_bottom_area(area: Option<Rect>) {
     }
     #[cfg(not(test))]
     {
-        if let Ok(mut snapshot) = last_jump_to_bottom_area_state().lock() {
-            *snapshot = area;
-        }
+        *jump_area_lock() = area;
     }
 }
 
@@ -1378,31 +1384,25 @@ pub(crate) fn last_jump_to_bottom_area() -> Option<Rect> {
         return TEST_LAST_JUMP_TO_BOTTOM_AREA.with(|snapshot| *snapshot.borrow());
     }
     #[cfg(not(test))]
-    {
-        last_jump_to_bottom_area_state()
-            .lock()
-            .ok()
-            .and_then(|snapshot| *snapshot)
-    }
+    *jump_area_lock()
 }
-
 /// Label shown on the jump-to-bottom overlay (GitHub Copilot-style).
 pub(crate) const JUMP_TO_BOTTOM_LABEL: &str = "Jump to bottom  (Ctrl+End)  ↓";
 
 pub(crate) fn jump_to_bottom_overlay_rect(input_area: Rect, frame_area: Rect) -> Option<Rect> {
-    if input_area.width < 8 || input_area.height == 0 {
-        return None;
+    // Needs a usable width and at least one free row above the input area.
+    if input_area.width >= 8
+        && input_area.height > 0
+        && input_area.y > frame_area.y
+        && let width = (JUMP_TO_BOTTOM_LABEL.width() as u16)
+            .saturating_add(4)
+            .min(input_area.width)
+        && width > 0
+    {
+        let x = input_area.x + input_area.width.saturating_sub(width) / 2;
+        return Some(Rect::new(x, input_area.y.saturating_sub(1), width, 1));
     }
-    let label_width = JUMP_TO_BOTTOM_LABEL.width() as u16;
-    let width = label_width.saturating_add(4).min(input_area.width);
-    if width == 0 {
-        return None;
-    }
-    let x = input_area.x + input_area.width.saturating_sub(width) / 2;
-    if input_area.y <= frame_area.y {
-        return None;
-    }
-    Some(Rect::new(x, input_area.y.saturating_sub(1), width, 1))
+    None
 }
 
 use frame_metrics::{
@@ -3612,8 +3612,8 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // palette so it wins when both could be visible).
     input_ui::draw_prompt_history_search_overlay(frame, app, chunks[7]);
 
-    // GitHub Copilot-style jump-to-bottom chip. Drawn last among non-modal
-    // overlays so it sits above the transcript tail, just over the composer.
+    // Jump-to-bottom chip: drawn last among non-modal overlays so it sits
+    // above the transcript tail, just over the composer.
     input_ui::draw_jump_to_bottom_overlay(frame, app, chunks[7]);
 
     // A pending destructive confirmation outranks every other late overlay: it

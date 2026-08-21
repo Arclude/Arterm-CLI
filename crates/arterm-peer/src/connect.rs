@@ -305,45 +305,63 @@ pub(crate) async fn connect_tcp(peer_addr: SocketAddr) -> Result<TcpStream> {
 
 /// Best-effort transport options for an established peer TCP socket.
 ///
-/// Failures are ignored: the link is still usable without them, and some
-/// platforms or sandboxes reject keepalive knobs.
+/// Failures are reported to stderr but never fatal: the link is still usable
+/// without them, and some platforms or sandboxes reject keepalive knobs.
 pub(crate) fn apply_established_tcp_options(stream: &TcpStream) {
-    let _ = stream.set_nodelay(true);
+    if let Err(error) = stream.set_nodelay(true) {
+        eprintln!("arterm-peer: failed to set TCP_NODELAY: {error}");
+    }
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
         // SAFETY: raw fd is owned by `stream` for the duration of this call;
         // setsockopt only toggles socket options and does not transfer ownership.
         let fd = stream.as_raw_fd();
-        unsafe {
-            let on: libc::c_int = 1;
-            let _ = libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_KEEPALIVE,
-                &on as *const _ as *const libc::c_void,
-                std::mem::size_of_val(&on) as libc::socklen_t,
-            );
-            #[cfg(any(target_os = "linux", target_os = "android"))]
-            {
-                // Start probes after 30s idle; repeat every 10s.
-                let idle: libc::c_int = 30;
-                let intvl: libc::c_int = 10;
-                let _ = libc::setsockopt(
+        // Report setsockopt failures once per call site instead of discarding
+        // them: a peer stuck on keepalive-less sockets is a real diagnosable
+        // bug, not noise.
+        fn tune(
+            fd: std::os::fd::RawFd,
+            level: libc::c_int,
+            name: libc::c_int,
+            value: libc::c_int,
+            label: &str,
+        ) {
+            // SAFETY: same fd-liveness argument as the caller; `value` is a
+            // local `c_int` whose address is only read for the call's duration.
+            let rc = unsafe {
+                libc::setsockopt(
                     fd,
-                    libc::IPPROTO_TCP,
-                    libc::TCP_KEEPIDLE,
-                    &idle as *const _ as *const libc::c_void,
-                    std::mem::size_of_val(&idle) as libc::socklen_t,
-                );
-                let _ = libc::setsockopt(
-                    fd,
-                    libc::IPPROTO_TCP,
-                    libc::TCP_KEEPINTVL,
-                    &intvl as *const _ as *const libc::c_void,
-                    std::mem::size_of_val(&intvl) as libc::socklen_t,
-                );
+                    level,
+                    name,
+                    &value as *const _ as *const libc::c_void,
+                    std::mem::size_of_val(&value) as libc::socklen_t,
+                )
+            };
+            if rc != 0 {
+                let errno = std::io::Error::last_os_error();
+                eprintln!("arterm-peer: failed to set {label}: {errno}");
             }
+        }
+        let on: libc::c_int = 1;
+        tune(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE, on, "SO_KEEPALIVE");
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            // Start probes after 30s idle; repeat every 10s.
+            tune(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_KEEPIDLE,
+                30,
+                "TCP_KEEPIDLE",
+            );
+            tune(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_KEEPINTVL,
+                10,
+                "TCP_KEEPINTVL",
+            );
         }
     }
 }

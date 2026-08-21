@@ -30,7 +30,7 @@ const REQUEST_ID: u64 = 1;
 const LIGHT_MODE_DEFAULT_CONCURRENCY: usize = 4;
 
 mod transport;
-use transport::{send_request, send_request_with_timeout};
+use transport::{cleanup_isolate_worktree, send_request, send_request_with_timeout};
 
 fn fresh_spawn_request_nonce(ctx: &ToolContext) -> String {
     let now_ms = std::time::SystemTime::now()
@@ -2858,18 +2858,14 @@ impl Tool for CommunicateTool {
                         )))
                     }
                     Ok(response) => {
-                        if let Some((base, wt_path)) = isolate_worktree.as_ref() {
-                            let _ = crate::worktree::remove_worktree(base, wt_path);
-                        }
+                        cleanup_isolate_worktree(isolate_worktree.as_ref());
                         ensure_success(&response)?;
                         Err(anyhow::anyhow!(
                             "Spawn succeeded but new session ID was not returned."
                         ))
                     }
                     Err(e) => {
-                        if let Some((base, wt_path)) = isolate_worktree.as_ref() {
-                            let _ = crate::worktree::remove_worktree(base, wt_path);
-                        }
+                        cleanup_isolate_worktree(isolate_worktree.as_ref());
                         Err(anyhow::anyhow!("Failed to spawn agent: {}", e))
                     }
                 }
