@@ -607,8 +607,16 @@ fn test_prepare_messages_shows_live_batch_progress_in_chat_history() {
         "missing running batch subcall in {:?}",
         rendered
     );
+    // The Updates panel renders the live git log, which can legitimately
+    // mention PR numbers like "#11". Only the live batch rows themselves must
+    // drop the "#1"/"#2" index prefixes that completed rows no longer use.
+    let batch_rows: Vec<String> = rendered
+        .iter()
+        .filter(|line| line.contains("batch") || line.contains("bash"))
+        .cloned()
+        .collect();
     assert!(
-        rendered
+        batch_rows
             .iter()
             .all(|line| !line.contains("#1") && !line.contains("#2")),
         "live batch rows should align with completed rows in {:?}",
