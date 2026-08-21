@@ -121,9 +121,9 @@ impl Tool for RepoMapTool {
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
         let input: RepoMapInput = serde_json::from_value(input)
             .map_err(|e| anyhow::anyhow!("invalid repo_map input: {e}"))?;
-        let explicit_path = input.path.clone().filter(|p| !p.trim().is_empty());
+        let explicit_path = input.path.as_deref().filter(|p| !p.trim().is_empty());
         let root = explicit_path
-            .map(PathBuf::from)
+            .map(|p| ctx.resolve_path(std::path::Path::new(p)))
             .or_else(|| ctx.working_dir.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         let max_entries = input.max_entries.unwrap_or(MAX_TREE_ENTRIES).min(1000);

@@ -495,6 +495,7 @@ impl PeerListener {
             return Ok(reject_arrival(peer_addr, RejectionReason::OutsideSubnet));
         }
 
+        crate::connect::apply_established_tcp_options(&stream);
         Ok(Arrival::Pending(PendingPeer { stream, peer_addr }))
     }
 }

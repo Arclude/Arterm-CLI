@@ -2799,7 +2799,11 @@ impl Tool for CommunicateTool {
                         .map(|p| p.to_string_lossy().into_owned())
                 });
                 // Worktree isolation: swap the working dir for a fresh
-                // `arterm/<slug>` worktree before spawning.
+                // `arterm/<slug>` worktree before spawning. The computed
+                // `working_dir` (not params.working_dir) must be sent on
+                // CommSpawn; otherwise the child lands in the parent cwd and
+                // the worktree is orphaned under .arterm/worktrees.
+                let mut isolate_worktree: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
                 let working_dir = if params.isolate.unwrap_or(false) {
                     let base = std::path::PathBuf::from(
                         requested_dir.clone().unwrap_or_else(|| ".".to_string()),
@@ -2817,6 +2821,7 @@ impl Tool for CommunicateTool {
                         .unwrap_or_else(|| "worker".to_string());
                     let wt = crate::worktree::create_worktree(&base, &label_for_slug)
                         .map_err(anyhow::Error::msg)?;
+                    isolate_worktree = Some((base, wt.path.clone()));
                     Some(wt.path.to_string_lossy().into_owned())
                 } else {
                     requested_dir.clone()
@@ -2834,7 +2839,7 @@ impl Tool for CommunicateTool {
                 let request = Request::CommSpawn {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
-                    working_dir: params.working_dir.clone(),
+                    working_dir: working_dir.clone(),
                     initial_message,
                     request_nonce: None,
                     spawn_mode: params.spawn_mode.clone(),
@@ -2853,12 +2858,20 @@ impl Tool for CommunicateTool {
                         )))
                     }
                     Ok(response) => {
+                        if let Some((base, wt_path)) = isolate_worktree.as_ref() {
+                            let _ = crate::worktree::remove_worktree(base, wt_path);
+                        }
                         ensure_success(&response)?;
                         Err(anyhow::anyhow!(
                             "Spawn succeeded but new session ID was not returned."
                         ))
                     }
-                    Err(e) => Err(anyhow::anyhow!("Failed to spawn agent: {}", e)),
+                    Err(e) => {
+                        if let Some((base, wt_path)) = isolate_worktree.as_ref() {
+                            let _ = crate::worktree::remove_worktree(base, wt_path);
+                        }
+                        Err(anyhow::anyhow!("Failed to spawn agent: {}", e))
+                    }
                 }
             }
 

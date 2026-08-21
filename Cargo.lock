@@ -698,6 +698,7 @@ dependencies = [
  "arterm-device",
  "chrono",
  "if-addrs",
+ "libc",
  "rustls",
  "serde",
  "serde_json",

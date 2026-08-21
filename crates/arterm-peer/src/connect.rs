@@ -290,11 +290,62 @@ async fn dial(
 ///
 /// No Happy Eyeballs and no walk of remaining DNS results: a refuse or timeout
 /// here is terminal for the dial, matching production `dial`.
+///
+/// After connect, TCP_NODELAY and SO_KEEPALIVE are applied so a post-hello
+/// `copy_bidirectional` relay cannot sit forever on a half-dead peer with no
+/// transport signal (dial timeouts alone only cover the first 15s).
 pub(crate) async fn connect_tcp(peer_addr: SocketAddr) -> Result<TcpStream> {
-    timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
+    let stream = timeout(CONNECT_TIMEOUT, TcpStream::connect(peer_addr))
         .await
         .with_context(|| format!("connecting to {peer_addr} timed out"))?
-        .with_context(|| format!("connecting to {peer_addr}"))
+        .with_context(|| format!("connecting to {peer_addr}"))?;
+    apply_established_tcp_options(&stream);
+    Ok(stream)
+}
+
+/// Best-effort transport options for an established peer TCP socket.
+///
+/// Failures are ignored: the link is still usable without them, and some
+/// platforms or sandboxes reject keepalive knobs.
+pub(crate) fn apply_established_tcp_options(stream: &TcpStream) {
+    let _ = stream.set_nodelay(true);
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: raw fd is owned by `stream` for the duration of this call;
+        // setsockopt only toggles socket options and does not transfer ownership.
+        let fd = stream.as_raw_fd();
+        unsafe {
+            let on: libc::c_int = 1;
+            let _ = libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_KEEPALIVE,
+                &on as *const _ as *const libc::c_void,
+                std::mem::size_of_val(&on) as libc::socklen_t,
+            );
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            {
+                // Start probes after 30s idle; repeat every 10s.
+                let idle: libc::c_int = 30;
+                let intvl: libc::c_int = 10;
+                let _ = libc::setsockopt(
+                    fd,
+                    libc::IPPROTO_TCP,
+                    libc::TCP_KEEPIDLE,
+                    &idle as *const _ as *const libc::c_void,
+                    std::mem::size_of_val(&idle) as libc::socklen_t,
+                );
+                let _ = libc::setsockopt(
+                    fd,
+                    libc::IPPROTO_TCP,
+                    libc::TCP_KEEPINTVL,
+                    &intvl as *const _ as *const libc::c_void,
+                    std::mem::size_of_val(&intvl) as libc::socklen_t,
+                );
+            }
+        }
+    }
 }
 
 /// First DNS/lookup candidate that sits on one of `networks`.

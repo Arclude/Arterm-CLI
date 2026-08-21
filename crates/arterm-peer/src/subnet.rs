@@ -140,28 +140,78 @@ impl SubnetPolicy {
 pub fn default_bind_ip() -> Result<IpAddr> {
     let interfaces =
         if_addrs::get_if_addrs().context("reading this machine's network interfaces")?;
+    let default_ifaces = default_route_ifaces();
 
-    let mut candidates: Vec<(u16, &str, Ipv4Addr)> = interfaces
+    let mut candidates: Vec<(u16, u8, &str, Ipv4Addr)> = interfaces
         .iter()
         .filter_map(|interface| match &interface.addr {
             if_addrs::IfAddr::V4(v4) if is_bindable_v4(v4.ip) => {
-                Some((bind_rank_v4(v4), interface.name.as_str(), v4.ip))
+                let on_default = if default_ifaces
+                    .iter()
+                    .any(|name| name == &interface.name)
+                {
+                    1u8
+                } else {
+                    0u8
+                };
+                Some((
+                    bind_rank_v4(v4),
+                    on_default,
+                    interface.name.as_str(),
+                    v4.ip,
+                ))
             }
             _ => None,
         })
         .collect();
 
-    // Best rank first; interface name breaks ties so the choice is stable
-    // between runs on a machine with several equally good addresses.
-    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+    // Best subnet rank first. When ranks tie (e.g. two LAN /24s), prefer the
+    // interface that carries the default route over lexicographic name order
+    // (enp2s0 must not beat wlan0 solely because "e" < "w"). Name is still
+    // the final stable tie-break.
+    candidates.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(right.2))
+    });
 
     match candidates.first() {
-        Some((_, _, ip)) => Ok(IpAddr::V4(*ip)),
+        Some((_, _, _, ip)) => Ok(IpAddr::V4(*ip)),
         None => anyhow::bail!(
             "this machine has no non-loopback IPv4 address, so there is no local network to \
              listen on — connect it to the network, or pass `--address <ip>:<port>` to choose \
              one yourself"
         ),
+    }
+}
+
+/// Interface names that currently carry a default IPv4 route, if readable.
+///
+/// Linux: `/proc/net/route` (destination 00000000). Other platforms return
+/// empty and fall back to name-only ties — better than inventing a wrong metric.
+fn default_route_ifaces() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(text) = std::fs::read_to_string("/proc/net/route") else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for line in text.lines().skip(1) {
+            let mut cols = line.split_whitespace();
+            let Some(iface) = cols.next() else { continue };
+            let Some(dest) = cols.next() else { continue };
+            // Destination 00000000 is the default route.
+            if dest == "00000000" {
+                out.push(iface.to_string());
+            }
+        }
+        out
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
     }
 }
 
