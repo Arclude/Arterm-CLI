@@ -1900,3 +1900,57 @@ fn jump_to_bottom_chip_click_and_ctrl_end_resume_follow() {
         "chip should hide once following the latest messages:\n{after}"
     );
 }
+
+#[test]
+fn ctrl_end_at_bottom_does_not_steal_caret() {
+    let _lock = scroll_render_test_lock();
+    let (mut app, mut terminal) = create_scroll_test_app(100, 24, 0, 40);
+    let _ = render_and_snap(&app, &mut terminal);
+    app.input = "draft".to_string();
+    app.cursor_pos = 2;
+    assert!(!app.auto_scroll_paused);
+    app.handle_key(KeyCode::End, KeyModifiers::CONTROL)
+        .expect("Ctrl+End at tail should not jump");
+    assert_eq!(
+        app.cursor_pos, 2,
+        "Ctrl+End while already at the latest messages must not move the caret"
+    );
+    assert!(!app.auto_scroll_paused);
+}
+
+#[test]
+fn jump_to_bottom_click_miss_does_not_follow() {
+    let _lock = scroll_render_test_lock();
+    let (mut app, mut terminal) = create_scroll_test_app(100, 24, 0, 40);
+    let _ = render_and_snap(&app, &mut terminal);
+    app.scroll_up(8);
+    let _ = render_and_snap(&app, &mut terminal);
+    let chip = crate::tui::ui::last_jump_to_bottom_area().expect("chip hitbox");
+    app.handle_mouse_event(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: chip.x.saturating_sub(2),
+        row: chip.y,
+        modifiers: KeyModifiers::empty(),
+    });
+    assert!(
+        app.auto_scroll_paused,
+        "a click beside the chip must not jump to bottom"
+    );
+}
+
+#[test]
+fn jump_to_bottom_chip_geometry_centers_above_input() {
+    let input = ratatui::layout::Rect::new(0, 10, 40, 3);
+    let frame = ratatui::layout::Rect::new(0, 0, 40, 20);
+    let rect = crate::tui::ui::jump_to_bottom_overlay_rect(input, frame).expect("room above input");
+    assert_eq!(rect.height, 1);
+    assert_eq!(rect.y, 9);
+    assert!(rect.x > 0);
+    assert!(rect.x + rect.width <= 40);
+
+    let no_room = crate::tui::ui::jump_to_bottom_overlay_rect(
+        ratatui::layout::Rect::new(0, 0, 40, 2),
+        ratatui::layout::Rect::new(0, 0, 40, 20),
+    );
+    assert!(no_room.is_none());
+}
