@@ -1393,7 +1393,7 @@ pub(crate) fn jump_to_bottom_overlay_rect(input_area: Rect, frame_area: Rect) ->
     if input_area.width < 8 || input_area.height == 0 {
         return None;
     }
-    let label_width = unicode_width::UnicodeWidthStr::width(JUMP_TO_BOTTOM_LABEL) as u16;
+    let label_width = JUMP_TO_BOTTOM_LABEL.width() as u16;
     let width = label_width.saturating_add(4).min(input_area.width);
     if width == 0 {
         return None;
