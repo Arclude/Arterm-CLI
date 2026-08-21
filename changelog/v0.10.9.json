@@ -1,0 +1,13 @@
+{
+  "version": "0.10.9",
+  "date": "2026-08-21",
+  "highlights": [
+    "/init now writes or updates AGENTS.md so later sessions understand the repo",
+    "When you scroll up in chat, a Jump to bottom chip appears over the composer (click it or press Ctrl+End)"
+  ],
+  "fixes": [
+    "An empty AGENTS.md no longer hides CLAUDE.md",
+    "A Windows working directory is no longer rejected on Linux, so a paired TUI stops reconnect-looping",
+    "Listen prefers the LAN over a Docker bridge, and IPv6 pairing addresses are stored in a form that can be dialed"
+  ]
+}
