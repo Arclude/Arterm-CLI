@@ -6,6 +6,9 @@ pub(super) use super::commands_improve::{
     parse_refactor_command, refactor_launch_notice, refactor_mode_for, refactor_stop_notice,
     refactor_stop_prompt, restore_improve_mode, session_improve_mode_for,
 };
+pub(super) use super::commands_init::{
+    build_init_prompt, handle_init_command_local, init_launch_notice, parse_init_command,
+};
 pub(super) use super::commands_plan::{
     build_plan_prompt, handle_plan_command_local, parse_plan_command, plan_launch_notice,
 };
@@ -1753,6 +1756,14 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
 
     if let Some(command) = parse_plan_command(trimmed) {
         handle_plan_command_local(app, command);
+        return true;
+    }
+
+    if let Some(command) = parse_init_command(trimmed) {
+        match command {
+            Ok(()) => handle_init_command_local(app),
+            Err(error) => app.push_display_message(DisplayMessage::error(error)),
+        }
         return true;
     }
 

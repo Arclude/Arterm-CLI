@@ -277,6 +277,10 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
         "Draft a plan-only proposal as a plan card (no edits)",
     ));
     lines.push(help_entry(
+        "/init",
+        "Generate or update AGENTS.md for this project",
+    ));
+    lines.push(help_entry(
         "/improve",
         "Autonomously improve the repo until returns diminish",
     ));

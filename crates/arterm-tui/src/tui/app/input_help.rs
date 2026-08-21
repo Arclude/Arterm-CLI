@@ -142,6 +142,9 @@ impl App {
             "plan" => {
                 "/plan [goal]\nDraft a plan without implementing anything. The model inspects the repo, then presents a structured plan (Goal, Scope, Approach, Validation, Open questions) as a dedicated plan card in the conversation.\n\nNothing is edited: it stops after presenting the plan. Once you approve, it converts the plan into a todo list and starts the work.\n\n/plan with no goal plans the task currently in focus."
             }
+            "init" => {
+                "/init\nExplore the current project and write or update `AGENTS.md` so later Arterm sessions already know how the repo is laid out, how to build/test, and which conventions matter.\n\nArterm loads `AGENTS.md` into the system prompt at session start. If that file is missing, it falls back to `CLAUDE.md`.\n\nIf `AGENTS.md` already exists, /init improves it in place rather than wiping it."
+            }
             "improve" => {
                 "/improve [focus]\nStart an autonomous repo-improvement loop. The model inspects the project, writes a ranked todo list, implements the highest-leverage safe improvements, validates them, then keeps going until further work has diminishing returns.\n\n/improve plan [focus]\nGenerate a ranked improve todo list only, without editing files.\n\n/improve resume\nResume the last saved improve mode for this session using the current improve todos.\n\n/improve status\nShow the inferred status of the current improve run and todo batch.\n\n/improve stop\nAsk the model to stop after the next safe point, update todos, and summarize remaining work."
             }

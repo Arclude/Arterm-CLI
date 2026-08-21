@@ -9,7 +9,7 @@ files, so you can tune agent behavior without rebuilding.
    overridable by file (see below).
 2. Capability modules (e.g. Mermaid guidance).
 3. Self-dev guidance (self-dev sessions only).
-4. `AGENTS.md` — project `./AGENTS.md` and global `~/AGENTS.md`.
+4. `AGENTS.md` — project `./AGENTS.md` (or `./CLAUDE.md` if `AGENTS.md` is missing) and global `~/AGENTS.md`. `/init` generates or updates the project file.
 5. Prompt overlay — `./.arterm/prompt-overlay.md` and `~/.arterm/prompt-overlay.md`.
 6. Preferred tools — `./.arterm/preferred-tools.md` and `~/.arterm/preferred-tools.md`.
 7. Memory and the active skill prompt (dynamic, not cached).
@@ -35,6 +35,13 @@ whitespace-only file falls back to the default, so you cannot accidentally ship 
 empty prompt.
 
 This replaces only the base prompt. AGENTS.md, overlays, skills, and memory still apply.
+
+## Generating a project briefing
+
+`/init` explores the current working directory and writes or updates `AGENTS.md`.
+Later sessions load that file automatically. If a repo already has Claude Code's
+`CLAUDE.md` and no `AGENTS.md`, Arterm loads `CLAUDE.md` until `/init` creates
+the Arterm-native file.
 
 ## Notes
 

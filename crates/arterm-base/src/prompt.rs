@@ -867,6 +867,16 @@ pub fn load_agents_md_files_from_dir(working_dir: Option<&Path>) -> (Option<Stri
         info.has_project_agents_md = true;
         info.project_agents_md_chars = size;
         contents.push(content);
+    } else if let Some((content, size)) = load_file(
+        &project_dir.join("CLAUDE.md"),
+        "Project Instructions (CLAUDE.md)",
+    ) {
+        // Claude Code's native briefing file. Used only when AGENTS.md is
+        // absent so a repo that already has CLAUDE.md still briefs Arterm
+        // without a duplicate file.
+        info.has_project_agents_md = true;
+        info.project_agents_md_chars = size;
+        contents.push(content);
     }
 
     // Home directory files
