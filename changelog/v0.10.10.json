@@ -1,0 +1,12 @@
+{
+  "version": "0.10.10",
+  "date": "2026-08-22",
+  "highlights": [
+    "A paired device's running sessions now attach to their server, so `arterm device sessions` and the session picker show real counts instead of an orphaned pile"
+  ],
+  "fixes": [
+    "The server registry's per-server session list is written as clients attach, follow resume and /clear, and is dropped on disconnect",
+    "A server re-registering (reload race) no longer wipes the session ownership it had recorded",
+    "/session and /sessions no longer appear twice in the command palette"
+  ]
+}
