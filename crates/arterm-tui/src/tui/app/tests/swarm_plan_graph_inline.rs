@@ -1248,7 +1248,7 @@ fn test_disconnected_ctrl_l_only_adds_spacer_and_touches_nothing() {
     remote.mark_history_loaded();
 
     let _stale_hash = seed_rendered_plan_graph(&mut app, &mut remote);
-    app.queued_messages.push("queued".to_string());
+    app.queue_user_text("queued".to_string());
     let messages_before = app.display_messages().len();
     app.scroll_offset = 10;
     app.auto_scroll_paused = true;

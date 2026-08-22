@@ -52,7 +52,7 @@ fn test_remote_error_without_retry_recovers_pending_followups() {
     app.interleave_message = Some("unsent interleave".to_string());
     app.pending_soft_interrupts = vec!["acked interleave".to_string()];
     app.pending_soft_interrupt_requests = vec![(88, "acked interleave".to_string())];
-    app.queued_messages.push("queued later".to_string());
+    app.queue_user_text("queued later".to_string());
 
     app.handle_server_event(
         crate::protocol::ServerEvent::Error {
@@ -154,8 +154,7 @@ fn test_remote_non_retryable_error_gets_short_auto_poke_retry() {
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
     app.auto_poke_incomplete_todos = true;
-    app.queued_messages
-        .push("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
+    app.queue_user_text("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "You have 1 incomplete todo. Continue working, or update the todo tool."
             .to_string(),
@@ -221,8 +220,7 @@ fn test_remote_non_retryable_error_stops_auto_poke_after_short_retry_budget() {
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
     app.auto_poke_incomplete_todos = true;
-    app.queued_messages
-        .push("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
+    app.queue_user_text("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "You have 1 incomplete todo. Continue working, or update the todo tool."
             .to_string(),
@@ -267,8 +265,7 @@ fn test_remote_fatal_model_endpoint_error_fails_fast_without_retry_budget() {
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
     app.auto_poke_incomplete_todos = true;
-    app.queued_messages
-        .push("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
+    app.queue_user_text("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "continue".to_string(),
         images: vec![],
@@ -321,8 +318,7 @@ fn test_remote_connectivity_error_waits_for_network_without_retry_budget() {
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
     app.auto_poke_incomplete_todos = true;
-    app.queued_messages
-        .push("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
+    app.queue_user_text("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "You have 1 incomplete todo. Continue working, or update the todo tool."
             .to_string(),
@@ -384,8 +380,7 @@ fn test_remote_connectivity_error_without_auto_retry_still_waits_for_network() {
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
     app.auto_poke_incomplete_todos = true;
-    app.queued_messages
-        .push("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
+    app.queue_user_text("You have 1 incomplete todo. Continue working, or update the todo tool.".to_string());
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "Continue working on the task.".to_string(),
         images: vec![],

@@ -231,7 +231,7 @@ fn test_remote_ctrl_up_retrieves_pending_queue_before_prompt_history() {
     let _guard = rt.enter();
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
     app.display_messages = vec![DisplayMessage::user("previous remote prompt")];
-    app.queued_messages.push("queued followup".to_string());
+    app.queue_user_text("queued followup".to_string());
     app.pending_queued_dispatch = true;
 
     rt.block_on(app.handle_remote_key(KeyCode::Up, KeyModifiers::CONTROL, &mut remote))
@@ -295,8 +295,7 @@ fn test_remote_escape_interrupt_disables_auto_poke_while_processing() {
 
     app.is_processing = true;
     app.auto_poke_incomplete_todos = true;
-    app.queued_messages
-        .push(super::commands::build_poke_message(&[
+    app.queue_user_text(super::commands::build_poke_message(&[
             crate::todo::TodoItem {
                 group: None,
                 id: "todo-1".to_string(),

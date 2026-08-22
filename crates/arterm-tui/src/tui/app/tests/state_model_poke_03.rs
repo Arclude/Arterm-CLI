@@ -2246,8 +2246,7 @@ fn test_poke_status_reports_current_state() {
 
         app.auto_poke_incomplete_todos = true;
         app.is_processing = true;
-        app.queued_messages
-            .push(super::commands::build_poke_message(
+        app.queue_user_text(super::commands::build_poke_message(
                 &super::commands::incomplete_poke_todos(&app),
             ));
         app.hidden_queued_system_messages.push(
@@ -2290,8 +2289,7 @@ fn test_poke_off_disarms_and_clears_queued_followup() {
 
         app.auto_poke_incomplete_todos = true;
         app.pending_queued_dispatch = true;
-        app.queued_messages
-            .push(super::commands::build_poke_message(
+        app.queue_user_text(super::commands::build_poke_message(
                 &super::commands::incomplete_poke_todos(&app),
             ));
         app.hidden_queued_system_messages.push(

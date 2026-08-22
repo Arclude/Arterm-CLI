@@ -8,7 +8,7 @@ pub(super) struct RestoredReloadInput {
     pub cursor: usize,
     pub pending_images: Vec<(String, String)>,
     pub submit_on_restore: bool,
-    pub queued_messages: Vec<String>,
+    pub queued_messages: Vec<super::queued::QueuedMessage>,
     pub hidden_queued_system_messages: Vec<String>,
     pub startup_status_notice: Option<String>,
     pub startup_display_message: Option<(String, String)>,
@@ -281,8 +281,14 @@ impl App {
             let mut queued_messages = self.queued_messages.clone();
             let mut hidden_queued_system_messages = self.hidden_queued_system_messages.clone();
             if let Some(pending) = inflight_continuation {
-                if !pending.content.trim().is_empty() {
-                    queued_messages.insert(0, pending.content.clone());
+                if !pending.content.trim().is_empty() || !pending.images.is_empty() {
+                    queued_messages.insert(
+                        0,
+                        super::queued::QueuedMessage::with_images(
+                            pending.content.clone(),
+                            pending.images.clone(),
+                        ),
+                    );
                 }
                 if let Some(reminder) = pending.system_reminder.clone() {
                     hidden_queued_system_messages.insert(0, reminder);
@@ -400,13 +406,7 @@ impl App {
                 .unwrap_or(false);
             let queued_messages = value
                 .get("queued_messages")
-                .and_then(|v| v.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                        .collect::<Vec<_>>()
-                })
+                .map(super::queued::parse_queued_messages_json)
                 .unwrap_or_default();
             let hidden_queued_system_messages = value
                 .get("hidden_queued_system_messages")
@@ -848,7 +848,7 @@ impl App {
             output_tokens: self.streaming.streaming_output_tokens,
             cache_read_input_tokens: self.streaming.streaming_cache_read_tokens,
             cache_creation_input_tokens: self.streaming.streaming_cache_creation_tokens,
-            queued_messages: self.queued_messages.clone(),
+            queued_messages: super::queued::queued_preview_texts(&self.queued_messages),
         }
     }
 

@@ -43,7 +43,7 @@ impl App {
         if let Some(interleave_message) = restored.interleave_message
             && !interleave_message.trim().is_empty()
         {
-            recovered_followups.push(interleave_message);
+            recovered_followups.push(super::queued::QueuedMessage::text(interleave_message));
         }
         let recovered_interrupts = restored
             .pending_soft_interrupt_resend
@@ -53,7 +53,11 @@ impl App {
                 "Recovered {} pending soft interrupt(s) after reload; re-queueing them as normal follow-ups",
                 recovered_interrupts.len()
             ));
-            recovered_followups.extend(recovered_interrupts);
+            recovered_followups.extend(
+                recovered_interrupts
+                    .into_iter()
+                    .map(super::queued::QueuedMessage::text),
+            );
         }
         if !recovered_followups.is_empty() {
             let mut recovered_queue = recovered_followups;
@@ -62,7 +66,7 @@ impl App {
             self.set_status_notice("Recovered pending prompts after reload");
         }
 
-        self.queued_messages = queued_messages;
+        self.replace_queued_messages(queued_messages);
         if self.has_queued_followups() {
             if self.is_remote {
                 // Do not synthesize a processing turn for restored remote follow-ups.
@@ -1231,7 +1235,7 @@ impl App {
     pub fn set_ambient_mode(&mut self, system_prompt: String, initial_message: String) {
         self.ambient_system_prompt = Some(system_prompt);
         crate::tool::ambient::register_ambient_session(self.session.id.clone());
-        self.queued_messages.push(initial_message);
+        self.queue_user_text(initial_message);
         self.is_processing = true;
         self.status = ProcessingStatus::Sending;
         self.processing_started = Some(Instant::now());
@@ -1243,7 +1247,7 @@ impl App {
         if message.trim().is_empty() {
             return;
         }
-        self.queued_messages.push(message);
+        self.queue_user_text(message);
         self.is_processing = true;
         self.status = ProcessingStatus::Sending;
         self.processing_started = Some(Instant::now());

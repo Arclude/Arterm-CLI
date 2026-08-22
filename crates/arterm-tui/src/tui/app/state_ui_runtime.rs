@@ -85,8 +85,35 @@ impl App {
         self.queued_messages.len() + self.hidden_queued_system_messages.len()
     }
 
-    pub fn queued_messages(&self) -> &[String] {
-        &self.queued_messages
+    pub fn queued_messages(&self) -> Vec<String> {
+        super::queued::queued_preview_texts(&self.queued_messages)
+    }
+
+    pub(super) fn queue_user_message(&mut self, message: impl Into<super::queued::QueuedMessage>) {
+        let message = message.into();
+        if message.is_empty() {
+            return;
+        }
+        self.queued_messages.push(message);
+    }
+
+    pub(super) fn queue_user_text(&mut self, text: impl Into<String>) {
+        self.queue_user_message(super::queued::QueuedMessage::text(text));
+    }
+
+    pub(super) fn replace_queued_messages(
+        &mut self,
+        messages: Vec<super::queued::QueuedMessage>,
+    ) {
+        self.queued_messages = messages;
+    }
+
+    pub(super) fn insert_queued_message(
+        &mut self,
+        index: usize,
+        message: impl Into<super::queued::QueuedMessage>,
+    ) {
+        self.queued_messages.insert(index, message.into());
     }
 
     pub fn streaming_tokens(&self) -> (u64, u64) {

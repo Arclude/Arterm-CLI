@@ -1142,7 +1142,7 @@ fn remote_submit_input_never_strands_a_local_pending_turn() {
         "remote submit_input must not set the local-only pending_turn flag"
     );
     assert_eq!(
-        app.queued_messages,
+        app.queued_messages(),
         vec!["plain prompt".to_string()],
         "the prompt should be queued for the remote tick loop"
     );

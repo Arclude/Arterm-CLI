@@ -11,7 +11,7 @@ fn test_handle_remote_disconnect_preserves_pending_interleaves_for_reconnect() {
     app.interleave_message = Some("unsent interleave".to_string());
     app.pending_soft_interrupts = vec!["acked interleave".to_string()];
     app.pending_soft_interrupt_requests = vec![(44, "acked interleave".to_string())];
-    app.queued_messages.push("queued later".to_string());
+    app.queue_user_text("queued later".to_string());
 
     let mut state = remote::RemoteRunState::default();
     remote::handle_disconnect(&mut app, &mut state, None);

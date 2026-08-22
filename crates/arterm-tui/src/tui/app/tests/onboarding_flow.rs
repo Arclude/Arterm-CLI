@@ -1654,7 +1654,7 @@ fn starting_recent_project_review_queues_remote_turn_without_stuck_sending() {
     );
     assert!(app.input.is_empty());
     assert_eq!(
-        app.queued_messages,
+        app.queued_messages(),
         vec![expected]
     );
 }

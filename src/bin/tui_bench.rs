@@ -852,8 +852,8 @@ impl TuiState for BenchState {
         self.is_processing
     }
 
-    fn queued_messages(&self) -> &[String] {
-        &self.queued_messages
+    fn queued_messages(&self) -> Vec<String> {
+        self.queued_messages.clone()
     }
 
     fn interleave_message(&self) -> Option<&str> {

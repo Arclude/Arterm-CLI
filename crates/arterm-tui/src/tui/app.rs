@@ -88,6 +88,7 @@ mod onboarding_repair;
 mod onboarding_sim;
 mod productivity;
 mod prompt_history;
+mod queued;
 mod remote;
 mod remote_notifications;
 mod replay;
@@ -875,8 +876,9 @@ pub struct App {
     /// Keeps the machine awake while a turn is processing/streaming.
     power_inhibitor: crate::power_inhibit::PowerInhibitor,
     should_quit: bool,
-    // Message queueing
-    queued_messages: Vec<String>,
+    // Message queueing. Preview/debug still expose the text; attachments ride
+    // along so a queued paste is not dropped on follow-up dispatch.
+    queued_messages: Vec<queued::QueuedMessage>,
     hidden_queued_system_messages: Vec<String>,
     current_turn_system_reminder: Option<String>,
     // Upstream provider (e.g., which provider OpenRouter routed to)

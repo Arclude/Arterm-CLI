@@ -822,7 +822,7 @@ async fn handle_remote_key_internal(
             match app.send_action(true) {
                 SendAction::Submit => submit_prepared_remote_input(app, remote, prepared).await?,
                 SendAction::Queue => {
-                    app.queued_messages.push(prepared.expanded);
+                    app.queue_user_message(crate::tui::app::queued::QueuedMessage::from_prepared(prepared));
                 }
                 SendAction::Interleave => {
                     app.send_interleave_now(prepared.expanded, prepared.images, remote)
@@ -2219,7 +2219,7 @@ async fn handle_remote_key_internal(
                         app.push_display_message(DisplayMessage::system(
                             app_mod::commands::plan_launch_notice(command.goal.as_deref(), true),
                         ));
-                        app.queued_messages.push(prompt);
+                        app.queue_user_text(prompt);
                     } else {
                         app.push_display_message(DisplayMessage::system(
                             app_mod::commands::plan_launch_notice(command.goal.as_deref(), false),
@@ -2243,7 +2243,7 @@ async fn handle_remote_key_internal(
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::init_launch_notice(true),
                                 ));
-                                app.queued_messages.push(prompt);
+                                app.queue_user_text(prompt);
                             } else {
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::init_launch_notice(false),
@@ -2303,7 +2303,7 @@ async fn handle_remote_key_internal(
                                     "♻️ Interrupting and resuming {}...",
                                     mode.status_label()
                                 )));
-                                app.queued_messages.push(prompt);
+                                app.queue_user_text(prompt);
                             } else {
                                 app.push_display_message(DisplayMessage::system(format!(
                                     "♻️ Resuming {}...",
@@ -2368,7 +2368,7 @@ async fn handle_remote_key_internal(
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::improve_stop_notice(true),
                                 ));
-                                app.queued_messages.push(stop_prompt);
+                                app.queue_user_text(stop_prompt);
                             } else {
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::improve_stop_notice(false),
@@ -2411,7 +2411,7 @@ async fn handle_remote_key_internal(
                                         true,
                                     ),
                                 ));
-                                app.queued_messages.push(prompt);
+                                app.queue_user_text(prompt);
                             } else {
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::improve_launch_notice(
@@ -2485,7 +2485,7 @@ async fn handle_remote_key_internal(
                                     "♻️ Interrupting and resuming {}...",
                                     mode.status_label()
                                 )));
-                                app.queued_messages.push(prompt);
+                                app.queue_user_text(prompt);
                             } else {
                                 app.push_display_message(DisplayMessage::system(format!(
                                     "♻️ Resuming {}...",
@@ -2550,7 +2550,7 @@ async fn handle_remote_key_internal(
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::refactor_stop_notice(true),
                                 ));
-                                app.queued_messages.push(stop_prompt);
+                                app.queue_user_text(stop_prompt);
                             } else {
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::refactor_stop_notice(false),
@@ -2593,7 +2593,7 @@ async fn handle_remote_key_internal(
                                         true,
                                     ),
                                 ));
-                                app.queued_messages.push(prompt);
+                                app.queue_user_text(prompt);
                             } else {
                                 app.push_display_message(DisplayMessage::system(
                                     app_mod::commands::refactor_launch_notice(
@@ -2635,7 +2635,7 @@ async fn handle_remote_key_internal(
                         submit_prepared_remote_input(app, remote, prepared).await?
                     }
                     SendAction::Queue => {
-                        app.queued_messages.push(prepared.expanded);
+                        app.queue_user_message(crate::tui::app::queued::QueuedMessage::from_prepared(prepared));
                     }
                     SendAction::Interleave => {
                         app.send_interleave_now(prepared.expanded, prepared.images, remote)

@@ -87,8 +87,10 @@ pub(super) fn is_todo_confidence_summary_message(message: &str) -> bool {
         || message.starts_with("All todos are done. Todo confidence summary:")
 }
 
-pub(super) fn queued_messages_are_only_pokes(messages: &[String]) -> bool {
-    !messages.is_empty() && messages.iter().all(|message| is_poke_message(message))
+pub(super) fn queued_messages_are_only_pokes(
+    messages: &[super::queued::QueuedMessage],
+) -> bool {
+    !messages.is_empty() && messages.iter().all(|message| is_poke_message(message.as_str()))
 }
 
 pub(super) fn clear_queued_poke_messages(app: &mut App) -> usize {
@@ -2567,7 +2569,7 @@ pub(super) fn handle_test_command(app: &mut App, trimmed: &str) -> bool {
     }
 
     let prompt = build_test_verification_prompt(claim);
-    app.queued_messages.push(prompt);
+    app.queue_user_text(prompt);
     if app.is_processing {
         app.push_display_message(DisplayMessage::system(
             "Queued /test; verification will run after the current turn.".to_string(),

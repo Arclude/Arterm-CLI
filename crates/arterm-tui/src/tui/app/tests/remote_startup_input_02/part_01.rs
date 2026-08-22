@@ -1460,8 +1460,7 @@ fn test_escape_interrupt_disables_auto_poke_while_processing() {
     let mut app = create_test_app();
     app.is_processing = true;
     app.auto_poke_incomplete_todos = true;
-    app.queued_messages
-        .push(super::commands::build_poke_message(&[
+    app.queue_user_text(super::commands::build_poke_message(&[
             crate::todo::TodoItem {
                 group: None,
                 id: "todo-1".to_string(),

@@ -52,13 +52,16 @@ fn extract_bracketed_system_message_strips_wrapper() {
 fn partition_queued_messages_moves_system_messages_into_reminders() {
     let (user_messages, reminder, display_system_messages) = partition_queued_messages(
         vec![
-            "[SYSTEM: Continue where you left off.]".to_string(),
-            "normal user input".to_string(),
+            super::super::queued::QueuedMessage::text("[SYSTEM: Continue where you left off.]"),
+            super::super::queued::QueuedMessage::text("normal user input"),
         ],
         vec!["hidden reminder".to_string()],
     );
 
-    assert_eq!(user_messages, vec!["normal user input"]);
+    assert_eq!(
+        user_messages,
+        vec![super::super::queued::QueuedMessage::text("normal user input")]
+    );
     assert_eq!(
         display_system_messages,
         vec!["Continue where you left off."]

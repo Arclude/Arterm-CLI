@@ -56,7 +56,7 @@ fn test_new_for_remote_does_not_requeue_acked_pending_soft_interrupts() {
 
         app.interleave_message = Some("local interleave".to_string());
         app.pending_soft_interrupts = vec!["already queued on server".to_string()];
-        app.queued_messages.push("queued later".to_string());
+        app.queue_user_text("queued later".to_string());
         app.save_input_for_reload(session_id);
 
         let mut restored = App::new_for_remote(Some(session_id.to_string()));
@@ -124,7 +124,7 @@ fn test_initial_history_bootstrap_preserves_restored_interleave_state() {
         app.interleave_message = Some("interrupt after reload".to_string());
         app.pending_soft_interrupts = vec!["already sent interrupt".to_string()];
         app.pending_soft_interrupt_requests = vec![(55, "already sent interrupt".to_string())];
-        app.queued_messages.push("queued followup".to_string());
+        app.queue_user_text("queued followup".to_string());
         app.save_input_for_reload(session_id);
 
         let mut restored = App::new_for_remote(Some(session_id.to_string()));

@@ -530,7 +530,10 @@ pub(in crate::tui::app) fn stage_turn_for_remote_tick_loop(app: &mut App, input:
         input::stage_local_interleave(app, input.to_string(), images);
         return true;
     }
-    app.queued_messages.push(input.to_string());
-    app.pending_images.clear();
+    let images = std::mem::take(&mut app.pending_images);
+    app.queue_user_message(crate::tui::app::queued::QueuedMessage::with_images(
+        input.to_string(),
+        images,
+    ));
     true
 }

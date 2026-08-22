@@ -128,7 +128,7 @@ impl App {
                 },
                 "queued_messages": {
                     "visible_count": self.queued_messages.len(),
-                    "visible_text_bytes": estimate_string_vec_bytes(&self.queued_messages),
+                    "visible_text_bytes": super::queued::queued_capacity_bytes(&self.queued_messages),
                     "hidden_count": self.hidden_queued_system_messages.len(),
                     "hidden_text_bytes": estimate_string_vec_bytes(&self.hidden_queued_system_messages),
                     "current_turn_system_reminder_bytes": self.current_turn_system_reminder.as_ref().map(|value| value.len()).unwrap_or(0),

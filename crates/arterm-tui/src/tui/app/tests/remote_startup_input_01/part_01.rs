@@ -32,7 +32,7 @@ fn test_finish_turn_does_not_duplicate_existing_poke_followup() {
 
         app.auto_poke_incomplete_todos = true;
         app.is_processing = true;
-        app.queued_messages.push("existing poke".to_string());
+        app.queue_user_text("existing poke".to_string());
         super::local::finish_turn(&mut app);
 
         assert_eq!(app.queued_messages(), &["existing poke"]);

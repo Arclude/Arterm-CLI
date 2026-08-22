@@ -134,7 +134,9 @@ pub(super) fn recover_undelivered_queued_continuation(app: &mut App, reason: &st
         .is_some_and(|pending| {
             pending.is_system
                 && !pending.auto_retry
-                && (!pending.content.trim().is_empty() || pending.system_reminder.is_some())
+                && (!pending.content.trim().is_empty()
+                    || pending.system_reminder.is_some()
+                    || !pending.images.is_empty())
         });
     if !is_recoverable {
         return false;
@@ -152,8 +154,11 @@ pub(super) fn recover_undelivered_queued_continuation(app: &mut App, reason: &st
     if let Some(reminder) = pending.system_reminder {
         app.hidden_queued_system_messages.insert(0, reminder);
     }
-    if !pending.content.trim().is_empty() {
-        app.queued_messages.insert(0, pending.content);
+    if !pending.content.trim().is_empty() || !pending.images.is_empty() {
+        app.insert_queued_message(
+            0,
+            crate::tui::app::queued::QueuedMessage::with_images(pending.content, pending.images),
+        );
     }
     true
 }
@@ -162,7 +167,7 @@ pub(super) fn recover_local_interleave_to_queue(app: &mut App, reason: &str) -> 
     let Some(interleave) = app.interleave_message.take() else {
         return false;
     };
-    if interleave.trim().is_empty() {
+    if interleave.trim().is_empty() && app.interleave_images.is_empty() {
         return false;
     }
 
@@ -170,7 +175,11 @@ pub(super) fn recover_local_interleave_to_queue(app: &mut App, reason: &str) -> 
         "Recovering unsent interleave into queued follow-ups after {}",
         reason
     ));
-    app.queued_messages.insert(0, interleave);
+    let images = std::mem::take(&mut app.interleave_images);
+    app.insert_queued_message(
+        0,
+        crate::tui::app::queued::QueuedMessage::with_images(interleave, images),
+    );
     true
 }
 
@@ -203,7 +212,10 @@ pub(super) async fn recover_stranded_soft_interrupts(
     ));
     app.pending_soft_interrupt_requests.clear();
 
-    let mut recovered_queue = recovered_interrupts;
+    let mut recovered_queue = recovered_interrupts
+        .into_iter()
+        .map(crate::tui::app::queued::QueuedMessage::text)
+        .collect::<Vec<_>>();
     recovered_queue.append(&mut app.queued_messages);
     app.queued_messages = recovered_queue;
     app.set_status_notice("Recovered queued interleave after turn finished");

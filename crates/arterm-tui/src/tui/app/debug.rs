@@ -462,7 +462,7 @@ pub(super) struct ScrollTestState {
     diff_pane_auto_scroll: bool,
     is_processing: bool,
     streaming_text: String,
-    queued_messages: Vec<String>,
+    queued_messages: Vec<super::queued::QueuedMessage>,
     interleave_message: Option<String>,
     pending_soft_interrupts: Vec<String>,
     input: String,

@@ -671,7 +671,7 @@ fn test_ctrl_l_terminal_clear_adds_spacer_and_keeps_everything() {
             cache_control: None,
         }],
     );
-    app.queued_messages.push("queued".to_string());
+    app.queue_user_text("queued".to_string());
     app.display_messages = vec![DisplayMessage::system("visible chat".to_string())];
     app.bump_display_messages_version();
     app.scroll_offset = 25;

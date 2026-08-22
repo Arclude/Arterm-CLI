@@ -102,13 +102,15 @@ fn test_queue_message_combines_on_send() {
     let mut app = create_test_app();
 
     // Queue two messages directly
-    app.queued_messages.push("message one".to_string());
-    app.queued_messages.push("message two".to_string());
+    app.queue_user_text("message one".to_string());
+    app.queue_user_text("message two".to_string());
 
     // Take and combine (simulating what process_queued_messages does)
-    let combined = std::mem::take(&mut app.queued_messages).join("\n\n");
+    let messages = std::mem::take(&mut app.queued_messages);
+    let (combined, images) = super::queued::combine_queued_user_payload(&messages);
 
     assert_eq!(combined, "message one\n\nmessage two");
+    assert!(images.is_empty());
     assert!(app.queued_messages.is_empty());
 }
 
@@ -934,8 +936,8 @@ fn test_save_and_restore_reload_state_preserves_queued_messages() {
 
     app.input = "draft".to_string();
     app.cursor_pos = 3;
-    app.queued_messages.push("queued one".to_string());
-    app.queued_messages.push("queued two".to_string());
+    app.queue_user_text("queued one".to_string());
+    app.queue_user_text("queued two".to_string());
     app.hidden_queued_system_messages
         .push("continue silently".to_string());
     app.save_input_for_reload(&session_id);
@@ -943,7 +945,7 @@ fn test_save_and_restore_reload_state_preserves_queued_messages() {
     let restored = App::restore_input_for_reload(&session_id).expect("reload state should exist");
     assert_eq!(restored.input, "draft");
     assert_eq!(restored.cursor, 3);
-    assert_eq!(restored.queued_messages, vec!["queued one", "queued two"]);
+    assert_eq!(super::queued::queued_preview_texts(&restored.queued_messages), vec!["queued one", "queued two"]);
     assert_eq!(
         restored.hidden_queued_system_messages,
         vec!["continue silently"]
@@ -963,8 +965,8 @@ fn test_new_for_remote_restored_queued_messages_stay_queued_until_remote_idle() 
     let mut app = create_test_app();
     let session_id = format!("test-remote-queued-restore-{}", std::process::id());
 
-    app.queued_messages.push("queued one".to_string());
-    app.queued_messages.push("queued two".to_string());
+    app.queue_user_text("queued one".to_string());
+    app.queue_user_text("queued two".to_string());
     app.hidden_queued_system_messages
         .push("continue silently".to_string());
     app.save_input_for_reload(&session_id);
@@ -1189,7 +1191,7 @@ fn test_new_for_remote_requeues_restored_pending_soft_interrupts() {
         app.pending_soft_interrupts = vec!["sent one".to_string(), "sent two".to_string()];
         app.pending_soft_interrupt_requests =
             vec![(101, "sent one".to_string()), (102, "sent two".to_string())];
-        app.queued_messages.push("queued later".to_string());
+        app.queue_user_text("queued later".to_string());
         app.save_input_for_reload(session_id);
 
         let restored = App::new_for_remote(Some(session_id.to_string()));

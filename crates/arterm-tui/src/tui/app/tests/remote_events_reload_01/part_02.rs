@@ -278,8 +278,7 @@ fn test_remote_poke_status_and_off_update_state() {
         app.status = ProcessingStatus::Streaming;
         app.current_message_id = Some(42);
         app.pending_queued_dispatch = true;
-        app.queued_messages
-            .push(super::commands::build_poke_message(
+        app.queue_user_text(super::commands::build_poke_message(
                 &super::commands::incomplete_poke_todos(&app),
             ));
 

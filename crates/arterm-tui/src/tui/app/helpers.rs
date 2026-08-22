@@ -171,15 +171,19 @@ pub(super) fn launch_client_executable() -> PathBuf {
 }
 
 pub(super) fn partition_queued_messages(
-    messages: Vec<String>,
+    messages: Vec<super::queued::QueuedMessage>,
     reminders: Vec<String>,
-) -> (Vec<String>, Option<String>, Vec<String>) {
+) -> (
+    Vec<super::queued::QueuedMessage>,
+    Option<String>,
+    Vec<String>,
+) {
     let mut user_messages = Vec::new();
     let mut display_system_messages = Vec::new();
     let mut reminder_parts = reminders;
 
     for message in messages {
-        if let Some(system_message) = extract_bracketed_system_message(&message) {
+        if let Some(system_message) = extract_bracketed_system_message(message.as_str()) {
             reminder_parts.push(system_message.clone());
             display_system_messages.push(system_message);
         } else {

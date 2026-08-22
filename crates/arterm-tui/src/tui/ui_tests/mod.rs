@@ -194,8 +194,8 @@ impl crate::tui::TuiState for TestState {
     fn is_processing(&self) -> bool {
         !matches!(self.status, ProcessingStatus::Idle)
     }
-    fn queued_messages(&self) -> &[String] {
-        &self.queued_messages
+    fn queued_messages(&self) -> Vec<String> {
+        self.queued_messages.clone()
     }
     fn interleave_message(&self) -> Option<&str> {
         self.interleave_message.as_deref()

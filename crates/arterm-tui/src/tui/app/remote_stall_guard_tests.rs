@@ -46,8 +46,7 @@ fn starved_queued_followup_is_rearmed_after_timeout() {
     let mut app = App::new_for_remote(None);
     app.is_processing = false;
     app.pending_queued_dispatch = false;
-    app.queued_messages
-        .push(crate::todo::build_auto_poke_message(2));
+    app.queue_user_text(crate::todo::build_auto_poke_message(2));
 
     // First observation only arms the timer; it must not re-dispatch yet.
     assert!(!detect_starved_queued_followup(&mut app));
@@ -80,7 +79,7 @@ fn starvation_watchdog_ignores_healthy_states() {
     assert!(app.queued_followup_starved_since.is_none());
 
     // Queued but a turn is in flight: the queue drains at turn end.
-    app.queued_messages.push("poke".to_string());
+    app.queue_user_text("poke".to_string());
     app.is_processing = true;
     app.queued_followup_starved_since =
         Some(Instant::now() - QUEUED_FOLLOWUP_STARVATION_TIMEOUT - Duration::from_secs(1));

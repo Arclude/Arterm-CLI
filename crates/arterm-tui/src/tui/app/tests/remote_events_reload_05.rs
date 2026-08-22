@@ -45,6 +45,89 @@ fn test_disconnect_recovers_inflight_queued_continuation_to_queue() {
 }
 
 #[test]
+fn test_disconnect_recovers_inflight_queued_images() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+
+    app.is_processing = true;
+    app.status = ProcessingStatus::Streaming;
+    app.current_message_id = Some(12);
+    app.rate_limit_pending_message = Some(PendingRemoteMessage {
+        content: "look at this".to_string(),
+        images: vec![("image/png".to_string(), "aaa".to_string())],
+        is_system: true,
+        system_reminder: None,
+        auto_retry: false,
+        retry_attempts: 0,
+        retry_at: None,
+    });
+    app.rate_limit_reset = None;
+
+    let mut state = remote::RemoteRunState::default();
+    remote::handle_disconnect(&mut app, &mut state, None);
+
+    assert_eq!(app.queued_messages(), &["look at this"]);
+    assert_eq!(
+        app.queued_messages[0].images,
+        vec![("image/png".to_string(), "aaa".to_string())]
+    );
+    assert!(app.rate_limit_pending_message.is_none());
+}
+
+#[test]
+fn test_save_and_restore_reload_state_preserves_queued_images() {
+    let mut app = create_test_app();
+    let session_id = format!("test-queued-images-{}", std::process::id());
+
+    app.queue_user_message(super::queued::QueuedMessage::with_images(
+        "look at this".to_string(),
+        vec![("image/png".to_string(), "aaa".to_string())],
+    ));
+    app.save_input_for_reload(&session_id);
+
+    let restored = App::restore_input_for_reload(&session_id).expect("reload state should exist");
+    assert_eq!(
+        super::queued::queued_preview_texts(&restored.queued_messages),
+        vec!["look at this"]
+    );
+    assert_eq!(
+        restored.queued_messages[0].images,
+        vec![("image/png".to_string(), "aaa".to_string())]
+    );
+}
+
+#[test]
+fn test_remote_followup_drain_sends_queued_images() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+
+    app.is_processing = false;
+    app.queue_user_message(super::queued::QueuedMessage::with_images(
+        "look at this".to_string(),
+        vec![("image/png".to_string(), "aaa".to_string())],
+    ));
+
+    rt.block_on(super::remote::process_remote_followups(
+        &mut app,
+        &mut remote,
+    ));
+
+    assert!(app.queued_messages.is_empty());
+    let pending = app
+        .rate_limit_pending_message
+        .expect("queued follow-up should have been handed to begin_remote_send");
+    assert_eq!(pending.content, "look at this");
+    assert_eq!(
+        pending.images,
+        vec![("image/png".to_string(), "aaa".to_string())]
+    );
+}
+
+#[test]
 fn test_disconnect_still_clears_pending_for_non_queued_shapes() {
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -80,7 +163,7 @@ fn test_save_input_for_reload_persists_inflight_queued_continuation() {
 
     // Simulate the reload racing the dispatch: one message still queued, one
     // already dequeued into the in-flight pending slot.
-    app.queued_messages.push("still queued".to_string());
+    app.queue_user_text("still queued".to_string());
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "dispatched but unfinished".to_string(),
         images: vec![],
@@ -96,7 +179,7 @@ fn test_save_input_for_reload_persists_inflight_queued_continuation() {
 
     let restored = App::restore_input_for_reload(&session_id).expect("reload state should exist");
     assert_eq!(
-        restored.queued_messages,
+        super::queued::queued_preview_texts(&restored.queued_messages),
         vec!["dispatched but unfinished", "still queued"],
         "the in-flight continuation must be persisted at the front of the queue"
     );
@@ -315,7 +398,7 @@ fn test_save_input_for_reload_removes_stale_file_when_state_is_empty() {
     let session_id = format!("test-391-stale-{}", std::process::id());
 
     // First reload snapshot holds a queued message.
-    app.queued_messages.push("old queued".to_string());
+    app.queue_user_text("old queued".to_string());
     app.save_input_for_reload(&session_id);
 
     let path = crate::storage::arterm_dir()

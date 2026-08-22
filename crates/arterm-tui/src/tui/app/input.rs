@@ -1188,7 +1188,7 @@ pub(super) fn expand_paste_placeholders(app: &mut App, input: &str) -> String {
 
 pub(super) fn queue_message(app: &mut App) {
     let prepared = take_prepared_input(app);
-    app.queued_messages.push(prepared.expanded);
+    app.queue_user_message(super::queued::QueuedMessage::from_prepared(prepared));
 }
 
 pub(super) fn retrieve_pending_message_for_edit(app: &mut App) -> bool {
@@ -1212,7 +1212,13 @@ pub(super) fn retrieve_pending_message_for_edit(app: &mut App) -> bool {
         had_pending = true;
     }
     if !app.queued_messages.is_empty() {
-        parts.extend(std::mem::take(&mut app.queued_messages));
+        let queued = std::mem::take(&mut app.queued_messages);
+        app.pending_images.extend(
+            queued
+                .iter()
+                .flat_map(|message| message.images.iter().cloned()),
+        );
+        parts.extend(queued.into_iter().map(|message| message.text));
         if !app.has_queued_followups() {
             app.pending_queued_dispatch = false;
         }
@@ -1358,7 +1364,7 @@ impl App {
         self.push_display_message(DisplayMessage::system(
             "🔎 We asked the agent to double-check this turn's weak points.",
         ));
-        self.queued_messages.push(digest);
+        self.queue_user_text(digest);
         self.pending_queued_dispatch = true;
         true
     }
@@ -1384,8 +1390,7 @@ impl App {
             self.push_display_message(DisplayMessage::system(
                 "🔍 Rechecking the plan and assessments after extended work...",
             ));
-            self.queued_messages
-                .push(crate::todo::TODO_LONG_SESSION_REVIEW_MESSAGE.to_string());
+            self.queue_user_text(crate::todo::TODO_LONG_SESSION_REVIEW_MESSAGE);
             self.pending_queued_dispatch = true;
             return true;
         }
@@ -1429,10 +1434,9 @@ impl App {
                 self.push_display_message(DisplayMessage::system(
                     "🔍 Checking end-to-end ownership before finishing...",
                 ));
-                self.queued_messages
-                    .push(crate::todo::build_todo_ownership_continuation_message(
-                        &todos, &goals,
-                    ));
+                self.queue_user_text(crate::todo::build_todo_ownership_continuation_message(
+                    &todos, &goals,
+                ));
                 self.pending_queued_dispatch = true;
                 return true;
             }
@@ -1460,7 +1464,7 @@ impl App {
                 // User-role content: reminder-only turns read as empty user
                 // messages and models answer instead of re-validating.
                 let summary = super::commands::build_todo_confidence_summary_message(&todos);
-                self.queued_messages.push(summary);
+                self.queue_user_text(summary);
                 self.pending_queued_dispatch = true;
                 return true;
             }
@@ -1536,7 +1540,7 @@ impl App {
         // exhaustion should only trip when the gate itself stops moving.
         self.todo_completion_gate_attempts = 0;
         self.last_auto_poke_fingerprint = Some(fingerprint);
-        self.queued_messages.push(poke_message);
+        self.queue_user_text(poke_message);
         self.pending_queued_dispatch = true;
         true
     }
@@ -3674,8 +3678,8 @@ impl App {
             let hidden_reminders = std::mem::take(&mut self.hidden_queued_system_messages);
             let (messages, reminder, display_system_messages) =
                 super::helpers::partition_queued_messages(queued_messages, hidden_reminders);
-            let combined = messages.join("\n\n");
-            let has_combined = !combined.is_empty();
+            let (combined, images) = super::queued::combine_queued_user_payload(&messages);
+            let has_combined = !combined.is_empty() || !images.is_empty();
             let preserve_visible_turn = super::commands::queued_messages_are_only_pokes(&messages);
 
             self.commit_pending_streaming_assistant_message();
@@ -3685,8 +3689,8 @@ impl App {
             }
 
             for msg in &messages {
-                if !super::commands::is_poke_message(msg) {
-                    self.push_display_message(DisplayMessage::user(msg.clone()));
+                if !super::commands::is_poke_message(msg.as_str()) {
+                    self.push_display_message(DisplayMessage::user(msg.text.clone()));
                 }
             }
 
@@ -3694,14 +3698,27 @@ impl App {
                 merge_turn_reminders(reminder, mission_turn_reminder(&self.session.id));
 
             if has_combined {
-                self.add_provider_message(Message::user(&combined));
-                self.session.add_message(
-                    Role::User,
-                    vec![ContentBlock::Text {
+                if images.is_empty() {
+                    self.add_provider_message(Message::user(&combined));
+                    self.session.add_message(
+                        Role::User,
+                        vec![ContentBlock::Text {
+                            text: combined.clone(),
+                            cache_control: None,
+                        }],
+                    );
+                } else {
+                    self.add_provider_message(Message::user_with_images(&combined, images.clone()));
+                    let mut blocks: Vec<ContentBlock> = images
+                        .into_iter()
+                        .map(|(media_type, data)| ContentBlock::Image { media_type, data })
+                        .collect();
+                    blocks.push(ContentBlock::Text {
                         text: combined.clone(),
                         cache_control: None,
-                    }],
-                );
+                    });
+                    self.session.add_message(Role::User, blocks);
+                }
             }
             self.session_save_pending = true;
             self.clear_streaming_render_state();

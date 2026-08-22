@@ -562,8 +562,8 @@ impl crate::tui::TuiState for App {
         self.is_processing || self.pending_queued_dispatch || self.split_launch_in_flight()
     }
 
-    fn queued_messages(&self) -> &[String] {
-        &self.queued_messages
+    fn queued_messages(&self) -> Vec<String> {
+        super::queued::queued_preview_texts(&self.queued_messages)
     }
 
     fn interleave_message(&self) -> Option<&str> {

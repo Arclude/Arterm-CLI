@@ -37,7 +37,7 @@ impl App {
             }),
             frame,
             recent_messages,
-            queued_messages: self.queued_messages.clone(),
+            queued_messages: super::queued::queued_preview_texts(&self.queued_messages),
         }
     }
 

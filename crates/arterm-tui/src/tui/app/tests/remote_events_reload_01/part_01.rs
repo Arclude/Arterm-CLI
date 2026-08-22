@@ -759,7 +759,7 @@ fn test_handle_server_event_history_session_change_clears_pending_interleaves() 
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
     app.remote_session_id = Some("session_old".to_string());
-    app.queued_messages.push("queued later".to_string());
+    app.queue_user_text("queued later".to_string());
     app.interleave_message = Some("unsent interleave".to_string());
     app.pending_soft_interrupts = vec!["acked interleave".to_string()];
     app.pending_soft_interrupt_requests = vec![(12, "acked interleave".to_string())];
@@ -1500,7 +1500,7 @@ fn test_remote_interrupted_defers_queued_followup_dispatch_by_one_cycle() {
     app.is_processing = true;
     app.status = ProcessingStatus::Streaming;
     app.current_message_id = Some(42);
-    app.queued_messages.push("queued later".to_string());
+    app.queue_user_text("queued later".to_string());
 
     app.handle_server_event(crate::protocol::ServerEvent::Interrupted, &mut remote);
 
@@ -1534,7 +1534,7 @@ fn test_remote_interrupted_recovers_pending_interleaves_in_order() {
     app.interleave_message = Some("unsent interleave".to_string());
     app.pending_soft_interrupts = vec!["acked interleave".to_string()];
     app.pending_soft_interrupt_requests = vec![(55, "acked interleave".to_string())];
-    app.queued_messages.push("queued later".to_string());
+    app.queue_user_text("queued later".to_string());
 
     app.handle_server_event(crate::protocol::ServerEvent::Interrupted, &mut remote);
 
@@ -1588,7 +1588,7 @@ fn test_remote_done_recovers_stranded_soft_interrupt_as_queued_followup() {
     app.current_message_id = Some(42);
     app.pending_soft_interrupts = vec!["late interleave".to_string()];
     app.pending_soft_interrupt_requests = vec![(55, "late interleave".to_string())];
-    app.queued_messages.push("queued later".to_string());
+    app.queue_user_text("queued later".to_string());
 
     app.handle_server_event(crate::protocol::ServerEvent::Done { id: 42 }, &mut remote);
 

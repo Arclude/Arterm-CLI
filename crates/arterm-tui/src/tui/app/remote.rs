@@ -258,23 +258,24 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
         let hidden_reminders = std::mem::take(&mut app.hidden_queued_system_messages);
         let (messages, reminder, display_system_messages) =
             super::helpers::partition_queued_messages(queued_messages, hidden_reminders);
-        let combined = messages.join("\n\n");
+        let (combined, images) = super::queued::combine_queued_user_payload(&messages);
         let auto_retry = reminder.is_some() && messages.is_empty();
         crate::logging::info(&format!(
-            "Sending queued continuation message ({} chars)",
-            combined.len()
+            "Sending queued continuation message ({} chars, {} image(s))",
+            combined.len(),
+            images.len()
         ));
         for msg in display_system_messages {
             app.push_display_message(DisplayMessage::system(msg));
         }
         for msg in &messages {
-            app.push_display_message(DisplayMessage::user(msg.clone()));
+            app.push_display_message(DisplayMessage::user(msg.text.clone()));
         }
         if begin_remote_send(
             app,
             remote,
             combined.clone(),
-            vec![],
+            images.clone(),
             true,
             reminder.clone(),
             auto_retry,
@@ -293,8 +294,11 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
             if let Some(reminder) = reminder {
                 app.hidden_queued_system_messages.insert(0, reminder);
             }
-            if !combined.is_empty() {
-                app.queued_messages.insert(0, combined);
+            if !combined.is_empty() || !images.is_empty() {
+                app.insert_queued_message(
+                    0,
+                    super::queued::QueuedMessage::with_images(combined, images),
+                );
             }
         }
         needs_redraw = true;
@@ -1505,18 +1509,18 @@ pub(super) async fn process_remote_followups(app: &mut App, remote: &mut RemoteC
         let hidden_reminders = std::mem::take(&mut app.hidden_queued_system_messages);
         let (messages, reminder, display_system_messages) =
             super::helpers::partition_queued_messages(queued_messages, hidden_reminders);
-        let combined = messages.join("\n\n");
+        let (combined, images) = super::queued::combine_queued_user_payload(&messages);
         let preserve_visible_turn = super::commands::queued_messages_are_only_pokes(&messages);
         let auto_retry = reminder.is_some() && messages.is_empty();
         for msg in display_system_messages {
             app.push_display_message(DisplayMessage::system(msg));
         }
         for msg in &messages {
-            if !super::commands::is_poke_message(msg) {
-                app.push_display_message(DisplayMessage::user(msg.clone()));
+            if !super::commands::is_poke_message(msg.as_str()) {
+                app.push_display_message(DisplayMessage::user(msg.text.clone()));
             }
         }
-        if !combined.is_empty() {
+        if !combined.is_empty() || !images.is_empty() {
             if preserve_visible_turn {
                 app.visible_turn_started.get_or_insert_with(Instant::now);
             } else {
@@ -1527,7 +1531,7 @@ pub(super) async fn process_remote_followups(app: &mut App, remote: &mut RemoteC
             app,
             remote,
             combined.clone(),
-            vec![],
+            images.clone(),
             true,
             reminder.clone(),
             auto_retry,
@@ -1544,8 +1548,11 @@ pub(super) async fn process_remote_followups(app: &mut App, remote: &mut RemoteC
             if let Some(reminder) = reminder {
                 app.hidden_queued_system_messages.insert(0, reminder);
             }
-            if !combined.is_empty() {
-                app.queued_messages.insert(0, combined);
+            if !combined.is_empty() || !images.is_empty() {
+                app.insert_queued_message(
+                    0,
+                    super::queued::QueuedMessage::with_images(combined, images),
+                );
             }
         }
     } else if !app.hidden_queued_system_messages.is_empty() {
@@ -1862,7 +1869,7 @@ fn queue_message_for_reconnect(app: &mut App) {
     }
 
     let prepared = input::take_prepared_input(app);
-    app.queued_messages.push(prepared.expanded);
+    app.queue_user_message(super::queued::QueuedMessage::from_prepared(prepared));
 
     let queued_count = app.queued_messages.len();
     app.set_status_notice(format!(
