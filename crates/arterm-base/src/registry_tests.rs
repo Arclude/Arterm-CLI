@@ -168,3 +168,45 @@ async fn cleanup_stale_preserves_live_socket_paths() {
         crate::env::remove_var("ARTERM_HOME");
     }
 }
+
+#[tokio::test]
+async fn register_and_unregister_session_on_server_updates_disk_registry() {
+    let _guard = lock_test_env();
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let prev_home: Option<OsString> = std::env::var_os("ARTERM_HOME");
+    crate::env::set_var("ARTERM_HOME", temp_home.path());
+
+    let mut registry = ServerRegistry::default();
+    registry.register(test_server_info("blazing"));
+    registry.save().await.expect("save registry");
+
+    // Recording a session the server already owns appends it, idempotently.
+    register_session_on_server("blazing", "fox").await;
+    register_session_on_server("blazing", "fox").await;
+    let loaded = ServerRegistry::load().await.expect("load registry");
+    assert_eq!(
+        loaded.find_by_name("blazing").map(|s| s.sessions.clone()),
+        Some(vec!["fox".to_string()])
+    );
+
+    // A session for an unknown server is dropped rather than creating a
+    // phantom entry — the caller treats both paths as best-effort.
+    register_session_on_server("ghost", "wolf").await;
+    let loaded = ServerRegistry::load().await.expect("load registry");
+    assert!(loaded.find_by_name("ghost").is_none());
+
+    // Removing a recorded session drops it; removing again is a no-op.
+    unregister_session_from_server("blazing", "fox").await;
+    unregister_session_from_server("blazing", "fox").await;
+    let loaded = ServerRegistry::load().await.expect("load registry");
+    assert_eq!(
+        loaded.find_by_name("blazing").map(|s| s.sessions.clone()),
+        Some(Vec::new())
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("ARTERM_HOME", prev_home);
+    } else {
+        crate::env::remove_var("ARTERM_HOME");
+    }
+}

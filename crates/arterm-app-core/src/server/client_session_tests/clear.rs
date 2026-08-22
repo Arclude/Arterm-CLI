@@ -100,6 +100,7 @@ async fn handle_clear_session_replaces_runtime_handles_and_updates_shutdown_regi
         &provider,
         &registry,
         &sessions,
+        "test-server",
         &shutdown_signals,
         &soft_interrupt_queues,
         &client_connections,

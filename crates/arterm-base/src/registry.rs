@@ -117,7 +117,13 @@ impl ServerRegistry {
     }
 
     /// Register a server
-    pub fn register(&mut self, info: ServerInfo) {
+    pub fn register(&mut self, mut info: ServerInfo) {
+        // A re-register of the same server (startup race, self-dev reload)
+        // must not drop the session ownership recorded against it — the
+        // incoming info carries an empty list by construction.
+        if let Some(existing) = self.servers.get(&info.name) {
+            info.sessions = existing.sessions.clone();
+        }
         self.servers.insert(info.name.clone(), info);
     }
 
@@ -243,6 +249,52 @@ pub async fn unregister_server(name: &str) -> Result<()> {
     registry.unregister(name);
     registry.save().await?;
     Ok(())
+}
+
+/// Record that a session is owned by this server, so the session picker (and
+/// `arterm device sessions`) can attach the session to its server instead of
+/// filing it under orphaned "sessions".
+///
+/// The registry key is the session's short name (e.g. `fox`), matching what
+/// [`ServerRegistry::add_session`] documents and what the picker matches on.
+/// Best-effort: a registry write failure logs and continues rather than
+/// failing the session that owns it.
+pub async fn register_session_on_server(server_name: &str, session_name: &str) {
+    let mut registry = match ServerRegistry::load().await {
+        Ok(registry) => registry,
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "failed to load server registry to record session {session_name}: {error}"
+            ));
+            return;
+        }
+    };
+    registry.add_session(server_name, session_name);
+    if let Err(error) = registry.save().await {
+        crate::logging::warn(&format!(
+            "failed to save server registry after recording session {session_name}: {error}"
+        ));
+    }
+}
+
+/// Remove a session's ownership record from its server. Best-effort for the
+/// same reasons as [`register_session_on_server`].
+pub async fn unregister_session_from_server(server_name: &str, session_name: &str) {
+    let mut registry = match ServerRegistry::load().await {
+        Ok(registry) => registry,
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "failed to load server registry to drop session {session_name}: {error}"
+            ));
+            return;
+        }
+    };
+    registry.remove_session(server_name, session_name);
+    if let Err(error) = registry.save().await {
+        crate::logging::warn(&format!(
+            "failed to save server registry after dropping session {session_name}: {error}"
+        ));
+    }
 }
 
 /// List all running servers

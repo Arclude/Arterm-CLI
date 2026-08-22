@@ -29,17 +29,12 @@ use crate::registry::ServerInfo;
 
 /// This machine's sessions, grouped by server, trimmed for a peer's list.
 ///
-/// Grouped by the session picker's own loader rather than by the server
-/// registry. The registry looks like the natural source — it has a per-server
-/// `sessions` list — but nothing ever writes to it: `ServerRegistry::add_session`
-/// and `remove_session` have no callers anywhere in the tree, so that list is
-/// permanently empty. Building the answer from it filtered every session away
-/// and reported every machine as idle, which is indistinguishable from a
-/// machine that really is idle. That is why the whole feature looked like a
-/// transport problem when the transport was fine.
-///
-/// Using the picker's loader also makes a remote list the same view as the
-/// local one, rather than a poorer second parse of the same files.
+/// Grouped by the session picker's own loader. The registry's per-server
+/// `sessions` list is written by the server as clients attach (see
+/// `register_session_on_server`), but the loader stays the source here so a
+/// remote list is the same view as the local one rather than a second parse
+/// of the same files, and stays correct for sessions started by builds that
+/// predate that bookkeeping.
 ///
 /// Read fresh each call: a peer asks whenever it refreshes its list, and the
 /// answer changes as sessions start and stop. A failure to read is reported as
@@ -191,8 +186,7 @@ impl RemoteSessionSource for PreloadedRemoteSessions {
 /// This machine's running servers, with their session lists filled in.
 ///
 /// `running_local_servers_sync` is still the source for what only the local
-/// view knows — socket, pid, host — but its `sessions` field is always empty
-/// for the reason [`local_session_summaries`] documents, so the ids come from
+/// view knows — socket, pid, host — so the ids come from
 /// the picker's loader and are matched to a server by name. A server the loader
 /// does not know keeps its own (empty) list rather than borrowing another's.
 pub(crate) fn local_servers_with_sessions() -> anyhow::Result<Vec<ServerInfo>> {

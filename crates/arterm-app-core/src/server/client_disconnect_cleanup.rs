@@ -70,6 +70,7 @@ pub(super) async fn cleanup_client_connection(
     client_connection_id: &str,
     shutdown_signals: &Arc<RwLock<HashMap<String, InterruptSignal>>>,
     soft_interrupt_queues: &SessionInterruptQueues,
+    server_name: &str,
     event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
     event_counter: &Arc<std::sync::atomic::AtomicU64>,
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
@@ -250,6 +251,15 @@ pub(super) async fn cleanup_client_connection(
     }
     remove_background_tool_signal(client_session_id);
     remove_session_interrupt_queue(soft_interrupt_queues, client_session_id).await;
+    // Drop the on-disk ownership record too, so a server that has lost its
+    // last client stops claiming the session in `device sessions` and the
+    // picker. Keyed by short name, matching how it was recorded.
+    if let Some(short_name) = crate::id::extract_session_name(client_session_id) {
+        let (server_name, short_name) = (server_name.to_string(), short_name.to_string());
+        tokio::spawn(async move {
+            crate::registry::unregister_session_from_server(&server_name, &short_name).await;
+        });
+    }
 
     if let Some(handle) = processing_task.take() {
         handle.abort();

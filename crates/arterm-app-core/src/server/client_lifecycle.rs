@@ -579,6 +579,17 @@ pub(super) async fn handle_client(
         let mut sessions_guard = sessions.write().await;
         sessions_guard.insert(client_session_id.clone(), Arc::clone(&agent));
     }
+    // Record ownership on this server in the on-disk registry. The picker and
+    // `arterm device sessions` attach a session to its server only through this
+    // list; without it every session lands in the orphaned "sessions" bucket
+    // and the server rows report zero sessions. The registry key is the
+    // session's short name (e.g. `fox`), which is what the picker matches on.
+    if let Some(short_name) = friendly_name.clone() {
+        let server_for_registry = server_name.clone();
+        tokio::spawn(async move {
+            crate::registry::register_session_on_server(&server_for_registry, &short_name).await;
+        });
+    }
     crate::runtime_memory_log::emit_event(
         crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
             "session_created",
@@ -1232,6 +1243,7 @@ pub(super) async fn handle_client(
                         &provider,
                         &registry,
                         &sessions,
+                        &server_name,
                         &shutdown_signals,
                         &soft_interrupt_queues,
                         &client_connections,
@@ -2797,6 +2809,7 @@ pub(super) async fn handle_client(
             &client_connection_id,
             &shutdown_signals,
             &soft_interrupt_queues,
+            &server_name,
             &event_history,
             &event_counter,
             &swarm_event_tx,

@@ -141,6 +141,7 @@ pub(super) async fn handle_clear_session(
     provider: &Arc<dyn Provider>,
     registry: &Registry,
     sessions: &SessionAgents,
+    server_name: &str,
     shutdown_signals: &Arc<RwLock<HashMap<String, InterruptSignal>>>,
     soft_interrupt_queues: &SessionInterruptQueues,
     client_connections: &Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
@@ -202,6 +203,18 @@ pub(super) async fn handle_clear_session(
         let mut sessions_guard = sessions.write().await;
         sessions_guard.remove(client_session_id);
         sessions_guard.insert(new_id.clone(), Arc::clone(agent));
+    }
+    // The registry ownership follows the same swap: the cleared session's
+    // short name goes, the fresh one arrives, both under this server.
+    if let Some((old_name, new_name)) = crate::id::extract_session_name(client_session_id)
+        .zip(crate::id::extract_session_name(&new_id))
+    {
+        let server_for_registry = server_name.to_string();
+        let (old_name, new_name) = (old_name.to_string(), new_name.to_string());
+        tokio::spawn(async move {
+            crate::registry::unregister_session_from_server(&server_for_registry, &old_name).await;
+            crate::registry::register_session_on_server(&server_for_registry, &new_name).await;
+        });
     }
     crate::runtime_memory_log::emit_event(
         crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
@@ -1577,6 +1590,24 @@ pub(super) async fn handle_resume_session(
                 let mut sessions_guard = sessions.write().await;
                 sessions_guard.remove(&old_session_id);
                 sessions_guard.insert(session_id.clone(), Arc::clone(agent));
+            }
+            // The in-memory map now keys the target id, so the on-disk
+            // ownership record follows it: drop the ephemeral boot session's
+            // entry and record the resumed one under this server.
+            if let Some((old_name, new_name)) = crate::id::extract_session_name(&old_session_id)
+                .zip(crate::id::extract_session_name(&session_id))
+            {
+                let server_for_registry = server_name.to_string();
+                let (old_name, new_name) = (old_name.to_string(), new_name.to_string());
+                tokio::spawn(async move {
+                    crate::registry::unregister_session_from_server(
+                        &server_for_registry,
+                        &old_name,
+                    )
+                    .await;
+                    crate::registry::register_session_on_server(&server_for_registry, &new_name)
+                        .await;
+                });
             }
             crate::runtime_memory_log::emit_event(
                 crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
