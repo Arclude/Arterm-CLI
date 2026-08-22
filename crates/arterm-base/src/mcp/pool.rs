@@ -280,6 +280,12 @@ impl SharedMcpPool {
         self.ref_counts.lock().await.clone()
     }
 
+    /// Bound for how long a follower waits on someone else's in-flight
+    /// connect attempt. Leaders bound themselves with `CONNECT_ON_CALL_TIMEOUT`
+    /// (manager) or the pool spawn path; this covers followers so a lost
+    /// leader cannot wedge them forever.
+    pub(crate) const CONNECT_FOLLOWER_TIMEOUT: Duration = Duration::from_secs(35);
+
     async fn begin_connect(&self, name: &str) -> ConnectAttempt {
         let mut connecting = self.connecting.lock().await;
         if let Some(notify) = connecting.get(name) {
@@ -338,6 +344,31 @@ impl SharedMcpPool {
         notify.notify_waiters();
     }
 
+    /// Cancel a leader's in-flight connect attempt bookkeeping after its
+    /// future was dropped (e.g. the manager's `CONNECT_ON_CALL_TIMEOUT`
+    /// elapsed). Removes the stale `connecting` entry and records a failure so
+    /// followers wake up with an error instead of waiting on a Notify that will
+    /// never fire, and the next attempt is not suppressed forever.
+    pub(crate) async fn abandon_connect(&self, name: &str) {
+        {
+            let mut connecting = self.connecting.lock().await;
+            let removed = connecting.remove(name);
+            if let Some(notify) = removed {
+                notify.notify_waiters();
+            }
+        }
+        {
+            let mut errors = self.last_errors.write().await;
+            errors.insert(
+                name.to_string(),
+                FailedConnectRecord {
+                    message: "connect attempt was cancelled (leader timed out)".to_string(),
+                    failed_at: Instant::now(),
+                },
+            );
+        }
+    }
+
     /// Connect `name` with an explicitly supplied config (deduplicated across
     /// concurrent callers). Returns `Ok(true)` for a new connection, `Ok(false)`
     /// when the server was already connected. Callers that only have the
@@ -367,7 +398,24 @@ impl SharedMcpPool {
         match self.begin_connect(&name).await {
             ConnectAttempt::Connected => Ok(false),
             ConnectAttempt::Wait(notify) => {
-                notify.notified().await;
+                // Bounded wait: a dropped or cancelled leader must not wedge
+                // every follower behind a Notify that will never fire. The
+                // connect-on-first-call path aborts its leader on timeout, and
+                // without this bound that cancellation leaked the
+                // `connecting` entry forever (observed: daemon-wide MCP freeze
+                // where even `mcp:servers` stopped answering).
+                let wait = notify.notified();
+                tokio::pin!(wait);
+                tokio::select! {
+                    _ = &mut wait => {}
+                    _ = tokio::time::sleep(Self::CONNECT_FOLLOWER_TIMEOUT) => {
+                        return Err(format!(
+                            "timed out after {}s waiting for a concurrent connection attempt \
+                             to '{name}' (the attempt may have been cancelled)",
+                            Self::CONNECT_FOLLOWER_TIMEOUT.as_secs()
+                        ));
+                    }
+                }
                 if self.handles.read().await.contains_key(&name) {
                     Ok(false)
                 } else {
@@ -433,6 +481,10 @@ mod tests {
     use super::{ConnectAttempt, SharedMcpPool};
     use crate::mcp::protocol::McpConfig;
     use std::sync::Arc;
+    use std::time::Duration;
+
+    /// CONNECT_FOLLOWER_TIMEOUT as seen from the test module.
+    const FOLLOWER_TIMEOUT: std::time::Duration = SharedMcpPool::CONNECT_FOLLOWER_TIMEOUT;
 
     #[tokio::test]
     async fn issue_790_reload_reuses_default_config_directory() {
@@ -498,6 +550,106 @@ mod tests {
         };
 
         assert!(Arc::ptr_eq(&first_notify, &second_notify));
+    }
+
+    #[tokio::test]
+    async fn abandoned_leader_frees_followers_and_next_attempt() {
+        // Production wedge (2026-08-22): the manager's connect-on-first-call
+        // timeout dropped the leader's future, so `finish_connect` never ran.
+        // The `connecting` entry leaked forever and every later caller waited
+        // on a Notify that would never fire, freezing the daemon's MCP layer
+        // (even `mcp:servers` stopped answering). abandon_connect must wake
+        // followers with an error and let the next attempt lead again.
+        let pool = Arc::new(SharedMcpPool::new(McpConfig::default()));
+
+        let leader = pool.begin_connect("wedged").await;
+        assert!(
+            matches!(leader, ConnectAttempt::Leader(_)),
+            "first attempt leads"
+        );
+
+        // Follower starts waiting on the leader's notify.
+        let follower_pool = Arc::clone(&pool);
+        let follower = tokio::spawn(async move {
+            follower_pool
+                .ensure_connected(
+                    "wedged".to_string(),
+                    crate::mcp::protocol::McpServerConfig {
+                        command: "true".to_string(),
+                        args: vec![],
+                        env: Default::default(),
+                        shared: true,
+                        transport: None,
+                        url: None,
+                        headers: std::collections::HashMap::new(),
+                        enabled: None,
+                        disabled: None,
+                    },
+                )
+                .await
+        });
+
+        // Give the follower a moment to enter the wait, then abandon the
+        // leader exactly like a dropped connect future would.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        pool.abandon_connect("wedged").await;
+
+        let follower_result =
+            tokio::time::timeout(std::time::Duration::from_secs(5), follower).await;
+        let follower_result = follower_result
+            .expect("follower must not hang after abandon")
+            .expect("follower task must not panic");
+        assert!(
+            follower_result.is_err(),
+            "follower gets an error, not a hang"
+        );
+
+        // The stale entry is gone: the next attempt becomes the leader again
+        // instead of waiting on the dead Notify.
+        let retry = pool.begin_connect("wedged").await;
+        assert!(
+            matches!(retry, ConnectAttempt::Leader(_)),
+            "next attempt must lead after abandon"
+        );
+    }
+
+    #[tokio::test]
+    async fn follower_wait_is_bounded_even_without_abandon() {
+        // Belt and braces: even if some path still leaks a `connecting` entry,
+        // a follower must give up on its own instead of waiting forever.
+        // The bound itself (35s) is too slow for CI, so we race the follower
+        // against a short deadline: before this fix it never returned at all
+        // and this test would hang until the harness timeout.
+        let pool = Arc::new(SharedMcpPool::new(McpConfig::default()));
+        let _leader = pool.begin_connect("ghost-leader").await;
+
+        // Drop the leader without calling finish_connect or abandon_connect:
+        // only the leaked map entry remains.
+        drop(_leader);
+
+        let config = crate::mcp::protocol::McpServerConfig {
+            command: "true".to_string(),
+            args: vec![],
+            env: Default::default(),
+            shared: true,
+            transport: None,
+            url: None,
+            headers: std::collections::HashMap::new(),
+            enabled: None,
+            disabled: None,
+        };
+        let follower = tokio::spawn(async move {
+            pool.ensure_connected("ghost-leader".to_string(), config)
+                .await
+        });
+        // Without the follower bound this wait would never resolve. We do not
+        // assert the full 35s elapsed (too slow); we assert it terminates with
+        // an error rather than hanging, within a generous 45s ceiling.
+        let outcome = tokio::time::timeout(FOLLOWER_TIMEOUT + Duration::from_secs(10), follower)
+            .await
+            .expect("follower must terminate, not hang")
+            .expect("follower task must not panic");
+        assert!(outcome.is_err(), "follower must time out with an error");
     }
 
     #[tokio::test]

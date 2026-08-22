@@ -64,6 +64,11 @@ impl Tool for McpTool {
         if !server_declares_intent && let Some(object) = input.as_object_mut() {
             object.remove("intent");
         }
+        // `call_tool` borrows the manager behind the read guard, so the guard
+        // necessarily lives across this await. That is safe only because every
+        // wait inside (connect-on-first-call, follower waits) is now bounded;
+        // before those bounds, one wedged call held this guard forever and
+        // starved `mcp reload`'s write lock — freezing all MCP tools.
         let manager = self.manager.read().await;
         let result = manager
             .call_tool(&self.server_name, &self.tool_def.name, input)

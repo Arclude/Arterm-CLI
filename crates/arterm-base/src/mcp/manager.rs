@@ -409,6 +409,18 @@ impl McpManager {
                     anyhow::bail!("MCP server '{server}' failed to connect: {err:#}");
                 }
                 Err(_) => {
+                    // The timeout dropped `connect` mid-flight. If this was the
+                    // pool leader, its `connecting` entry and Notify leak: the
+                    // spawn future is gone so `finish_connect` never runs, and
+                    // every later caller waits on a Notify that never fires.
+                    // That froze the daemon's whole MCP subsystem behind the
+                    // manager lock (observed: `mcp:servers` timing out too).
+                    // Cancel the leader state so the next attempt starts fresh.
+                    if config.shared {
+                        if let Some(pool) = &self.pool {
+                            pool.abandon_connect(server).await;
+                        }
+                    }
                     anyhow::bail!(
                         "MCP server '{server}' did not connect within {}s; tool '{tool}' is \
                          unavailable right now",
