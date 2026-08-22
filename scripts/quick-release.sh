@@ -25,7 +25,8 @@ set -euo pipefail
 MODE="standard"
 DRY_RUN=false
 SKIP_CI_CHECK=false
-while [[ "${1:-}" == --* ]]; do
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=true ;;
         --fast|--fast-local)
@@ -53,16 +54,21 @@ while [[ "${1:-}" == --* ]]; do
             ;;
         --)
             shift
+            POSITIONAL+=("$@")
             break
             ;;
-        *)
+        --*)
             echo "Error: Unknown option: $1" >&2
-            echo "Usage: scripts/quick-release.sh [--prepare-fast | --fast-local | --prepare-fast-macos | --fast-macos-local | --remote | --dry-run] [--skip-ci-check] <version> [title]" >&2
+            echo "Usage: scripts/quick-release.sh [--prepare-fast | --fast-local | --prepare-fast-macos | --prepare-fast-macos-local | --remote | --dry-run] [--skip-ci-check] <version> [title]" >&2
             exit 1
+            ;;
+        *)
+            POSITIONAL+=("$1")
             ;;
     esac
     shift
 done
+set -- "${POSITIONAL[@]}"
 
 if $DRY_RUN && [[ "$MODE" == "remote" ]]; then
     echo "Error: --dry-run cannot be combined with --remote." >&2
