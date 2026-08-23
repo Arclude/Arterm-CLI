@@ -1,0 +1,11 @@
+{
+  "version": "0.10.11",
+  "date": "2026-08-23",
+  "highlights": [
+    "An open Windows chat now stays in the session list even when it only has the boot reminder, so Linux can pick it instead of seeing an empty Windows heading"
+  ],
+  "fixes": [
+    "The first TUI after lighthouse starts is recorded even if servers.json is not ready yet",
+    "A live session is no longer dropped from the picker or the peer list just because its only message is a system reminder"
+  ]
+}
