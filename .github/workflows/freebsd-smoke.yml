@@ -91,3 +91,9 @@ jobs:
             echo "::group::Run platform unit tests"
             cargo test --locked $PROFILE_FLAG -p arterm-base --lib -- --nocapture platform
             echo "::endgroup::"
+
+            # The vmaction copy-back step rsyncs the whole work directory back
+            # to the runner; shipping the multi-GB `target/` tree has killed the
+            # transfer mid-stream in the release workflow (rsync exit 12), so
+            # drop it once the checks have passed.
+            rm -rf target
