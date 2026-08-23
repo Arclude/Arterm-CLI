@@ -648,13 +648,12 @@ fn openai_docs_reference_current_callback_uri() -> Result<()> {
     // README.md documented the login flow when it was upstream's product page.
     // This project's README says nothing about OAuth, so it can no longer
     // answer this question, and OAUTH.md is the document that can.
-    for relative in ["OAUTH.md"] {
-        let content = std::fs::read_to_string(repo_root.join(relative))?;
-        assert!(
-            content.contains(&expected),
-            "{relative} should mention current OpenAI callback URI {expected}"
-        );
-    }
+    let relative = "OAUTH.md";
+    let content = std::fs::read_to_string(repo_root.join(relative))?;
+    assert!(
+        content.contains(&expected),
+        "{relative} should mention current OpenAI callback URI {expected}"
+    );
     Ok(())
 }
 

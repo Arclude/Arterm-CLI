@@ -416,10 +416,10 @@ impl McpManager {
                     // That froze the daemon's whole MCP subsystem behind the
                     // manager lock (observed: `mcp:servers` timing out too).
                     // Cancel the leader state so the next attempt starts fresh.
-                    if config.shared {
-                        if let Some(pool) = &self.pool {
-                            pool.abandon_connect(server).await;
-                        }
+                    if config.shared
+                        && let Some(pool) = &self.pool
+                    {
+                        pool.abandon_connect(server).await;
                     }
                     anyhow::bail!(
                         "MCP server '{server}' did not connect within {}s; tool '{tool}' is \
