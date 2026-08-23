@@ -185,6 +185,52 @@ async fn queue_soft_interrupt_for_session_persists_when_live_queue_is_unavailabl
 }
 
 #[tokio::test]
+async fn restore_session_unregisters_previous_active_pid() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let prev_home = std::env::var_os("ARTERM_HOME");
+    crate::env::set_var("ARTERM_HOME", temp.path());
+
+    let provider: Arc<dyn Provider> = Arc::new(TestProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    let previous = agent.session_id().to_string();
+    assert!(
+        crate::storage::active_session_ids()
+            .iter()
+            .any(|id| id == &previous),
+        "creating an agent must register its PID"
+    );
+
+    let next = format!("session_otter_restore_{}", std::process::id());
+    crate::session::Session::create_with_id(next.clone(), None, None)
+        .save()
+        .expect("save next session");
+    agent
+        .restore_session(&next)
+        .expect("restore should switch sessions");
+
+    assert!(
+        !crate::storage::active_session_ids()
+            .iter()
+            .any(|id| id == &previous),
+        "restoring another session must drop the previous PID file"
+    );
+    assert!(
+        crate::storage::active_session_ids()
+            .iter()
+            .any(|id| id == &next),
+        "the restored session becomes the live PID"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("ARTERM_HOME", prev_home);
+    } else {
+        crate::env::remove_var("ARTERM_HOME");
+    }
+}
+
+#[tokio::test]
 async fn dispatch_monitor_matched_persists_when_live_queue_is_unavailable() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::TempDir::new().expect("temp dir");

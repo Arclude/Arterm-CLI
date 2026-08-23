@@ -124,7 +124,9 @@ pub(super) fn raw_value_display_text(raw: &RawValue) -> Option<String> {
         }
     }
 
-    let value: serde_json::Value = serde_json::from_str(raw.get()).ok()?;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw.get()) else {
+        return None;
+    };
     let mut text = String::new();
     collect_text(&value, &mut text);
     let text = text.trim();

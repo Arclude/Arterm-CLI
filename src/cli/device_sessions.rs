@@ -44,10 +44,11 @@ pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
     let Ok((groups, orphans)) = crate::tui::session_picker::load_sessions_grouped() else {
         return Vec::new();
     };
-    // Live means a running process, the same signal the left-arrow Active
-    // list uses locally. A disk stamp or SessionStatus::Active is leftover
-    // from the last time the TUI opened, and would mark every saved
-    // session live on the other machine.
+    // Live means a TUI is attached right now. The daemon writes its own
+    // PID into `active_pids` when it creates an agent, so that file stays
+    // after the window closes. `servers.json` is updated on connect and
+    // disconnect, which is the signal the other machine should treat as
+    // an open window.
     let live_ids = live_session_ids();
 
     let mut summaries: Vec<RemoteServerSummary> = groups
@@ -79,12 +80,9 @@ pub(crate) fn local_session_summaries() -> Vec<RemoteServerSummary> {
     summaries
 }
 
-/// Session ids with a live process on this machine.
+/// Short names (and any full ids) of sessions with an attached TUI.
 fn live_session_ids() -> HashSet<String> {
-    crate::session::user_session_presence()
-        .into_iter()
-        .map(|presence| presence.session_id)
-        .collect()
+    crate::registry::attached_session_names_sync()
 }
 
 /// A local `SessionInfo` trimmed for the wire.
@@ -94,7 +92,7 @@ fn session_summary_from(
 ) -> RemoteSessionSummary {
     RemoteSessionSummary {
         id: info.id.clone(),
-        short_name: info.short_name,
+        short_name: info.short_name.clone(),
         icon: info.icon,
         title: info.title,
         // A session with no visible user turn yet has no prompt to show. That
@@ -108,7 +106,8 @@ fn session_summary_from(
         working_dir: info.working_dir,
         model: info.model,
         estimated_tokens: info.estimated_tokens,
-        is_active: live_ids.contains(&info.id),
+        is_active: live_ids.contains(&info.id)
+            || (!info.short_name.is_empty() && live_ids.contains(&info.short_name)),
     }
 }
 
@@ -255,6 +254,32 @@ mod tests {
     use crate::tui::session_picker::{ResumeTarget, SessionInfo, SessionSource};
     use chrono::Utc;
 
+    fn persist_attached_sessions(names: &[&str]) {
+        let mut registry = crate::registry::ServerRegistry::default();
+        registry.register(crate::registry::ServerInfo {
+            id: "server_blazing_123".to_string(),
+            name: "blazing".to_string(),
+            icon: "🔥".to_string(),
+            socket: std::path::PathBuf::from("/tmp/blazing.sock"),
+            debug_socket: std::path::PathBuf::from("/tmp/blazing-debug.sock"),
+            git_hash: "abc1234".to_string(),
+            version: "v0.1.123".to_string(),
+            pid: std::process::id(),
+            started_at: "2025-01-01T00:00:00Z".to_string(),
+            sessions: names.iter().map(|name| (*name).to_string()).collect(),
+            host: crate::registry::ServerHost::Local,
+        });
+        let path = crate::registry::registry_path().expect("registry path");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("registry dir");
+        }
+        std::fs::write(
+            path,
+            serde_json::to_string(&registry).expect("encode registry"),
+        )
+        .expect("write registry");
+    }
+
     fn info(id: &str) -> SessionInfo {
         SessionInfo {
             id: id.to_string(),
@@ -292,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn a_saved_session_is_not_live_without_a_running_process() {
+    fn a_saved_session_is_not_live_without_an_attached_tui() {
         let summary = session_summary_from(info("session_old"), &HashSet::new());
         assert!(
             !summary.is_active,
@@ -301,14 +326,14 @@ mod tests {
     }
 
     #[test]
-    fn a_running_process_is_the_live_flag() {
+    fn an_attached_tui_name_is_the_live_flag() {
         let live = HashSet::from(["session_open".to_string()]);
         let summary = session_summary_from(info("session_open"), &live);
         assert!(summary.is_active);
     }
 
     #[test]
-    fn local_session_summaries_mark_only_running_processes_live() {
+    fn local_session_summaries_mark_only_attached_tuis_live() {
         let _guard = crate::storage::lock_test_env();
         let temp = tempfile::tempdir().expect("tempdir");
         let prev_home = std::env::var_os("ARTERM_HOME");
@@ -329,7 +354,21 @@ mod tests {
             }],
         );
         session.mark_active();
+        persist_attached_sessions(&[]);
 
+        let summaries = local_session_summaries();
+        let detached = summaries
+            .iter()
+            .flat_map(|server| server.details.iter())
+            .find(|row| row.id == id)
+            .expect("saved session must be listed");
+        assert!(
+            !detached.is_active,
+            "a leftover daemon PID file is not an attached TUI"
+        );
+
+        persist_attached_sessions(&["fox"]);
+        crate::tui::session_picker::invalidate_session_list_cache();
         let summaries = local_session_summaries();
         let open = summaries
             .iter()
@@ -338,10 +377,10 @@ mod tests {
             .expect("saved session must be listed");
         assert!(
             open.is_active,
-            "a TUI that just marked itself active must look live to a peer"
+            "a TUI recorded on the live server must look live to a peer"
         );
 
-        session.mark_closed();
+        persist_attached_sessions(&[]);
         crate::tui::session_picker::invalidate_session_list_cache();
         let summaries = local_session_summaries();
         let closed = summaries
@@ -351,7 +390,7 @@ mod tests {
             .expect("closed session still lists");
         assert!(
             !closed.is_active,
-            "closing the TUI must drop the live flag even if last_active_at stays on disk"
+            "disconnecting the TUI must drop the live flag even if the daemon PID file remains"
         );
 
         if let Some(prev_home) = prev_home {
@@ -364,7 +403,7 @@ mod tests {
 
     /// The public listen path: the same function `arterm device listen` answers
     /// with, over real TLS, then the same conversion the left-arrow Active
-    /// list uses. A live process stays live; a leftover disk stamp does not.
+    /// list uses. An attached TUI stays live; a leftover disk stamp does not.
     #[tokio::test(flavor = "multi_thread")]
     async fn device_listen_answers_with_live_flags_from_this_machine() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -405,6 +444,7 @@ mod tests {
             idle.mark_active();
             idle.mark_closed();
             idle.save().expect("save closed session");
+            persist_attached_sessions(&["fox"]);
             crate::tui::session_picker::invalidate_session_list_cache();
             // Snapshot on this thread: `load_sessions_grouped` cannot block inside
             // the current-thread runtime the listener task would otherwise use.

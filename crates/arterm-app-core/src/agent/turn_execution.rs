@@ -630,6 +630,9 @@ impl Agent {
         let previous_session_id = self.session.id.clone();
         // Restore provider_session_id for Claude CLI session resume
         self.provider_session_id = session.provider_session_id.clone();
+        if previous_session_id != session.id {
+            crate::storage::unregister_active_pid(&previous_session_id);
+        }
         self.session = session;
         crate::tool::clear_session_tool_policy(&previous_session_id);
         crate::tool::set_session_tool_policy(

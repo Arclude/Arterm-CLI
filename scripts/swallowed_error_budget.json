@@ -1,7 +1,7 @@
 {
-  "total": 3303,
+  "total": 3302,
   "totals_by_pattern": {
-    "dot_ok": 1229,
+    "dot_ok": 1228,
     "let_underscore": 1229,
     "unwrap_or_default": 845
   },
@@ -2302,7 +2302,7 @@
       "unwrap_or_default": 4
     },
     "crates/arterm-tui/src/tui/session_picker/loading.rs": {
-      "dot_ok": 33,
+      "dot_ok": 32,
       "let_underscore": 1,
       "unwrap_or_default": 21
     },

@@ -249,3 +249,52 @@ async fn register_session_on_server_retries_until_server_appears() {
         crate::env::remove_var("ARTERM_HOME");
     }
 }
+
+#[test]
+fn attached_session_names_sync_reads_live_server_sessions() {
+    let _guard = lock_test_env();
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let prev_home: Option<OsString> = std::env::var_os("ARTERM_HOME");
+    crate::env::set_var("ARTERM_HOME", temp_home.path());
+
+    let mut live = ServerRegistry::default();
+    let mut info = test_server_info("blazing");
+    info.sessions = vec!["fox".to_string(), "otter".to_string()];
+    live.register(info);
+    let path = registry_path().expect("registry path");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("registry dir");
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_string(&live).expect("encode live registry"),
+    )
+    .expect("write live registry");
+    assert_eq!(
+        attached_session_names_sync(),
+        ["fox".to_string(), "otter".to_string()]
+            .into_iter()
+            .collect()
+    );
+
+    let mut dead = ServerRegistry::default();
+    let mut stale = test_server_info("ghost");
+    stale.pid = 999_999;
+    stale.sessions = vec!["wolf".to_string()];
+    dead.register(stale);
+    std::fs::write(
+        path,
+        serde_json::to_string(&dead).expect("encode dead registry"),
+    )
+    .expect("write dead registry");
+    assert!(
+        attached_session_names_sync().is_empty(),
+        "a dead server must not advertise leftover attached names"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("ARTERM_HOME", prev_home);
+    } else {
+        crate::env::remove_var("ARTERM_HOME");
+    }
+}

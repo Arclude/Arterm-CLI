@@ -430,9 +430,6 @@ impl SessionPicker {
     }
 }
 
-const REMOTE_LIVE_WINDOW: chrono::Duration = chrono::Duration::minutes(30);
-
 pub(super) fn remote_session_is_live(session: &SessionInfo) -> bool {
     session.last_active_at.is_some()
-        || chrono::Utc::now().signed_duration_since(session.last_message_time) <= REMOTE_LIVE_WINDOW
 }

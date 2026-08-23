@@ -343,6 +343,9 @@ impl App {
             // Don't restore provider_session_id - Claude sessions don't persist across
             // process restarts. The messages are restored, so Claude will get full context.
             self.provider_session_id = None;
+            if self.session.id != session.id {
+                crate::storage::unregister_active_pid(&self.session.id);
+            }
             self.session = session;
             crate::memory::sync_injected_memories(
                 &self.session.id,

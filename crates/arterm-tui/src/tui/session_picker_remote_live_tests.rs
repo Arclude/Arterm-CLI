@@ -34,6 +34,12 @@ fn active_filter_includes_paired_device_sessions_without_local_presence() {
     let remote = remote_row(
         "session_windows",
         "192.168.1.108:7644",
+        true,
+        now_ms - 120_000,
+    );
+    let recent_idle = remote_row(
+        "session_recent",
+        "192.168.1.108:7644",
         false,
         now_ms - 120_000,
     );
@@ -42,7 +48,7 @@ fn active_filter_includes_paired_device_sessions_without_local_presence() {
         row.server_name = None;
         row
     };
-    let mut picker = SessionPicker::new(vec![remote, local]);
+    let mut picker = SessionPicker::new(vec![remote, recent_idle, local]);
     picker.activate_active_filter();
     let visible: Vec<&str> = picker
         .visible_session_iter_for_test()

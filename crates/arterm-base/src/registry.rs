@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tokio::fs;
 
@@ -338,6 +338,17 @@ pub fn running_local_servers_sync() -> Result<Vec<ServerInfo>> {
         .collect();
     servers.sort_by(|a, b| b.started_at.cmp(&a.started_at));
     Ok(servers)
+}
+
+/// Short names of sessions that currently have a TUI attached to a live server.
+///
+/// `servers.json` records a name when a client connects and drops it on
+/// disconnect. That is the signal a peer should treat as "open window", not a
+/// leftover `active_pids` file owned by the long-lived daemon.
+pub fn attached_session_names_sync() -> HashSet<String> {
+    running_local_servers_sync()
+        .map(|servers| servers.into_iter().flat_map(|info| info.sessions).collect())
+        .unwrap_or_else(|_| HashSet::new())
 }
 
 /// Best-effort sync lookup for a server by socket path.

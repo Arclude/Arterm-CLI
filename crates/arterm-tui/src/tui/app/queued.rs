@@ -115,10 +115,10 @@ pub(super) fn queued_capacity_bytes(messages: &[QueuedMessage]) -> usize {
 }
 
 pub(super) fn parse_queued_messages_json(value: &serde_json::Value) -> Vec<QueuedMessage> {
-    value
-        .as_array()
-        .map(|items| items.iter().filter_map(parse_queued_message_json).collect())
-        .unwrap_or_default()
+    match value.as_array() {
+        Some(items) => items.iter().filter_map(parse_queued_message_json).collect(),
+        None => Vec::new(),
+    }
 }
 
 fn parse_queued_image_json(image: &serde_json::Value) -> Option<QueuedImage> {
@@ -143,13 +143,13 @@ fn parse_queued_message_json(item: &serde_json::Value) -> Option<QueuedMessage> 
         .get("text")
         .or_else(|| object.get("content"))
         .and_then(|value| value.as_str())
-        .unwrap_or_default()
+        .unwrap_or("")
         .to_string();
     let images: Vec<QueuedImage> = object
         .get("images")
         .and_then(|value| value.as_array())
         .map(|items| items.iter().filter_map(parse_queued_image_json).collect())
-        .unwrap_or_default();
+        .unwrap_or_else(Vec::new);
     if text.is_empty() && images.is_empty() {
         None
     } else {
