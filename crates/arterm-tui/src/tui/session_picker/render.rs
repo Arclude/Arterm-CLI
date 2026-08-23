@@ -83,7 +83,7 @@ impl SessionPicker {
     /// is no active search. Mirrors the matcher's tokenization so highlighting and
     /// filtering agree on what counts as a match.
     pub(super) fn active_highlight_tokens(&self) -> Vec<String> {
-        super::loading::search_query_tokens(&self.search_query)
+        super::search::search_query_tokens(&self.search_query)
     }
 
     /// Split `text` into spans, applying `base` to non-matching segments and a

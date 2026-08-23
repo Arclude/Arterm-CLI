@@ -519,6 +519,12 @@ jobs:
             chmod +x dist/arterm-freebsd-x86_64
             cd dist && tar czf arterm-freebsd-x86_64.tar.gz arterm-freebsd-x86_64
 
+            # The vmaction copy-back step rsyncs the whole work directory back
+            # to the runner. Shipping the multi-GB `target/` tree with it has
+            # been killing the transfer mid-stream (rsync exit 12, connection
+            # closed ~2.5GB in), so drop it once the tarball exists.
+            rm -rf ../target
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

@@ -822,7 +822,9 @@ async fn handle_remote_key_internal(
             match app.send_action(true) {
                 SendAction::Submit => submit_prepared_remote_input(app, remote, prepared).await?,
                 SendAction::Queue => {
-                    app.queue_user_message(crate::tui::app::queued::QueuedMessage::from_prepared(prepared));
+                    app.queue_user_message(crate::tui::app::queued::QueuedMessage::from_prepared(
+                        prepared,
+                    ));
                 }
                 SendAction::Interleave => {
                     app.send_interleave_now(prepared.expanded, prepared.images, remote)
@@ -2635,7 +2637,9 @@ async fn handle_remote_key_internal(
                         submit_prepared_remote_input(app, remote, prepared).await?
                     }
                     SendAction::Queue => {
-                        app.queue_user_message(crate::tui::app::queued::QueuedMessage::from_prepared(prepared));
+                        app.queue_user_message(
+                            crate::tui::app::queued::QueuedMessage::from_prepared(prepared),
+                        );
                     }
                     SendAction::Interleave => {
                         app.send_interleave_now(prepared.expanded, prepared.images, remote)

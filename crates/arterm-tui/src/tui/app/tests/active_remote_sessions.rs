@@ -257,10 +257,15 @@ fn slash_active_loads_a_paired_live_row_into_the_picker() {
 
     let picker = app.session_picker_overlay.as_ref().expect("overlay");
     let picker = picker.borrow();
-    let visible: Vec<String> = picker
+    // The harness app is itself a live session (b48f3be keeps live
+    // system-reminder-only sessions in the picker), so it shares the picker
+    // with the paired remote row.
+    let mut visible: Vec<String> = picker
         .visible_session_iter()
         .map(|session| session.id.clone())
         .collect();
+    let own_id = app.session_id().to_string();
+    visible.retain(|id| id != &own_id);
     assert_eq!(visible, vec!["session_open".to_string()]);
     assert_eq!(
         picker.remote_device_for_session("session_open").as_deref(),

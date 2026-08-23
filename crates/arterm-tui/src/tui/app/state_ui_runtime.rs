@@ -101,10 +101,7 @@ impl App {
         self.queue_user_message(super::queued::QueuedMessage::text(text));
     }
 
-    pub(super) fn replace_queued_messages(
-        &mut self,
-        messages: Vec<super::queued::QueuedMessage>,
-    ) {
+    pub(super) fn replace_queued_messages(&mut self, messages: Vec<super::queued::QueuedMessage>) {
         self.queued_messages = messages;
     }
 

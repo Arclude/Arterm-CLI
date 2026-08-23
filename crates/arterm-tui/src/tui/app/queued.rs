@@ -77,7 +77,9 @@ impl std::ops::Deref for QueuedMessage {
 /// Text is joined the same way the old `Vec<String>` path did. Images from every
 /// item are concatenated so a queued paste is not dropped just because another
 /// poke/reminder sat next to it.
-pub(super) fn combine_queued_user_payload(messages: &[QueuedMessage]) -> (String, Vec<QueuedImage>) {
+pub(super) fn combine_queued_user_payload(
+    messages: &[QueuedMessage],
+) -> (String, Vec<QueuedImage>) {
     let combined = messages
         .iter()
         .map(|message| message.text.as_str())
@@ -92,7 +94,10 @@ pub(super) fn combine_queued_user_payload(messages: &[QueuedMessage]) -> (String
 }
 
 pub(super) fn queued_preview_texts(messages: &[QueuedMessage]) -> Vec<String> {
-    messages.iter().map(|message| message.text.clone()).collect()
+    messages
+        .iter()
+        .map(|message| message.text.clone())
+        .collect()
 }
 
 pub(super) fn queued_capacity_bytes(messages: &[QueuedMessage]) -> usize {
@@ -121,10 +126,7 @@ fn parse_queued_image_json(image: &serde_json::Value) -> Option<QueuedImage> {
         if pair.len() != 2 {
             return None;
         }
-        return Some((
-            pair[0].as_str()?.to_string(),
-            pair[1].as_str()?.to_string(),
-        ));
+        return Some((pair[0].as_str()?.to_string(), pair[1].as_str()?.to_string()));
     }
     Some((
         image.get("media_type")?.as_str()?.to_string(),

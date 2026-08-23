@@ -31,6 +31,7 @@ mod memory;
 mod navigation;
 pub mod remote_devices;
 mod render;
+mod search;
 
 #[cfg(test)]
 use loading::collect_recent_session_stems;

@@ -60,7 +60,9 @@ fn partition_queued_messages_moves_system_messages_into_reminders() {
 
     assert_eq!(
         user_messages,
-        vec![super::super::queued::QueuedMessage::text("normal user input")]
+        vec![super::super::queued::QueuedMessage::text(
+            "normal user input"
+        )]
     );
     assert_eq!(
         display_system_messages,
