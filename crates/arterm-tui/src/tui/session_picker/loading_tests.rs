@@ -89,6 +89,40 @@ fn trivial_hidden_only_snapshot_detector_keeps_system_plus_visible_message() {
 }
 
 #[test]
+fn load_sessions_keeps_a_live_system_reminder_only_session() {
+    let _env_lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp dir");
+    let _home = EnvVarGuard::set_path("ARTERM_HOME", temp.path());
+    let _scan_limit = EnvVarGuard::set_str("ARTERM_SESSION_PICKER_MAX_SESSIONS", "100");
+    let _include_saved = EnvVarGuard::set_str("ARTERM_SESSION_PICKER_INCLUDE_OLD_SAVED", "0");
+    invalidate_session_list_cache();
+
+    let sessions_dir = temp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+    let stem = "session_spider_1787444132451_2abd49d82ceb4ed9";
+    std::fs::write(
+        sessions_dir.join(format!("{stem}.json")),
+        r#"{
+          "id":"session_spider_1787444132451_2abd49d82ceb4ed9",
+          "created_at":"2026-08-23T00:15:32.451333400Z",
+          "updated_at":"2026-08-23T00:15:32.485465400Z",
+          "messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>boot</system-reminder>"}],"display_role":"system"}],
+          "short_name":"spider",
+          "status":"Active"
+        }"#,
+    )
+    .expect("write live stub");
+    crate::storage::register_active_pid(stem, std::process::id());
+
+    let loaded = load_sessions().expect("load sessions");
+    assert!(
+        loaded.iter().any(|session| session.id == stem),
+        "a live TUI with only the boot reminder must stay on the picker and the peer list"
+    );
+    invalidate_session_list_cache();
+}
+
+#[test]
 fn cached_grouped_sessions_round_trip_from_disk() {
     let _env_lock = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");

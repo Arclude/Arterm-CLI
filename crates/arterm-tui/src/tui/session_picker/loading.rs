@@ -1130,6 +1130,17 @@ fn collect_saved_session_candidates(sessions_dir: &Path) -> Result<Vec<String>> 
     Ok(saved)
 }
 
+fn live_session_ids() -> HashSet<String> {
+    crate::session::user_session_presence()
+        .into_iter()
+        .map(|presence| presence.session_id)
+        .collect()
+}
+
+fn keep_empty_session(session: &SessionSummary, stem: &str, live_ids: &HashSet<String>) -> bool {
+    session.saved || live_ids.contains(stem)
+}
+
 #[cfg(test)]
 pub(super) fn collect_recent_session_stems(
     sessions_dir: &Path,
@@ -1623,6 +1634,7 @@ fn parse_arterm_session_info(
     sessions_dir: &Path,
     stem: &str,
     catchup_seen: &crate::catchup::CatchupSeenSnapshot,
+    live_ids: &HashSet<String>,
 ) -> Option<SessionInfo> {
     // Imported stems are filtered out by `collect_recent_session_candidates`, but
     // keep the cheap defensive check so this helper is safe to call directly.
@@ -1639,7 +1651,10 @@ fn parse_arterm_session_info(
     let session = load_session_summary(&path).ok()?;
 
     let visible_message_count = session.messages.visible_message_count;
-    if visible_message_count == 0 {
+    // A live TUI often has only the boot system-reminder. That is not a
+    // conversation, but dropping it hides the open Windows row from both
+    // this machine's picker and the peer list Linux asks for.
+    if visible_message_count == 0 && !keep_empty_session(&session, stem, live_ids) {
         return None;
     }
 
@@ -1743,6 +1758,24 @@ pub fn load_sessions() -> Result<Vec<SessionInfo>> {
                 }
             }
         }
+        let live_stems: Vec<String> = live_session_ids()
+            .into_iter()
+            .filter(|id| sessions_dir.join(format!("{id}.json")).exists())
+            .collect();
+        if !live_stems.is_empty() {
+            let mut seen: HashSet<String> = candidates.iter().cloned().collect();
+            let mut pinned = Vec::new();
+            for stem in live_stems {
+                if seen.insert(stem.clone()) {
+                    pinned.push(stem);
+                } else {
+                    candidates.retain(|existing| existing != &stem);
+                    pinned.push(stem);
+                }
+            }
+            pinned.extend(candidates);
+            candidates = pinned;
+        }
         candidates
     } else {
         Vec::new()
@@ -1751,8 +1784,10 @@ pub fn load_sessions() -> Result<Vec<SessionInfo>> {
     // Loading the catch-up "seen" state once (instead of per session) avoids
     // re-reading and re-parsing `catchup_seen.json` for every candidate.
     let catchup_seen = crate::catchup::CatchupSeenSnapshot::load();
+    let live_ids = live_session_ids();
     let sessions_dir_ref = &sessions_dir;
     let catchup_ref = &catchup_seen;
+    let live_ids_ref = &live_ids;
 
     let (mut sessions, external_sessions) = std::thread::scope(|scope| {
         // One handle for all five external scans (they fan out internally), so
@@ -1786,7 +1821,7 @@ pub fn load_sessions() -> Result<Vec<SessionInfo>> {
             let end = (start + window).min(candidates.len());
             let batch = candidates[start..end].to_vec();
             let parsed = parallel_map(batch, move |stem| {
-                parse_arterm_session_info(sessions_dir_ref, &stem, catchup_ref)
+                parse_arterm_session_info(sessions_dir_ref, &stem, catchup_ref, live_ids_ref)
             });
             for (offset, parsed_session) in parsed.into_iter().enumerate() {
                 if let Some(info) = parsed_session {
@@ -1821,7 +1856,7 @@ pub fn load_sessions() -> Result<Vec<SessionInfo>> {
             .flatten()
             .collect();
             let saved_sessions = parallel_map(gate_passers, move |stem| {
-                parse_arterm_session_info(sessions_dir_ref, &stem, catchup_ref)
+                parse_arterm_session_info(sessions_dir_ref, &stem, catchup_ref, live_ids_ref)
             });
             sessions.extend(saved_sessions.into_iter().flatten());
         }
