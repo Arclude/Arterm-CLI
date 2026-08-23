@@ -189,8 +189,8 @@ async fn register_and_unregister_session_on_server_updates_disk_registry() {
         Some(vec!["fox".to_string()])
     );
 
-    // A session for an unknown server is dropped rather than creating a
-    // phantom entry — the caller treats both paths as best-effort.
+    // A session for an unknown server is dropped after the brief startup
+    // retry window rather than creating a phantom entry.
     register_session_on_server("ghost", "wolf").await;
     let loaded = ServerRegistry::load().await.expect("load registry");
     assert!(loaded.find_by_name("ghost").is_none());
@@ -202,6 +202,45 @@ async fn register_and_unregister_session_on_server_updates_disk_registry() {
     assert_eq!(
         loaded.find_by_name("blazing").map(|s| s.sessions.clone()),
         Some(Vec::new())
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("ARTERM_HOME", prev_home);
+    } else {
+        crate::env::remove_var("ARTERM_HOME");
+    }
+}
+
+#[tokio::test]
+async fn register_session_on_server_retries_until_server_appears() {
+    let _guard = lock_test_env();
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let prev_home: Option<OsString> = std::env::var_os("ARTERM_HOME");
+    crate::env::set_var("ARTERM_HOME", temp_home.path());
+
+    // Empty registry: the first TUI after lighthouse starts can race this.
+    ServerRegistry::default()
+        .save()
+        .await
+        .expect("save empty registry");
+
+    let register = tokio::spawn(async {
+        register_session_on_server("lighthouse", "spider").await;
+    });
+
+    // Shortly after the first miss, the server lands in servers.json.
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    let mut registry = ServerRegistry::default();
+    registry.register(test_server_info("lighthouse"));
+    registry.save().await.expect("save server");
+
+    register.await.expect("register task");
+    let loaded = ServerRegistry::load().await.expect("load registry");
+    assert_eq!(
+        loaded
+            .find_by_name("lighthouse")
+            .map(|s| s.sessions.clone()),
+        Some(vec!["spider".to_string()])
     );
 
     if let Some(prev_home) = prev_home {

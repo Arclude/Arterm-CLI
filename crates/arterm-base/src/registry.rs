@@ -259,22 +259,42 @@ pub async fn unregister_server(name: &str) -> Result<()> {
 /// [`ServerRegistry::add_session`] documents and what the picker matches on.
 /// Best-effort: a registry write failure logs and continues rather than
 /// failing the session that owns it.
+///
+/// [`ServerRegistry::add_session`] silently no-ops when `server_name` is not
+/// yet in `servers.json`. The first TUI client after lighthouse starts can
+/// hit that window, so this retries briefly at startup. If the server never
+/// appears, the session is still dropped rather than creating a phantom entry.
 pub async fn register_session_on_server(server_name: &str, session_name: &str) {
-    let mut registry = match ServerRegistry::load().await {
-        Ok(registry) => registry,
-        Err(error) => {
-            crate::logging::warn(&format!(
-                "failed to load server registry to record session {session_name}: {error}"
-            ));
+    const ATTEMPTS: usize = 20;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+
+    for attempt in 1..=ATTEMPTS {
+        let mut registry = match ServerRegistry::load().await {
+            Ok(registry) => registry,
+            Err(error) => {
+                crate::logging::warn(&format!(
+                    "failed to load server registry to record session {session_name}: {error}"
+                ));
+                return;
+            }
+        };
+        if registry.find_by_name(server_name).is_some() {
+            registry.add_session(server_name, session_name);
+            if let Err(error) = registry.save().await {
+                crate::logging::warn(&format!(
+                    "failed to save server registry after recording session {session_name}: {error}"
+                ));
+            }
             return;
         }
-    };
-    registry.add_session(server_name, session_name);
-    if let Err(error) = registry.save().await {
-        crate::logging::warn(&format!(
-            "failed to save server registry after recording session {session_name}: {error}"
-        ));
+        if attempt < ATTEMPTS {
+            tokio::time::sleep(RETRY_DELAY).await;
+        }
     }
+
+    crate::logging::warn(&format!(
+        "server {server_name} not in registry after {ATTEMPTS} attempts; dropping session {session_name}"
+    ));
 }
 
 /// Remove a session's ownership record from its server. Best-effort for the
