@@ -147,6 +147,78 @@ fn selecting_a_paired_device_row_queues_a_peer_switch() {
 }
 
 #[test]
+fn selecting_a_local_server_row_resumes_here() {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let _rt = runtime.enter();
+    let mut app = create_test_app();
+    app.session_picker_mode = SessionPickerMode::ActiveSessions;
+    let local = crate::tui::session_picker::SessionInfo {
+        id: "session_sloth".to_string(),
+        parent_id: None,
+        short_name: "sloth".to_string(),
+        icon: "s".to_string(),
+        title: "Local chat".to_string(),
+        message_count: 1,
+        user_message_count: 1,
+        assistant_message_count: 0,
+        created_at: chrono::Utc::now(),
+        last_message_time: chrono::Utc::now(),
+        last_active_at: Some(chrono::Utc::now()),
+        working_dir: None,
+        model: None,
+        provider_key: None,
+        is_canary: false,
+        is_debug: false,
+        saved: false,
+        save_label: None,
+        status: crate::session::SessionStatus::Active,
+        needs_catchup: false,
+        estimated_tokens: 0,
+        first_user_prompt: None,
+        messages_preview: Vec::new(),
+        search_index: "sloth summit".to_string(),
+        server_name: Some("summit".to_string()),
+        server_icon: None,
+        source: crate::tui::session_picker::SessionSource::Arterm,
+        resume_target: crate::tui::session_picker::ResumeTarget::ArtermSession {
+            session_id: "session_sloth".to_string(),
+        },
+        external_path: None,
+    };
+    app.session_picker_overlay = Some(RefCell::new(
+        crate::tui::session_picker::SessionPicker::new_grouped(
+            vec![crate::tui::session_picker::ServerGroup {
+                name: "summit".to_string(),
+                icon: "⛰".to_string(),
+                version: String::new(),
+                git_hash: String::new(),
+                is_running: true,
+                sessions: vec![local],
+            }],
+            Vec::new(),
+        ),
+    ));
+
+    app.handle_session_picker_key(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::empty(),
+    )
+    .expect("session picker enter should succeed");
+
+    assert_eq!(
+        app.workspace_client
+            .take_pending_resume_session()
+            .as_deref(),
+        Some("session_sloth"),
+        "a local grouped row resumes on this machine"
+    );
+    assert!(
+        app.workspace_client.take_pending_peer_switch().is_none(),
+        "the local server name is not a paired device"
+    );
+}
+
+#[test]
 fn slash_active_loads_a_paired_live_row_into_the_picker() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");

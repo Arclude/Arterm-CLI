@@ -3,10 +3,30 @@ use super::*;
 
 impl SessionPicker {
     pub(super) fn session_is_live(&self, session: &SessionInfo) -> bool {
-        if session.server_name.is_some() {
+        if self.session_is_remote(session) {
             return remote_session_is_live(session);
         }
         self.live_presence.contains_key(&session.id)
+    }
+
+    /// A row from a paired machine, not a local TUI grouped under this
+    /// machine's server name.
+    ///
+    /// `server_name` used to be stamped on every attached local session.
+    /// Active then treated recency as live, and Enter tried a peer switch
+    /// to "summit". Grouped local rows stay local even if a stale cache
+    /// still carries that name.
+    fn session_is_remote(&self, session: &SessionInfo) -> bool {
+        if session.server_name.is_none() {
+            return false;
+        }
+        if self.all_server_groups.is_empty() {
+            return true;
+        }
+        self.all_server_groups.iter().any(|group| {
+            group.name == super::remote_devices::REMOTE_GROUP_NAME
+                && group.sessions.iter().any(|row| row.id == session.id)
+        })
     }
 
     fn normalized_search_query(query: &str) -> String {
@@ -420,10 +440,21 @@ impl SessionPicker {
     /// on screen is what the user chose from, and a device renamed since the
     /// list was built should not silently redirect the switch.
     pub(crate) fn remote_device_for_session(&self, session_id: &str) -> Option<String> {
-        self.all_server_groups
+        if let Some(device) = self.all_server_groups.iter().find_map(|group| {
+            group
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .filter(|_| group.name == super::remote_devices::REMOTE_GROUP_NAME)
+                .and_then(|session| session.server_name.clone())
+        }) {
+            return Some(device);
+        }
+        if !self.all_server_groups.is_empty() {
+            return None;
+        }
+        self.all_sessions
             .iter()
-            .flat_map(|group| group.sessions.iter())
-            .chain(self.all_sessions.iter())
             .chain(self.all_orphan_sessions.iter())
             .find(|session| session.id == session_id)
             .and_then(|session| session.server_name.clone())
