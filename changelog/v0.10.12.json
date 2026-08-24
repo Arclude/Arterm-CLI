@@ -1,0 +1,12 @@
+{
+  "version": "0.10.12",
+  "date": "2026-08-24",
+  "highlights": [
+    "Active no longer treats this machine as a paired device, so leftover local rows cannot steal Enter or inflate the live list"
+  ],
+  "fixes": [
+    "Local session grouping no longer stamps server_name; that field is only a remote peer",
+    "A leftover local server name in the picker cache cannot appear as a Remote devices row",
+    "Only attached TUIs count as live remote sessions"
+  ]
+}
