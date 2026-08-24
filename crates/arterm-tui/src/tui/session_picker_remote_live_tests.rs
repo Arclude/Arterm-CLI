@@ -109,6 +109,56 @@ fn a_local_server_group_is_not_a_paired_device() {
 }
 
 #[test]
+fn active_filter_hides_a_detached_local_row_even_if_the_server_name_lingers() {
+    let now_ms = Utc::now().timestamp_millis();
+    let mut detached = remote_row("session_sloth", "summit", true, now_ms);
+    detached.server_name = Some("summit".to_string());
+    let remote = remote_row("session_windows", "island", true, now_ms);
+    let mut picker = SessionPicker::new_grouped(
+        vec![
+            ServerGroup {
+                name: "summit".to_string(),
+                icon: "⛰".to_string(),
+                version: String::new(),
+                git_hash: String::new(),
+                is_running: true,
+                sessions: vec![detached],
+            },
+            ServerGroup {
+                name: "Remote devices".to_string(),
+                icon: "🖧".to_string(),
+                version: String::new(),
+                git_hash: String::new(),
+                is_running: true,
+                sessions: vec![remote],
+            },
+        ],
+        Vec::new(),
+    );
+    picker.activate_active_filter();
+    let visible: Vec<&str> = picker
+        .visible_session_iter_for_test()
+        .map(|session| session.id.as_str())
+        .collect();
+    assert_eq!(
+        visible,
+        vec!["session_windows"],
+        "a leftover local server_name must not inflate Active"
+    );
+    assert_eq!(
+        picker.remote_device_for_session("session_sloth"),
+        None,
+        "the local group is still this machine"
+    );
+    assert_eq!(
+        picker
+            .remote_device_for_session("session_windows")
+            .as_deref(),
+        Some("island")
+    );
+}
+
+#[test]
 fn remote_device_for_session_reads_grouped_rows() {
     let now_ms = Utc::now().timestamp_millis();
     let remote = remote_row("session_windows", "island", true, now_ms);

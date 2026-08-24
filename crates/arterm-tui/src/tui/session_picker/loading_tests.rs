@@ -194,6 +194,78 @@ fn load_sessions_grouped_does_not_stamp_the_local_server_as_a_peer() {
 }
 
 #[test]
+fn a_v1_grouped_cache_is_not_reused_after_local_server_names_stopped_being_peers() {
+    let _env_lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp dir");
+    let _home = EnvVarGuard::set_path("ARTERM_HOME", temp.path());
+    let _scan_limit = EnvVarGuard::set_str("ARTERM_SESSION_PICKER_MAX_SESSIONS", "100");
+    let _include_saved = EnvVarGuard::set_str("ARTERM_SESSION_PICKER_INCLUDE_OLD_SAVED", "0");
+    invalidate_session_list_cache();
+
+    let sessions_dir = temp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+    let now = chrono::Utc::now();
+    let session = SessionInfo {
+        id: "session_sloth_stale_cache".to_string(),
+        parent_id: None,
+        short_name: "sloth".to_string(),
+        icon: "s".to_string(),
+        title: "Local leftover".to_string(),
+        message_count: 1,
+        user_message_count: 1,
+        assistant_message_count: 0,
+        created_at: now,
+        last_message_time: now,
+        last_active_at: Some(now),
+        working_dir: None,
+        model: None,
+        provider_key: None,
+        is_canary: false,
+        is_debug: false,
+        saved: false,
+        save_label: None,
+        status: SessionStatus::Closed,
+        needs_catchup: false,
+        estimated_tokens: 0,
+        first_user_prompt: None,
+        messages_preview: Vec::new(),
+        search_index: "sloth".to_string(),
+        server_name: Some("summit".to_string()),
+        server_icon: None,
+        source: SessionSource::Arterm,
+        resume_target: ResumeTarget::ArtermSession {
+            session_id: "session_sloth_stale_cache".to_string(),
+        },
+        external_path: None,
+    };
+    let cache = GroupedSessionListDiskCache {
+        version: 1,
+        generated_at: now,
+        sessions_dir,
+        scan_limit: session_scan_limit(),
+        include_old_saved_sessions: include_old_saved_sessions_on_initial_load(),
+        external_sessions: include_external_sessions(),
+        server_groups: vec![crate::tui::session_picker::ServerGroup {
+            name: "summit".to_string(),
+            icon: "⛰".to_string(),
+            version: String::new(),
+            git_hash: String::new(),
+            is_running: true,
+            sessions: vec![session],
+        }],
+        orphan_sessions: Vec::new(),
+    };
+    let path = session_list_disk_cache_path().expect("cache path");
+    crate::storage::write_json_fast(&path, &cache).expect("write v1 cache");
+
+    assert!(
+        load_cached_sessions_grouped().is_none(),
+        "a v1 cache that stamped local server names must be rebuilt"
+    );
+    invalidate_session_list_cache();
+}
+
+#[test]
 fn cached_grouped_sessions_round_trip_from_disk() {
     let _env_lock = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
