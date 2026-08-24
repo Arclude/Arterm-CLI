@@ -259,15 +259,7 @@ pub(crate) fn handle_clean_arg(rest: &str, working_dir: Option<&str>) -> Option<
 /// `arterm-peer-<id>.sock`, kept well away from `arterm.sock` precisely so
 /// nothing mistakes it for the local daemon. Anything else is this machine.
 fn server_is_remote_peer() -> bool {
-    socket_is_remote_peer(&crate::server::socket_path())
-}
-
-/// The naming rule behind [`server_is_remote_peer`], taking the path so it is
-/// testable without mutating `ARTERM_SOCKET` under every other test.
-fn socket_is_remote_peer(path: &std::path::Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("arterm-peer-"))
+    crate::server::socket_is_remote_peer(&crate::server::socket_path())
 }
 
 #[derive(Clone, Copy)]
@@ -588,7 +580,7 @@ mod tests {
         for name in ["arterm.sock", "arterm-debug.sock", "my-custom.sock"] {
             let path = std::path::Path::new("/run/user/1000").join(name);
             assert!(
-                !socket_is_remote_peer(&path),
+                !crate::server::socket_is_remote_peer(&path),
                 "{name} is served by this machine"
             );
         }
@@ -598,13 +590,15 @@ mod tests {
     /// session's files live on another machine.
     #[test]
     fn a_peer_relay_socket_is_remote() {
-        assert!(socket_is_remote_peer(std::path::Path::new(
+        assert!(crate::server::socket_is_remote_peer(std::path::Path::new(
             "/run/user/1000/arterm-peer-0123456789abcdef.sock"
         )));
     }
 
     #[test]
     fn a_path_without_a_file_name_is_not_remote() {
-        assert!(!socket_is_remote_peer(std::path::Path::new("/")));
+        assert!(!crate::server::socket_is_remote_peer(std::path::Path::new(
+            "/"
+        )));
     }
 }

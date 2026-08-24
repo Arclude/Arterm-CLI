@@ -342,9 +342,12 @@ impl RemoteConnection {
         // Subscribe to events
         let subscribe_start = Instant::now();
         let (working_dir, selfdev) = super::subscribe_metadata(remote_working_dir);
-        let resume_target = resume_session
-            .filter(|session_id| crate::session::session_exists(session_id))
-            .map(|session_id| session_id.to_string());
+        // Peer sessions live on the other machine. Checking this client's
+        // session store would drop a Windows id that Linux has never stored,
+        // and the reconnect would attach a new empty chat instead of the
+        // session the user just picked.
+        let resume_target =
+            resume_target_for_connect(resume_session, &server::socket_path());
         conn.send_request(Request::Subscribe {
             id: conn.next_request_id,
             working_dir,
@@ -1447,6 +1450,22 @@ impl RemoteEventState for ReplayRemoteState {
     fn mark_history_loaded(&mut self) {}
 }
 
+/// Which session Subscribe should resume, if any.
+///
+/// Local sockets still require the session file to exist here. A peer relay
+/// does not: the id belongs to the other machine.
+fn resume_target_for_connect(
+    resume_session: Option<&str>,
+    socket: &std::path::Path,
+) -> Option<String> {
+    resume_session
+        .filter(|session_id| {
+            crate::server::socket_is_remote_peer(socket)
+                || crate::session::session_exists(session_id)
+        })
+        .map(|session_id| session_id.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1873,5 +1892,28 @@ mod tests {
             1,
         ));
         assert!(remote_protocol_frame_exceeds_limit(usize::MAX, 1));
+    }
+
+    #[test]
+    fn a_peer_relay_resumes_a_session_this_machine_has_never_stored() {
+        assert_eq!(
+            resume_target_for_connect(
+                Some("session_windows"),
+                std::path::Path::new("/run/arterm-peer-0123456789abcdef.sock"),
+            )
+            .as_deref(),
+            Some("session_windows"),
+        );
+    }
+
+    #[test]
+    fn a_local_socket_still_requires_the_session_file() {
+        assert_eq!(
+            resume_target_for_connect(
+                Some("session_missing_locally"),
+                std::path::Path::new("/run/arterm.sock"),
+            ),
+            None,
+        );
     }
 }

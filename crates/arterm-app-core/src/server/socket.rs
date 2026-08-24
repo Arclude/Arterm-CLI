@@ -1,7 +1,7 @@
 use super::Client;
 use crate::transport::Stream;
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub fn socket_path() -> PathBuf {
@@ -222,6 +222,18 @@ pub(super) fn mark_close_on_exec<T: std::os::fd::AsRawFd>(io: &T) {
 
 pub fn set_socket_path(path: &str) {
     crate::env::set_var("ARTERM_SOCKET", path);
+}
+
+/// Whether this socket is a local relay in front of a paired machine.
+///
+/// `arterm device connect` and the TUI peer switch bind a socket named
+/// `arterm-peer-<id>.sock`, kept well away from `arterm.sock` so nothing
+/// mistakes it for the local daemon. Sessions behind that relay live on the
+/// other machine, so local disk checks such as `session_exists` do not apply.
+pub fn socket_is_remote_peer(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("arterm-peer-"))
 }
 
 /// Spawn a server child process and wait until it signals readiness.

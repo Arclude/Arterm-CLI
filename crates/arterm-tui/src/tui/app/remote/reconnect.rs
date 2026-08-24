@@ -417,7 +417,13 @@ pub(in crate::tui::app) async fn connect_with_retry(
             Ok(ConnectOutcome::Connected(remote))
         }
         Err(e) => {
-            if state.reconnect_attempts == 0 && !app.server_spawning {
+            // A peer switch points ARTERM_SOCKET at a local relay that only
+            // answers after the TLS hop to the other machine. The first
+            // reconnect can lose that race, and treating it as a hard
+            // startup failure left the TUI stuck on "Switching to …".
+            let switching_to_peer =
+                crate::server::socket_is_remote_peer(&crate::server::socket_path());
+            if state.reconnect_attempts == 0 && !app.server_spawning && !switching_to_peer {
                 return Err(anyhow::anyhow!(
                     "Failed to connect to server. Is `arterm serve` running? Error: {}",
                     e

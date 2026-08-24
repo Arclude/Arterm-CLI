@@ -144,6 +144,12 @@ pub(in crate::tui::app) fn apply_pending_peer_switch(app: &mut App) -> bool {
     crate::server::set_socket_path(socket);
     app.remote_session_id = None;
     app.resume_session_id = switch.session_id;
+    // The old machine's transcript must not stay on screen while the relay
+    // dials. Leaving it there is what made a stuck switch look like the same
+    // chat with a "Switching to …" notice on top.
+    app.clear_display_messages();
+    app.clear_streaming_render_state();
+    app.set_remote_startup_phase(super::super::RemoteStartupPhase::Connecting);
     app.set_status_notice(format!("Switching to {}…", switch.device));
     true
 }

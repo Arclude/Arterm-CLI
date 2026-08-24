@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
-use super::socket::sibling_socket_path;
+use super::socket::{sibling_socket_path, socket_is_remote_peer};
 #[cfg(unix)]
 use super::socket::{
     daemon_lock_path, server_start_matches_existing_server, try_acquire_daemon_lock,
@@ -15,6 +15,24 @@ use super::{connect_socket, reap_stale_socket_if_dead};
 #[cfg(unix)]
 use crate::transport::Listener;
 use std::time::Duration;
+
+#[test]
+fn a_peer_relay_socket_is_remote() {
+    assert!(socket_is_remote_peer(std::path::Path::new(
+        "/run/user/1000/arterm-peer-0123456789abcdef.sock"
+    )));
+}
+
+#[test]
+fn this_machines_sockets_are_not_remote_peers() {
+    for name in ["arterm.sock", "arterm-debug.sock", "my-custom.sock"] {
+        let path = std::path::Path::new("/run/user/1000").join(name);
+        assert!(
+            !socket_is_remote_peer(&path),
+            "{name} is served by this machine"
+        );
+    }
+}
 
 #[test]
 fn sibling_socket_path_roundtrip() {
