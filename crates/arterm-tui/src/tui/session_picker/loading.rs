@@ -2681,11 +2681,7 @@ pub fn load_sessions_grouped() -> Result<(Vec<ServerGroup>, Vec<SessionInfo>)> {
 
     for session in all_sessions {
         if let Some(server) = session_to_server.get(&session.short_name) {
-            // Group by the local server the TUI is attached to, but leave
-            // `server_name` empty. That field is the paired device on a
-            // remote row. Stamping the local server name here made Active
-            // treat this machine's sessions as peers ("summit is no longer
-            // a paired device").
+            // Local grouping only. Do not stamp server_name; that field is a peer.
             server_sessions
                 .entry(server.name.clone())
                 .or_default()
