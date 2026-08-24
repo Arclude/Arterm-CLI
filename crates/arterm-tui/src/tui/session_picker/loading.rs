@@ -67,7 +67,7 @@ fn include_old_saved_sessions_on_initial_load() -> bool {
 }
 
 const SESSION_LIST_CACHE_TTL: Duration = Duration::from_secs(5);
-const SESSION_LIST_DISK_CACHE_VERSION: u32 = 1;
+const SESSION_LIST_DISK_CACHE_VERSION: u32 = 2;
 const SESSION_LIST_DISK_CACHE_MAX_AGE_SECONDS: i64 = 7 * 24 * 60 * 60;
 const SAVED_METADATA_TAIL_SCAN_BYTES: u64 = 64 * 1024;
 const INITIAL_TRANSCRIPT_SEARCH_BUDGET_BYTES: usize = 64 * 1024;
@@ -2679,10 +2679,13 @@ pub fn load_sessions_grouped() -> Result<(Vec<ServerGroup>, Vec<SessionInfo>)> {
     let mut server_sessions: HashMap<String, Vec<SessionInfo>> = HashMap::new();
     let mut orphan_sessions: Vec<SessionInfo> = Vec::new();
 
-    for mut session in all_sessions {
+    for session in all_sessions {
         if let Some(server) = session_to_server.get(&session.short_name) {
-            session.server_name = Some(server.name.clone());
-            session.server_icon = Some(server.icon.clone());
+            // Group by the local server the TUI is attached to, but leave
+            // `server_name` empty. That field is the paired device on a
+            // remote row. Stamping the local server name here made Active
+            // treat this machine's sessions as peers ("summit is no longer
+            // a paired device").
             server_sessions
                 .entry(server.name.clone())
                 .or_default()

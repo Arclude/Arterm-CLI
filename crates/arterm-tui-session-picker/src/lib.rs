@@ -138,7 +138,8 @@ pub struct SessionInfo {
     pub messages_preview: Vec<PreviewMessage>,
     /// Lowercased searchable text used by picker filtering.
     pub search_index: String,
-    /// Server name this session belongs to (if running).
+    /// Paired device this session belongs to. Local rows leave this empty
+    /// so Active and selection do not treat this machine's server as a peer.
     pub server_name: Option<String>,
     /// Server icon.
     pub server_icon: Option<String>,

@@ -123,6 +123,77 @@ fn load_sessions_keeps_a_live_system_reminder_only_session() {
 }
 
 #[test]
+fn load_sessions_grouped_does_not_stamp_the_local_server_as_a_peer() {
+    let _env_lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp dir");
+    let _home = EnvVarGuard::set_path("ARTERM_HOME", temp.path());
+    let _scan_limit = EnvVarGuard::set_str("ARTERM_SESSION_PICKER_MAX_SESSIONS", "100");
+    let _include_saved = EnvVarGuard::set_str("ARTERM_SESSION_PICKER_INCLUDE_OLD_SAVED", "0");
+    invalidate_session_list_cache();
+
+    let sessions_dir = temp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+    let stem = "session_sloth_1787444132451_2abd49d82ceb4ed9";
+    std::fs::write(
+        sessions_dir.join(format!("{stem}.json")),
+        r#"{
+          "id":"session_sloth_1787444132451_2abd49d82ceb4ed9",
+          "created_at":"2026-08-23T00:15:32.451333400Z",
+          "updated_at":"2026-08-23T00:15:32.485465400Z",
+          "last_active_at":"2026-08-23T00:15:32.485465400Z",
+          "messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],
+          "short_name":"sloth",
+          "status":"Active"
+        }"#,
+    )
+    .expect("write attached local session");
+
+    let mut registry = crate::registry::ServerRegistry::default();
+    registry.register(crate::registry::ServerInfo {
+        id: "server_summit_123".to_string(),
+        name: "summit".to_string(),
+        icon: "⛰".to_string(),
+        socket: std::path::PathBuf::from("/tmp/summit.sock"),
+        debug_socket: std::path::PathBuf::from("/tmp/summit-debug.sock"),
+        git_hash: "abc1234".to_string(),
+        version: "v0.1.123".to_string(),
+        pid: std::process::id(),
+        started_at: "2025-01-01T00:00:00Z".to_string(),
+        sessions: vec!["sloth".to_string()],
+        host: crate::registry::ServerHost::Local,
+    });
+    let path = crate::registry::registry_path().expect("registry path");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("registry dir");
+    }
+    std::fs::write(
+        path,
+        serde_json::to_string(&registry).expect("encode registry"),
+    )
+    .expect("write registry");
+
+    let (groups, orphans) = load_sessions_grouped().expect("load grouped sessions");
+    assert!(
+        orphans.is_empty(),
+        "an attached local TUI belongs under its server"
+    );
+    let group = groups
+        .iter()
+        .find(|group| group.name == "summit")
+        .expect("local server group");
+    let session = group
+        .sessions
+        .iter()
+        .find(|session| session.id == stem)
+        .expect("attached session");
+    assert_eq!(
+        session.server_name, None,
+        "the local server name is not a paired device"
+    );
+    invalidate_session_list_cache();
+}
+
+#[test]
 fn cached_grouped_sessions_round_trip_from_disk() {
     let _env_lock = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");

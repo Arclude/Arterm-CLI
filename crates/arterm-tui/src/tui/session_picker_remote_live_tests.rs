@@ -86,6 +86,29 @@ fn active_filter_hides_stale_paired_device_history() {
 }
 
 #[test]
+fn a_local_server_group_is_not_a_paired_device() {
+    let now_ms = Utc::now().timestamp_millis();
+    let mut local = remote_row("session_sloth", "summit", true, now_ms);
+    local.server_name = Some("summit".to_string());
+    let picker = SessionPicker::new_grouped(
+        vec![ServerGroup {
+            name: "summit".to_string(),
+            icon: "⛰".to_string(),
+            version: String::new(),
+            git_hash: String::new(),
+            is_running: true,
+            sessions: vec![local],
+        }],
+        Vec::new(),
+    );
+    assert_eq!(
+        picker.remote_device_for_session("session_sloth"),
+        None,
+        "selecting a local grouped row must resume here, not peer-switch to the server name"
+    );
+}
+
+#[test]
 fn remote_device_for_session_reads_grouped_rows() {
     let now_ms = Utc::now().timestamp_millis();
     let remote = remote_row("session_windows", "island", true, now_ms);

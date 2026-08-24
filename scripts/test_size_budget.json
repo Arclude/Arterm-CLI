@@ -36,7 +36,7 @@
     "crates/arterm-tui/src/tui/app/tests/state_model_poke_03.rs": 2875,
     "crates/arterm-tui/src/tui/app/tests/swarm_plan_graph_inline.rs": 1980,
     "crates/arterm-tui/src/tui/info_widget_tests.rs": 1815,
-    "crates/arterm-tui/src/tui/session_picker/loading_tests.rs": 1435,
+    "crates/arterm-tui/src/tui/session_picker/loading_tests.rs": 1506,
     "crates/arterm-tui/src/tui/session_picker_tests.rs": 2578,
     "crates/arterm-tui/src/tui/ui_messages/tests.rs": 3202,
     "crates/arterm-tui/src/tui/ui_tests/prepare.rs": 1423,
