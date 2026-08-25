@@ -94,7 +94,7 @@ async fn a_peer_switch_sends_a_detach_request_over_the_wire() {
             Ok(Ok(0)) | Err(_) => break,
             Ok(Ok(n)) => {
                 buffer.extend_from_slice(&chunk[..n]);
-                if buffer.iter().any(|&b| b == b'\n') {
+                if buffer.contains(&b'\n') {
                     break;
                 }
             }
