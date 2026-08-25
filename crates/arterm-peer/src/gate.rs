@@ -103,6 +103,49 @@ impl TrustGate {
         trust.trust(updated)
     }
 
+    /// Learn a trusted peer's real device name from its handshake hello.
+    ///
+    /// Only overwrites the stored name when the stored one looks like a
+    /// placeholder captured from an address at pairing time (legacy entries
+    /// like `192.168.1.108:7644` from `device join` without `--name`). A name
+    /// the user chose explicitly is never second-guessed.
+    ///
+    /// Returns the name now stored for the device (learned or kept), so the
+    /// caller can use the current identity without re-reading the store.
+    /// Like [`Self::record_address`], a device that is no longer in the store
+    /// is left out of it.
+    pub fn record_name(&self, fingerprint: &Fingerprint, name: &str) -> Result<String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Ok(self
+                .stored_name(fingerprint)
+                .context("reading the trust store to learn a peer's name")?
+                .unwrap_or_default());
+        }
+        let mut trust = TrustStore::load_at(self.trust_path.clone())
+            .context("reading the trust store to learn a peer's name")?;
+        let Some(existing) = trust.find(fingerprint) else {
+            return Ok(String::new());
+        };
+        if existing.name == trimmed || !name_looks_like_address(&existing.name) {
+            return Ok(existing.name.clone());
+        }
+        let updated = TrustedDevice {
+            name: trimmed.to_string(),
+            ..existing.clone()
+        };
+        let name = updated.name.clone();
+        trust.trust(updated)?;
+        Ok(name)
+    }
+
+    /// The name currently stored for a fingerprint, if the device is trusted.
+    fn stored_name(&self, fingerprint: &Fingerprint) -> Result<Option<String>> {
+        let trust = TrustStore::load_at(self.trust_path.clone())
+            .context("reading the trust store to look up a peer's name")?;
+        Ok(trust.find(fingerprint).map(|device| device.name.clone()))
+    }
+
     /// Record a device this machine has just finished pairing with.
     pub fn record_pairing(
         &self,
@@ -119,6 +162,41 @@ impl TrustGate {
             paired_at: chrono::Utc::now().to_rfc3339(),
         })
     }
+}
+
+/// Whether a stored device name looks like it was captured from a network
+/// address rather than chosen: `192.168.1.108:7644`, `[fe80::1]:7644`, or a
+/// bare host/IP with or without a port. Used to decide when a learned name
+/// from the wire may replace it.
+fn name_looks_like_address(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Exact SocketAddr forms first: covers IPv4 `host:port`, IPv6
+    // `[v6]:port`, and bare `[v6]`.
+    if trimmed.parse::<std::net::SocketAddr>().is_ok() {
+        return true;
+    }
+    if trimmed.starts_with('[') {
+        // Bracketed but not a full SocketAddr (missing port, scope id, ...).
+        return trimmed
+            .trim_start_matches('[')
+            .split(']')
+            .next()
+            .is_some_and(|host| host.parse::<std::net::Ipv6Addr>().is_ok() || host.contains(':'));
+    }
+    // `host:port` where the port half parses: an IPv4 socket form or a
+    // hostname:port invite address. Unbracketed IPv6 also lands here and is
+    // not a plausible user-chosen name either.
+    if let Some((host, port)) = trimmed.rsplit_once(':') {
+        return !host.is_empty() && port.parse::<u16>().is_ok();
+    }
+    // Bare IP (v4 or unbracketed v6) or bare hostname-with-dots that came from
+    // an invite address. A dotted name like "toygar-pc" has no dots, and a
+    // genuine device name with dots is rare enough that the learned name from
+    // the wire is the better identity anyway.
+    trimmed.parse::<std::net::IpAddr>().is_ok() || (!trimmed.contains(' ') && trimmed.contains('.'))
 }
 
 #[cfg(test)]

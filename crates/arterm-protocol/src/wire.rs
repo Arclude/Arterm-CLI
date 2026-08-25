@@ -55,6 +55,14 @@ pub enum Request {
     #[serde(rename = "cancel")]
     Cancel { id: u64 },
 
+    /// Graceful detach: the client is intentionally closing the connection
+    /// (e.g. switching to another peer) and the server must NOT treat the
+    /// disconnect as a crash or closed session. The session stays registered
+    /// and resumable. Acknowledged with a plain Ack, then the client drops the
+    /// connection.
+    #[serde(rename = "detach")]
+    Detach { id: u64 },
+
     /// Move the currently executing tool to background
     #[serde(rename = "background_tool")]
     BackgroundTool { id: u64 },

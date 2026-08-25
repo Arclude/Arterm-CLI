@@ -563,6 +563,7 @@ impl Request {
         match self {
             Request::Message { id, .. } => *id,
             Request::Cancel { id } => *id,
+            Request::Detach { id } => *id,
             Request::BackgroundTool { id } => *id,
             Request::SoftInterrupt { id, .. } => *id,
             Request::CancelSoftInterrupts { id } => *id,

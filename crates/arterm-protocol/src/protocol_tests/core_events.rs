@@ -14,6 +14,17 @@ fn test_request_roundtrip() -> Result<()> {
 }
 
 #[test]
+fn test_detach_request_roundtrip() -> Result<()> {
+    let req = Request::Detach { id: 41 };
+    let json = serde_json::to_string(&req)?;
+    assert_eq!(json, r#"{"type":"detach","id":41}"#);
+    let decoded = parse_request_json(&json)?;
+    assert_eq!(decoded.id(), 41);
+    assert!(matches!(decoded, Request::Detach { id: 41 }));
+    Ok(())
+}
+
+#[test]
 fn test_soft_interrupt_images_roundtrip_and_legacy_default() -> Result<()> {
     let req = Request::SoftInterrupt {
         id: 2,

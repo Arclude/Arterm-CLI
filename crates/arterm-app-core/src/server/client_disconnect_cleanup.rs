@@ -22,6 +22,10 @@ enum DisconnectDisposition {
     Closed,
     Crashed,
     Reloading,
+    /// The client explicitly detached (Request::Detach) before dropping the
+    /// connection. The session must stay registered and resumable: no
+    /// mark_closed/mark_crashed, no swarm teardown, no registry unregister.
+    Detached,
 }
 
 fn disconnect_disposition(disconnected_while_processing: bool) -> DisconnectDisposition {
@@ -34,6 +38,19 @@ fn disconnect_disposition(disconnected_while_processing: bool) -> DisconnectDisp
     } else {
         DisconnectDisposition::Crashed
     }
+}
+
+/// The disposition for a connection teardown, honoring an explicit detach.
+///
+/// A client that sent [`crate::protocol::Request::Detach`] before hanging up
+/// said goodbye on purpose (peer switch): that intent outranks everything the
+/// connection state could otherwise imply, so the session stays registered
+/// and resumable instead of being marked closed or crashed.
+fn disposition_for(disconnected_while_processing: bool, client_detached: bool) -> DisconnectDisposition {
+    if client_detached {
+        return DisconnectDisposition::Detached;
+    }
+    disconnect_disposition(disconnected_while_processing)
 }
 
 async fn session_has_live_successor(
@@ -74,13 +91,14 @@ pub(super) async fn cleanup_client_connection(
     event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
     event_counter: &Arc<std::sync::atomic::AtomicU64>,
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+    client_detached: bool,
 ) -> Result<()> {
     let disconnected_while_processing = client_is_processing
         || processing_task
             .as_ref()
             .map(|handle| !handle.is_finished())
             .unwrap_or(false);
-    let disposition = disconnect_disposition(disconnected_while_processing);
+    let disposition = disposition_for(disconnected_while_processing, client_detached);
 
     {
         let mut debug_state = client_debug_state.write().await;
@@ -91,6 +109,26 @@ pub(super) async fn cleanup_client_connection(
         connections.remove(client_connection_id);
     }
     unregister_session_event_sender(swarm_members, client_session_id, client_connection_id).await;
+
+    if disposition == DisconnectDisposition::Detached {
+        // Graceful detach: the client said goodbye explicitly (peer switch).
+        // Keep the session entry, swarm membership, and registry record intact
+        // so it stays resumable and visible in the picker. Only tear down this
+        // connection's own bookkeeping (done above).
+        crate::logging::info(&format!(
+            "Client detached gracefully from session {}; keeping session registered",
+            client_session_id
+        ));
+        if let Some(handle) = processing_task.take() {
+            // The client detached mid-processing; let the in-flight turn finish
+            // detached rather than aborting it mid-tool.
+            tokio::spawn(async move {
+                let _ = handle.await;
+            });
+        }
+        event_handle.abort();
+        return Ok(());
+    }
 
     // Release stale live ownership before slower cleanup so a reconnecting TUI can
     // reclaim the same session without tripping duplicate-attach guards.
@@ -118,6 +156,10 @@ pub(super) async fn cleanup_client_connection(
                         DisconnectDisposition::Closed => {
                             agent.mark_closed();
                         }
+                        DisconnectDisposition::Detached => {
+                            // Unreachable: detached connections return early
+                            // above, before the session entry is removed.
+                        }
                         DisconnectDisposition::Reloading => {
                             agent.mark_crashed(Some(
                                 "Server reload interrupted processing".to_string(),
@@ -144,6 +186,13 @@ pub(super) async fn cleanup_client_connection(
                             crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
                                 "session_closed",
                                 "client_disconnected",
+                            )
+                        }
+                        DisconnectDisposition::Detached => {
+                            // Unreachable: detached connections return early above.
+                            crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
+                                "session_detached",
+                                "client_detached_gracefully",
                             )
                         }
                         DisconnectDisposition::Crashed => {
@@ -183,6 +232,7 @@ pub(super) async fn cleanup_client_connection(
     {
         let (status, detail) = match disposition {
             DisconnectDisposition::Closed => ("stopped", Some("disconnected".to_string())),
+            DisconnectDisposition::Detached => ("stopped", Some("detached".to_string())),
             DisconnectDisposition::Crashed => {
                 ("crashed", Some("disconnect while running".to_string()))
             }
@@ -271,11 +321,25 @@ pub(super) async fn cleanup_client_connection(
 
 #[cfg(test)]
 mod tests {
-    use super::{DisconnectDisposition, disconnect_disposition};
+    use super::{DisconnectDisposition, disconnect_disposition, disposition_for};
 
     #[test]
     fn idle_disconnect_is_closed() {
         assert_eq!(disconnect_disposition(false), DisconnectDisposition::Closed);
+    }
+
+    #[test]
+    fn detached_flag_wins_over_every_other_disposition() {
+        // A client that said Detach and then hung up is never classified as
+        // closed or crashed, even when it disconnected mid-processing: the
+        // explicit goodbye is the intent that matters.
+        let _guard = crate::storage::lock_test_env();
+        crate::server::clear_reload_marker();
+        assert_eq!(disposition_for(false, true), DisconnectDisposition::Detached);
+        assert_eq!(disposition_for(true, true), DisconnectDisposition::Detached);
+        // Without the goodbye, the historical classification still applies.
+        assert_eq!(disposition_for(false, false), DisconnectDisposition::Closed);
+        assert_eq!(disposition_for(true, false), DisconnectDisposition::Crashed);
     }
 
     #[test]

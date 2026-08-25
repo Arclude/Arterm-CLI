@@ -478,6 +478,9 @@ pub(super) async fn handle_client(
 
     // Per-client state
     let mut client_is_processing = false;
+    // Set when the client sends Request::Detach: the subsequent disconnect is
+    // intentional (peer switch) and must not tear down the session.
+    let mut client_detached = false;
     let (processing_done_tx, mut processing_done_rx) =
         mpsc::unbounded_channel::<(u64, Result<()>, Option<String>)>();
     let mut processing_task: Option<tokio::task::JoinHandle<()>> = None;
@@ -1164,6 +1167,20 @@ pub(super) async fn handle_client(
                     },
                 )
                 .await;
+            }
+
+            Request::Detach { id } => {
+                // Graceful goodbye: acknowledge, remember the intent, and close
+                // the read loop. The connection drop then routes to
+                // DisconnectDisposition::Detached cleanup, which keeps the
+                // session registered and resumable.
+                client_detached = true;
+                let json = encode_event(&ServerEvent::Ack { id });
+                let mut w = writer.lock().await;
+                if w.write_all(json.as_bytes()).await.is_err() {
+                    break;
+                }
+                break;
             }
 
             Request::Cancel { id } => {
@@ -2813,6 +2830,7 @@ pub(super) async fn handle_client(
             &event_history,
             &event_counter,
             &swarm_event_tx,
+            client_detached,
         ),
     )
     .await?;

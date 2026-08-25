@@ -240,6 +240,9 @@ pub struct RemoteConnection {
     client_instance_id: Option<String>,
     next_request_id: u64,
     tool_diff: RemoteDiffTracker,
+    /// Request id of the most recent send_detach call (test assertions only).
+    #[cfg(test)]
+    last_detach_request_id: std::sync::Mutex<Option<u64>>,
     /// Bytes pulled from the socket that have not yet been split into complete
     /// newline-delimited protocol lines. This buffer is persistent across
     /// `next_event` calls so a future cancelled by a `tokio::select!` peer
@@ -331,6 +334,8 @@ impl RemoteConnection {
             client_instance_id: client_instance_id.map(str::to_string),
             next_request_id: 1,
             tool_diff: RemoteDiffTracker::default(),
+            #[cfg(test)]
+            last_detach_request_id: std::sync::Mutex::new(None),
             read_buffer: Vec::new(),
             read_buffer_scan_start: 0,
             #[cfg(test)]
@@ -1004,6 +1009,34 @@ impl RemoteConnection {
         self.notify_auth_changed_detached_event(provider, None, false);
     }
 
+    /// Tell the far server this client is intentionally hanging up (peer
+    /// switch), so the disconnect is not treated as a crash/closed session and
+    /// the session stays registered and resumable. Fire-and-forget: old servers
+    /// that predate `detach` answer with a benign Error event and the write
+    /// races the socket teardown anyway. `&self` on purpose — the caller drops
+    /// the connection right after.
+    pub fn send_detach(&self) {
+        let id = self.next_request_id;
+        #[cfg(test)]
+        {
+            self.last_detach_request_id
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .replace(id);
+        }
+        self.send_request_detached(Request::Detach { id }, "detach");
+    }
+
+    /// The request id of the most recent [`Self::send_detach`] call, for tests
+    /// that assert a peer switch says goodbye before dropping the connection.
+    #[cfg(test)]
+    pub(crate) fn take_last_detach_request_id(&self) -> Option<u64> {
+        self.last_detach_request_id
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+    }
+
     /// Notify the server about a typed auth lifecycle change without blocking the caller.
     pub fn notify_auth_changed_detached_event(
         &mut self,
@@ -1281,6 +1314,8 @@ impl RemoteConnection {
             client_instance_id: None,
             next_request_id: 1,
             tool_diff: RemoteDiffTracker::default(),
+            #[cfg(test)]
+            last_detach_request_id: std::sync::Mutex::new(None),
             read_buffer: Vec::new(),
             read_buffer_scan_start: 0,
             #[cfg(test)]

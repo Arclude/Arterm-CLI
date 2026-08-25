@@ -61,3 +61,56 @@ fn a_relay_socket_is_named_for_its_device() {
         assert!(name.ends_with(".sock"), "{name}");
     }
 }
+
+/// A peer switch must say goodbye before dropping the connection: without the
+/// Detach request the far server treats the abrupt TCP drop as a crash or a
+/// closed session and unregisters it from the picker. This pins the wire side
+/// of that handshake — the detached write lands on the socket as a well-formed
+/// `detach` request line.
+#[tokio::test]
+async fn a_peer_switch_sends_a_detach_request_over_the_wire() {
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    let mut peer = remote
+        .take_dummy_peer()
+        .expect("dummy connection has a peer end");
+
+    remote.send_detach();
+    // send_detach is fire-and-forget; the record itself is synchronous, but the
+    // socket write lands on the spawned task. Give it a moment below.
+    assert_eq!(
+        remote.take_last_detach_request_id(),
+        Some(1),
+        "send_detach must record the request id synchronously"
+    );
+
+    use tokio::io::AsyncReadExt;
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 512];
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let read = tokio::time::timeout(std::time::Duration::from_millis(200), peer.read(&mut chunk))
+            .await;
+        match read {
+            Ok(Ok(0)) | Err(_) => break,
+            Ok(Ok(n)) => {
+                buffer.extend_from_slice(&chunk[..n]);
+                if buffer.iter().any(|&b| b == b'\n') {
+                    break;
+                }
+            }
+            Ok(Err(error)) => panic!("reading the peer end failed: {error}"),
+        }
+        if std::time::Instant::now() > deadline {
+            break;
+        }
+    }
+
+    let line = String::from_utf8_lossy(&buffer);
+    let parsed: serde_json::Value = line
+        .trim()
+        .lines()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .expect("the detach write should produce a JSON line");
+    assert_eq!(parsed["type"], "detach", "got: {line}");
+    assert!(parsed["id"].as_u64().is_some(), "got: {line}");
+}

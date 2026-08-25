@@ -250,3 +250,101 @@ fn forgetting_a_device_closes_the_door_without_rebuilding_the_gate() {
         Admission::Refused
     );
 }
+
+/// Legacy pairings recorded the invite address as the device name (`device
+/// join` without `--name`). The handshake hello carries the real name, and
+/// `record_name` migrates those placeholder entries on first reconnect.
+#[test]
+fn learning_a_name_replaces_an_address_shaped_placeholder() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let laptop = fingerprint(b"the laptop");
+    let gate = TrustGate::in_dir(dir.path());
+    gate.record_pairing(
+        &laptop,
+        "192.168.1.108:7644",
+        Some("192.168.1.108:7644".to_string()),
+    )
+    .expect("recording the legacy pairing");
+
+    let learned = gate
+        .record_name(&laptop, "station")
+        .expect("learning the name from the hello");
+    assert_eq!(learned, "station");
+
+    match gate.admits(&laptop).expect("after learning") {
+        Admission::Trusted(device) => {
+            assert_eq!(device.name, "station");
+            assert_eq!(device.address.as_deref(), Some("192.168.1.108:7644"));
+        }
+        other => panic!("expected a trusted device, got {other:?}"),
+    }
+}
+
+/// A name the user chose explicitly is never second-guessed, even when the
+/// peer introduces itself with a different one.
+#[test]
+fn learning_a_name_never_overwrites_a_chosen_name() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let laptop = fingerprint(b"the laptop");
+    let gate = TrustGate::in_dir(dir.path());
+    gate.record_pairing(&laptop, "my-laptop", None)
+        .expect("recording the pairing");
+
+    let kept = gate
+        .record_name(&laptop, "hostname-says-otherwise")
+        .expect("hearing the hello name");
+    assert_eq!(kept, "my-laptop");
+
+    match gate.admits(&laptop).expect("after the hello") {
+        Admission::Trusted(device) => assert_eq!(device.name, "my-laptop"),
+        other => panic!("expected a trusted device, got {other:?}"),
+    }
+}
+
+/// Address-shaped names take several forms; the detector should catch the ones
+/// an invite address can produce and leave real names alone.
+#[test]
+fn address_shaped_name_detection_covers_the_invite_forms() {
+    for placeholder in [
+        "192.168.1.108:7644",
+        "[fe80::1%3]:7644",
+        "[fe80::1]:7644",
+        "10.0.0.5",
+        "fe80::1",
+        "desktop.local:7644",
+        "192.168.1.8",
+    ] {
+        assert!(
+            name_looks_like_address(placeholder),
+            "{placeholder} should count as address-shaped"
+        );
+    }
+    for chosen in [
+        "laptop",
+        "my-laptop",
+        "station",
+        "Toygar's PC",
+        "dev box",
+        "a:b", // colon present but not a port
+    ] {
+        assert!(
+            !name_looks_like_address(chosen),
+            "{chosen} should count as a chosen name"
+        );
+    }
+}
+
+/// A device forgotten between the handshake and the name learning must not be
+/// put back by the learning, mirroring the address-refresh rule.
+#[test]
+fn learning_the_name_of_a_forgotten_device_does_not_re_add_it() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let gone = fingerprint(b"the laptop");
+    let gate = TrustGate::in_dir(dir.path());
+
+    let learned = gate
+        .record_name(&gone, "station")
+        .expect("learning a name nobody holds");
+    assert!(learned.is_empty());
+    assert_eq!(gate.admits(&gone).expect("after the learning"), Admission::Refused);
+}

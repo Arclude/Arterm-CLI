@@ -196,7 +196,7 @@ impl PeerAdmitter {
         };
 
         match admission {
-            Admission::Trusted(device) => {
+            Admission::Trusted(mut device) => {
                 // Keep the recorded address current so the pairing can be used
                 // in the other direction without the user looking an IP up.
                 if let Some(address) = advertised
@@ -205,6 +205,22 @@ impl PeerAdmitter {
                     self.gate
                         .record_address(&fingerprint, address)
                         .context("recording the address a trusted peer connected from")?;
+                }
+
+                // Learn the peer's real device name from the hello. Legacy
+                // pairings recorded the invite address as the name (`device
+                // join` without `--name`), so every log line and aggregation
+                // said "192.168.1.108:7644" instead of the peer's identity.
+                // The wire has carried the true name all along; only replace
+                // names that still look like addresses, never a chosen one.
+                if hello.name() != device.name {
+                    let learned = self
+                        .gate
+                        .record_name(&fingerprint, hello.name())
+                        .context("learning a trusted peer's device name")?;
+                    if !learned.is_empty() {
+                        device.name = learned;
+                    }
                 }
 
                 // A trusted device that only wants the session list gets it and

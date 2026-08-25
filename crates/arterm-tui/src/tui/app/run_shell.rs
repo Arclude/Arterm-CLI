@@ -943,6 +943,11 @@ impl App {
                         // rather than inside the tick: it ends this connection,
                         // and only the outer loop can dial the next one.
                         if remote::apply_pending_peer_switch(&mut self) {
+                            // Graceful goodbye to the far server: without it the
+                            // abrupt TCP drop marks the session closed/crashed
+                            // and unregisters it from the picker. Fire-and-forget
+                            // so a slow peer cannot stall the switch.
+                            remote_conn.send_detach();
                             continue 'outer;
                         }
                     }

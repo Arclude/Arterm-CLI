@@ -177,6 +177,12 @@ pub(crate) async fn connect(
     // port nothing is listening on would have the far end record an address
     // that never answers.
     let probe = connect_to_peer(&credentials, &target, secret.as_deref(), None).await?;
+    // The welcome carries the far listener's real device name. Legacy trust
+    // entries may still carry an address as the name; learn the true one so
+    // relay logs and aggregation stop saying "192.168.1.108:7644".
+    TrustGate::for_this_device()?
+        .record_name(&fingerprint, &probe.peer_name)
+        .context("learning the peer's device name from the welcome")?;
     if probe.paired_now {
         println!(
             "Paired with {} — it now accepts connections from this device too.",
