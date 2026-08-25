@@ -44,6 +44,11 @@ const LEDGER: &[(&str, Disposition)] = &[
     ("ClientDebugResponse", ClientInternal),
     ("Compact", Covered),
     ("CycleModel", ClientInternal),
+    // The TUI's goodbye on a peer switch: the daemon keeps the session
+    // registered instead of treating the drop as a crash. Harness API clients
+    // own their transport end-to-end (closing it is just closing it), so this
+    // distinction is internal daemon session bookkeeping.
+    ("Detach", ClientInternal),
     ("GetCompactedHistory", ClientInternal),
     ("GetHistory", Covered),
     ("GetModelCatalog", Covered),
