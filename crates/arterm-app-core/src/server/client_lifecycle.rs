@@ -22,7 +22,8 @@ use super::client_session::{
     handle_clear_session, handle_mcp_action, handle_reload, handle_resume_session, handle_subscribe,
 };
 use super::client_state::{
-    handle_get_compacted_history, handle_get_history, handle_get_model_catalog, handle_get_state,
+    HistoryRefreshArgs, handle_get_compacted_history, handle_get_model_catalog, handle_get_state,
+    send_swarm_history_refresh,
 };
 use super::client_writer::write_direct_event;
 use super::comm_await::{CommAwaitMembersContext, handle_comm_await_members};
@@ -478,8 +479,7 @@ pub(super) async fn handle_client(
 
     // Per-client state
     let mut client_is_processing = false;
-    // Set when the client sends Request::Detach: the subsequent disconnect is
-    // intentional (peer switch) and must not tear down the session.
+    // Set when the client sends Request::Detach (intentional disconnect).
     let mut client_detached = false;
     let (processing_done_tx, mut processing_done_rx) =
         mpsc::unbounded_channel::<(u64, Result<()>, Option<String>)>();
@@ -552,8 +552,8 @@ pub(super) async fn handle_client(
         }
     }
 
-    // Get lock-free control-plane handles BEFORE wrapping in Mutex.
-    // This allows cancel/soft-interrupt/background-tool requests while the agent is processing.
+    // Lock-free control-plane handles, taken BEFORE the agent Mutex wrap so
+    // cancel/soft-interrupt/background-tool requests work mid-processing.
     let mut session_control = SessionControlHandle::new(
         client_session_id.clone(),
         new_agent.soft_interrupt_queue(),
@@ -561,8 +561,8 @@ pub(super) async fn handle_client(
         new_agent.graceful_shutdown_signal(),
     );
 
-    // Register the shutdown signal in the server-level map so
-    // graceful_shutdown_sessions can signal it without locking the agent mutex
+    // Register the shutdown signal so graceful_shutdown_sessions can signal
+    // without locking the agent mutex.
     {
         let mut signals = shutdown_signals.write().await;
         signals.insert(
@@ -582,11 +582,8 @@ pub(super) async fn handle_client(
         let mut sessions_guard = sessions.write().await;
         sessions_guard.insert(client_session_id.clone(), Arc::clone(&agent));
     }
-    // Record ownership on this server in the on-disk registry. The picker and
-    // `arterm device sessions` attach a session to its server only through this
-    // list; without it every session lands in the orphaned "sessions" bucket
-    // and the server rows report zero sessions. The registry key is the
-    // session's short name (e.g. `fox`), which is what the picker matches on.
+    // Record ownership on this server in the on-disk registry: the picker and
+    // `arterm device sessions` match sessions to servers through this list.
     if let Some(short_name) = friendly_name.clone() {
         let server_for_registry = server_name.clone();
         tokio::spawn(async move {
@@ -649,12 +646,11 @@ pub(super) async fn handle_client(
         }
     });
 
-    // Note: Don't send initial SessionId here - it's sent by the Subscribe handler
-    // Sending it via the channel causes race conditions where it can arrive after
-    // other events (like History) that are written directly to the socket.
+    // Initial SessionId is sent by the Subscribe handler; sending it here
+    // races other events (like History) written directly to the socket.
 
-    // Set up client debug command channel
-    // This client becomes the "active" debug client that receives client: commands
+    // Set up the client debug channel; this client becomes the "active"
+    // debug client receiving client: commands.
     let (debug_cmd_tx, mut debug_cmd_rx) = mpsc::unbounded_channel::<(u64, String)>();
     let client_debug_id = id::new_id("client");
     {
@@ -703,9 +699,8 @@ pub(super) async fn handle_client(
         })
     };
 
-    // Do not drain global bus traffic until the client has completed its first
-    // subscribe. Under heavy swarm file-activity load, ignored bus frames can
-    // otherwise monopolize the select loop before the initial subscribe/read.
+    // Don't drain global bus traffic until the first subscribe completes; under
+    // heavy swarm load, ignored frames monopolize the select loop otherwise.
     let mut client_subscribed = false;
     let mut pending_request = Some(initial_request);
 
@@ -716,8 +711,8 @@ pub(super) async fn handle_client(
             line.clear();
             tokio::select! {
             biased;
-            // Prioritize direct client I/O so subscribe/ping/message requests do not get
-            // starved behind noisy background bus traffic.
+            // Prioritize direct client I/O so subscribe/ping/message requests
+            // are not starved behind noisy background bus traffic.
             n = reader.read_line(&mut line) => {
                 let n = match n {
                     Ok(n) => n,
@@ -1170,16 +1165,10 @@ pub(super) async fn handle_client(
             }
 
             Request::Detach { id } => {
-                // Graceful goodbye: acknowledge, remember the intent, and close
-                // the read loop. The connection drop then routes to
-                // DisconnectDisposition::Detached cleanup, which keeps the
-                // session registered and resumable.
+                // Graceful goodbye: ack, remember intent, end the read loop.
                 client_detached = true;
-                let json = encode_event(&ServerEvent::Ack { id });
-                let mut w = writer.lock().await;
-                if w.write_all(json.as_bytes()).await.is_err() {
-                    break;
-                }
+                let ack = encode_event(&ServerEvent::Ack { id });
+                let _sent = writer.lock().await.write_all(ack.as_bytes()).await;
                 break;
             }
 
@@ -1307,34 +1296,27 @@ pub(super) async fn handle_client(
                             "Rewound session {} to message {} (removed {})",
                             client_session_id, message_index, removed
                         ));
-                        if handle_get_history(
+                        if send_swarm_history_refresh(HistoryRefreshArgs {
                             id,
-                            &client_session_id,
+                            client_session_id: &client_session_id,
                             client_is_processing,
-                            &agent,
-                            &provider,
-                            &sessions,
-                            &client_connections,
-                            &client_count,
-                            &writer,
-                            &server_name,
-                            &server_icon,
-                            None,
-                        )
+                            agent: &agent,
+                            provider: &provider,
+                            sessions: &sessions,
+                            client_connections: &client_connections,
+                            client_count: &client_count,
+                            writer: &writer,
+                            server_name: &server_name,
+                            server_icon: &server_icon,
+                            swarm_members: &swarm_members,
+                            swarm_plans: &swarm_plans,
+                            restore_plan: true,
+                        })
                         .await
                         .is_err()
                         {
                             break;
                         }
-                        // The truncated History replaces the client transcript
-                        // (dropping the inline plan graph); re-send the plan so
-                        // the diagram comes back.
-                        send_swarm_plan_to_session(
-                            &client_session_id,
-                            &swarm_members,
-                            &swarm_plans,
-                        )
-                        .await;
                     }
                     Err(message) => {
                         let _ = client_event_tx.send(ServerEvent::Error {
@@ -1367,33 +1349,27 @@ pub(super) async fn handle_client(
                             "Undid rewind for session {} (restored {})",
                             client_session_id, restored
                         ));
-                        if handle_get_history(
+                        if send_swarm_history_refresh(HistoryRefreshArgs {
                             id,
-                            &client_session_id,
+                            client_session_id: &client_session_id,
                             client_is_processing,
-                            &agent,
-                            &provider,
-                            &sessions,
-                            &client_connections,
-                            &client_count,
-                            &writer,
-                            &server_name,
-                            &server_icon,
-                            None,
-                        )
+                            agent: &agent,
+                            provider: &provider,
+                            sessions: &sessions,
+                            client_connections: &client_connections,
+                            client_count: &client_count,
+                            writer: &writer,
+                            server_name: &server_name,
+                            server_icon: &server_icon,
+                            swarm_members: &swarm_members,
+                            swarm_plans: &swarm_plans,
+                            restore_plan: true,
+                        })
                         .await
                         .is_err()
                         {
                             break;
                         }
-                        // Same as rewind: restore the inline plan graph after
-                        // the transcript replacement.
-                        send_swarm_plan_to_session(
-                            &client_session_id,
-                            &swarm_members,
-                            &swarm_plans,
-                        )
-                        .await;
                     }
                     Err(message) => {
                         let _ = client_event_tx.send(ServerEvent::Error {
@@ -1606,20 +1582,22 @@ pub(super) async fn handle_client(
             }
 
             Request::GetHistory { id } => {
-                if handle_get_history(
+                if send_swarm_history_refresh(HistoryRefreshArgs {
                     id,
-                    &client_session_id,
+                    client_session_id: &client_session_id,
                     client_is_processing,
-                    &agent,
-                    &provider,
-                    &sessions,
-                    &client_connections,
-                    &client_count,
-                    &writer,
-                    &server_name,
-                    &server_icon,
-                    None,
-                )
+                    agent: &agent,
+                    provider: &provider,
+                    sessions: &sessions,
+                    client_connections: &client_connections,
+                    client_count: &client_count,
+                    writer: &writer,
+                    server_name: &server_name,
+                    server_icon: &server_icon,
+                    swarm_members: &swarm_members,
+                    swarm_plans: &swarm_plans,
+                    restore_plan: false,
+                })
                 .await
                 .is_err()
                 {

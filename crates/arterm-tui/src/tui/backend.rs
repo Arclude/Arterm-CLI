@@ -240,9 +240,6 @@ pub struct RemoteConnection {
     client_instance_id: Option<String>,
     next_request_id: u64,
     tool_diff: RemoteDiffTracker,
-    /// Request id of the most recent send_detach call (test assertions only).
-    #[cfg(test)]
-    last_detach_request_id: std::sync::Mutex<Option<u64>>,
     /// Bytes pulled from the socket that have not yet been split into complete
     /// newline-delimited protocol lines. This buffer is persistent across
     /// `next_event` calls so a future cancelled by a `tokio::select!` peer
@@ -334,8 +331,6 @@ impl RemoteConnection {
             client_instance_id: client_instance_id.map(str::to_string),
             next_request_id: 1,
             tool_diff: RemoteDiffTracker::default(),
-            #[cfg(test)]
-            last_detach_request_id: std::sync::Mutex::new(None),
             read_buffer: Vec::new(),
             read_buffer_scan_start: 0,
             #[cfg(test)]
@@ -526,7 +521,6 @@ impl RemoteConnection {
         });
     }
 
-    /// Send a message to the server
     /// Send a message to the server and return the request ID
     pub async fn send_message(&mut self, content: String) -> Result<u64> {
         self.send_message_with_images_and_reminder(content, vec![], None)
@@ -596,12 +590,9 @@ impl RemoteConnection {
 
     /// Re-request the session history payload from the server.
     ///
-    /// Used by the client-side history-recovery watchdog: if the bootstrap
-    /// `History` event never arrives after a (re)connect (e.g. it was dropped
-    /// during a reload handoff, or the server was momentarily busy), the client
-    /// would otherwise be stuck forever on "loading session…" with every prompt
-    /// gated behind `has_loaded_history()`. Sending a fresh `GetHistory` lets the
-    /// server resend the payload so the session can recover without a `/restart`.
+    /// History-recovery watchdog call: if the bootstrap `History` never
+    /// arrives after a (re)connect, ask the server to resend it so the
+    /// session recovers without a `/restart`.
     pub async fn request_history(&mut self) -> Result<u64> {
         let id = self.next_request_id;
         self.next_request_id += 1;
@@ -999,42 +990,17 @@ impl RemoteConnection {
         .await
     }
 
-    /// Notify the server about auth changes without blocking the caller.
-    pub fn notify_auth_changed_detached(&mut self) {
-        self.notify_auth_changed_for_provider_detached(None);
-    }
-
-    /// Notify the server about a provider-specific auth change without blocking the caller.
+    /// Notify the server about a provider auth change without blocking.
     pub fn notify_auth_changed_for_provider_detached(&mut self, provider: Option<&str>) {
         self.notify_auth_changed_detached_event(provider, None, false);
     }
 
-    /// Tell the far server this client is intentionally hanging up (peer
-    /// switch), so the disconnect is not treated as a crash/closed session and
-    /// the session stays registered and resumable. Fire-and-forget: old servers
-    /// that predate `detach` answer with a benign Error event and the write
-    /// races the socket teardown anyway. `&self` on purpose — the caller drops
-    /// the connection right after.
+    /// Intentional goodbye (peer switch): session stays registered.
     pub fn send_detach(&self) {
-        let id = self.next_request_id;
-        #[cfg(test)]
-        {
-            self.last_detach_request_id
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .replace(id);
-        }
-        self.send_request_detached(Request::Detach { id }, "detach");
-    }
-
-    /// The request id of the most recent [`Self::send_detach`] call, for tests
-    /// that assert a peer switch says goodbye before dropping the connection.
-    #[cfg(test)]
-    pub(crate) fn take_last_detach_request_id(&self) -> Option<u64> {
-        self.last_detach_request_id
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take()
+        let request = Request::Detach {
+            id: self.next_request_id,
+        };
+        self.send_request_detached(request, "detach");
     }
 
     /// Notify the server about a typed auth lifecycle change without blocking the caller.
@@ -1314,8 +1280,6 @@ impl RemoteConnection {
             client_instance_id: None,
             next_request_id: 1,
             tool_diff: RemoteDiffTracker::default(),
-            #[cfg(test)]
-            last_detach_request_id: std::sync::Mutex::new(None),
             read_buffer: Vec::new(),
             read_buffer_scan_start: 0,
             #[cfg(test)]
@@ -1494,7 +1458,7 @@ mod tests {
         let _guard = writer.lock().await;
 
         let start = Instant::now();
-        remote.notify_auth_changed_detached();
+        remote.notify_auth_changed_detached_event(None, None, false);
         let elapsed = start.elapsed();
 
         assert!(

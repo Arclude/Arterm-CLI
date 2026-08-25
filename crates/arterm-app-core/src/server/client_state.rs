@@ -1,5 +1,8 @@
 use super::ClientConnectionInfo;
+use super::SwarmMember;
+use super::VersionedPlan;
 use super::server_has_newer_binary;
+use super::swarm::send_swarm_plan_to_session;
 use crate::agent::Agent;
 use crate::bus::Bus;
 use crate::message::{ContentBlock, Role};
@@ -96,6 +99,65 @@ pub(super) async fn handle_get_state(
         },
     )
     .await
+}
+
+/// Shared context for [`send_swarm_history_refresh`]: the (many) handles the
+/// read loop owns that the history refresh path needs.
+pub(super) struct HistoryRefreshArgs<'a> {
+    pub(super) id: u64,
+    pub(super) client_session_id: &'a str,
+    pub(super) client_is_processing: bool,
+    pub(super) agent: &'a Arc<Mutex<Agent>>,
+    pub(super) provider: &'a Arc<dyn Provider>,
+    pub(super) sessions: &'a SessionAgents,
+    pub(super) client_connections: &'a Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
+    pub(super) client_count: &'a Arc<RwLock<usize>>,
+    pub(super) writer: &'a Arc<Mutex<WriteHalf>>,
+    pub(super) server_name: &'a str,
+    pub(super) server_icon: &'a str,
+    pub(super) swarm_members: &'a Arc<RwLock<HashMap<String, SwarmMember>>>,
+    pub(super) swarm_plans: &'a Arc<RwLock<HashMap<String, VersionedPlan>>>,
+    pub(super) restore_plan: bool,
+}
+
+/// Send fresh history; when `restore_plan`, re-send the inline plan graph
+/// that the truncated transcript (rewind/undo) dropped.
+pub(super) async fn send_swarm_history_refresh(args: HistoryRefreshArgs<'_>) -> Result<()> {
+    let HistoryRefreshArgs {
+        id,
+        client_session_id,
+        client_is_processing,
+        agent,
+        provider,
+        sessions,
+        client_connections,
+        client_count,
+        writer,
+        server_name,
+        server_icon,
+        swarm_members,
+        swarm_plans,
+        restore_plan,
+    } = args;
+    handle_get_history(
+        id,
+        client_session_id,
+        client_is_processing,
+        agent,
+        provider,
+        sessions,
+        client_connections,
+        client_count,
+        writer,
+        server_name,
+        server_icon,
+        None,
+    )
+    .await?;
+    if restore_plan {
+        send_swarm_plan_to_session(client_session_id, swarm_members, swarm_plans).await;
+    }
+    Ok(())
 }
 
 #[expect(

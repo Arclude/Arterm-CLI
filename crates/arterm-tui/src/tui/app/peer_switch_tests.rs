@@ -75,21 +75,15 @@ async fn a_peer_switch_sends_a_detach_request_over_the_wire() {
         .expect("dummy connection has a peer end");
 
     remote.send_detach();
-    // send_detach is fire-and-forget; the record itself is synchronous, but the
-    // socket write lands on the spawned task. Give it a moment below.
-    assert_eq!(
-        remote.take_last_detach_request_id(),
-        Some(1),
-        "send_detach must record the request id synchronously"
-    );
 
     use tokio::io::AsyncReadExt;
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 512];
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        let read = tokio::time::timeout(std::time::Duration::from_millis(200), peer.read(&mut chunk))
-            .await;
+        let read =
+            tokio::time::timeout(std::time::Duration::from_millis(200), peer.read(&mut chunk))
+                .await;
         match read {
             Ok(Ok(0)) | Err(_) => break,
             Ok(Ok(n)) => {

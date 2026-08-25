@@ -346,5 +346,8 @@ fn learning_the_name_of_a_forgotten_device_does_not_re_add_it() {
         .record_name(&gone, "station")
         .expect("learning a name nobody holds");
     assert!(learned.is_empty());
-    assert_eq!(gate.admits(&gone).expect("after the learning"), Admission::Refused);
+    assert_eq!(
+        gate.admits(&gone).expect("after the learning"),
+        Admission::Refused
+    );
 }

@@ -117,10 +117,10 @@ impl TrustGate {
     pub fn record_name(&self, fingerprint: &Fingerprint, name: &str) -> Result<String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
-            return Ok(self
-                .stored_name(fingerprint)
-                .context("reading the trust store to learn a peer's name")?
-                .unwrap_or_default());
+            return match self.stored_name(fingerprint) {
+                Ok(stored) => Ok(stored.unwrap_or_else(String::new)),
+                Err(error) => Err(error.context("reading the trust store to learn a peer's name")),
+            };
         }
         let mut trust = TrustStore::load_at(self.trust_path.clone())
             .context("reading the trust store to learn a peer's name")?;

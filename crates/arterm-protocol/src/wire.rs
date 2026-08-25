@@ -55,11 +55,8 @@ pub enum Request {
     #[serde(rename = "cancel")]
     Cancel { id: u64 },
 
-    /// Graceful detach: the client is intentionally closing the connection
-    /// (e.g. switching to another peer) and the server must NOT treat the
-    /// disconnect as a crash or closed session. The session stays registered
-    /// and resumable. Acknowledged with a plain Ack, then the client drops the
-    /// connection.
+    /// Graceful goodbye: the client is closing the connection on purpose
+    /// (e.g. switching peers); the session must stay registered and resumable.
     #[serde(rename = "detach")]
     Detach { id: u64 },
 
@@ -163,11 +160,9 @@ pub enum Request {
     #[serde(rename = "reload")]
     Reload {
         id: u64,
-        /// When `true` (the default for backward compatibility), the server
-        /// reloads unconditionally. When `false`, the server only reloads if it
-        /// detects a strictly-newer reload candidate binary, so callers like
-        /// `arterm server reload` can request a graceful upgrade without risking
-        /// a downgrade (e.g. a newer self-dev daemon next to an older release).
+        /// When `true` (the default), reload unconditionally. When `false`,
+        /// only reload if a strictly-newer candidate binary exists, so callers
+        /// can request a graceful upgrade that never downgrades.
         #[serde(default = "default_true")]
         force: bool,
     },
@@ -241,14 +236,10 @@ pub enum Request {
 
     /// Set the active model by name.
     ///
-    /// A legacy/desktop compatibility shape (`{"type":"set_route","model":...}`)
-    /// is also accepted, but it is normalized into this variant inside
-    /// [`crate::decode_request`] rather than via a serde `alias`. A serde alias
-    /// would make this variant *also* answer to the `set_route` tag, and serde's
-    /// internally-tagged enums pick the first matching variant by tag (not by
-    /// fields), so it would shadow the structured [`Request::SetRoute`] variant
-    /// below and make every structured route switch fail with
-    /// `missing field \`model\``.
+    /// A legacy/desktop shape (`{"type":"set_route","model":...}`) is also
+    /// accepted, normalized into this variant in [`crate::decode_request`]:
+    /// a serde `alias` would make the internally-tagged enum pick this variant
+    /// for the `set_route` tag, shadowing [`Request::SetRoute`].
     #[serde(rename = "set_model")]
     SetModel { id: u64, model: String },
 

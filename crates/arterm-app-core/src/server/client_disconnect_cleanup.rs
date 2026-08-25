@@ -46,7 +46,10 @@ fn disconnect_disposition(disconnected_while_processing: bool) -> DisconnectDisp
 /// said goodbye on purpose (peer switch): that intent outranks everything the
 /// connection state could otherwise imply, so the session stays registered
 /// and resumable instead of being marked closed or crashed.
-fn disposition_for(disconnected_while_processing: bool, client_detached: bool) -> DisconnectDisposition {
+fn disposition_for(
+    disconnected_while_processing: bool,
+    client_detached: bool,
+) -> DisconnectDisposition {
     if client_detached {
         return DisconnectDisposition::Detached;
     }
@@ -121,9 +124,14 @@ pub(super) async fn cleanup_client_connection(
         ));
         if let Some(handle) = processing_task.take() {
             // The client detached mid-processing; let the in-flight turn finish
-            // detached rather than aborting it mid-tool.
+            // detached rather than aborting it mid-tool. Log the outcome so a
+            // panicking turn is not silently dropped.
             tokio::spawn(async move {
-                let _ = handle.await;
+                if let Err(join_error) = handle.await {
+                    crate::logging::warn(&format!(
+                        "Detached processing task ended abnormally: {join_error}"
+                    ));
+                }
             });
         }
         event_handle.abort();
@@ -335,7 +343,10 @@ mod tests {
         // explicit goodbye is the intent that matters.
         let _guard = crate::storage::lock_test_env();
         crate::server::clear_reload_marker();
-        assert_eq!(disposition_for(false, true), DisconnectDisposition::Detached);
+        assert_eq!(
+            disposition_for(false, true),
+            DisconnectDisposition::Detached
+        );
         assert_eq!(disposition_for(true, true), DisconnectDisposition::Detached);
         // Without the goodbye, the historical classification still applies.
         assert_eq!(disposition_for(false, false), DisconnectDisposition::Closed);
