@@ -68,7 +68,7 @@ pub use storage_paths::session_journal_path_from_snapshot;
 #[cfg(test)]
 pub(crate) use storage_paths::session_path_in_dir;
 use storage_paths::{estimate_json_bytes, persist_vector_mode_label};
-pub use storage_paths::{session_exists, session_journal_path, session_path};
+pub use storage_paths::{delete_session_files, session_exists, session_journal_path, session_path};
 
 fn stored_messages_to_messages(messages: &[StoredMessage]) -> Vec<Message> {
     messages.iter().map(StoredMessage::to_message).collect()
@@ -932,6 +932,15 @@ impl Session {
         true
     }
 
+    /// Whether this session holds any message a user would call a conversation:
+    /// not internal system reminders, not scheduled-task bookkeeping.
+    ///
+    /// Used to decide whether a throwaway "boot" session (created for a client
+    /// that immediately resumed another session) may be deleted from disk.
+    pub fn has_visible_conversation(&self) -> bool {
+        self.messages.iter().any(is_visible_conversation_message)
+    }
+
     /// Refresh the initial immutable session-context message if the session has
     /// not started a real conversation yet. This covers remote/client-server
     /// startup where the server creates an Agent before the subscribing client
@@ -940,7 +949,6 @@ impl Session {
         if self.messages.iter().any(is_visible_conversation_message) {
             return false;
         }
-
         let Some(message) = self.messages.iter_mut().find(|message| {
             message.content.iter().any(|block| match block {
                 ContentBlock::Text { text, .. } => text.starts_with(SESSION_CONTEXT_PREFIX),

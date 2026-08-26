@@ -180,3 +180,48 @@ fn remote_device_for_session_reads_grouped_rows() {
         Some("island")
     );
 }
+
+#[test]
+fn remote_session_working_dir_reads_the_peers_own_dir() {
+    let now_ms = Utc::now().timestamp_millis();
+    // The peer advertised the session with its own Windows dir; the row keeps
+    // it, and a switch must send exactly that dir — never this machine's cwd.
+    let mut remote = remote_row("session_windows", "island", true, now_ms);
+    remote.working_dir = Some("C:\\Users\\win\\project".to_string());
+    let mut local = remote_row("session_local", "summit", true, now_ms);
+    local.server_name = None;
+    local.working_dir = Some("/home/me/project".to_string());
+    let picker = SessionPicker::new_grouped(
+        vec![
+            ServerGroup {
+                name: "summit".to_string(),
+                icon: "⛰".to_string(),
+                version: String::new(),
+                git_hash: String::new(),
+                is_running: true,
+                sessions: vec![local],
+            },
+            ServerGroup {
+                name: "Remote devices".to_string(),
+                icon: "🖧".to_string(),
+                version: String::new(),
+                git_hash: String::new(),
+                is_running: true,
+                sessions: vec![remote],
+            },
+        ],
+        Vec::new(),
+    );
+    assert_eq!(
+        picker
+            .remote_session_working_dir("session_windows")
+            .as_deref(),
+        Some("C:\\Users\\win\\project"),
+        "a remote row's own dir is what the peer switch must report"
+    );
+    assert_eq!(
+        picker.remote_session_working_dir("session_local"),
+        None,
+        "a local row's dir is the local daemon's business, not a switch override"
+    );
+}

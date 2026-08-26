@@ -1586,6 +1586,29 @@ pub(super) async fn handle_resume_session(
             let old_session_id = client_session_id.clone();
             *client_session_id = session_id.clone();
 
+            // Every client connection boots with a throwaway session. When the
+            // client immediately resumes another one (picker switch, peer
+            // switch, `--resume`), that boot session never held a conversation
+            // yet it stayed on disk forever — which is how the session store
+            // grew thousands of "empty" rows in the picker. Delete it now that
+            // the connection has moved on, but only when it really is empty:
+            // a boot session the user typed into has a conversation and is a
+            // real session worth keeping.
+            if old_session_id != session_id {
+                // The agent has already restored the target session, so its
+                // in-memory message list describes the target, not the boot
+                // session. Read the boot session's own snapshot from disk.
+                let discardable = crate::session::Session::load_startup_stub(&old_session_id)
+                    .map(|stub| !stub.has_visible_conversation())
+                    .unwrap_or(false);
+                if discardable {
+                    let old_id = old_session_id.clone();
+                    tokio::task::spawn_blocking(move || {
+                        crate::session::delete_session_files(&old_id);
+                    });
+                }
+            }
+
             {
                 let mut sessions_guard = sessions.write().await;
                 sessions_guard.remove(&old_session_id);

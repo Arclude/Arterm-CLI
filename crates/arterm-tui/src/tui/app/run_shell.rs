@@ -812,6 +812,14 @@ impl App {
             }
 
             let session_to_resume = self.reconnect_target_session_id();
+            // A peer switch can re-point the subscribe cwd at the target
+            // session's own directory (see `apply_pending_peer_switch`); only
+            // when it has not does the launch-time `--remote-working-dir` (or
+            // the client's cwd) apply.
+            let subscribe_working_dir = self
+                .resume_working_dir
+                .clone()
+                .or_else(|| remote_working_dir.clone());
 
             let mut remote_conn = match remote::connect_with_retry(
                 &mut self,
@@ -819,7 +827,7 @@ impl App {
                 &mut event_stream,
                 &mut remote_state,
                 session_to_resume.as_deref(),
-                remote_working_dir.as_deref(),
+                subscribe_working_dir.as_deref(),
             )
             .await?
             {

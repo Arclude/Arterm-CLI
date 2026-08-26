@@ -342,8 +342,21 @@ impl RemoteConnection {
         // Subscribe to events
         let subscribe_start = Instant::now();
         let (working_dir, selfdev) = super::subscribe_metadata(remote_working_dir);
+        // A peer server owns sessions this machine has never heard of: the
+        // socket is named `arterm-peer-*` (see `peer_switch::relay_socket_path`),
+        // and filtering the resume target through the local session store here
+        // silently dropped every cross-machine switch — the peer attached us to
+        // a fresh boot session instead of the Windows chat we picked.
+        //
+        // The working dir sent above is deliberate even on a peer: Subscribe
+        // requires one, and when a peer switch carries the target session's own
+        // dir (see `apply_pending_peer_switch`) the subscribe would otherwise
+        // overwrite it with this machine's cwd.
+        let session_lives_on_peer = socket_is_peer_relay(crate::server::socket_path().as_path());
         let resume_target = resume_session
-            .filter(|session_id| crate::session::session_exists(session_id))
+            .filter(|session_id| {
+                session_lives_on_peer || crate::session::session_exists(session_id)
+            })
             .map(|session_id| session_id.to_string());
         conn.send_request(Request::Subscribe {
             id: conn.next_request_id,
@@ -1446,10 +1459,37 @@ impl RemoteEventState for ReplayRemoteState {
     fn mark_history_loaded(&mut self) {}
 }
 
+/// Whether the socket this client is pointed at is a relay to a paired device
+/// rather than this machine's own daemon.
+///
+/// Peer relays are named `arterm-peer-<fingerprint>.sock` (see
+/// `peer_switch::relay_socket_path`), kept well away from `arterm.sock` so
+/// nothing mistakes them for the local daemon. Sessions reached through one
+/// live on the other machine: their ids are absent from the local session
+/// store, and this client's working dir is meaningless there.
+fn socket_is_peer_relay(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("arterm-peer-"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+
+    #[test]
+    fn peer_relay_sockets_are_recognized_by_name() {
+        assert!(socket_is_peer_relay(std::path::Path::new(
+            "/run/user/1000/arterm-peer-a5456910dfa37096.sock"
+        )));
+        // The local daemon is not a peer, whatever directory it lives in.
+        assert!(!socket_is_peer_relay(std::path::Path::new(
+            "/run/user/1000/arterm.sock"
+        )));
+        assert!(!socket_is_peer_relay(std::path::Path::new(
+            "/tmp/arterm-test.sock"
+        )));
+    }
 
     #[tokio::test]
     async fn detached_auth_changed_notification_does_not_wait_for_writer_lock() {

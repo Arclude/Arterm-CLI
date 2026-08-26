@@ -47,3 +47,21 @@ pub fn session_exists(session_id: &str) -> bool {
         .map(|path| path.exists())
         .unwrap_or(false)
 }
+
+/// Remove a session's snapshot, journal, and rolling backup from disk.
+///
+/// Best-effort: used to reclaim throwaway boot sessions after a client moves
+/// to another session, so failures are ignored rather than surfaced — the
+/// worst case is the pre-fix behaviour (a small file lingers).
+pub fn delete_session_files(session_id: &str) {
+    let Ok(snapshot) = session_path(session_id) else {
+        return;
+    };
+    let journal = session_journal_path_from_snapshot(&snapshot);
+    let mut backup = snapshot.clone().into_os_string();
+    backup.push(".bak");
+    let _ = std::fs::remove_file(&snapshot);
+    let _ = std::fs::remove_file(&journal);
+    let _ = std::fs::remove_file(std::path::Path::new(&backup));
+    let _ = crate::storage::unregister_active_pid(session_id);
+}

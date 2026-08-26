@@ -1277,6 +1277,12 @@ pub struct App {
     pending_migration: Option<String>,
     // Session to resume on connect (remote mode)
     resume_session_id: Option<String>,
+    // Working directory to report on subscribe for the resume target, set by a
+    // peer switch. `None` means "use the client's own cwd" — the ordinary
+    // same-machine behavior. A peer switch sets the target session's own dir
+    // (as the peer advertised it) because the client's cwd is a path on this
+    // machine and must not be stamped onto a session living on another one.
+    resume_working_dir: Option<String>,
     // Exit code to use when quitting (for canary wrapper communication)
     requested_exit_code: Option<i32>,
     // Memory feature toggle for this session

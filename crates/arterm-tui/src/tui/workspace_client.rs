@@ -40,6 +40,11 @@ pub(crate) struct PeerSwitch {
     pub(crate) session_id: Option<String>,
     /// Device name, for the notice shown after the switch.
     pub(crate) device: String,
+    /// The target session's own working directory, as the peer reported it.
+    /// Sent as the subscribe cwd so the peer's session (and the boot session it
+    /// would otherwise create) binds to its own directory rather than this
+    /// machine's cwd, which does not exist there.
+    pub(crate) working_dir: Option<String>,
 }
 
 impl WorkspaceClientState {

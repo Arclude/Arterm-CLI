@@ -41,9 +41,10 @@ impl App {
         &mut self,
         device: Option<&str>,
         session_id: String,
+        working_dir: Option<String>,
     ) -> bool {
         if let Some(device) = device {
-            return self.begin_peer_session_switch(device, session_id);
+            return self.begin_peer_session_switch(device, session_id, working_dir);
         }
 
         match way_home(
@@ -54,6 +55,9 @@ impl App {
                 socket: home.to_path_buf(),
                 session_id: Some(session_id),
                 device: "this machine".to_string(),
+                // Coming home: the local daemon already knows the session's own
+                // directory, and the client's cwd is valid there again.
+                working_dir: None,
             }),
             None => self.workspace_client.queue_resume_session(session_id),
         }
@@ -61,7 +65,12 @@ impl App {
     }
 
     /// Queue a move to `session_id` on `device`, standing up its relay first.
-    fn begin_peer_session_switch(&mut self, device: &str, session_id: String) -> bool {
+    fn begin_peer_session_switch(
+        &mut self,
+        device: &str,
+        session_id: String,
+        working_dir: Option<String>,
+    ) -> bool {
         let target = match resolve_target(device) {
             Ok(target) => target,
             Err(reason) => {
@@ -120,6 +129,7 @@ impl App {
             socket,
             session_id: Some(session_id),
             device: device.to_string(),
+            working_dir,
         });
         true
     }

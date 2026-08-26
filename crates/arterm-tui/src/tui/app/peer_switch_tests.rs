@@ -108,3 +108,40 @@ async fn a_peer_switch_sends_a_detach_request_over_the_wire() {
     assert_eq!(parsed["type"], "detach", "got: {line}");
     assert!(parsed["id"].as_u64().is_some(), "got: {line}");
 }
+
+/// The subscribe cwd must follow the session, not the client. A switch to a
+/// peer carries the target session's own working dir (as the peer advertised
+/// it) so the resumed session — and the boot session the connection starts in —
+/// bind to that dir instead of being stamped with this machine's cwd. Coming
+/// home clears it, restoring ordinary client-cwd behavior.
+#[test]
+fn a_peer_switch_carries_the_targets_own_working_dir() {
+    let mut app = crate::tui::app::tests::create_test_app();
+    let relay = std::env::temp_dir().join("arterm-peer-0123456789abcdef.sock");
+    app.workspace_client.queue_peer_switch(crate::tui::workspace_client::PeerSwitch {
+        socket: relay,
+        session_id: Some("session_windows".to_string()),
+        device: "island".to_string(),
+        working_dir: Some("C:\\Users\\win\\project".to_string()),
+    });
+
+    assert!(crate::tui::app::remote::apply_pending_peer_switch(&mut app));
+    assert_eq!(app.resume_session_id.as_deref(), Some("session_windows"));
+    assert_eq!(
+        app.resume_working_dir.as_deref(),
+        Some("C:\\Users\\win\\project"),
+        "the peer's session dir must become the subscribe cwd"
+    );
+
+    // Coming home: no foreign dir survives the switch back, or every later
+    // local resume would report the Windows path as its cwd.
+    let home = std::env::temp_dir().join("arterm.sock");
+    app.workspace_client.queue_peer_switch(crate::tui::workspace_client::PeerSwitch {
+        socket: home,
+        session_id: Some("session_local".to_string()),
+        device: "this machine".to_string(),
+        working_dir: None,
+    });
+    assert!(crate::tui::app::remote::apply_pending_peer_switch(&mut app));
+    assert_eq!(app.resume_working_dir, None);
+}

@@ -2778,7 +2778,18 @@ impl App {
             .session_picker_overlay
             .as_ref()
             .and_then(|cell| cell.borrow().remote_device_for_session(&session_id));
-        if !self.begin_session_switch(remote_device.as_deref(), session_id) {
+        // The row's own working dir travels with the switch: it is the dir the
+        // peer's session already runs in, and sending it as the subscribe cwd
+        // stops this machine's cwd being stamped onto the peer's session.
+        let remote_working_dir = self
+            .session_picker_overlay
+            .as_ref()
+            .and_then(|cell| cell.borrow().remote_session_working_dir(&session_id));
+        if !self.begin_session_switch(
+            remote_device.as_deref(),
+            session_id,
+            remote_working_dir,
+        ) {
             // Reaching it failed and the reason is already on screen; leaving
             // the picker open lets the user pick something else.
             return;

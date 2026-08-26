@@ -144,6 +144,13 @@ pub(in crate::tui::app) fn apply_pending_peer_switch(app: &mut App) -> bool {
     crate::server::set_socket_path(socket);
     app.remote_session_id = None;
     app.resume_session_id = switch.session_id;
+    // The subscribe cwd must follow the session, not the client. On a peer the
+    // client's own cwd is a path on this machine and either fails validation or
+    // rewrites the target session's working dir; the session's own dir — the
+    // one the peer advertised in its session list — is the correct value in
+    // both worlds. Coming home, `None` restores the ordinary "client cwd"
+    // behavior.
+    app.resume_working_dir = switch.working_dir;
     app.set_status_notice(format!("Switching to {}…", switch.device));
     true
 }

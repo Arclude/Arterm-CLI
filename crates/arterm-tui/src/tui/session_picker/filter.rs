@@ -459,6 +459,42 @@ impl SessionPicker {
             .find(|session| session.id == session_id)
             .and_then(|session| session.server_name.clone())
     }
+
+    /// The working directory a chosen remote session runs in, as the device
+    /// that owns it advertised it.
+    ///
+    /// A peer switch sends this as the subscribe cwd: the client's own cwd is a
+    /// path on this machine and must not be stamped onto a session living on
+    /// another one. `None` for local rows — and for remote rows the peer did
+    /// not report a dir for — falls back to the ordinary client-cwd behavior.
+    pub(crate) fn remote_session_working_dir(&self, session_id: &str) -> Option<String> {
+        let row = self
+            .all_server_groups
+            .iter()
+            .find_map(|group| {
+                group
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .filter(|_| group.name == super::remote_devices::REMOTE_GROUP_NAME)
+            })
+            .or_else(|| {
+                if self.all_server_groups.is_empty() {
+                    self.all_sessions
+                        .iter()
+                        .chain(self.all_orphan_sessions.iter())
+                        .find(|session| session.id == session_id)
+                } else {
+                    None
+                }
+            })?;
+        // Only a row owned by another machine carries a foreign dir worth
+        // sending; a local row's dir is already known to the local daemon.
+        row.server_name
+            .as_ref()
+            .map(|_| row.working_dir.clone())
+            .flatten()
+    }
 }
 
 pub(super) fn remote_session_is_live(session: &SessionInfo) -> bool {
