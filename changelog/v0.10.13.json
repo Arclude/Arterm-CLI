@@ -1,0 +1,11 @@
+{
+  "version": "0.10.13",
+  "date": "2026-08-26",
+  "highlights": [
+    "Switching between paired machines no longer marks the left-behind session closed or crashed: the client says goodbye with a new detach request and the session stays registered and resumable"
+  ],
+  "fixes": [
+    "Legacy pairings that recorded the invite address as the device name (e.g. 192.168.1.108:7644) learn the peer's real name from the handshake; user-chosen names are never overwritten",
+    "Old servers that predate the detach request degrade gracefully: the unknown request only draws a benign error event and the connection closes normally"
+  ]
+}
