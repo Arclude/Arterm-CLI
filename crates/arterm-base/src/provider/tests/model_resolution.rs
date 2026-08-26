@@ -1895,6 +1895,12 @@ fn test_context_limit_respects_provider_hint() {
 
 #[test]
 fn test_resolve_model_capabilities_uses_provider_hint() {
+    // The context-limit cache is process-global and hydrates from this
+    // machine's persisted model catalogs; a live API may have reported a
+    // different limit for gpt-5.4 than the static table below expects.
+    // Clear it so this test pins the static classification.
+    clear_context_limit_cache_for_tests();
+
     let openai = resolve_model_capabilities("gpt-5.4", Some("openai"));
     assert_eq!(openai.provider.as_deref(), Some("openai"));
     assert_eq!(openai.context_window, Some(1_000_000));

@@ -297,6 +297,8 @@ pub fn set_model_with_auth_refresh(provider: &dyn Provider, model: &str) -> Resu
 }
 
 use self::dispatch::CompletionMode;
+#[cfg(test)]
+pub use self::models::clear_context_limit_cache_for_tests;
 pub use self::models::{
     AccountModelAvailability, AccountModelAvailabilityState, AnthropicModelCatalog,
     ModelCatalogHttpStatus, OpenAIModelCatalog, begin_anthropic_model_catalog_refresh,

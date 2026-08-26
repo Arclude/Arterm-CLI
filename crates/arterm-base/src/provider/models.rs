@@ -479,6 +479,20 @@ fn get_cached_context_limit(model: &str) -> Option<usize> {
     cache.get(model).copied()
 }
 
+/// Drop all cached context limits.
+///
+/// Test support: the cache is process-global and hydrates from this machine's
+/// persisted model catalogs (`~/.config/arterm/openai_model_catalog_cache.json`),
+/// so a developer whose live API reported a different limit for a model sees
+/// static-classification tests fail depending on execution order. Clearing at
+/// test start pins the expectation to the static tables under test.
+#[cfg(test)]
+pub fn clear_context_limit_cache_for_tests() {
+    if let Ok(mut cache) = CONTEXT_LIMIT_CACHE.write() {
+        cache.clear();
+    }
+}
+
 /// Populate the context limit cache from API-provided model data.
 /// Called once at startup when OpenAI OAuth credentials are available.
 pub fn populate_context_limits(models: HashMap<String, usize>) {
