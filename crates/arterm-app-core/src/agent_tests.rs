@@ -1860,3 +1860,96 @@ async fn fable_guardrail_reconsideration_recovers_the_streaming_turn() {
         "{text:?}"
     );
 }
+
+/// A peer switch restores a session living on another machine, where the
+/// client's own cwd is a foreign path. The subscribe cwd the client sends is
+/// the target session's *own* advertised working dir; the restore must stamp
+/// exactly that onto the session (and persist it), never the daemon's cwd and
+/// never the pre-switch directory.
+#[tokio::test]
+async fn restore_with_working_dir_override_stamps_the_targets_own_dir() {
+    let _guard = crate::storage::lock_test_env();
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    // The session as the peer owns it: a working dir on the peer's filesystem
+    // (a Windows path in the motivating case) and a real conversation.
+    let mut target = crate::session::Session::create_with_id(
+        "session_peer_target_windows".to_string(),
+        None,
+        Some("windows chat".to_string()),
+    );
+    target.working_dir = Some("C:\\Users\\toygar\\projects\\thing".to_string());
+    target.messages.push(crate::session::StoredMessage {
+        id: "m1".to_string(),
+        role: crate::message::Role::User,
+        content: vec![crate::message::ContentBlock::Text {
+            text: "hello from windows".to_string(),
+            cache_control: None,
+        }],
+        display_role: None,
+        timestamp: None,
+        tool_duration_ms: None,
+        token_usage: None,
+    });
+    target.save().expect("save target");
+
+    // The boot session the client is leaving behind carries this machine's
+    // cwd; the override the peer switch sends is the target's own dir.
+    let peer_advertised_dir = "C:\\Users\\toygar\\projects\\thing";
+    agent
+        .restore_session_with_working_dir(&target.id, Some(peer_advertised_dir))
+        .expect("restore with override should succeed");
+
+    assert_eq!(
+        agent.working_dir(),
+        Some(peer_advertised_dir),
+        "the live agent must run in the target session's own directory"
+    );
+    let on_disk =
+        crate::session::Session::load(&target.id).expect("reload persisted session");
+    assert_eq!(
+        on_disk.working_dir.as_deref(),
+        Some(peer_advertised_dir),
+        "the override must be persisted with the resumed session"
+    );
+    assert_eq!(
+        on_disk.messages.len(),
+        1,
+        "the target's conversation must arrive intact"
+    );
+}
+
+/// Coming home (or any ordinary local resume) sends no override, and the
+/// session's persisted working dir must survive the restore untouched.
+#[tokio::test]
+async fn restore_without_override_keeps_the_sessions_persisted_dir() {
+    let _guard = crate::storage::lock_test_env();
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    let mut target = crate::session::Session::create_with_id(
+        "session_local_target_keepdir".to_string(),
+        None,
+        None,
+    );
+    target.working_dir = Some("/home/toygar/local-project".to_string());
+    target.save().expect("save target");
+
+    agent
+        .restore_session(&target.id)
+        .expect("plain restore should succeed");
+
+    assert_eq!(
+        agent.working_dir(),
+        Some("/home/toygar/local-project"),
+        "no override means the session's own dir stays authoritative"
+    );
+    let on_disk = crate::session::Session::load(&target.id).expect("reload");
+    assert_eq!(
+        on_disk.working_dir.as_deref(),
+        Some("/home/toygar/local-project")
+    );
+}
