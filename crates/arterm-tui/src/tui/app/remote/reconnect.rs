@@ -825,6 +825,7 @@ pub(in crate::tui::app) fn finalize_reload_reconnect(
                     "Reload reconnect: clearing stale resumed-processing state before dispatching continuation",
                 );
                 app.remote_resume_activity = None;
+                app.hold_queued_followups_until_idle = false;
                 app.is_processing = false;
                 app.status = ProcessingStatus::Idle;
                 app.processing_started = None;

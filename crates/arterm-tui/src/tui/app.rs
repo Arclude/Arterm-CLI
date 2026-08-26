@@ -919,6 +919,12 @@ pub struct App {
     deferred_stream_done_id: Option<u64>,
     // Server-reported processing snapshot captured from resume/history before live events arrive.
     remote_resume_activity: Option<RemoteResumeActivity>,
+    // After "Already processing a message", keep recovered queued follow-ups
+    // parked until the running turn actually completes. Live stream events
+    // clear `remote_resume_activity`, which would otherwise let
+    // `process_remote_followups` treat the queue as a synthetic startup and
+    // resend into the same busy rejection.
+    hold_queued_followups_until_idle: bool,
     // First tick at which a queued follow-up was observed sitting undispatched
     // while the client was idle. Drives the starvation watchdog that recovers a
     // stranded auto-poke continuation instead of spinning forever.

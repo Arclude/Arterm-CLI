@@ -857,3 +857,127 @@ fn unsolicited_remote_model_change_does_not_touch_startup_default() {
         "an unsolicited model change must not rewrite the startup default"
     );
 }
+
+#[test]
+fn test_busy_rejection_does_not_redispatch_queued_continuation() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+
+    // Reload raced the turn-end dispatch: a queued continuation was dequeued
+    // into begin_remote_send, which stamped current_message_id with the
+    // follow-up request id. The server still has the original turn running
+    // and rejects the follow-up with that same id.
+    app.is_processing = true;
+    app.status = ProcessingStatus::Sending;
+    app.current_message_id = Some(99);
+    app.remote_session_id = Some("session_busy_rejection".to_string());
+    app.rate_limit_pending_message = Some(PendingRemoteMessage {
+        content: "queued follow-up in flight".to_string(),
+        images: vec![],
+        is_system: true,
+        system_reminder: Some("hidden reminder".to_string()),
+        auto_retry: false,
+        retry_attempts: 0,
+        retry_at: None,
+    });
+
+    app.handle_server_event(
+        crate::protocol::ServerEvent::Error {
+            id: 99,
+            message: "Already processing a message".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    assert_eq!(app.queued_messages(), &["queued follow-up in flight"]);
+    assert_eq!(app.hidden_queued_system_messages, vec!["hidden reminder"]);
+    assert!(
+        app.rate_limit_pending_message.is_none(),
+        "rejected continuation must return to the queue, not stay pending"
+    );
+    assert!(
+        app.is_processing,
+        "busy rejection must keep the running-turn processing flag"
+    );
+    assert!(
+        app.current_message_id.is_none(),
+        "rejected follow-up id must not remain as current_message_id"
+    );
+    assert!(
+        app.remote_resume_activity.is_some(),
+        "resume snapshot must block synthetic startup redispatches"
+    );
+    assert!(
+        app.hold_queued_followups_until_idle,
+        "busy rejection must park the queue until the original turn completes"
+    );
+    assert!(
+        !app.display_messages().iter().any(|message| {
+            message.role == "error" && message.content == "Already processing a message"
+        }),
+        "busy rejection should not surface as a transcript error"
+    );
+
+    rt.block_on(remote::process_remote_followups(&mut app, &mut remote));
+
+    assert_eq!(
+        app.queued_messages(),
+        &["queued follow-up in flight"],
+        "queued continuation must stay queued while the original turn is still running"
+    );
+    assert_eq!(app.hidden_queued_system_messages, vec!["hidden reminder"]);
+    assert!(
+        app.rate_limit_pending_message.is_none(),
+        "follow-up drain must not re-send while the server is still busy"
+    );
+    assert!(app.is_processing);
+    assert!(app.current_message_id.is_none());
+    assert!(app.hold_queued_followups_until_idle);
+
+    // Live stream events clear remote_resume_activity. The hold flag must still
+    // prevent a synthetic redispatch into the same busy rejection.
+    app.handle_server_event(
+        crate::protocol::ServerEvent::TextDelta {
+            text: "still working".to_string(),
+        },
+        &mut remote,
+    );
+    assert!(app.remote_resume_activity.is_none());
+    assert!(app.hold_queued_followups_until_idle);
+    rt.block_on(remote::process_remote_followups(&mut app, &mut remote));
+    assert_eq!(
+        app.queued_messages(),
+        &["queued follow-up in flight"],
+        "live stream must not re-arm a synthetic startup dispatch"
+    );
+    assert!(app.rate_limit_pending_message.is_none());
+
+    // A later Done for the original turn (unknown to this client) must still
+    // finalize the resumed activity so the queue can dispatch once. Flush the
+    // paced TextDelta first; otherwise Done is deferred until the next tick.
+    let ops = app.stream_buffer.flush();
+    app.apply_stream_ops(ops);
+    app.stream_message_ended = true;
+    app.handle_server_event(crate::protocol::ServerEvent::Done { id: 7 }, &mut remote);
+    assert!(
+        !app.is_processing,
+        "resumed-turn Done must complete the adopted running turn"
+    );
+    assert!(app.remote_resume_activity.is_none());
+    assert!(
+        !app.hold_queued_followups_until_idle,
+        "turn completion must release the parked queue"
+    );
+
+    rt.block_on(remote::process_remote_followups(&mut app, &mut remote));
+    assert!(
+        app.queued_messages().is_empty(),
+        "queued continuation must dispatch once the original turn completes"
+    );
+    assert!(app.rate_limit_pending_message.is_some());
+    assert!(app.is_processing);
+}

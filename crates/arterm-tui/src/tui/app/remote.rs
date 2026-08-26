@@ -849,6 +849,7 @@ pub(super) async fn handle_remote_event<B: Backend>(
                 app.set_status_notice("Remote protocol error");
                 app.is_processing = false;
                 app.status = ProcessingStatus::Idle;
+                app.hold_queued_followups_until_idle = false;
                 return Ok((RemoteEventOutcome::Quit, true));
             }
             handle_disconnect(app, state, Some(reason));
@@ -961,6 +962,7 @@ pub(super) fn handle_disconnect(
     app.current_message_id = None;
     app.last_stream_activity = None;
     app.remote_resume_activity = None;
+    app.hold_queued_followups_until_idle = false;
     let ops = app.stream_buffer.flush();
     app.apply_stream_ops(ops);
     if !app.streaming.streaming_text.is_empty() {
@@ -1351,6 +1353,7 @@ pub(super) async fn process_remote_followups(app: &mut App, remote: &mut RemoteC
     let synthetic_startup_dispatch = app.is_processing
         && app.current_message_id.is_none()
         && app.remote_resume_activity.is_none()
+        && !app.hold_queued_followups_until_idle
         && (app.submit_input_on_startup
             || !app.queued_messages.is_empty()
             || !app.hidden_queued_system_messages.is_empty());
@@ -1698,6 +1701,7 @@ async fn detect_and_cancel_stall(app: &mut App, remote: &mut RemoteConnection) {
             app.clear_visible_turn_started();
             app.status = ProcessingStatus::Idle;
             app.current_message_id = None;
+            app.hold_queued_followups_until_idle = false;
             app.processing_started = None;
             app.last_stream_activity = None;
             if !app.streaming.streaming_text.is_empty() {

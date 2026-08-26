@@ -604,7 +604,6 @@ pub(in crate::tui::app) fn handle_server_event(
             | ServerEvent::UpstreamProvider { .. }
             | ServerEvent::Interrupted
             | ServerEvent::Done { .. }
-            | ServerEvent::Error { .. }
     ) {
         app.remote_resume_activity = None;
     }
@@ -1056,6 +1055,7 @@ pub(in crate::tui::app) fn handle_server_event(
             app.stream_message_ended = false;
             app.processing_started = None;
             app.current_message_id = None;
+            app.hold_queued_followups_until_idle = false;
             remote.clear_pending();
             remote.reset_call_output_tokens_seen();
             let auto_poked = app.schedule_turn_end_followups();
@@ -1177,6 +1177,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.thought_line_inserted = false;
                 app.thinking_prefix_emitted = false;
                 app.thinking_buffer.clear();
+                app.hold_queued_followups_until_idle = false;
                 remote.clear_pending();
                 remote.reset_call_output_tokens_seen();
                 app.note_runtime_memory_event_force("turn_completed", "remote_turn_finished");
@@ -1208,9 +1209,9 @@ pub(in crate::tui::app) fn handle_server_event(
             completed_current_message || auto_poked
         }
         ServerEvent::Error {
+            id,
             message,
             retry_after_secs,
-            ..
         } => {
             // An MCP action launched from the open /mcp overlay failed; land
             // the error in the overlay footer (where the "working..." note
@@ -1234,16 +1235,31 @@ pub(in crate::tui::app) fn handle_server_event(
             if message == "Already processing a message"
                 && recover_undelivered_queued_continuation(app, "server busy rejection")
             {
+                // The Error id is the *rejected follow-up*, not the running turn.
+                // `begin_remote_send` already overwrote `current_message_id` with
+                // that follow-up id. Drop it so a later live Done for the real
+                // turn is not treated as stale (`id < current`). Keep
+                // `is_processing` and park the recovered queue until that turn
+                // actually completes. Clearing processing made
+                // `process_remote_followups` treat the queue as a synthetic
+                // startup and resend immediately; live stream events also clear
+                // `remote_resume_activity`, so the resume snapshot alone is not
+                // enough to stop the loop.
+                if app.current_message_id == Some(id) {
+                    app.current_message_id = None;
+                }
                 app.is_processing = true;
                 app.status = ProcessingStatus::Thinking(Instant::now());
-                app.current_message_id = None;
                 app.processing_started.get_or_insert_with(Instant::now);
                 app.last_stream_activity = Some(Instant::now());
-                app.remote_resume_activity = Some(RemoteResumeActivity {
-                    session_id: app.remote_session_id.clone().unwrap_or_default(),
-                    observed_at: Instant::now(),
-                    current_tool_name: None,
-                });
+                app.hold_queued_followups_until_idle = true;
+                if app.remote_resume_activity.is_none() {
+                    app.remote_resume_activity = Some(RemoteResumeActivity {
+                        session_id: app.remote_session_id.clone().unwrap_or_default(),
+                        observed_at: Instant::now(),
+                        current_tool_name: None,
+                    });
+                }
                 app.set_status_notice("Server still busy; follow-up stays queued");
                 crate::logging::info(
                     "Server rejected queued continuation because a turn is still running; re-queued it and re-adopted the running turn",
@@ -1274,6 +1290,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     app.processing_started = None;
                     app.clear_visible_turn_started();
                     app.current_message_id = None;
+                    app.hold_queued_followups_until_idle = false;
                     remote.clear_pending();
                     remote.reset_call_output_tokens_seen();
                     return false;
@@ -1306,6 +1323,7 @@ pub(in crate::tui::app) fn handle_server_event(
             app.is_processing = false;
             app.status = ProcessingStatus::Idle;
             app.stream_message_ended = false;
+            app.hold_queued_followups_until_idle = false;
             let recovered_local = recover_local_interleave_to_queue(app, "request error");
             crate::tui::mermaid::clear_streaming_preview_diagram();
             app.thought_line_inserted = false;
@@ -1662,6 +1680,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.last_stream_activity = None;
                 app.stream_message_ended = false;
                 app.remote_resume_activity = None;
+                app.hold_queued_followups_until_idle = false;
                 app.is_processing = false;
                 app.status = ProcessingStatus::Idle;
                 app.follow_chat_bottom();
