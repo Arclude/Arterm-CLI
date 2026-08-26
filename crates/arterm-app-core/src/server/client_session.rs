@@ -1597,9 +1597,12 @@ pub(super) async fn handle_resume_session(
             if old_session_id != session_id {
                 // The agent has already restored the target session, so its
                 // in-memory message list describes the target, not the boot
-                // session. Read the boot session's own snapshot from disk.
-                let discardable = crate::session::Session::load_startup_stub(&old_session_id)
-                    .map(|stub| !stub.has_visible_conversation())
+                // session. Read the boot session's own snapshot from disk —
+                // the full one: `load_startup_stub` skips the message vector,
+                // so a stub could not tell a conversation from an empty boot
+                // session and would have marked both discardable.
+                let discardable = crate::session::Session::load(&old_session_id)
+                    .map(|session| !session.has_visible_conversation())
                     .unwrap_or(false);
                 if discardable {
                     let old_id = old_session_id.clone();

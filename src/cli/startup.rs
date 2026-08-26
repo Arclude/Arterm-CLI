@@ -31,10 +31,15 @@ pub async fn run() -> Result<()> {
         .spawn(crate::memory_log::cleanup_old_memory_logs)
         .ok();
     // Prune stale per-session `.bak` recovery copies (never the transcripts
-    // themselves) so the sessions directory does not grow without bound.
+    // themselves) so the sessions directory does not grow without bound. The
+    // same thread sweeps long-abandoned empty boot sessions left behind by
+    // pre-cleanup builds.
     std::thread::Builder::new()
         .name("arterm-session-bak-prune".to_string())
-        .spawn(crate::session::prune_old_session_backups)
+        .spawn(|| {
+            crate::session::prune_old_session_backups();
+            crate::session::prune_empty_boot_sessions();
+        })
         .ok();
     logging::info("arterm starting");
 

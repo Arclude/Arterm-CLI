@@ -57,11 +57,42 @@ pub fn delete_session_files(session_id: &str) {
     let Ok(snapshot) = session_path(session_id) else {
         return;
     };
-    let journal = session_journal_path_from_snapshot(&snapshot);
-    let mut backup = snapshot.clone().into_os_string();
-    backup.push(".bak");
-    let _ = std::fs::remove_file(&snapshot);
-    let _ = std::fs::remove_file(&journal);
-    let _ = std::fs::remove_file(std::path::Path::new(&backup));
+    delete_session_files_at(&snapshot);
     let _ = crate::storage::unregister_active_pid(session_id);
+}
+
+/// Remove a session's artifacts starting from the snapshot path, for callers
+/// that discovered the file themselves (e.g., a directory sweep) rather than
+/// through the storage-dir id lookup.
+pub(crate) fn delete_session_files_at(snapshot: &Path) {
+    let journal = session_journal_path_from_snapshot(snapshot);
+    // `storage::write_bytes_inner` leaves the previous version as
+    // `<id>.bak` (extension replaced, not appended), and a wipe guard can
+    // leave `<full-name>.pre-wipe-<ts>.bak` copies. Both are copies of the
+    // snapshot being deleted, so both go.
+    let rolling_backup = snapshot.with_extension("bak");
+    let _ = std::fs::remove_file(snapshot);
+    let _ = std::fs::remove_file(&journal);
+    let _ = std::fs::remove_file(&rolling_backup);
+    if let Some(dir) = snapshot.parent() {
+        if let Some(stem) = snapshot.file_name().and_then(|n| n.to_str()) {
+            let prefix = format!("{stem}.pre-wipe-");
+            let _ = prune_pre_wipe_backups(dir, &prefix);
+        }
+    }
+}
+
+/// Remove `<stem>.pre-wipe-<timestamp>.bak` copies in `dir`.
+fn prune_pre_wipe_backups(dir: &std::path::Path, prefix: &str) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(prefix) && name.ends_with(".bak") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    Ok(())
 }
