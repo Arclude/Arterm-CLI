@@ -487,7 +487,7 @@ impl SelfDevTool {
     /// reload/find-config); inside self-dev it manages builds and reloads.
     pub fn description_for(is_selfdev: bool) -> &'static str {
         if is_selfdev {
-            "Manage self-dev builds, tests, and reloads while working on arterm itself."
+            "Manage self-dev builds, tests, and reloads while working on arterm itself. `build` and `build-reload` require a non-empty `reason` so other queued agents can see why the build is needed."
         } else {
             "Enter self-dev mode to work on arterm itself: setup, reload, find config/paths."
         }
@@ -523,7 +523,10 @@ impl SelfDevTool {
                     },
                     "prompt": { "type": "string" },
                     "context": { "type": "string" },
-                    "reason": { "type": "string" },
+                    "reason": {
+                        "type": "string",
+                        "description": "Required for `build` and `build-reload`. Non-empty explanation shown to other queued/blocked agents."
+                    },
                     "target": {
                         "type": "string",
                         "enum": ["auto", "tui", "desktop2", "all"],

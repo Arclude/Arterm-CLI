@@ -401,6 +401,24 @@ fn schema_only_advertises_core_selfdev_fields() {
     assert!(props.contains_key("prompt"));
     assert!(props.contains_key("context"));
     assert!(props.contains_key("reason"));
+    assert_eq!(
+        schema["properties"]["reason"]["description"].as_str(),
+        Some(
+            "Required for `build` and `build-reload`. Non-empty explanation shown to other queued/blocked agents."
+        )
+    );
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .expect("required")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(required.contains(&"action"));
+    assert!(
+        !required.contains(&"reason"),
+        "reason is required only for build/build-reload, not every selfdev action"
+    );
+    assert!(SelfDevTool::description_for(true).contains("non-empty `reason`"));
     assert!(props.contains_key("target"));
     assert!(props.contains_key("command"));
     assert!(props.contains_key("request_id"));
