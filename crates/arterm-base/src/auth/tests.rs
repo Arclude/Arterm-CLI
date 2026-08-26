@@ -968,6 +968,38 @@ fn browser_suppressed_inside_test_harness_without_env_overrides() {
     );
 }
 
+/// The nightly cargo used by the dev wrapper's parallel frontend can relocate
+/// test binaries from `target/<profile>/deps/` to
+/// `target/<profile>/build/<pkg>/<hash>/out/`; the detection must follow both
+/// layouts or every unit test may pop a real browser window.
+#[test]
+fn test_harness_detection_covers_nightly_out_dir_layout() {
+    use super::is_test_harness_path as is_harness;
+    assert!(
+        is_harness("/repo/target/debug/deps/arterm_base-abc"),
+        "stable cargo deps/ layout"
+    );
+    assert!(
+        is_harness("/repo/target/selfdev/build/arterm-base/e1c5/out/arterm_base-e1c5"),
+        "nightly cargo build/<pkg>/<hash>/out/ layout (seen in the wild 2026-08)"
+    );
+    assert!(
+        is_harness("C:\\repo\\target\\debug\\deps\\arterm_base-abc.exe"),
+        "windows paths are normalized before matching"
+    );
+    // Production binaries live directly under target/<profile>/; classifying
+    // them as test harnesses would suppress the user's real browser logins.
+    assert!(
+        !is_harness("/repo/target/selfdev/arterm"),
+        "a production binary must not be classified as a test harness"
+    );
+    assert!(
+        !is_harness("/home/user/.arterm/builds/current/arterm"),
+        "an installed binary is not a test harness"
+    );
+    assert!(!is_harness("/usr/bin/arterm"), "system install");
+}
+
 /// Antigravity/Gemini access tokens live about an hour and are refreshed
 /// transparently on the next request. Reporting `Expired` just because the
 /// cached access token aged out made a fully working provider render as broken

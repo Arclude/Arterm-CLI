@@ -151,12 +151,22 @@ pub fn running_in_test_harness() -> bool {
         }
         std::env::current_exe()
             .ok()
-            .map(|exe| {
-                let path = exe.to_string_lossy().replace('\\', "/");
-                path.contains("/target/") && path.contains("/deps/")
-            })
+            .map(|exe| is_test_harness_path(&exe.to_string_lossy()))
             .unwrap_or(false)
     })
+}
+
+/// Whether an executable path looks like a cargo test-harness binary.
+///
+/// Stable cargo puts test binaries in `target/<profile>/deps/`. Newer nightly
+/// cargo (used by the dev wrapper's parallel frontend) can relocate them to
+/// `target/<profile>/build/<pkg>/<hash>/out/`. Production binaries live
+/// directly in `target/<profile>/` — no `deps/` or `out/` segment — wherever
+/// they are later copied or symlinked to.
+fn is_test_harness_path(raw: &str) -> bool {
+    let path = raw.replace('\\', "/");
+    let in_artifact_dir = path.contains("/deps/") || path.contains("/out/");
+    path.contains("/target/") && in_artifact_dir
 }
 
 fn env_truthy(key: &str) -> bool {
