@@ -2829,7 +2829,20 @@ fn restore_agent_session_if_requested(
     resume_session: Option<&str>,
 ) -> Result<()> {
     if let Some(session_id) = resume_session {
+        // The fresh agent booted with a throwaway session that `mark_active`
+        // already persisted. Resuming away from it must delete that boot
+        // session (when it is really empty), mirroring the server-side
+        // cleanup in `handle_resume_session` — otherwise every
+        // `arterm run --resume <id>` leaves another empty file behind.
+        let boot_session_id = agent.session_id().to_string();
         agent.restore_session(session_id)?;
+        if boot_session_id != session_id
+            && crate::session::Session::load(&boot_session_id)
+                .map(|boot| !boot.has_visible_conversation())
+                .unwrap_or(false)
+        {
+            crate::session::delete_session_files(&boot_session_id);
+        }
     }
     Ok(())
 }

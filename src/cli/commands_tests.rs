@@ -1281,3 +1281,75 @@ async fn restore_agent_session_if_requested_restores_resumed_session() {
 
     assert_eq!(resumed.session_id(), original_session_id);
 }
+
+#[tokio::test]
+async fn restore_agent_session_if_requested_deletes_the_boot_session() {
+    let _guard = crate::storage::lock_test_env();
+
+    let provider: Arc<dyn Provider> = Arc::new(TestProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut original = crate::agent::Agent::new(provider.clone(), registry);
+    let original_session_id = original.session_id().to_string();
+    original
+        .run_once_capture("seed session for resume boot-delete test")
+        .await
+        .expect("seed session");
+
+    let registry = Registry::new(provider.clone()).await;
+    let mut resumed = crate::agent::Agent::new(provider, registry);
+    let boot_session_id = resumed.session_id().to_string();
+    assert_ne!(boot_session_id, original_session_id);
+    assert!(
+        crate::session::session_exists(&boot_session_id),
+        "boot session must be on disk before the resume"
+    );
+
+    restore_agent_session_if_requested(&mut resumed, Some(&original_session_id))
+        .expect("restore session");
+
+    assert_eq!(resumed.session_id(), original_session_id);
+    assert!(
+        !crate::session::session_exists(&boot_session_id),
+        "empty boot session must be deleted after resuming away"
+    );
+    assert!(
+        crate::session::session_exists(&original_session_id),
+        "the resumed target must survive"
+    );
+}
+
+#[tokio::test]
+async fn restore_agent_session_if_requested_keeps_a_boot_session_with_conversation() {
+    let _guard = crate::storage::lock_test_env();
+
+    let provider: Arc<dyn Provider> = Arc::new(TestProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut original = crate::agent::Agent::new(provider.clone(), registry);
+    let original_session_id = original.session_id().to_string();
+    original
+        .run_once_capture("seed session for keep-boot test")
+        .await
+        .expect("seed session");
+
+    // A boot session the user already typed into is a real conversation.
+    let registry = Registry::new(provider.clone()).await;
+    let mut resumed = crate::agent::Agent::new(provider, registry);
+    let boot_session_id = resumed.session_id().to_string();
+    resumed
+        .run_once_capture("a turn that lives in the boot session")
+        .await
+        .expect("turn in boot session");
+    assert!(
+        crate::session::session_exists(&boot_session_id),
+        "boot session with a turn must be on disk"
+    );
+
+    restore_agent_session_if_requested(&mut resumed, Some(&original_session_id))
+        .expect("restore session");
+
+    assert!(
+        crate::session::session_exists(&boot_session_id),
+        "boot session holding a conversation must be kept"
+    );
+    assert_eq!(resumed.session_id(), original_session_id);
+}
