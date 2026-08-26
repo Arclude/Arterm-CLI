@@ -61,7 +61,20 @@ pub(crate) async fn listen(address: Option<String>) -> Result<()> {
         println!("{} paired device(s) may connect.", paired.devices().len());
     }
 
+    // A peer session is spliced into whatever daemon owns this socket, and a
+    // listener started from another arterm session's shell inherits that
+    // session's ARTERM_SOCKET — silently relaying peers to the *wrong*
+    // daemon. Say which daemon is about to receive them before anything
+    // connects.
     let socket = crate::server::socket_path();
+    println!("  daemon socket {}", socket.display());
+    if let Some(note) = inherited_socket_note(
+        std::env::var_os("ARTERM_SOCKET").as_deref(),
+        &crate::storage::runtime_dir().join("arterm.sock"),
+    ) {
+        println!();
+        println!("Note: {note}");
+    }
     if !crate::server::has_live_listener(&socket).await {
         println!();
         println!("Note: no arterm server is running at {}.", socket.display());
@@ -358,6 +371,34 @@ fn default_proxy_socket(fingerprint: &Fingerprint) -> Result<PathBuf> {
         .context("a device fingerprint is shorter than expected")?
         .to_string();
     Ok(crate::storage::runtime_dir().join(format!("arterm-peer-{short}.sock")))
+}
+
+/// The note `listen` prints when ARTERM_SOCKET came from the environment
+/// rather than this machine's own runtime dir.
+///
+/// The listener joins peers to whatever daemon owns [`crate::server::socket_path`],
+/// and a listener started from another arterm session's shell inherits that
+/// session's `ARTERM_SOCKET` — pointing peers at a daemon whose sessions are
+/// not the ones this machine shows. There is no reliable way to detect the
+/// wrong daemon from inside (the inherited path can even be the default
+/// path of a different runtime dir), so the note fires whenever the
+/// environment supplies a socket at all: the banner already names the exact
+/// socket that will be used, and this tells the reader why.
+fn inherited_socket_note(
+    inherited: Option<&std::ffi::OsStr>,
+    default_socket: &std::path::Path,
+) -> Option<String> {
+    let inherited = inherited?;
+    let inherited_path = std::path::Path::new(inherited);
+    if inherited_path == default_socket {
+        // The environment names this machine's own socket; nothing surprising.
+        return None;
+    }
+    Some(format!(
+        "ARTERM_SOCKET={} was inherited from this shell's environment, so peers will be \
+         joined to the daemon at that path. Unset it to serve this machine's own daemon.",
+        inherited_path.display()
+    ))
 }
 
 #[cfg(test)]

@@ -198,6 +198,49 @@ fn the_local_socket_is_named_after_the_device_and_not_after_the_daemon() {
     );
 }
 
+/// A listener started from another arterm session's shell inherits that
+/// session's ARTERM_SOCKET. The note must say so, because the peers it
+/// accepts will be joined to a daemon whose sessions are not this
+/// machine's. This is the exact silent-wrong-target the two-device tour
+/// hit: the inherited path is even the *default* socket path of a
+/// different runtime dir, so nothing else about it looks wrong.
+#[test]
+fn an_inherited_socket_from_another_session_earns_a_warning() {
+    let note = inherited_socket_note(
+        Some(std::ffi::OsStr::new("/run/user/1000/arterm.sock")),
+        std::path::Path::new("/tmp/fake-win-home/run/arterm.sock"),
+    )
+    .expect("an inherited foreign socket must be called out");
+    assert!(
+        note.contains("inherited"),
+        "the note should say the socket came from the environment, got: {note}"
+    );
+    assert!(
+        note.contains("/run/user/1000/arterm.sock"),
+        "the note should name the inherited path, got: {note}"
+    );
+}
+
+/// The common honest case: no ARTERM_SOCKET in the environment, the daemon
+/// socket is this machine's own. No note, no noise.
+#[test]
+fn no_inherited_socket_means_no_note() {
+    assert!(inherited_socket_note(None, std::path::Path::new("/run/user/1000/arterm.sock")).is_none());
+}
+
+/// When the environment names exactly this machine's own default socket the
+/// relay target is the expected daemon either way, so the note stays quiet
+/// rather than nagging every normal invocation that happens to inherit its
+/// own session's socket.
+#[test]
+fn an_inherited_socket_matching_the_default_path_stays_quiet() {
+    assert!(inherited_socket_note(
+        Some(std::ffi::OsStr::new("/run/user/1000/arterm.sock")),
+        std::path::Path::new("/run/user/1000/arterm.sock"),
+    )
+    .is_none());
+}
+
 /// The local socket is a door to another machine's agent, so it must not be
 /// walkable by anyone else sharing this host.
 #[cfg(unix)]
