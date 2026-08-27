@@ -111,9 +111,10 @@ fn status_label(status: &BackgroundTaskStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::task_summary;
+    use super::{handle_bg_action, task_summary};
     use crate::background::TaskStatusFile;
     use crate::bus::BackgroundTaskStatus;
+    use crate::protocol::ServerEvent;
 
     fn running_task() -> TaskStatusFile {
         TaskStatusFile {
@@ -149,5 +150,79 @@ mod tests {
         assert!(summary.detached);
         assert!(summary.duration_secs.is_none());
         assert!(summary.progress.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_and_cancel_round_trip_a_live_task() {
+        let session_id = format!("session_jobs_{}", std::process::id());
+        let info = crate::background::global()
+            .spawn_with_notify(
+                "bash",
+                Some("wire overlay job".to_string()),
+                &session_id,
+                false,
+                false,
+                |_output| async {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    Ok(crate::background::TaskResult::completed(Some(0)))
+                },
+            )
+            .await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        handle_bg_action(7, "list", None, false, &session_id, &tx).await;
+
+        let ServerEvent::BgTaskList { id, tasks } = rx.recv().await.expect("list snapshot") else {
+            panic!("list must answer with BgTaskList");
+        };
+        assert_eq!(id, 7);
+        let listed = tasks
+            .iter()
+            .find(|task| task.task_id == info.task_id)
+            .expect("live job must appear in this session's list");
+        assert_eq!(listed.status, "running");
+        assert_eq!(listed.display_name.as_deref(), Some("wire overlay job"));
+        assert_eq!(listed.session_id, session_id);
+        assert!(listed.started_at.contains('T'));
+        let ServerEvent::Done { id } = rx.recv().await.expect("list done") else {
+            panic!("list must finish with Done");
+        };
+        assert_eq!(id, 7);
+
+        handle_bg_action(
+            8,
+            "cancel",
+            Some(info.task_id.as_str()),
+            false,
+            &session_id,
+            &tx,
+        )
+        .await;
+        let ServerEvent::BgTaskList { id, tasks } = rx.recv().await.expect("cancel snapshot") else {
+            panic!("cancel must answer with a refreshed BgTaskList");
+        };
+        assert_eq!(id, 8);
+        let cancelled = tasks
+            .iter()
+            .find(|task| task.task_id == info.task_id)
+            .expect("cancelled job stays in the snapshot");
+        assert_eq!(cancelled.status, "failed");
+        assert_eq!(cancelled.error.as_deref(), Some("Cancelled by user"));
+        assert!(
+            cancelled.duration_secs.is_some_and(|secs| secs >= 0.0),
+            "cancelled job must carry elapsed time"
+        );
+        let ServerEvent::Done { id } = rx.recv().await.expect("cancel done") else {
+            panic!("cancel must finish with Done");
+        };
+        assert_eq!(id, 8);
+
+        handle_bg_action(9, "cancel", None, false, &session_id, &tx).await;
+        let ServerEvent::Error { id, message, .. } = rx.recv().await.expect("missing id error")
+        else {
+            panic!("cancel without a task id must error");
+        };
+        assert_eq!(id, 9);
+        assert!(message.contains("requires a task id"), "{message}");
     }
 }
