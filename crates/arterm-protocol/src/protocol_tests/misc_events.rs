@@ -500,3 +500,92 @@ fn test_message_end_carries_provider_stop_reason() -> Result<()> {
     assert!(!json.contains("stop_reason"), "unexpected field: {json}");
     Ok(())
 }
+
+#[test]
+fn test_bg_action_request_roundtrip() -> Result<()> {
+    let req = Request::BgAction {
+        id: 42,
+        action: "list".to_string(),
+        task_id: None,
+        all_sessions: true,
+    };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("\"type\":\"bg_action\""));
+    assert!(json.contains("\"all_sessions\":true"));
+    let decoded = parse_request_json(&json)?;
+    let Request::BgAction {
+        id,
+        action,
+        task_id,
+        all_sessions,
+    } = decoded
+    else {
+        return Err(anyhow!("expected BgAction request"));
+    };
+    assert_eq!(id, 42);
+    assert_eq!(action, "list");
+    assert!(task_id.is_none());
+    assert!(all_sessions);
+
+    // Default all_sessions is omitted so older peers keep a quiet wire.
+    let json = serde_json::to_string(&Request::BgAction {
+        id: 43,
+        action: "cancel".to_string(),
+        task_id: Some("abc123".to_string()),
+        all_sessions: false,
+    })?;
+    assert!(
+        !json.contains("all_sessions"),
+        "false all_sessions must not appear on the wire: {json}"
+    );
+    let decoded = parse_request_json(&json)?;
+    let Request::BgAction {
+        action,
+        task_id,
+        all_sessions,
+        ..
+    } = decoded
+    else {
+        return Err(anyhow!("expected BgAction request"));
+    };
+    assert_eq!(action, "cancel");
+    assert_eq!(task_id.as_deref(), Some("abc123"));
+    assert!(!all_sessions);
+    Ok(())
+}
+
+#[test]
+fn test_bg_task_list_event_roundtrip() -> Result<()> {
+    let event = ServerEvent::BgTaskList {
+        id: 42,
+        tasks: vec![BgTaskSummary {
+            task_id: "abc123".to_string(),
+            tool_name: "bash".to_string(),
+            display_name: Some("sleep for overlay".to_string()),
+            session_id: "session_one".to_string(),
+            status: "running".to_string(),
+            started_at: "2026-08-27T10:00:00+00:00".to_string(),
+            completed_at: None,
+            duration_secs: None,
+            pid: Some(7),
+            detached: true,
+            progress: None,
+            error: None,
+        }],
+    };
+    let json = encode_event(&event);
+    assert!(json.contains("\"type\":\"bg_task_list\""));
+    assert!(json.contains("\"started_at\":\"2026-08-27T10:00:00+00:00\""));
+    let decoded = parse_event_json(json.trim())?;
+    let ServerEvent::BgTaskList { id, tasks } = decoded else {
+        return Err(anyhow!("expected BgTaskList event"));
+    };
+    assert_eq!(id, 42);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].task_id, "abc123");
+    assert_eq!(tasks[0].display_name.as_deref(), Some("sleep for overlay"));
+    assert_eq!(tasks[0].status, "running");
+    assert_eq!(tasks[0].started_at, "2026-08-27T10:00:00+00:00");
+    assert!(tasks[0].detached);
+    Ok(())
+}

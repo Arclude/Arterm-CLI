@@ -1192,6 +1192,189 @@ fn remote_jobs_all_slash_requests_a_bg_list_on_the_next_tick() {
     );
 }
 
+fn jobs_overlay_text(app: &crate::tui::app::App) -> String {
+    let picker = app
+        .jobs_picker_overlay
+        .as_ref()
+        .expect("jobs overlay should be open");
+    let backend = ratatui::backend::TestBackend::new(90, 24);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| picker.render(frame))
+        .expect("draw overlay");
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+fn running_bg_task(task_id: &str, started_at: &str) -> crate::protocol::BgTaskSummary {
+    crate::protocol::BgTaskSummary {
+        task_id: task_id.to_string(),
+        tool_name: "bash".to_string(),
+        display_name: Some("sleep for overlay".to_string()),
+        session_id: "session_one".to_string(),
+        status: "running".to_string(),
+        started_at: started_at.to_string(),
+        completed_at: None,
+        duration_secs: Some(8.0),
+        pid: Some(7),
+        detached: true,
+        progress: None,
+        error: None,
+    }
+}
+
+#[test]
+fn remote_jobs_tick_sends_bg_action_list_on_the_wire() {
+    use tokio::io::AsyncBufReadExt;
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(true);
+    assert!(app.pending_jobs_list);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let line = rt.block_on(async {
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        let peer = remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream");
+        let (reader, _writer) = peer.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+
+        super::handle_tick(&mut app, &mut remote).await;
+
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .await
+            .expect("BgAction list should be readable by peer");
+        line
+    });
+
+    match serde_json::from_str::<crate::protocol::Request>(&line)
+        .expect("tick should send a protocol request")
+    {
+        crate::protocol::Request::BgAction {
+            action,
+            task_id,
+            all_sessions,
+            ..
+        } => {
+            assert_eq!(action, "list");
+            assert!(task_id.is_none());
+            assert!(all_sessions, "/jobs all must list every session");
+        }
+        other => panic!("expected BgAction list, got {other:?}"),
+    }
+    assert!(
+        !app.pending_jobs_list,
+        "the list request must be consumed after the tick"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_applies_bg_task_list_and_x_cancels_on_the_wire() {
+    use tokio::io::AsyncBufReadExt;
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("sleep for overlay") && text.contains("running") && text.contains("8s"),
+        "BgTaskList must paint the live job with elapsed time, got:\n{text}"
+    );
+
+    let line = rt.block_on(async {
+        let peer = remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream");
+        let (reader, _writer) = peer.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("x should send cancel");
+
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .await
+            .expect("BgAction cancel should be readable by peer");
+        line
+    });
+
+    match serde_json::from_str::<crate::protocol::Request>(&line)
+        .expect("overlay stop should send a protocol request")
+    {
+        crate::protocol::Request::BgAction {
+            action,
+            task_id,
+            all_sessions,
+            ..
+        } => {
+            assert_eq!(action, "cancel");
+            assert_eq!(task_id.as_deref(), Some("abc123"));
+            assert!(!all_sessions);
+        }
+        other => panic!("expected BgAction cancel, got {other:?}"),
+    }
+}
+
+#[test]
+fn remote_jobs_overlay_shows_background_job_errors() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "job errors must land in the overlay footer, got:\n{text}"
+    );
+}
+
 #[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
