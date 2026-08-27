@@ -1224,11 +1224,11 @@ pub(in crate::tui::app) fn handle_server_event(
                 return true;
             }
             if message.starts_with("Background job ") {
-                let overlay_open = app.jobs_picker_overlay.is_some();
+                // Overlay traffic even when /jobs is closed: a matching cancel
+                // Error still clears the in-flight id, and must not abort a
+                // live turn or land in the transcript.
                 app.apply_jobs_overlay_error(id, message.clone());
-                if overlay_open {
-                    return true;
-                }
+                return true;
             }
             // The server rejects a Message request with this error while its
             // previous turn is still running. This typically happens when a

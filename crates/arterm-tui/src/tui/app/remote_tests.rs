@@ -1760,6 +1760,45 @@ fn remote_jobs_overlay_error_does_not_finish_a_live_turn() {
 }
 
 #[test]
+fn remote_jobs_error_with_closed_overlay_does_not_finish_a_live_turn() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.status = crate::tui::app::ProcessingStatus::Streaming;
+    app.pending_jobs_remote_cancel = Some(8);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.jobs_picker_overlay.is_none(),
+        "the overlay stays closed"
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a matching cancel Error must clear the in-flight guard even when closed"
+    );
+    assert!(app.is_processing, "closed-overlay job errors must not abort the live turn");
+    assert_eq!(app.current_message_id, Some(3));
+    assert!(
+        !app.display_messages.iter().any(|m| m.content.contains("Background job")),
+        "closed-overlay job errors must not leak into the transcript"
+    );
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set
