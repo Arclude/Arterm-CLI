@@ -561,8 +561,16 @@ fn init_tui_terminal_resume() -> Result<ratatui::DefaultTerminal> {
     let mut terminal = Terminal::new(backend)
         .map_err(|e| anyhow::anyhow!("failed to create terminal on resume: {}", e))?;
 
+    // Not `Terminal::clear()`: its `get_cursor_position` query can never be
+    // answered while crossterm's event reader (already running from the
+    // pre-exec client) parks on the shared reader mutex, and the timed-out
+    // query kills resume with "The cursor position could not be read within a
+    // normal duration". A direct ED2 preserves the cursor by spec and needs
+    // no round-trip.
+    use ratatui::backend::{Backend, ClearType};
     terminal
-        .clear()
+        .backend_mut()
+        .clear_region(ClearType::All)
         .map_err(|e| anyhow::anyhow!("failed to clear terminal on resume: {}", e))?;
 
     Ok(terminal)

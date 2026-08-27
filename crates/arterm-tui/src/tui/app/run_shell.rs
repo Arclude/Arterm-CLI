@@ -21,6 +21,7 @@ fn report_reload_interaction_gap() {
 use crate::tui::TuiState;
 use crossterm::cursor::{RestorePosition, SavePosition};
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
+use ratatui::backend::ClearType;
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use std::io::Write;
 
@@ -160,9 +161,12 @@ pub(crate) fn status_uses_primary_spinner(status: &ProcessingStatus) -> bool {
 /// How the next full frame should invalidate ratatui's diff state, if at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FullFrameInvalidation {
-    /// `Terminal::clear()`: an ED2 Clear-All escape plus a full re-emit.
-    /// Needed when the real screen diverged from ratatui's model in cells the
-    /// next diff may not repaint (native terminal scroll, external commands).
+    /// An ED2 Clear-All escape plus a full re-emit, issued without the
+    /// cursor-position query `Terminal::clear()` performs (that query is
+    /// fatal under crossterm's event-reader lock contention; see
+    /// [`hard_clear_without_cursor_query`]). Needed when the real screen
+    /// diverged from ratatui's model in cells the next diff may not repaint
+    /// (native terminal scroll, external commands).
     HardClear,
     /// Sentinel-invalidate the previous buffer: full re-emit with no
     /// intermediate clear escape, so the repaint stays atomic inside the
@@ -219,6 +223,24 @@ pub(crate) fn invalidate_previous_terminal_buffer<B: ratatui::backend::Backend>(
         *cell = sentinel.clone();
     }
     terminal.swap_buffers();
+}
+
+/// The `Backend::get_cursor_position` query issued by ratatui's
+/// `Terminal::clear()` is fatal here: crossterm's `cursor::position` and the
+/// `EventStream` reader thread contend for the same internal event-reader
+/// mutex, and the reader parks on `poll(None)` while idle, so the query's
+/// `try_lock_for(~2s)` expires and crossterm returns the fatal
+/// "The cursor position could not be read within a normal duration" error
+/// (observed as an instant crash right after startup/resume). Clearing the
+/// region directly issues the same ED2 escape without any cursor round-trip,
+/// and the sentinel fill reproduces the "reset the back buffer" half of
+/// `Terminal::clear` so the next draw still re-emits every cell.
+pub(crate) fn hard_clear_without_cursor_query<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+) -> Result<(), B::Error> {
+    terminal.backend_mut().clear_region(ClearType::All)?;
+    invalidate_previous_terminal_buffer(terminal);
+    Ok(())
 }
 
 /// State the animation-only fast path consults before it may run, snapshotted
@@ -464,7 +486,7 @@ impl StatusSpinnerRenderer {
         let sync = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate).is_ok();
         match invalidation {
             FullFrameInvalidation::HardClear => {
-                terminal.clear()?;
+                hard_clear_without_cursor_query(terminal)?;
                 self.invalidate();
             }
             FullFrameInvalidation::SoftRepaint => {
