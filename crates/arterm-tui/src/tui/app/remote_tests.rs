@@ -1125,6 +1125,41 @@ fn remote_dropped_file_path_is_sent_as_a_prompt_not_a_slash_command() {
 }
 
 #[test]
+fn remote_jobs_slash_opens_the_overlay_instead_of_a_model_turn() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+    rt.block_on(crate::tui::app::remote::submit_remote_slash_input(
+        &mut app,
+        &mut remote,
+        crate::tui::app::input::PreparedInput {
+            raw_input: "/jobs".to_string(),
+            expanded: "/jobs".to_string(),
+            images: vec![],
+        },
+    ))
+    .expect("remote /jobs should open locally");
+
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "/jobs must open the overlay on a remote TUI"
+    );
+    assert!(
+        !app.is_processing,
+        "/jobs must not start a model turn"
+    );
+    assert!(
+        app.queued_messages().is_empty(),
+        "/jobs must not be queued as a user prompt"
+    );
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set
