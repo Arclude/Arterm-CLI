@@ -1008,6 +1008,14 @@ pub(super) fn handle_disconnect(
         ));
     }
     app.reset_streaming_tps();
+    if app.pending_jobs_remote_cancel.take().is_some() {
+        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+            picker.set_status("Connection lost; job may still be running.".to_string());
+        }
+    }
+    if app.jobs_picker_overlay.is_some() {
+        app.pending_jobs_list = true;
+    }
     app.is_processing = false;
     app.status = ProcessingStatus::Idle;
     app.stream_message_ended = false;

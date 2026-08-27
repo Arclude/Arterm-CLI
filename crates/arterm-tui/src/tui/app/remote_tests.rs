@@ -1913,6 +1913,35 @@ fn remote_jobs_cancel_send_error_stays_in_the_overlay() {
 }
 
 #[test]
+fn disconnect_clears_in_flight_remote_jobs_cancel() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+    app.pending_jobs_list = false;
+    app.pending_jobs_remote_cancel = Some(8);
+    if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+        picker.set_status("⏳ already stopping a job...");
+    }
+
+    let mut state = RemoteRunState::default();
+    super::handle_disconnect(&mut app, &mut state, None);
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "disconnect must drop the stale cancel id so reconnect can stop again"
+    );
+    assert!(
+        app.pending_jobs_list,
+        "an open overlay must refresh after reconnect"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Connection lost"),
+        "disconnect must replace the stuck hourglass, got:\n{text}"
+    );
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set
