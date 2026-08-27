@@ -368,9 +368,7 @@ mod jobs {
             "local cancel must refresh the overlay without waiting for a bus event, got:\n{text}"
         );
         assert!(
-            !text.contains("press r")
-                && !text.contains("stopping")
-                && text.contains("esc close"),
+            !text.contains("press r") && !text.contains("stopping") && text.contains("esc close"),
             "successful cancel must clear the stopping footer, got:\n{text}"
         );
 
@@ -409,7 +407,10 @@ mod jobs {
             text.push('\n');
         }
         assert!(
-            text.contains(&format!("Background job '{}' is not running.", info.task_id)),
+            text.contains(&format!(
+                "Background job '{}' is not running.",
+                info.task_id
+            )),
             "a second stop must report the miss in the footer, got:\n{text}"
         );
     }

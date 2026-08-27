@@ -2785,11 +2785,7 @@ impl App {
             .session_picker_overlay
             .as_ref()
             .and_then(|cell| cell.borrow().remote_session_working_dir(&session_id));
-        if !self.begin_session_switch(
-            remote_device.as_deref(),
-            session_id,
-            remote_working_dir,
-        ) {
+        if !self.begin_session_switch(remote_device.as_deref(), session_id, remote_working_dir) {
             // Reaching it failed and the reason is already on screen; leaving
             // the picker open lets the user pick something else.
             return;

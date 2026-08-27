@@ -1149,10 +1149,7 @@ fn remote_jobs_slash_opens_the_overlay_instead_of_a_model_turn() {
         app.jobs_picker_overlay.is_some(),
         "/jobs must open the overlay on a remote TUI"
     );
-    assert!(
-        !app.is_processing,
-        "/jobs must not start a model turn"
-    );
+    assert!(!app.is_processing, "/jobs must not start a model turn");
     assert!(
         app.queued_messages().is_empty(),
         "/jobs must not be queued as a user prompt"
@@ -1476,7 +1473,9 @@ fn remote_overlapping_x_does_not_send_a_second_cancel() {
     match serde_json::from_str::<crate::protocol::Request>(&lines[0])
         .expect("first stop should send a protocol request")
     {
-        crate::protocol::Request::BgAction { action, task_id, .. } => {
+        crate::protocol::Request::BgAction {
+            action, task_id, ..
+        } => {
             assert_eq!(action, "cancel");
             assert_eq!(task_id.as_deref(), Some("abc123"));
         }
@@ -1821,10 +1820,15 @@ fn remote_jobs_error_with_closed_overlay_does_not_finish_a_live_turn() {
         app.pending_jobs_remote_cancel.is_none(),
         "a matching cancel Error must clear the in-flight guard even when closed"
     );
-    assert!(app.is_processing, "closed-overlay job errors must not abort the live turn");
+    assert!(
+        app.is_processing,
+        "closed-overlay job errors must not abort the live turn"
+    );
     assert_eq!(app.current_message_id, Some(3));
     assert!(
-        !app.display_messages.iter().any(|m| m.content.contains("Background job")),
+        !app.display_messages
+            .iter()
+            .any(|m| m.content.contains("Background job")),
         "closed-overlay job errors must not leak into the transcript"
     );
 }
@@ -1857,7 +1861,10 @@ fn remote_jobs_cancel_error_matches_by_request_id() {
         app.pending_jobs_remote_cancel.is_none(),
         "a cancel Error must match by request id, not only the Background job prefix"
     );
-    assert!(app.is_processing, "cancel Errors must not abort the live turn");
+    assert!(
+        app.is_processing,
+        "cancel Errors must not abort the live turn"
+    );
     assert_eq!(app.current_message_id, Some(3));
     let text = jobs_overlay_text(&app);
     assert!(
@@ -1891,7 +1898,10 @@ fn remote_jobs_closed_overlay_bg_task_list_clears_cancel() {
         app.pending_jobs_remote_cancel.is_none(),
         "a matching cancel BgTaskList must clear the guard even when /jobs is closed"
     );
-    assert!(app.is_processing, "closed-overlay BgTaskList must not abort the live turn");
+    assert!(
+        app.is_processing,
+        "closed-overlay BgTaskList must not abort the live turn"
+    );
     assert_eq!(app.current_message_id, Some(3));
     assert!(app.jobs_picker_overlay.is_none());
 }

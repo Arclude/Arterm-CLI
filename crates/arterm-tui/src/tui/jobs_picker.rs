@@ -91,7 +91,9 @@ impl JobsPicker {
     }
 
     fn has_cancel_hourglass(&self) -> bool {
-        self.status.as_deref().is_some_and(|s| s.contains("stopping"))
+        self.status
+            .as_deref()
+            .is_some_and(|s| s.contains("stopping"))
     }
 
     /// Handle one key. Returns what the caller should do.
@@ -174,10 +176,7 @@ impl JobsPicker {
 
         let mut lines: Vec<Line> = Vec::new();
         if self.rows.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "  No background jobs.",
-                dim,
-            )));
+            lines.push(Line::from(Span::styled("  No background jobs.", dim)));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Agent bash/build/docker jobs started with run_in_background appear here.",
@@ -329,9 +328,7 @@ mod tests {
     fn rendered_text(picker: &JobsPicker) -> String {
         let backend = TestBackend::new(90, 24);
         let mut terminal = Terminal::new(backend).expect("terminal");
-        terminal
-            .draw(|frame| picker.render(frame))
-            .expect("draw");
+        terminal.draw(|frame| picker.render(frame)).expect("draw");
         let buffer = terminal.backend().buffer();
         let mut text = String::new();
         for y in 0..buffer.area.height {
@@ -359,7 +356,10 @@ mod tests {
     #[test]
     fn x_does_not_cancel_a_finished_job() {
         let mut picker = JobsPicker::new(vec![finished("bbb")], false);
-        assert_eq!(key(&mut picker, KeyCode::Char('x')), JobsPickerOutcome::Stay);
+        assert_eq!(
+            key(&mut picker, KeyCode::Char('x')),
+            JobsPickerOutcome::Stay
+        );
     }
 
     #[test]
