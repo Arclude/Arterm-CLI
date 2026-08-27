@@ -1231,6 +1231,37 @@ fn running_bg_task(task_id: &str, started_at: &str) -> crate::protocol::BgTaskSu
 }
 
 #[test]
+fn alt_down_hotkey_opens_the_remote_jobs_picker() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    assert!(app.jobs_picker_overlay.is_none());
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    rt.block_on(async {
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::ALT,
+            &mut remote,
+        )
+        .await
+        .expect("Alt+Down should be handled");
+    });
+
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "Alt+Down must open the jobs picker overlay"
+    );
+    assert!(
+        app.pending_jobs_list,
+        "opening via the hotkey must queue a background list refresh"
+    );
+}
+
+#[test]
 fn remote_jobs_tick_sends_bg_action_list_on_the_wire() {
     use tokio::io::AsyncBufReadExt;
 

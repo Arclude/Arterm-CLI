@@ -97,6 +97,12 @@ swarm_panel_focus = "alt+n"
 # Default: Cmd+B on macOS, Alt+R on Windows/Linux. Set "" to disable.
 # open_resume = "cmd+b"
 
+# Open the background jobs picker (same as /jobs) to list and stop running
+# background jobs without typing a command. While open: j/k or arrows move,
+# x stops the selected job, r refreshes, a toggles all-sessions, esc closes.
+# Default: Alt+Down. Set "" to disable.
+jobs_picker = "alt+down"
+
 # /resume picker Enter behavior. Options: "current-terminal" or "new-terminal".
 # By default Enter resumes in this terminal; Ctrl+Enter performs the alternate action.
 session_picker_enter = "current-terminal"

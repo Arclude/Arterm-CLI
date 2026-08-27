@@ -444,6 +444,11 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    if app.jobs_picker_key_matches(code, modifiers) {
+        app.open_jobs_picker(false);
+        return Ok(());
+    }
+
     if handle_workspace_navigation_key(app, code, modifiers, remote).await? {
         return Ok(());
     }

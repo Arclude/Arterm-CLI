@@ -1578,6 +1578,15 @@ impl App {
             .unwrap_or(false)
     }
 
+    /// Whether the configured `keybindings.jobs_picker` chord matches this key.
+    pub(crate) fn jobs_picker_key_matches(&self, code: KeyCode, modifiers: KeyModifiers) -> bool {
+        self.jobs_picker_key
+            .binding
+            .as_ref()
+            .map(|binding| binding.matches(code, modifiers))
+            .unwrap_or(false)
+    }
+
     /// Whether the configured `keybindings.fallback_switch` chord matches this key.
     pub(crate) fn fallback_switch_key_matches(
         &self,
@@ -2131,6 +2140,10 @@ pub(super) fn handle_pre_control_shortcuts(
     if app.open_resume_key_matches(code, modifiers) {
         app.record_keybinding_fast(super::shortcut_hints::LearnableAction::Resume);
         app.open_session_picker();
+        return true;
+    }
+    if app.jobs_picker_key_matches(code, modifiers) {
+        app.open_jobs_picker(false);
         return true;
     }
     if let Some(direction) = app.model_switch_keys.direction_for(code, modifiers) {

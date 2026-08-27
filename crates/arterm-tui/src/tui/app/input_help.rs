@@ -32,7 +32,7 @@ impl App {
                 "/mcp\nOpen the interactive MCP server panel: pick a server to see its status, command, config location, and tools, and run connect/reconnect/disconnect from a menu. `r` reloads the MCP config.\n\n/mcp status\nPush a one-shot colored status card into the transcript instead: connected (green, with tool count), connecting (yellow), not connected (red, with the connect failure when the session attempted one).\n\nManage servers with `arterm mcp add/list/remove` in a terminal."
             }
             "jobs" => {
-                "/jobs\nOpen the background-job panel: bash, build, and docker commands the agent started with run_in_background. Each row shows elapsed time. x (or Delete) stops the selected running job, r refreshes, a toggles every session vs this one.\n\n/jobs all\nOpen the same panel listing jobs from every session on this machine."
+                "/jobs\nOpen the background-job panel: bash, build, and docker commands the agent started with run_in_background. Each row shows elapsed time. x (or Delete) stops the selected running job, r refreshes, a toggles every session vs this one.{jobs_shortcut}\n\n/jobs all\nOpen the same panel listing jobs from every session on this machine."
             }
             "provider-test-coverage"
             | "provider test coverage"
@@ -236,6 +236,11 @@ impl App {
             None => String::new(),
         };
         let help = help.replace("{resume_shortcut}", &resume_shortcut);
+        let jobs_shortcut = match crate::tui::keybind::load_jobs_picker_key().label {
+            Some(label) => format!(" You can also press {label} to open it directly."),
+            None => String::new(),
+        };
+        let help = help.replace("{jobs_shortcut}", &jobs_shortcut);
         // Mac keyboards have no "Alt" key; show the ⌥ keycap instead.
         let help = help.replace(
             "Alt+",

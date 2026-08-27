@@ -333,6 +333,15 @@ pub const KEYBINDING_DEFAULTS: &[KeybindingDefault] = &[
         macos: PlatformDefault::dev("cmd+b"),
         other: PlatformDefault::dev("alt+r"),
     },
+    KeybindingDefault {
+        id: "jobs_picker",
+        description: "Open the background jobs picker (/jobs overlay)",
+        // Alt+Down also works on macOS terminals that forward it; Option+Down
+        // is not a cursor gesture the composer needs, so keep one chord
+        // everywhere.
+        macos: PlatformDefault::dev("alt+down"),
+        other: PlatformDefault::dev("alt+down"),
+    },
 ];
 
 /// Look up a keybinding action by id.

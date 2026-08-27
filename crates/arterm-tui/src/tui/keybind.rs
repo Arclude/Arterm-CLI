@@ -611,6 +611,23 @@ pub fn load_open_resume_key() -> OptionalBinding {
     }
 }
 
+/// Optional binding that opens the background jobs (`/jobs`) picker.
+/// Default: Alt+Down everywhere. Set "" to disable.
+pub fn load_jobs_picker_key() -> OptionalBinding {
+    let cfg = config();
+    let raw = cfg.keybindings.jobs_picker.trim();
+    if raw.is_empty() || is_disabled(raw) {
+        return OptionalBinding::default();
+    }
+    match parse_keybinding(raw) {
+        Some(binding) => OptionalBinding {
+            label: Some(format_binding(&binding)),
+            binding: Some(binding),
+        },
+        None => OptionalBinding::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
