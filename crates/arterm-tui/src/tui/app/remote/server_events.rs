@@ -1223,6 +1223,13 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.request_full_redraw();
                 return true;
             }
+            if message.starts_with("Background job ")
+                && let Some(picker) = app.jobs_picker_overlay.as_mut()
+            {
+                picker.set_status(message.clone());
+                app.request_full_redraw();
+                return true;
+            }
             // The server rejects a Message request with this error while its
             // previous turn is still running. This typically happens when a
             // reload/reconnect raced the turn-end dispatch: the history
@@ -2232,6 +2239,10 @@ pub(in crate::tui::app) fn handle_server_event(
             persist_replay_display_message(app, "system", None, &message);
             app.set_status_notice("Plan proposal received");
             false
+        }
+        ServerEvent::BgTaskList { tasks, .. } => {
+            app.apply_bg_task_list(tasks);
+            true
         }
         ServerEvent::McpToolList { server, tools } => {
             if let Some(picker) = app.mcp_picker_overlay.as_mut() {

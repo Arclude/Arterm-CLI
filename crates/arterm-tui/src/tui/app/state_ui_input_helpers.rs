@@ -160,6 +160,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/info", "Show session info and tokens"),
     RegisteredCommand::public("/usage", "Show connected provider usage limits"),
     RegisteredCommand::public("/mcp", "Show MCP servers and their tools for this session"),
+    RegisteredCommand::public("/jobs", "List, time, and stop background jobs"),
     RegisteredCommand::public(
         "/productivity",
         "Generate a shareable usage report + dashboard image",

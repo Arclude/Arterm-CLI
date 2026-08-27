@@ -205,6 +205,44 @@ mod mcp {
     }
 }
 
+/// Behavioral test for `/jobs`, driven through the real `App`.
+mod jobs {
+    use crate::tui::app::commands_dispatch::dispatch_local_command;
+    use crate::tui::app::tests::create_test_app;
+
+    #[test]
+    fn the_jobs_command_opens_the_overlay() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+
+        assert!(
+            dispatch_local_command(&mut app, "/jobs"),
+            "/jobs should be claimed by the shared dispatch table"
+        );
+        assert!(
+            app.jobs_picker_overlay.is_some(),
+            "bare /jobs opens the interactive overlay"
+        );
+        app.jobs_picker_overlay = None;
+
+        assert!(
+            dispatch_local_command(&mut app, "/jobs all"),
+            "/jobs all should be claimed"
+        );
+        assert!(
+            app.jobs_picker_overlay
+                .as_ref()
+                .is_some_and(|picker| picker.all_sessions()),
+            "/jobs all lists every session"
+        );
+
+        assert!(
+            !dispatch_local_command(&mut app, "/jobsomething"),
+            "prefix collisions must not be claimed"
+        );
+    }
+}
+
 /// Behavioral tests for `/colors`, driven through the real `App` so they cover
 /// what a user actually types: dispatch, message text, config persistence, and
 /// error handling.

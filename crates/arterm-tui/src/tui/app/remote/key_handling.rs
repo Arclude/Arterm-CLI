@@ -324,6 +324,22 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    if app.jobs_picker_overlay.is_some() {
+        if let Some(outcome) = app.handle_jobs_picker_key_outcome(code, modifiers) {
+            if let crate::tui::jobs_picker::JobsPickerOutcome::Action {
+                action,
+                task_id,
+                all_sessions,
+            } = outcome
+            {
+                remote
+                    .bg_action(action, task_id.as_deref(), all_sessions)
+                    .await?;
+            }
+        }
+        return Ok(());
+    }
+
     if app.session_picker_overlay.is_some() {
         return app.handle_session_picker_key(code, modifiers);
     }

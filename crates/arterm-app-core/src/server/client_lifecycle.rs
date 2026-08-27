@@ -19,7 +19,8 @@ use super::client_lightweight_control::{
     LightweightControlContext, handle_lightweight_control_request, parse_swarm_spawn_mode,
 };
 use super::client_session::{
-    handle_clear_session, handle_mcp_action, handle_reload, handle_resume_session, handle_subscribe,
+    handle_bg_action, handle_clear_session, handle_mcp_action, handle_reload, handle_resume_session,
+    handle_subscribe,
 };
 use super::client_state::{
     HistoryRefreshArgs, handle_get_compacted_history, handle_get_model_catalog, handle_get_state,
@@ -1666,6 +1667,23 @@ pub(super) async fn handle_client(
 
             Request::McpAction { id, action, server } => {
                 handle_mcp_action(id, &action, server.as_deref(), &agent, &client_event_tx).await;
+            }
+
+            Request::BgAction {
+                id,
+                action,
+                task_id,
+                all_sessions,
+            } => {
+                handle_bg_action(
+                    id,
+                    &action,
+                    task_id.as_deref(),
+                    all_sessions,
+                    &client_session_id,
+                    &client_event_tx,
+                )
+                .await;
             }
 
             Request::ResumeSession {

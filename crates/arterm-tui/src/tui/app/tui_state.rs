@@ -1944,6 +1944,10 @@ impl crate::tui::TuiState for App {
         self.mcp_picker_overlay.as_ref()
     }
 
+    fn jobs_picker_overlay(&self) -> Option<&crate::tui::jobs_picker::JobsPicker> {
+        self.jobs_picker_overlay.as_ref()
+    }
+
     fn device_pairing(&self) -> Option<crate::tui::DevicePairingView<'_>> {
         self.device_pairing.as_ref().map(|screen| screen.view())
     }

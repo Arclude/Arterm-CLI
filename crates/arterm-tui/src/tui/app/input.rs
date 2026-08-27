@@ -2346,6 +2346,13 @@ pub(super) fn handle_modal_key(
         return Ok(true);
     }
 
+    if app.jobs_picker_overlay.is_some() {
+        if let Some(outcome) = app.handle_jobs_picker_key_outcome(code, modifiers) {
+            app.handle_jobs_picker_action_local(outcome);
+        }
+        return Ok(true);
+    }
+
     if app.session_picker_overlay.is_some() {
         app.handle_session_picker_key(code, modifiers)?;
         return Ok(true);

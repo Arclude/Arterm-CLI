@@ -113,6 +113,19 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= app.update_pinned_images_auto_hide();
     // Dissolve stale (off-screen) reasoning traces with zero visible motion.
     needs_redraw |= app.gc_offscreen_reasoning_traces();
+    if app.pending_jobs_list {
+        app.pending_jobs_list = false;
+        let all_sessions = app
+            .jobs_picker_overlay
+            .as_ref()
+            .is_some_and(|picker| picker.all_sessions());
+        if let Err(error) = remote.bg_action("list", None, all_sessions).await {
+            if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+                picker.set_status(format!("Could not list jobs: {error:#}"));
+            }
+        }
+        needs_redraw = true;
+    }
     needs_redraw |= dispatch_compacted_history_load(app, remote).await;
     // Adopt the resolved scroll position once a frame containing newly loaded
     // older history has rendered, so manual scrolling resumes seamlessly.

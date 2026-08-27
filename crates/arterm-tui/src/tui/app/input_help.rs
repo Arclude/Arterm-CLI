@@ -31,6 +31,9 @@ impl App {
             "mcp" => {
                 "/mcp\nOpen the interactive MCP server panel: pick a server to see its status, command, config location, and tools, and run connect/reconnect/disconnect from a menu. `r` reloads the MCP config.\n\n/mcp status\nPush a one-shot colored status card into the transcript instead: connected (green, with tool count), connecting (yellow), not connected (red, with the connect failure when the session attempted one).\n\nManage servers with `arterm mcp add/list/remove` in a terminal."
             }
+            "jobs" => {
+                "/jobs\nOpen the background-job panel: bash, build, and docker commands the agent started with run_in_background. Each row shows elapsed time. x (or Delete) stops the selected running job, r refreshes, a toggles every session vs this one.\n\n/jobs all\nOpen the same panel listing jobs from every session on this machine."
+            }
             "provider-test-coverage"
             | "provider test coverage"
             | "model-status"

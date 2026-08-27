@@ -223,6 +223,21 @@ pub enum Request {
         server: Option<String>,
     },
 
+    /// Manage background jobs from the client (/jobs overlay):
+    /// "list" or "cancel". The server answers `list` with `BgTaskList`
+    /// and `cancel` with another `BgTaskList` after the stop. Failure
+    /// is `Error`.
+    #[serde(rename = "bg_action")]
+    BgAction {
+        id: u64,
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+        /// When true, list every session's jobs. Default is this session only.
+        #[serde(default, skip_serializing_if = "is_false")]
+        all_sessions: bool,
+    },
+
     /// Cycle the active model (direction: 1 for next, -1 for previous)
     #[serde(rename = "cycle_model")]
     CycleModel {
@@ -1060,6 +1075,10 @@ pub enum ServerEvent {
     #[serde(rename = "mcp_tool_list")]
     McpToolList { server: String, tools: Vec<String> },
 
+    /// Snapshot of background jobs for the /jobs overlay.
+    #[serde(rename = "bg_task_list")]
+    BgTaskList { id: u64, tasks: Vec<BgTaskSummary> },
+
     /// MCP status update (sent after background MCP connections complete)
     #[serde(rename = "mcp_status")]
     McpStatus {
@@ -1481,4 +1500,28 @@ pub enum ServerEvent {
         /// Tool call ID this is associated with
         tool_call_id: String,
     },
+}
+
+/// One background job as shown in the /jobs overlay.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BgTaskSummary {
+    pub task_id: String,
+    pub tool_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub session_id: String,
+    pub status: String,
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_secs: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub detached: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }

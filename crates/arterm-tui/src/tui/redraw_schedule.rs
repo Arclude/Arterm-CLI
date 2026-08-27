@@ -596,6 +596,7 @@ fn periodic_redraw_required_inner(state: &dyn TuiState, include_idle_animation: 
         && crate::build::read_build_progress().is_none()
         && !swarm_spinner_redraw_active(state)
         && !session_picker_spinner_redraw_active(state)
+        && state.jobs_picker_overlay().is_none()
     {
         return false;
     }
@@ -618,6 +619,11 @@ fn periodic_redraw_required_inner(state: &dyn TuiState, include_idle_animation: 
 
     if session_picker_spinner_redraw_active(state) {
         record_full_frame_redraw_reason("session_picker_spinner");
+        return true;
+    }
+
+    if state.jobs_picker_overlay().is_some() {
+        record_full_frame_redraw_reason("jobs_overlay");
         return true;
     }
 

@@ -58,6 +58,7 @@ mod commands_colors;
 mod commands_dispatch;
 mod commands_improve;
 mod commands_init;
+mod commands_jobs;
 mod commands_mcp;
 mod commands_overnight;
 mod commands_plan;
@@ -1655,6 +1656,10 @@ pub struct App {
     pub(crate) settings_overlay: Option<super::settings_overlay::SettingsOverlay>,
     /// The `/mcp` server-status overlay, when it is open.
     pub(crate) mcp_picker_overlay: Option<super::mcp_picker::McpPicker>,
+    /// The `/jobs` background-job overlay, when it is open.
+    pub(crate) jobs_picker_overlay: Option<super::jobs_picker::JobsPicker>,
+    /// Remote `/jobs` just opened; send a list request on the next tick.
+    pub(crate) pending_jobs_list: bool,
     session_picker_mode: SessionPickerMode,
     pending_session_picker_load: Option<PendingSessionPickerLoad>,
     /// "Where we left off" lines for the startup screen, and the read that

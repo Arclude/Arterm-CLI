@@ -1398,6 +1398,31 @@ impl BackgroundTaskManager {
         )
     }
 
+    /// Best-effort synchronous snapshot of every status file on disk.
+    /// Used by the TUI /jobs overlay so local sessions can list jobs without
+    /// blocking the runtime from inside a tick/key handler.
+    pub fn list_sync(&self) -> Vec<TaskStatusFile> {
+        let mut results = Vec::new();
+        let Ok(entries) = std::fs::read_dir(&self.output_dir) else {
+            return results;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(status) = serde_json::from_str::<TaskStatusFile>(&content) else {
+                continue;
+            };
+            results.push(status);
+        }
+        results.sort_by(|a, b| b.task_id.cmp(&a.task_id));
+        results
+    }
+
     /// Best-effort synchronous lookup of detached tasks that are still running
     /// for a specific session.
     ///

@@ -27,6 +27,7 @@ pub mod keybind;
 mod layout_utils;
 pub mod login_picker;
 pub mod markdown;
+pub mod jobs_picker;
 pub mod mcp_picker;
 pub mod memory_clean_view;
 pub use device_pairing::{DevicePairing, DevicePairingView};
@@ -644,6 +645,10 @@ pub trait TuiState {
     }
     /// The `/mcp` server-status overlay, when it is open.
     fn mcp_picker_overlay(&self) -> Option<&mcp_picker::McpPicker> {
+        None
+    }
+    /// The `/jobs` background-job overlay, when it is open.
+    fn jobs_picker_overlay(&self) -> Option<&jobs_picker::JobsPicker> {
         None
     }
     /// The `/memory clean` confirmation, when one is waiting on an answer.

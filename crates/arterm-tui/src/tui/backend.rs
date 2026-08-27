@@ -971,6 +971,24 @@ impl RemoteConnection {
         .await
     }
 
+    /// List or cancel background jobs from the /jobs overlay.
+    pub async fn bg_action(
+        &mut self,
+        action: &str,
+        task_id: Option<&str>,
+        all_sessions: bool,
+    ) -> Result<()> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        self.send_request(Request::BgAction {
+            id,
+            action: action.to_string(),
+            task_id: task_id.map(str::to_string),
+            all_sessions,
+        })
+        .await
+    }
+
     /// Notify the server that auth credentials changed (e.g., after login)
     pub async fn notify_auth_changed(&mut self) -> Result<()> {
         let id = self.next_request_id;
