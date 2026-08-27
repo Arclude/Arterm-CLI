@@ -241,6 +241,87 @@ mod jobs {
             "prefix collisions must not be claimed"
         );
     }
+
+    #[test]
+    fn jobs_overlay_lists_elapsed_time_and_stops_a_running_task() {
+        let _lock = crate::storage::lock_test_env();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let _guard = rt.enter();
+
+        let mut app = create_test_app();
+        let session_id = app.session.id.clone();
+        let info = rt.block_on(crate::background::global().spawn_with_notify(
+            "bash",
+            Some("sleep for overlay".to_string()),
+            &session_id,
+            false,
+            false,
+            |_output| async {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                Ok(crate::background::TaskResult::completed(Some(0)))
+            },
+        ));
+
+        assert!(dispatch_local_command(&mut app, "/jobs"));
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("sleep for overlay") && text.contains("running"),
+            "overlay should list the live job with elapsed time, got:\n{text}"
+        );
+        assert!(
+            text.contains("s") && (text.contains("running")),
+            "overlay should show a duration for the running job"
+        );
+
+        let outcome = app
+            .handle_jobs_picker_key_outcome(
+                crossterm::event::KeyCode::Char('x'),
+                crossterm::event::KeyModifiers::empty(),
+            )
+            .expect("x should request cancel");
+        app.handle_jobs_picker_action_local(outcome);
+
+        let started = std::time::Instant::now();
+        loop {
+            let status = rt.block_on(crate::background::global().status(&info.task_id));
+            if status
+                .as_ref()
+                .is_some_and(|task| task.status != crate::bus::BackgroundTaskStatus::Running)
+            {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(3),
+                "job {} should stop after overlay cancel",
+                info.task_id
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let status = rt
+            .block_on(crate::background::global().status(&info.task_id))
+            .expect("cancelled job status");
+        assert_eq!(
+            status.error.as_deref(),
+            Some("Cancelled by user"),
+            "overlay stop must use BackgroundTaskManager::cancel"
+        );
+    }
 }
 
 /// Behavioral tests for `/colors`, driven through the real `App` so they cover
