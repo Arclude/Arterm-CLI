@@ -461,14 +461,32 @@ mod jobs {
         let _lock = crate::storage::lock_test_env();
         let mut app = create_test_app();
         assert!(dispatch_local_command(&mut app, "/jobs"));
+        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+            picker.set_rows(vec![crate::protocol::BgTaskSummary {
+                task_id: "first".to_string(),
+                tool_name: "bash".to_string(),
+                display_name: Some("sleep for overlay".to_string()),
+                session_id: app.session.id.clone(),
+                status: "running".to_string(),
+                started_at: chrono::Utc::now().to_rfc3339(),
+                completed_at: None,
+                duration_secs: None,
+                pid: Some(7),
+                detached: false,
+                progress: None,
+                error: None,
+            }]);
+        }
 
         let (tx, rx) = std::sync::mpsc::channel();
         app.pending_jobs_cancel = Some(rx);
-        app.handle_jobs_picker_action_local(crate::tui::jobs_picker::JobsPickerOutcome::Action {
-            action: "cancel",
-            task_id: Some("second".to_string()),
-            all_sessions: false,
-        });
+        let outcome = app
+            .handle_jobs_picker_key_outcome(
+                crossterm::event::KeyCode::Char('x'),
+                crossterm::event::KeyModifiers::empty(),
+            )
+            .expect("x should still request cancel");
+        app.handle_jobs_picker_action_local(outcome);
         assert!(
             app.pending_jobs_cancel.is_some(),
             "a second stop must not drop the in-flight cancel channel"
@@ -493,7 +511,7 @@ mod jobs {
         }
         assert!(
             text.contains("already stopping a job"),
-            "a second stop must wait for the in-flight cancel, got:\n{text}"
+            "a second x must wait for the in-flight cancel, got:\n{text}"
         );
         drop(tx);
     }
