@@ -1223,7 +1223,9 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.request_full_redraw();
                 return true;
             }
-            if message.starts_with("Background job ") {
+            if app.pending_jobs_remote_cancel == Some(id)
+                || message.starts_with("Background job ")
+            {
                 // Overlay traffic even when /jobs is closed: a matching cancel
                 // Error still clears the in-flight id, and must not abort a
                 // live turn or land in the transcript.

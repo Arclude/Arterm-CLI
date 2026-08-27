@@ -1799,6 +1799,73 @@ fn remote_jobs_error_with_closed_overlay_does_not_finish_a_live_turn() {
 }
 
 #[test]
+fn remote_jobs_cancel_error_matches_by_request_id() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.status = crate::tui::app::ProcessingStatus::Streaming;
+    app.open_jobs_picker(false);
+    app.pending_jobs_remote_cancel = Some(8);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Unsupported background job action 'cancel'.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a cancel Error must match by request id, not only the Background job prefix"
+    );
+    assert!(app.is_processing, "cancel Errors must not abort the live turn");
+    assert_eq!(app.current_message_id, Some(3));
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Unsupported background job action 'cancel'."),
+        "a matching cancel Error must land in the overlay footer, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_closed_overlay_bg_task_list_clears_cancel() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.pending_jobs_remote_cancel = Some(8);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 8,
+            tasks: vec![],
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a matching cancel BgTaskList must clear the guard even when /jobs is closed"
+    );
+    assert!(app.is_processing, "closed-overlay BgTaskList must not abort the live turn");
+    assert_eq!(app.current_message_id, Some(3));
+    assert!(app.jobs_picker_overlay.is_none());
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set
