@@ -513,7 +513,44 @@ mod jobs {
             text.contains("already stopping a job"),
             "a second x must wait for the in-flight cancel, got:\n{text}"
         );
-        drop(tx);
+
+        tx.send(crate::tui::app::LocalJobsCancelResult::NotRunning {
+            task_id: "first".to_string(),
+        })
+        .expect("original cancel result must still have a live channel");
+        let started = std::time::Instant::now();
+        loop {
+            let _ = crate::tui::app::local::handle_tick(&mut app);
+            if app.pending_jobs_cancel.is_none() {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(3),
+                "original cancel result should land after overlapping x"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open after the original result");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("Background job 'first' is not running."),
+            "overlapping x must not lose the original cancel result, got:\n{text}"
+        );
     }
 }
 
