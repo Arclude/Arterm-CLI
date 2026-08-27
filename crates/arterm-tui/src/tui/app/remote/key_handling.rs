@@ -332,6 +332,16 @@ async fn handle_remote_key_internal(
                 all_sessions,
             } = outcome
             {
+                if action == "cancel" && app.pending_jobs_remote_cancel {
+                    if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+                        picker.set_status("⏳ already stopping a job...".to_string());
+                    }
+                    app.request_full_redraw();
+                    return Ok(());
+                }
+                if action == "cancel" {
+                    app.pending_jobs_remote_cancel = true;
+                }
                 remote
                     .bg_action(action, task_id.as_deref(), all_sessions)
                     .await?;

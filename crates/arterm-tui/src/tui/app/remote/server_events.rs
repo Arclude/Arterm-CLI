@@ -1224,10 +1224,9 @@ pub(in crate::tui::app) fn handle_server_event(
                 return true;
             }
             if message.starts_with("Background job ")
-                && let Some(picker) = app.jobs_picker_overlay.as_mut()
+                && app.jobs_picker_overlay.is_some()
             {
-                picker.set_status(message.clone());
-                app.request_full_redraw();
+                app.apply_jobs_overlay_error(message.clone());
                 return true;
             }
             // The server rejects a Message request with this error while its

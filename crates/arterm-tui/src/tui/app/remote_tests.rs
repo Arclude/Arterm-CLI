@@ -1379,6 +1379,86 @@ fn remote_jobs_overlay_applies_bg_task_list_and_x_cancels_on_the_wire() {
 }
 
 #[test]
+fn remote_overlapping_x_does_not_send_a_second_cancel() {
+    use tokio::io::AsyncReadExt;
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+
+    let lines = rt.block_on(async {
+        let peer = remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream");
+        let (reader, _writer) = peer.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("first x should send cancel");
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("second x should be refused locally");
+
+        drop(remote);
+        let mut collected = String::new();
+        reader
+            .read_to_string(&mut collected)
+            .await
+            .expect("read remaining overlay requests");
+        collected
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    });
+
+    assert_eq!(
+        lines.len(),
+        1,
+        "overlapping x must not send a second BgAction, got {lines:?}"
+    );
+    match serde_json::from_str::<crate::protocol::Request>(&lines[0])
+        .expect("first stop should send a protocol request")
+    {
+        crate::protocol::Request::BgAction { action, task_id, .. } => {
+            assert_eq!(action, "cancel");
+            assert_eq!(task_id.as_deref(), Some("abc123"));
+        }
+        other => panic!("expected BgAction cancel, got {other:?}"),
+    }
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "second x must wait for the in-flight remote cancel, got:\n{text}"
+    );
+}
+
+#[test]
 fn remote_jobs_overlay_shows_background_job_errors() {
     let mut app = create_test_app();
     app.is_remote = true;

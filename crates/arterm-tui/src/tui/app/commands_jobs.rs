@@ -60,6 +60,7 @@ impl App {
             JobsPickerOutcome::Stay => None,
             JobsPickerOutcome::Close => {
                 self.jobs_picker_overlay = None;
+                self.pending_jobs_remote_cancel = false;
                 None
             }
             action @ JobsPickerOutcome::Action { .. } => Some(action),
@@ -160,8 +161,17 @@ impl App {
     }
 
     pub(in crate::tui) fn apply_bg_task_list(&mut self, tasks: Vec<BgTaskSummary>) {
+        self.pending_jobs_remote_cancel = false;
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
             picker.set_rows(tasks);
+            self.request_full_redraw();
+        }
+    }
+
+    pub(in crate::tui) fn apply_jobs_overlay_error(&mut self, message: String) {
+        self.pending_jobs_remote_cancel = false;
+        if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+            picker.set_status(message);
             self.request_full_redraw();
         }
     }
