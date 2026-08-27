@@ -1376,6 +1376,87 @@ fn remote_jobs_overlay_shows_background_job_errors() {
 }
 
 #[test]
+fn remote_jobs_overlay_list_does_not_finish_a_resumed_turn() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.status = crate::tui::app::ProcessingStatus::RunningTool("bash".to_string());
+    app.remote_resume_activity = Some(crate::tui::app::RemoteResumeActivity {
+        session_id: "session_resume_jobs".to_string(),
+        observed_at: std::time::Instant::now(),
+        current_tool_name: Some("bash".to_string()),
+    });
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.is_processing,
+        "overlay BgTaskList must not settle a resumed remote turn"
+    );
+    assert!(
+        matches!(
+            app.status,
+            crate::tui::app::ProcessingStatus::RunningTool(_)
+        ),
+        "resumed tool status must survive overlay list"
+    );
+    assert!(
+        app.remote_resume_activity.is_some(),
+        "resumed activity must survive overlay list"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("sleep for overlay") && text.contains("8s"),
+        "overlay must still paint the snapshot, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_error_does_not_finish_a_live_turn() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.status = crate::tui::app::ProcessingStatus::Streaming;
+    app.open_jobs_picker(false);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    assert!(app.is_processing, "job errors must not abort the live turn");
+    assert_eq!(app.current_message_id, Some(3));
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "job errors must land in the overlay footer, got:\n{text}"
+    );
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set

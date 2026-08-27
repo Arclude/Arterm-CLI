@@ -512,7 +512,8 @@ fn test_bg_action_request_roundtrip() -> Result<()> {
     let json = serde_json::to_string(&req)?;
     assert!(json.contains("\"type\":\"bg_action\""));
     assert!(json.contains("\"all_sessions\":true"));
-    let decoded = parse_request_json(&json)?;
+    // handle_client decodes overlay traffic through decode_request, not raw serde.
+    let decoded = decode_request(&json)?;
     let Request::BgAction {
         id,
         action,
@@ -538,7 +539,7 @@ fn test_bg_action_request_roundtrip() -> Result<()> {
         !json.contains("all_sessions"),
         "false all_sessions must not appear on the wire: {json}"
     );
-    let decoded = parse_request_json(&json)?;
+    let decoded = decode_request(&json)?;
     let Request::BgAction {
         action,
         task_id,
@@ -551,6 +552,16 @@ fn test_bg_action_request_roundtrip() -> Result<()> {
     assert_eq!(action, "cancel");
     assert_eq!(task_id.as_deref(), Some("abc123"));
     assert!(!all_sessions);
+    assert!(
+        !Request::BgAction {
+            id: 42,
+            action: "list".to_string(),
+            task_id: None,
+            all_sessions: true,
+        }
+        .is_lightweight_control_request(),
+        "BgAction must go through the subscribed session, not the lightweight control path"
+    );
     Ok(())
 }
 

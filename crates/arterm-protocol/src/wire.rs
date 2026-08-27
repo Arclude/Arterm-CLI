@@ -226,7 +226,8 @@ pub enum Request {
     /// Manage background jobs from the client (/jobs overlay):
     /// "list" or "cancel". The server answers `list` with `BgTaskList`
     /// and `cancel` with another `BgTaskList` after the stop. Failure
-    /// is `Error`.
+    /// is `Error`. Success does not send `Done`; overlay traffic must
+    /// not look like a turn ended.
     #[serde(rename = "bg_action")]
     BgAction {
         id: u64,

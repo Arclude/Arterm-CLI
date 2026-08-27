@@ -19,8 +19,10 @@ pub(in crate::server) async fn handle_bg_action(
 ) {
     match action {
         "list" => {
+            // Overlay paints from BgTaskList. Do not send Done: a resumed
+            // remote turn has no current_message_id, so overlay Done would
+            // look like the turn ended.
             send_task_list(id, all_sessions, session_id, client_event_tx).await;
-            let _ = client_event_tx.send(ServerEvent::Done { id });
         }
         "cancel" => {
             let Some(task_id) = task_id.filter(|id| !id.is_empty()) else {
@@ -34,7 +36,6 @@ pub(in crate::server) async fn handle_bg_action(
             match background::global().cancel(task_id).await {
                 Ok(true) => {
                     send_task_list(id, all_sessions, session_id, client_event_tx).await;
-                    let _ = client_event_tx.send(ServerEvent::Done { id });
                 }
                 Ok(false) => {
                     let _ = client_event_tx.send(ServerEvent::Error {
@@ -184,10 +185,10 @@ mod tests {
         assert_eq!(listed.display_name.as_deref(), Some("wire overlay job"));
         assert_eq!(listed.session_id, session_id);
         assert!(listed.started_at.contains('T'));
-        let ServerEvent::Done { id } = rx.recv().await.expect("list done") else {
-            panic!("list must finish with Done");
-        };
-        assert_eq!(id, 7);
+        assert!(
+            rx.try_recv().is_err(),
+            "list must not send Done; overlay paints from BgTaskList"
+        );
 
         handle_bg_action(
             8,
@@ -212,10 +213,10 @@ mod tests {
             cancelled.duration_secs.is_some_and(|secs| secs >= 0.0),
             "cancelled job must carry elapsed time"
         );
-        let ServerEvent::Done { id } = rx.recv().await.expect("cancel done") else {
-            panic!("cancel must finish with Done");
-        };
-        assert_eq!(id, 8);
+        assert!(
+            rx.try_recv().is_err(),
+            "cancel must not send Done; overlay paints from BgTaskList"
+        );
 
         handle_bg_action(9, "cancel", None, false, &session_id, &tx).await;
         let ServerEvent::Error { id, message, .. } = rx.recv().await.expect("missing id error")
