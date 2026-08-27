@@ -1484,6 +1484,30 @@ fn remote_overlapping_x_does_not_send_a_second_cancel() {
 
     handle_server_event(
         &mut app,
+        ServerEvent::Error {
+            id: 9,
+            message: "Background job 'other' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "an unrelated job error must not drop the in-flight remote cancel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "an unrelated job error must not clobber the in-flight footer, got:\n{text}"
+    );
+    assert!(
+        !text.contains("Background job 'other' is not running."),
+        "unrelated job errors must wait until cancel settles, got:\n{text}"
+    );
+
+    handle_server_event(
+        &mut app,
         ServerEvent::BgTaskList {
             id: 1,
             tasks: vec![running_bg_task("abc123", &started_at)],
@@ -1501,6 +1525,7 @@ fn remote_jobs_overlay_shows_background_job_errors() {
     let mut app = create_test_app();
     app.is_remote = true;
     app.open_jobs_picker(false);
+    app.pending_jobs_remote_cancel = Some(8);
 
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let _guard = rt.enter();
@@ -1519,6 +1544,10 @@ fn remote_jobs_overlay_shows_background_job_errors() {
     assert!(
         text.contains("Background job 'abc123' is not running."),
         "job errors must land in the overlay footer, got:\n{text}"
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "the cancel's own Error must clear the in-flight guard"
     );
 }
 

@@ -80,7 +80,12 @@ impl App {
             "list" => {
                 let rows = snapshot_jobs(all_sessions, Some(self.session.id.as_str()));
                 if let Some(picker) = self.jobs_picker_overlay.as_mut() {
-                    picker.set_rows(rows);
+                    apply_jobs_rows(
+                        picker,
+                        rows,
+                        self.pending_jobs_cancel.is_some()
+                            || self.pending_jobs_remote_cancel.is_some(),
+                    );
                 }
             }
             "cancel" => {
@@ -164,16 +169,15 @@ impl App {
         // Cancel answers with BgTaskList using the cancel request id. A list
         // snapshot (open, r, a, or completion refresh) uses a different id and
         // must not drop the in-flight guard.
-        let cancel_completed = self.pending_jobs_remote_cancel == Some(id);
-        if cancel_completed {
+        if self.pending_jobs_remote_cancel == Some(id) {
             self.pending_jobs_remote_cancel = None;
         }
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
-            if self.pending_jobs_remote_cancel.is_some() {
-                picker.set_rows_keep_hourglass(tasks);
-            } else {
-                picker.set_rows(tasks);
-            }
+            apply_jobs_rows(
+                picker,
+                tasks,
+                self.pending_jobs_cancel.is_some() || self.pending_jobs_remote_cancel.is_some(),
+            );
             self.request_full_redraw();
         }
     }
@@ -181,6 +185,9 @@ impl App {
     pub(in crate::tui) fn apply_jobs_overlay_error(&mut self, id: u64, message: String) {
         if self.pending_jobs_remote_cancel == Some(id) {
             self.pending_jobs_remote_cancel = None;
+        } else if self.pending_jobs_remote_cancel.is_some() {
+            // Keep the in-flight footer; this error belongs to another request.
+            return;
         }
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
             picker.set_status(message);
@@ -202,9 +209,21 @@ impl App {
         let all_sessions = picker.all_sessions();
         let rows = snapshot_jobs(all_sessions, Some(self.session.id.as_str()));
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
-            picker.set_rows(rows);
+            apply_jobs_rows(
+                picker,
+                rows,
+                self.pending_jobs_cancel.is_some() || self.pending_jobs_remote_cancel.is_some(),
+            );
         }
         self.request_full_redraw();
+    }
+}
+
+fn apply_jobs_rows(picker: &mut JobsPicker, rows: Vec<BgTaskSummary>, keep_hourglass: bool) {
+    if keep_hourglass {
+        picker.set_rows_keep_hourglass(rows);
+    } else {
+        picker.set_rows(rows);
     }
 }
 

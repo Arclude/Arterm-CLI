@@ -90,6 +90,10 @@ impl JobsPicker {
         self.status = Some(status.into());
     }
 
+    fn has_cancel_hourglass(&self) -> bool {
+        self.status.as_deref().is_some_and(|s| s.contains("stopping"))
+    }
+
     /// Handle one key. Returns what the caller should do.
     pub fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> JobsPickerOutcome {
         match code {
@@ -121,7 +125,9 @@ impl JobsPicker {
                 }
             }
             KeyCode::Char('r') => {
-                self.status = Some("⏳ refreshing jobs...".to_string());
+                if !self.has_cancel_hourglass() {
+                    self.status = Some("⏳ refreshing jobs...".to_string());
+                }
                 JobsPickerOutcome::Action {
                     action: "list",
                     task_id: None,
@@ -130,11 +136,13 @@ impl JobsPicker {
             }
             KeyCode::Char('a') => {
                 self.all_sessions = !self.all_sessions;
-                self.status = Some(if self.all_sessions {
-                    "⏳ listing jobs from every session...".to_string()
-                } else {
-                    "⏳ listing this session's jobs...".to_string()
-                });
+                if !self.has_cancel_hourglass() {
+                    self.status = Some(if self.all_sessions {
+                        "⏳ listing jobs from every session...".to_string()
+                    } else {
+                        "⏳ listing this session's jobs...".to_string()
+                    });
+                }
                 JobsPickerOutcome::Action {
                     action: "list",
                     task_id: None,
@@ -415,6 +423,24 @@ mod tests {
         assert!(
             !rendered_text(&picker).contains("already stopping a job"),
             "a completing snapshot must drop the in-flight footer"
+        );
+    }
+
+    #[test]
+    fn r_keeps_an_in_flight_cancel_hourglass() {
+        let mut picker = JobsPicker::new(vec![running("aaa", "build")], false);
+        picker.set_status("⏳ already stopping a job...");
+        assert_eq!(
+            key(&mut picker, KeyCode::Char('r')),
+            JobsPickerOutcome::Action {
+                action: "list",
+                task_id: None,
+                all_sessions: false,
+            }
+        );
+        assert!(
+            rendered_text(&picker).contains("already stopping a job"),
+            "refresh must not clobber an in-flight cancel footer"
         );
     }
 }

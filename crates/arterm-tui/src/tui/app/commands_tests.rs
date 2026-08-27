@@ -514,6 +514,39 @@ mod jobs {
             "a second x must wait for the in-flight cancel, got:\n{text}"
         );
 
+        let outcome = app
+            .handle_jobs_picker_key_outcome(
+                crossterm::event::KeyCode::Char('r'),
+                crossterm::event::KeyModifiers::empty(),
+            )
+            .expect("r should still request a list");
+        app.handle_jobs_picker_action_local(outcome);
+        assert!(
+            app.pending_jobs_cancel.is_some(),
+            "a list refresh must not drop the in-flight cancel channel"
+        );
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open after list");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("already stopping a job"),
+            "list-while-cancel must keep the in-flight footer, got:\n{text}"
+        );
+
         tx.send(crate::tui::app::LocalJobsCancelResult::NotRunning {
             task_id: "first".to_string(),
         })

@@ -120,7 +120,9 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
             .jobs_picker_overlay
             .as_ref()
             .is_some_and(|picker| picker.all_sessions());
-        if let Err(error) = remote.bg_action("list", None, all_sessions).await {
+        if let Err(error) = remote.bg_action("list", None, all_sessions).await
+            && app.pending_jobs_remote_cancel.is_none()
+        {
             if let Some(picker) = app.jobs_picker_overlay.as_mut() {
                 picker.set_status(format!("Could not list jobs: {error:#}"));
             }
