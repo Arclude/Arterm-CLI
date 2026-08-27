@@ -3,6 +3,27 @@ use super::parse_diff_mode_name;
 use super::parse_manual_subagent_spec;
 
 #[test]
+fn alt_down_hotkey_opens_the_local_jobs_picker() {
+    let mut app = crate::tui::app::tests::create_test_app();
+    assert!(app.jobs_picker_overlay.is_none());
+
+    let handled = super::super::input::handle_pre_control_shortcuts(
+        &mut app,
+        crossterm::event::KeyCode::Down,
+        crossterm::event::KeyModifiers::ALT,
+    );
+
+    assert!(
+        handled,
+        "Alt+Down should be consumed by the local pre-control shortcut path"
+    );
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "Alt+Down must open the jobs picker overlay on a local session"
+    );
+}
+
+#[test]
 fn parse_diff_mode_name_maps_known_aliases() {
     use crate::config::DiffDisplayMode;
     assert_eq!(parse_diff_mode_name("off"), Some(DiffDisplayMode::Off));
