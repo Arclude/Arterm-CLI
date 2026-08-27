@@ -1226,7 +1226,7 @@ pub(in crate::tui::app) fn handle_server_event(
             if message.starts_with("Background job ")
                 && app.jobs_picker_overlay.is_some()
             {
-                app.apply_jobs_overlay_error(message.clone());
+                app.apply_jobs_overlay_error(id, message.clone());
                 return true;
             }
             // The server rejects a Message request with this error while its
@@ -2239,8 +2239,8 @@ pub(in crate::tui::app) fn handle_server_event(
             app.set_status_notice("Plan proposal received");
             false
         }
-        ServerEvent::BgTaskList { tasks, .. } => {
-            app.apply_bg_task_list(tasks);
+        ServerEvent::BgTaskList { id, tasks } => {
+            app.apply_bg_task_list(id, tasks);
             true
         }
         ServerEvent::McpToolList { server, tools } => {

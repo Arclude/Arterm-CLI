@@ -1456,6 +1456,44 @@ fn remote_overlapping_x_does_not_send_a_second_cancel() {
         text.contains("already stopping a job"),
         "second x must wait for the in-flight remote cancel, got:\n{text}"
     );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "first cancel uses dummy request id 1"
+    );
+
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 8,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "a list snapshot must not drop the in-flight remote cancel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "list-while-cancel must keep the in-flight footer, got:\n{text}"
+    );
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 1,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "the cancel's own BgTaskList must clear the in-flight guard"
+    );
 }
 
 #[test]

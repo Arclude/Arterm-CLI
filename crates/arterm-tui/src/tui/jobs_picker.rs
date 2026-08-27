@@ -66,13 +66,22 @@ impl JobsPicker {
 
     /// Replace the rows with a fresh snapshot, keeping the selection when possible.
     pub fn set_rows(&mut self, rows: Vec<BgTaskSummary>) {
+        self.replace_rows(rows, true);
+    }
+
+    /// Same as [`set_rows`], but keep an in-flight ⏳ footer (list-while-cancel).
+    pub fn set_rows_keep_hourglass(&mut self, rows: Vec<BgTaskSummary>) {
+        self.replace_rows(rows, false);
+    }
+
+    fn replace_rows(&mut self, rows: Vec<BgTaskSummary>, clear_hourglass: bool) {
         let selected_id = self.selected_row().map(|row| row.task_id.clone());
         self.rows = rows;
         match selected_id.and_then(|id| self.rows.iter().position(|row| row.task_id == id)) {
             Some(index) => self.selected = index,
             None => self.selected = 0,
         }
-        if self.status.as_deref().is_some_and(|s| s.starts_with('⏳')) {
+        if clear_hourglass && self.status.as_deref().is_some_and(|s| s.starts_with('⏳')) {
             self.status = None;
         }
     }
@@ -391,5 +400,21 @@ mod tests {
         assert_eq!(human_duration(8.2), "8s");
         assert_eq!(human_duration(75.0), "1m 15s");
         assert_eq!(human_duration(3661.0), "1h 1m");
+    }
+
+    #[test]
+    fn set_rows_clears_hourglass_unless_kept() {
+        let mut picker = JobsPicker::new(vec![running("aaa", "build")], false);
+        picker.set_status("⏳ already stopping a job...");
+        picker.set_rows_keep_hourglass(vec![running("aaa", "build")]);
+        assert!(
+            rendered_text(&picker).contains("already stopping a job"),
+            "list-while-cancel must keep the in-flight footer"
+        );
+        picker.set_rows(vec![running("aaa", "build")]);
+        assert!(
+            !rendered_text(&picker).contains("already stopping a job"),
+            "a completing snapshot must drop the in-flight footer"
+        );
     }
 }

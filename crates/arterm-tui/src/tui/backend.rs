@@ -972,12 +972,13 @@ impl RemoteConnection {
     }
 
     /// List or cancel background jobs from the /jobs overlay.
+    /// Returns the request id so the overlay can match `BgTaskList` / `Error`.
     pub async fn bg_action(
         &mut self,
         action: &str,
         task_id: Option<&str>,
         all_sessions: bool,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         let id = self.next_request_id;
         self.next_request_id += 1;
         self.send_request(Request::BgAction {
@@ -986,7 +987,8 @@ impl RemoteConnection {
             task_id: task_id.map(str::to_string),
             all_sessions,
         })
-        .await
+        .await?;
+        Ok(id)
     }
 
     /// Notify the server that auth credentials changed (e.g., after login)

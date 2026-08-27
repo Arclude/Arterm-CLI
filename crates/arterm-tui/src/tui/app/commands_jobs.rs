@@ -60,7 +60,7 @@ impl App {
             JobsPickerOutcome::Stay => None,
             JobsPickerOutcome::Close => {
                 self.jobs_picker_overlay = None;
-                self.pending_jobs_remote_cancel = false;
+                self.pending_jobs_remote_cancel = None;
                 None
             }
             action @ JobsPickerOutcome::Action { .. } => Some(action),
@@ -160,16 +160,28 @@ impl App {
         true
     }
 
-    pub(in crate::tui) fn apply_bg_task_list(&mut self, tasks: Vec<BgTaskSummary>) {
-        self.pending_jobs_remote_cancel = false;
+    pub(in crate::tui) fn apply_bg_task_list(&mut self, id: u64, tasks: Vec<BgTaskSummary>) {
+        // Cancel answers with BgTaskList using the cancel request id. A list
+        // snapshot (open, r, a, or completion refresh) uses a different id and
+        // must not drop the in-flight guard.
+        let cancel_completed = self.pending_jobs_remote_cancel == Some(id);
+        if cancel_completed {
+            self.pending_jobs_remote_cancel = None;
+        }
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
-            picker.set_rows(tasks);
+            if self.pending_jobs_remote_cancel.is_some() {
+                picker.set_rows_keep_hourglass(tasks);
+            } else {
+                picker.set_rows(tasks);
+            }
             self.request_full_redraw();
         }
     }
 
-    pub(in crate::tui) fn apply_jobs_overlay_error(&mut self, message: String) {
-        self.pending_jobs_remote_cancel = false;
+    pub(in crate::tui) fn apply_jobs_overlay_error(&mut self, id: u64, message: String) {
+        if self.pending_jobs_remote_cancel == Some(id) {
+            self.pending_jobs_remote_cancel = None;
+        }
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
             picker.set_status(message);
             self.request_full_redraw();

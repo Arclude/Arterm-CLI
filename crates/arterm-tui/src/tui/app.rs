@@ -1671,8 +1671,9 @@ pub struct App {
     pub(crate) pending_jobs_list: bool,
     /// Local `/jobs` cancel result, delivered off the TUI thread.
     pub(crate) pending_jobs_cancel: Option<std::sync::mpsc::Receiver<LocalJobsCancelResult>>,
-    /// Remote `/jobs` cancel is in flight; overlapping x must not send another.
-    pub(crate) pending_jobs_remote_cancel: bool,
+    /// Remote `/jobs` cancel request id, while that stop is in flight.
+    /// Overlapping x must not send another; a list snapshot must not clear it.
+    pub(crate) pending_jobs_remote_cancel: Option<u64>,
     session_picker_mode: SessionPickerMode,
     pending_session_picker_load: Option<PendingSessionPickerLoad>,
     /// "Where we left off" lines for the startup screen, and the read that
