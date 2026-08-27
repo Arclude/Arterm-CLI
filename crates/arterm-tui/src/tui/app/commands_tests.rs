@@ -243,6 +243,33 @@ mod jobs {
     }
 
     #[test]
+    fn help_jobs_and_slash_suggestions_describe_the_overlay() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+
+        assert!(
+            app.get_suggestions_for("/jo")
+                .iter()
+                .any(|(command, _)| command == "/jobs"),
+            "/jobs must appear in slash autocomplete"
+        );
+        assert!(
+            dispatch_local_command(&mut app, "/help jobs"),
+            "/help jobs should be claimed"
+        );
+        let help = app
+            .display_messages()
+            .iter()
+            .rev()
+            .find(|message| message.role == "system")
+            .map(|message| message.content.as_str())
+            .expect("/help jobs should print overlay help");
+        assert!(help.contains("/jobs"), "{help}");
+        assert!(help.contains("x (or Delete)"), "{help}");
+        assert!(help.contains("/jobs all"), "{help}");
+    }
+
+    #[test]
     fn jobs_overlay_lists_elapsed_time_and_stops_a_running_task() {
         let _lock = crate::storage::lock_test_env();
         let rt = tokio::runtime::Runtime::new().expect("runtime");
