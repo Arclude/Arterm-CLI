@@ -107,6 +107,25 @@ impl App {
             self.request_full_redraw();
         }
     }
+
+    /// Repaint `/jobs` when a background job finishes or reports progress.
+    /// Local sessions snapshot in-process. Remote sessions request a list on
+    /// the next tick so overlay Done never races a live turn.
+    pub(in crate::tui) fn refresh_jobs_overlay_if_open(&mut self) {
+        let Some(picker) = self.jobs_picker_overlay.as_ref() else {
+            return;
+        };
+        if self.is_remote {
+            self.pending_jobs_list = true;
+            return;
+        }
+        let all_sessions = picker.all_sessions();
+        let rows = snapshot_jobs(all_sessions, Some(self.session.id.as_str()));
+        if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+            picker.set_rows(rows);
+        }
+        self.request_full_redraw();
+    }
 }
 
 fn snapshot_jobs(all_sessions: bool, session_id: Option<&str>) -> Vec<BgTaskSummary> {

@@ -1425,6 +1425,43 @@ fn remote_jobs_overlay_list_does_not_finish_a_resumed_turn() {
 }
 
 #[test]
+fn remote_background_task_notification_requests_a_jobs_list() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+    app.pending_jobs_list = false;
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Notification {
+            from_session: "background_task".to_string(),
+            from_name: Some("background task".to_string()),
+            notification_type: crate::protocol::NotificationType::Message {
+                scope: Some("background_task".to_string()),
+                channel: None,
+                tldr: None,
+            },
+            message: "**Background task** `abc123` · `bash` · ✓ completed · 8.0s · exit 0"
+                .to_string(),
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.pending_jobs_list,
+        "a background-task notification must refresh the open overlay"
+    );
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "overlay must stay open after a completion notification"
+    );
+}
+
+#[test]
 fn remote_jobs_overlay_error_does_not_finish_a_live_turn() {
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().expect("runtime");

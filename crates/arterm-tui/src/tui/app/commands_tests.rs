@@ -348,6 +348,46 @@ mod jobs {
             Some("Cancelled by user"),
             "overlay stop must use BackgroundTaskManager::cancel"
         );
+
+        crate::tui::app::local::handle_bus_event(
+            &mut app,
+            Ok(crate::bus::BusEvent::BackgroundTaskCompleted(
+                crate::bus::BackgroundTaskCompleted {
+                    task_id: info.task_id.clone(),
+                    tool_name: "bash".to_string(),
+                    display_name: Some("sleep for overlay".to_string()),
+                    session_id: session_id.clone(),
+                    status: crate::bus::BackgroundTaskStatus::Failed,
+                    exit_code: None,
+                    output_preview: String::new(),
+                    output_file: std::env::temp_dir().join(format!("{}.output", info.task_id)),
+                    duration_secs: 0.2,
+                    notify: false,
+                    wake: false,
+                },
+            )),
+        );
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("failed") && text.contains("sleep for overlay"),
+            "completion must refresh the overlay without pressing r, got:\n{text}"
+        );
     }
 }
 

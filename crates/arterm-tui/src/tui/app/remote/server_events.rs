@@ -2584,6 +2584,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 }
                 persist_replay_display_message(app, "background_task", None, &message);
                 app.set_status_notice(presentation.status_notice);
+                app.refresh_jobs_overlay_if_open();
                 return false;
             }
 

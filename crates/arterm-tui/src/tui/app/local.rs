@@ -429,6 +429,7 @@ fn apply_terminal_event(
 }
 
 fn handle_background_task_completed(app: &mut App, task: BackgroundTaskCompleted) {
+    app.refresh_jobs_overlay_if_open();
     if !task.notify || task.session_id != app.session.id {
         return;
     }
@@ -470,6 +471,7 @@ fn handle_background_task_completed(app: &mut App, task: BackgroundTaskCompleted
 }
 
 fn handle_background_task_progress(app: &mut App, event: BackgroundTaskProgressEvent) {
+    app.refresh_jobs_overlay_if_open();
     if event.session_id != app.session.id {
         return;
     }
