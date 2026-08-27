@@ -86,19 +86,61 @@ impl App {
                 let Some(task_id) = task_id else {
                     return;
                 };
-                let manager_task_id = task_id.clone();
-                tokio::spawn(async move {
-                    let _ = background::global().cancel(&manager_task_id).await;
-                });
-                if let Some(picker) = self.jobs_picker_overlay.as_mut() {
-                    picker.set_status(format!(
-                        "Stopping {task_id}... press r to refresh"
-                    ));
+                // Cancel off the TUI thread. A miss (already finished / unknown
+                // id) lands in the footer the same way remote BgAction errors
+                // do, instead of leaving the ⏳ note forever.
+                let (tx, rx) = std::sync::mpsc::channel();
+                self.pending_jobs_cancel = Some(rx);
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        let _ = tx.send(local_jobs_cancel_result(&task_id, all_sessions).await);
+                    });
+                } else {
+                    std::thread::spawn(move || {
+                        let result = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .map(|rt| rt.block_on(local_jobs_cancel_result(&task_id, all_sessions)))
+                            .unwrap_or_else(|error| super::LocalJobsCancelResult::Failed {
+                                message: error.to_string(),
+                            });
+                        let _ = tx.send(result);
+                    });
                 }
             }
             _ => {}
         }
         self.request_full_redraw();
+    }
+
+    pub(in crate::tui) fn poll_jobs_cancel(&mut self) -> bool {
+        let Some(rx) = self.pending_jobs_cancel.as_ref() else {
+            return false;
+        };
+        let Ok(result) = rx.try_recv() else {
+            return false;
+        };
+        self.pending_jobs_cancel = None;
+        match result {
+            super::LocalJobsCancelResult::Stopped { all_sessions } => {
+                let rows = snapshot_jobs(all_sessions, Some(self.session.id.as_str()));
+                if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+                    picker.set_rows(rows);
+                }
+            }
+            super::LocalJobsCancelResult::NotRunning { task_id } => {
+                if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+                    picker.set_status(format!("Background job '{task_id}' is not running."));
+                }
+            }
+            super::LocalJobsCancelResult::Failed { message } => {
+                if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+                    picker.set_status(format!("Background job cancel failed: {message}"));
+                }
+            }
+        }
+        self.request_full_redraw();
+        true
     }
 
     pub(in crate::tui) fn apply_bg_task_list(&mut self, tasks: Vec<BgTaskSummary>) {
@@ -125,6 +167,21 @@ impl App {
             picker.set_rows(rows);
         }
         self.request_full_redraw();
+    }
+}
+
+async fn local_jobs_cancel_result(
+    task_id: &str,
+    all_sessions: bool,
+) -> super::LocalJobsCancelResult {
+    match background::global().cancel(task_id).await {
+        Ok(true) => super::LocalJobsCancelResult::Stopped { all_sessions },
+        Ok(false) => super::LocalJobsCancelResult::NotRunning {
+            task_id: task_id.to_string(),
+        },
+        Err(error) => super::LocalJobsCancelResult::Failed {
+            message: format!("{error:#}"),
+        },
     }
 }
 

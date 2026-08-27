@@ -170,6 +170,7 @@ const FULL_FRAME_REDRAW_REASONS: &[&str] = &[
     "status_animation",
     "swarm_spinner",
     "session_picker_spinner",
+    "jobs_overlay",
 ];
 
 fn record_full_frame_redraw_reason(reason: &'static str) {
@@ -201,6 +202,9 @@ pub(crate) fn current_full_frame_redraw_reason(state: &dyn TuiState) -> Option<&
     }
     if session_picker_spinner_redraw_active(state) {
         return Some("session_picker_spinner");
+    }
+    if state.jobs_picker_overlay().is_some() {
+        return Some("jobs_overlay");
     }
     live_activity_redraw_reason(state)
 }
@@ -711,6 +715,7 @@ mod tests {
             "status_animation",
             "swarm_spinner",
             "session_picker_spinner",
+            "jobs_overlay",
         ] {
             assert!(
                 FULL_FRAME_REDRAW_REASONS.contains(&reason),

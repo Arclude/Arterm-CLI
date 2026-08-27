@@ -841,6 +841,14 @@ struct CostState {
 }
 
 /// State for an in-progress OAuth/API-key login flow triggered by `/login`.
+/// Result of a local `/jobs` overlay cancel, delivered off the TUI thread.
+#[derive(Debug)]
+pub(crate) enum LocalJobsCancelResult {
+    Stopped { all_sessions: bool },
+    NotRunning { task_id: String },
+    Failed { message: String },
+}
+
 /// TUI Application state
 pub struct App {
     provider: Arc<dyn Provider>,
@@ -1660,6 +1668,8 @@ pub struct App {
     pub(crate) jobs_picker_overlay: Option<super::jobs_picker::JobsPicker>,
     /// Remote `/jobs` just opened; send a list request on the next tick.
     pub(crate) pending_jobs_list: bool,
+    /// Local `/jobs` cancel result, delivered off the TUI thread.
+    pub(crate) pending_jobs_cancel: Option<std::sync::mpsc::Receiver<LocalJobsCancelResult>>,
     session_picker_mode: SessionPickerMode,
     pending_session_picker_load: Option<PendingSessionPickerLoad>,
     /// "Where we left off" lines for the startup screen, and the read that

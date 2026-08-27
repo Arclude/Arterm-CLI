@@ -326,20 +326,17 @@ mod jobs {
 
         let started = std::time::Instant::now();
         loop {
-            let status = rt.block_on(crate::background::global().status(&info.task_id));
-            if status
-                .as_ref()
-                .is_some_and(|task| task.status != crate::bus::BackgroundTaskStatus::Running)
-            {
+            let _ = crate::tui::app::local::handle_tick(&mut app);
+            if app.pending_jobs_cancel.is_none() {
                 break;
             }
             assert!(
                 started.elapsed() < std::time::Duration::from_secs(3),
-                "job {} should stop after overlay cancel",
-                info.task_id
+                "local cancel result should land on a tick"
             );
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
+
         let status = rt
             .block_on(crate::background::global().status(&info.task_id))
             .expect("cancelled job status");
@@ -349,24 +346,6 @@ mod jobs {
             "overlay stop must use BackgroundTaskManager::cancel"
         );
 
-        crate::tui::app::local::handle_bus_event(
-            &mut app,
-            Ok(crate::bus::BusEvent::BackgroundTaskCompleted(
-                crate::bus::BackgroundTaskCompleted {
-                    task_id: info.task_id.clone(),
-                    tool_name: "bash".to_string(),
-                    display_name: Some("sleep for overlay".to_string()),
-                    session_id: session_id.clone(),
-                    status: crate::bus::BackgroundTaskStatus::Failed,
-                    exit_code: None,
-                    output_preview: String::new(),
-                    output_file: std::env::temp_dir().join(format!("{}.output", info.task_id)),
-                    duration_secs: 0.2,
-                    notify: false,
-                    wake: false,
-                },
-            )),
-        );
         let picker = app
             .jobs_picker_overlay
             .as_ref()
@@ -386,7 +365,52 @@ mod jobs {
         }
         assert!(
             text.contains("failed") && text.contains("sleep for overlay"),
-            "completion must refresh the overlay without pressing r, got:\n{text}"
+            "local cancel must refresh the overlay without waiting for a bus event, got:\n{text}"
+        );
+        assert!(
+            !text.contains("press r")
+                && !text.contains("stopping")
+                && text.contains("esc close"),
+            "successful cancel must clear the stopping footer, got:\n{text}"
+        );
+
+        app.handle_jobs_picker_action_local(crate::tui::jobs_picker::JobsPickerOutcome::Action {
+            action: "cancel",
+            task_id: Some(info.task_id.clone()),
+            all_sessions: false,
+        });
+        let started = std::time::Instant::now();
+        loop {
+            let _ = crate::tui::app::local::handle_tick(&mut app);
+            if app.pending_jobs_cancel.is_none() {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(3),
+                "missed cancel result should land on a tick"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open after a missed cancel");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains(&format!("Background job '{}' is not running.", info.task_id)),
+            "a second stop must report the miss in the footer, got:\n{text}"
         );
     }
 }
