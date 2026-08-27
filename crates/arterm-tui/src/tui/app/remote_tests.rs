@@ -1866,6 +1866,53 @@ fn remote_jobs_closed_overlay_bg_task_list_clears_cancel() {
 }
 
 #[test]
+fn remote_jobs_cancel_send_error_stays_in_the_overlay() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+    drop(
+        remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream"),
+    );
+
+    rt.block_on(async {
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("a failed cancel send must stay in the overlay");
+    });
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a failed cancel send must not leave an in-flight guard"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Could not cancel jobs:"),
+        "a failed cancel send must land in the overlay footer, got:\n{text}"
+    );
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set

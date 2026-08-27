@@ -339,11 +339,21 @@ async fn handle_remote_key_internal(
                     app.request_full_redraw();
                     return Ok(());
                 }
-                let request_id = remote
+                match remote
                     .bg_action(action, task_id.as_deref(), all_sessions)
-                    .await?;
-                if action == "cancel" {
-                    app.pending_jobs_remote_cancel = Some(request_id);
+                    .await
+                {
+                    Ok(request_id) => {
+                        if action == "cancel" {
+                            app.pending_jobs_remote_cancel = Some(request_id);
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+                            picker.set_status(format!("Could not {action} jobs: {error:#}"));
+                        }
+                        app.request_full_redraw();
+                    }
                 }
             }
         }
