@@ -1160,6 +1160,39 @@ fn remote_jobs_slash_opens_the_overlay_instead_of_a_model_turn() {
 }
 
 #[test]
+fn remote_jobs_all_slash_requests_a_bg_list_on_the_next_tick() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+    rt.block_on(crate::tui::app::remote::submit_remote_slash_input(
+        &mut app,
+        &mut remote,
+        crate::tui::app::input::PreparedInput {
+            raw_input: "/jobs all".to_string(),
+            expanded: "/jobs all".to_string(),
+            images: vec![],
+        },
+    ))
+    .expect("remote /jobs all should open locally");
+
+    assert!(
+        app.jobs_picker_overlay
+            .as_ref()
+            .is_some_and(|picker| picker.all_sessions()),
+        "/jobs all must list every session"
+    );
+    assert!(
+        app.pending_jobs_list,
+        "remote overlay must request a live BgAction list on the next tick"
+    );
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set
