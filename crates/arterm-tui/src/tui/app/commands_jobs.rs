@@ -86,6 +86,13 @@ impl App {
                 let Some(task_id) = task_id else {
                     return;
                 };
+                if self.pending_jobs_cancel.is_some() {
+                    if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+                        picker.set_status("⏳ already stopping a job...".to_string());
+                    }
+                    self.request_full_redraw();
+                    return;
+                }
                 // Cancel off the TUI thread. A miss (already finished / unknown
                 // id) lands in the footer the same way remote BgAction errors
                 // do, instead of leaving the ⏳ note forever.

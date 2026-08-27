@@ -455,6 +455,48 @@ mod jobs {
             "dropped cancel workers must leave a footer, got:\n{text}"
         );
     }
+
+    #[test]
+    fn jobs_overlay_keeps_an_in_flight_cancel() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+        assert!(dispatch_local_command(&mut app, "/jobs"));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.pending_jobs_cancel = Some(rx);
+        app.handle_jobs_picker_action_local(crate::tui::jobs_picker::JobsPickerOutcome::Action {
+            action: "cancel",
+            task_id: Some("second".to_string()),
+            all_sessions: false,
+        });
+        assert!(
+            app.pending_jobs_cancel.is_some(),
+            "a second stop must not drop the in-flight cancel channel"
+        );
+
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("already stopping a job"),
+            "a second stop must wait for the in-flight cancel, got:\n{text}"
+        );
+        drop(tx);
+    }
 }
 
 /// Behavioral tests for `/colors`, driven through the real `App` so they cover
