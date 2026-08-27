@@ -113,6 +113,7 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= app.update_pinned_images_auto_hide();
     // Dissolve stale (off-screen) reasoning traces with zero visible motion.
     needs_redraw |= app.gc_offscreen_reasoning_traces();
+    needs_redraw |= app.poll_jobs_cancel();
     if app.pending_jobs_list {
         app.pending_jobs_list = false;
         let all_sessions = app

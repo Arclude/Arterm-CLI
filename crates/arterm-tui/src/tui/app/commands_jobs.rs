@@ -117,8 +117,17 @@ impl App {
         let Some(rx) = self.pending_jobs_cancel.as_ref() else {
             return false;
         };
-        let Ok(result) = rx.try_recv() else {
-            return false;
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending_jobs_cancel = None;
+                if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+                    picker.set_status("Background job cancel failed: worker dropped.".to_string());
+                }
+                self.request_full_redraw();
+                return true;
+            }
         };
         self.pending_jobs_cancel = None;
         match result {

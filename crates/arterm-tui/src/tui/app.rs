@@ -841,6 +841,7 @@ struct CostState {
 }
 
 /// State for an in-progress OAuth/API-key login flow triggered by `/login`.
+
 /// Result of a local `/jobs` overlay cancel, delivered off the TUI thread.
 #[derive(Debug)]
 pub(crate) enum LocalJobsCancelResult {
