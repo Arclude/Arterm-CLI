@@ -413,6 +413,48 @@ mod jobs {
             "a second stop must report the miss in the footer, got:\n{text}"
         );
     }
+
+    #[test]
+    fn jobs_overlay_reports_a_dropped_cancel_worker() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+        assert!(dispatch_local_command(&mut app, "/jobs"));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.pending_jobs_cancel = Some(rx);
+        drop(tx);
+
+        assert!(
+            crate::tui::app::local::handle_tick(&mut app),
+            "a dropped cancel worker must request a redraw"
+        );
+        assert!(
+            app.pending_jobs_cancel.is_none(),
+            "the disconnected channel must be cleared"
+        );
+
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("Background job cancel failed: worker dropped."),
+            "dropped cancel workers must leave a footer, got:\n{text}"
+        );
+    }
 }
 
 /// Behavioral tests for `/colors`, driven through the real `App` so they cover

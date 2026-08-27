@@ -1281,6 +1281,35 @@ fn remote_jobs_tick_sends_bg_action_list_on_the_wire() {
 }
 
 #[test]
+fn remote_tick_clears_a_dropped_local_jobs_cancel() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+    app.pending_jobs_list = false;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.pending_jobs_cancel = Some(rx);
+    drop(tx);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    rt.block_on(async {
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        super::handle_tick(&mut app, &mut remote).await;
+    });
+
+    assert!(
+        app.pending_jobs_cancel.is_none(),
+        "remote ticks must poll the local cancel channel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job cancel failed: worker dropped."),
+        "remote ticks must surface a dropped cancel worker, got:\n{text}"
+    );
+}
+
+#[test]
 fn remote_jobs_overlay_applies_bg_task_list_and_x_cancels_on_the_wire() {
     use tokio::io::AsyncBufReadExt;
 
