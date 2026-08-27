@@ -42,6 +42,11 @@ impl App {
             snapshot_jobs(all_sessions, Some(self.session.id.as_str()))
         };
         self.jobs_picker_overlay = Some(JobsPicker::new(rows, all_sessions));
+        if self.pending_jobs_cancel.is_some() || self.pending_jobs_remote_cancel.is_some() {
+            if let Some(picker) = self.jobs_picker_overlay.as_mut() {
+                picker.set_status("⏳ already stopping a job...".to_string());
+            }
+        }
         if self.is_remote {
             self.pending_jobs_list = true;
         }
@@ -60,7 +65,7 @@ impl App {
             JobsPickerOutcome::Stay => None,
             JobsPickerOutcome::Close => {
                 self.jobs_picker_overlay = None;
-                self.pending_jobs_remote_cancel = None;
+                self.pending_jobs_list = false;
                 None
             }
             action @ JobsPickerOutcome::Action { .. } => Some(action),
@@ -183,11 +188,10 @@ impl App {
     }
 
     pub(in crate::tui) fn apply_jobs_overlay_error(&mut self, id: u64, message: String) {
-        if self.pending_jobs_remote_cancel == Some(id) {
-            self.pending_jobs_remote_cancel = None;
-        } else if self.pending_jobs_remote_cancel.is_some() {
-            // Keep the in-flight footer; this error belongs to another request.
-            return;
+        match self.pending_jobs_remote_cancel {
+            Some(pending) if pending != id => return,
+            Some(_) => self.pending_jobs_remote_cancel = None,
+            None => {}
         }
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
             picker.set_status(message);

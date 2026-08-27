@@ -1552,6 +1552,96 @@ fn remote_jobs_overlay_shows_background_job_errors() {
 }
 
 #[test]
+fn remote_jobs_overlay_error_without_pending_cancel_still_paints() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "job errors must land in the overlay footer even without an in-flight cancel, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_close_keeps_in_flight_cancel() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+    app.pending_jobs_remote_cancel = Some(1);
+
+    assert!(
+        app.handle_jobs_picker_key_outcome(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::empty(),
+        )
+        .is_none(),
+        "esc closes the overlay"
+    );
+    assert!(
+        app.jobs_picker_overlay.is_none(),
+        "esc must close the overlay"
+    );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "closing must not drop the in-flight remote cancel"
+    );
+    assert!(
+        !app.pending_jobs_list,
+        "closing must not send a list after the overlay is gone"
+    );
+
+    app.open_jobs_picker(false);
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "reopening must keep the in-flight remote cancel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "reopening during cancel must restore the in-flight footer, got:\n{text}"
+    );
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 1,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a matching error after reopen must clear the in-flight guard"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "a matching error after reopen must land in the footer, got:\n{text}"
+    );
+}
+
+#[test]
 fn remote_jobs_overlay_list_does_not_finish_a_resumed_turn() {
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().expect("runtime");
