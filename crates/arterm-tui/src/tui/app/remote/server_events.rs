@@ -1543,6 +1543,7 @@ pub(in crate::tui::app) fn handle_server_event(
             subagent_model,
             autoreview_enabled,
             autojudge_enabled,
+            plan_mode_enabled,
             available_models,
             available_model_routes,
             mcp_servers,
@@ -1723,6 +1724,14 @@ pub(in crate::tui::app) fn handle_server_event(
                 autoreview_enabled.unwrap_or(crate::config::config().autoreview.enabled);
             app.autojudge_enabled =
                 autojudge_enabled.unwrap_or(crate::config::config().autojudge.enabled);
+            if let Some(plan_mode) = plan_mode_enabled {
+                // Server-authoritative Plan Mode state: the registry that gates
+                // tool execution lives in the server process, so re-sync both
+                // the client mirror and the local registry copy on
+                // reconnect/resume. Older servers omit the field.
+                arterm_app_core::tool::set_plan_mode(&session_id, plan_mode);
+                app.remote_plan_mode_enabled = plan_mode;
+            }
             if upstream_provider.is_some() {
                 app.upstream_provider = upstream_provider;
             }

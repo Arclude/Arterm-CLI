@@ -482,6 +482,7 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
         subagent_model: None,
         autoreview_enabled: None,
         autojudge_enabled: None,
+        plan_mode_enabled: None,
         compaction_mode: arterm_config_types::CompactionMode::Reactive,
         activity: None,
         side_panel: arterm_side_panel_types::SidePanelSnapshot {

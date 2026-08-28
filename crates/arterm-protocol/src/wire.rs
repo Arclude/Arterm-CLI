@@ -1202,6 +1202,11 @@ pub enum ServerEvent {
         /// Session-scoped automatic judge toggle.
         #[serde(skip_serializing_if = "Option::is_none")]
         autojudge_enabled: Option<bool>,
+        /// Server-authoritative Plan Mode state for this session (read-only
+        /// tool gating). Older servers omit it; clients fall back to their
+        /// local mirror.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan_mode_enabled: Option<bool>,
         /// Active compaction mode for this session
         #[serde(default)]
         compaction_mode: arterm_config_types::CompactionMode,
