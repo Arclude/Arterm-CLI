@@ -815,6 +815,14 @@ impl crate::tui::TuiState for App {
         self.is_replay
     }
 
+    fn plan_mode_enabled(&self) -> bool {
+        if self.is_remote {
+            self.remote_plan_mode_enabled
+        } else {
+            arterm_app_core::tool::is_plan_mode(&self.session.id)
+        }
+    }
+
     fn diff_mode(&self) -> crate::config::DiffDisplayMode {
         self.diff_mode
     }

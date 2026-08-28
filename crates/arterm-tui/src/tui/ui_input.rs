@@ -419,6 +419,10 @@ pub(super) fn input_prompt(app: &dyn TuiState) -> (&'static str, Color) {
     let mode = composer_mode(app.input(), app.is_remote_mode());
     if mode.is_shell() {
         ("$ ", shell_mode_color())
+    } else if app.plan_mode_enabled() {
+        // Distinct glyph + amber color so read-only Plan Mode stays visibly on
+        // while composing, mirroring the shell mode's `$ ` treatment.
+        ("◈ ", rgb(255, 193, 7))
     } else if app.is_processing() {
         ("… ", queued_color())
     } else if app.active_skill().is_some() {

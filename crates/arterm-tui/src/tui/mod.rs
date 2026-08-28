@@ -361,6 +361,12 @@ pub trait TuiState {
     fn is_canary(&self) -> bool;
     /// Whether running in replay mode
     fn is_replay(&self) -> bool;
+    /// Whether read-only Plan Mode is active for the current session. The UI
+    /// keeps a persistent visual indicator (header badge + prompt glyph) while
+    /// this is on, since the toggle's status notice only flashes briefly.
+    fn plan_mode_enabled(&self) -> bool {
+        false
+    }
     /// Diff display mode (off/inline/full-inline/pinned/file)
     fn diff_mode(&self) -> crate::config::DiffDisplayMode;
     /// Current session ID (if available)

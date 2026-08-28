@@ -634,6 +634,9 @@ fn build_persistent_header_with_auth(
     let server_update = app.server_update_available() == Some(true);
     let client_update = app.client_update_available();
     let mut status_items: Vec<&str> = Vec::new();
+    if app.plan_mode_enabled() {
+        status_items.push("plan");
+    }
     if app.is_replay() {
         status_items.push("replay");
     } else if is_remote {
@@ -1259,6 +1262,25 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("client:") && line.contains(" · v")),
             "local mode client line should not carry a version label: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn persistent_header_shows_plan_badge_while_plan_mode_is_on() {
+        let app = create_test_app();
+        let session_id = app.session_id().to_string();
+        arterm_app_core::tool::set_plan_mode(&session_id, true);
+        let on_lines = rendered_header_lines(&app, 120);
+        arterm_app_core::tool::set_plan_mode(&session_id, false);
+        let off_lines = rendered_header_lines(&app, 120);
+
+        assert!(
+            on_lines.iter().any(|line| line.contains("· plan")),
+            "plan mode on should badge the header: {on_lines:?}"
+        );
+        assert!(
+            !off_lines.iter().any(|line| line.contains("· plan")),
+            "plan mode off should drop the header badge: {off_lines:?}"
         );
     }
 
