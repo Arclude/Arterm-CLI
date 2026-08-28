@@ -669,9 +669,14 @@ pub(super) struct OvernightAutoPokeState {
     pub final_wrap_poked: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct CommandCandidatesCache {
     candidates: Vec<(String, &'static str)>,
+    /// Instant the candidates were computed. Skills are re-read from disk
+    /// when a slash prefix is being typed and the cache is older than
+    /// [`App::COMMAND_CANDIDATES_TTL`], so a skill installed while the TUI
+    /// is open appears in `/` completion without a restart or `/skills`.
+    computed_at: std::time::Instant,
 }
 
 /// Memoized result of [`App::command_suggestions`] for one exact input buffer.
@@ -1758,6 +1763,11 @@ impl Provider for InertRuntimeProvider {
 }
 
 impl App {
+    /// How long `/` completion candidates stay cached before skills are
+    /// re-read from disk. Short enough that a freshly installed skill shows
+    /// up after a keystroke or two, long enough that the disk scan stays off
+    /// the per-frame path.
+    pub(crate) const COMMAND_CANDIDATES_TTL: std::time::Duration = std::time::Duration::from_secs(2);
     const AUTO_RETRY_BASE_DELAY_SECS: u64 = 2;
     const AUTO_RETRY_MAX_ATTEMPTS: u8 = 3;
     /// Budget for completion-confidence gate nudges per auto-poke cycle.
