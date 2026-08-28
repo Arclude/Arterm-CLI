@@ -450,7 +450,10 @@ async fn handle_remote_key_internal(
     }
 
     if app.plan_mode_key_matches(code, modifiers) {
-        app_mod::commands::toggle_plan_mode(app);
+        // In remote mode the tools execute in the server process, so the
+        // toggle must be forwarded there instead of flipping client-local
+        // state (which would not block anything server-side).
+        app_mod::commands::toggle_plan_mode_remote(app, remote).await?;
         return Ok(());
     }
 
@@ -1774,6 +1777,13 @@ async fn handle_remote_key_internal(
                         images: vec![],
                     };
                     route_prepared_input_to_new_remote_session(app, remote, prepared).await?;
+                    return Ok(());
+                }
+
+                if matches!(trimmed, "/planmode" | "/plan-mode" | "/plan_mode") {
+                    // Same rationale as the Alt+P hotkey: the server owns the
+                    // authoritative Plan Mode state, forward the toggle there.
+                    app_mod::commands::toggle_plan_mode_remote(app, remote).await?;
                     return Ok(());
                 }
 

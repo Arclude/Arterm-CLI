@@ -2152,7 +2152,7 @@ pub(super) fn handle_pre_control_shortcuts(
         return true;
     }
     if app.plan_mode_key_matches(code, modifiers) {
-        super::commands::toggle_plan_mode(app);
+        super::commands::toggle_plan_mode_local(app);
         return true;
     }
     if let Some(direction) = app.model_switch_keys.direction_for(code, modifiers) {

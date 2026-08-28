@@ -46,6 +46,10 @@ fn alt_p_hotkey_toggles_plan_mode() {
         arterm_app_core::tool::is_plan_mode(&session_id),
         "Alt+P must enable plan mode"
     );
+    assert!(
+        app.remote_plan_mode_enabled,
+        "local toggle must keep the client mirror in sync"
+    );
 
     let handled = super::super::input::handle_pre_control_shortcuts(
         &mut app,
@@ -56,6 +60,10 @@ fn alt_p_hotkey_toggles_plan_mode() {
     assert!(
         !arterm_app_core::tool::is_plan_mode(&session_id),
         "second Alt+P must disable plan mode again"
+    );
+    assert!(
+        !app.remote_plan_mode_enabled,
+        "client mirror must follow plan mode off"
     );
 }
 

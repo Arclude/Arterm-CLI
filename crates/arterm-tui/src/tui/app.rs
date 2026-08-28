@@ -1312,6 +1312,12 @@ pub struct App {
     autoreview_enabled: bool,
     // Automatic end-of-turn judge toggle for this session
     autojudge_enabled: bool,
+    // Plan Mode toggle mirror for remote sessions. The authoritative state
+    // lives in the server process (it gates tool execution there), so in
+    // remote mode this tracks the last value acknowledged by the server. In
+    // local mode the process-local registry is authoritative and this is a
+    // plain mirror for status display.
+    pub(crate) remote_plan_mode_enabled: bool,
     // Last requested `/improve` mode for this session.
     improve_mode: Option<ImproveMode>,
     // Suppress duplicate memory injection messages for near-identical prompts.

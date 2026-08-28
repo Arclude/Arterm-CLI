@@ -45,4 +45,5 @@ pub enum FeatureToggle {
     Swarm,
     Autoreview,
     Autojudge,
+    PlanMode,
 }

@@ -1666,26 +1666,55 @@ fn handle_planmode_command(app: &mut App, trimmed: &str) -> bool {
     if !matches!(trimmed, "/planmode" | "/plan-mode" | "/plan_mode") {
         return false;
     }
-    toggle_plan_mode(app);
+    toggle_plan_mode_local(app);
     true
 }
 
-/// Toggle read-only Plan Mode for the current session and surface the
-/// resulting state. Shared by the `/planmode` command and the Alt+P hotkey.
-pub(in crate::tui) fn toggle_plan_mode(app: &mut App) {
+/// Toggle read-only Plan Mode for a locally hosted session and surface the
+/// resulting state. Shared by the `/planmode` command and the Alt+P hotkey in
+/// local mode. In remote mode the tools execute in the server process, so
+/// [`toggle_plan_mode_remote`] must be used instead: it forwards the toggle
+/// over the protocol and only mirrors the acknowledged state locally.
+pub(in crate::tui) fn toggle_plan_mode_local(app: &mut App) {
     let session_id = app.session_id().to_string();
     if session_id.is_empty() {
         app.set_status_notice("No active session");
         return;
     }
     let currently_active = arterm_app_core::tool::is_plan_mode(&session_id);
-    if currently_active {
-        arterm_app_core::tool::set_plan_mode(&session_id, false);
-        app.set_status_notice("Plan Mode OFF — write tools restored");
-    } else {
-        arterm_app_core::tool::set_plan_mode(&session_id, true);
-        app.set_status_notice("Plan Mode ON — write tools blocked (edit, write, bash, etc.)");
+    apply_plan_mode_state(app, !currently_active);
+}
+
+/// Apply a Plan Mode state locally (process-local registry + status surface).
+/// Used by local toggles and by remote acknowledgements mirroring server state.
+pub(in crate::tui) fn apply_plan_mode_state(app: &mut App, enabled: bool) {
+    let session_id = app.session_id().to_string();
+    if session_id.is_empty() {
+        app.set_status_notice("No active session");
+        return;
     }
+    arterm_app_core::tool::set_plan_mode(&session_id, enabled);
+    app.remote_plan_mode_enabled = enabled;
+    if enabled {
+        app.set_status_notice("Plan Mode ON — write tools blocked (edit, write, bash, etc.)");
+    } else {
+        app.set_status_notice("Plan Mode OFF — write tools restored");
+    }
+}
+
+/// Remote counterpart of [`toggle_plan_mode_local`]: sends the new Plan Mode
+/// state to the server (where tools actually execute) and mirrors it locally
+/// once the request is accepted. Returns the applied state.
+pub(in crate::tui) async fn toggle_plan_mode_remote(
+    app: &mut App,
+    remote: &mut crate::tui::backend::RemoteConnection,
+) -> anyhow::Result<bool> {
+    let new_state = !app.remote_plan_mode_enabled;
+    remote
+        .set_feature(crate::protocol::FeatureToggle::PlanMode, new_state)
+        .await?;
+    apply_plan_mode_state(app, new_state);
+    Ok(new_state)
 }
 
 pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {

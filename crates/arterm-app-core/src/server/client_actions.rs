@@ -455,6 +455,14 @@ pub(super) async fn handle_set_feature(
                 }
             }
         }
+        FeatureToggle::PlanMode => {
+            // Plan Mode state lives in this process (it gates tool execution
+            // and the system-prompt reminder), so the server owns the toggle.
+            // The client's /planmode command and the Alt+P hotkey send the
+            // request here in remote mode.
+            crate::tool::set_plan_mode(client_session_id, enabled);
+            let _ = client_event_tx.send(ServerEvent::Done { id });
+        }
         FeatureToggle::Swarm => {
             if *swarm_enabled == enabled {
                 let _ = client_event_tx.send(ServerEvent::Done { id });

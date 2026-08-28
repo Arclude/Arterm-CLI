@@ -2028,7 +2028,10 @@ fn handle_disconnected_key_internal(
     }
 
     if app.plan_mode_key_matches(code, modifiers) {
-        super::commands::toggle_plan_mode(app);
+        // Disconnected: no server to forward to. Flip the local mirror so the
+        // UI stays truthful; the server-side registry is re-synced by the next
+        // local toggle or reconnection-time state fetch.
+        super::commands::toggle_plan_mode_local(app);
         return Ok(());
     }
 

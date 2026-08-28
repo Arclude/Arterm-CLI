@@ -368,6 +368,7 @@ impl App {
         let autojudge_enabled = session
             .autojudge_enabled
             .unwrap_or(config().autojudge.enabled);
+        let plan_mode_initially_on = arterm_app_core::tool::is_plan_mode(&session.id);
         let context_limit = provider.context_window() as u64;
         let mut runtime_memory_log = if crate::runtime_memory_log::client_logging_enabled() {
             Some(crate::runtime_memory_log::RuntimeMemoryLogController::new(
@@ -582,6 +583,7 @@ impl App {
             memory_enabled: features.memory,
             autoreview_enabled,
             autojudge_enabled,
+            remote_plan_mode_enabled: plan_mode_initially_on,
             improve_mode,
             last_injected_memory_signature: None,
             swarm_enabled: features.swarm,
@@ -796,6 +798,7 @@ impl App {
         let autojudge_enabled = session
             .autojudge_enabled
             .unwrap_or(config().autojudge.enabled);
+        let plan_mode_initially_on = arterm_app_core::tool::is_plan_mode(&session.id);
         let context_limit = provider.context_window() as u64;
         let mut runtime_memory_log = if crate::runtime_memory_log::client_logging_enabled() {
             Some(crate::runtime_memory_log::RuntimeMemoryLogController::new(
@@ -1040,6 +1043,7 @@ impl App {
             memory_enabled: features.memory,
             autoreview_enabled,
             autojudge_enabled,
+            remote_plan_mode_enabled: plan_mode_initially_on,
             improve_mode,
             last_injected_memory_signature: None,
             swarm_enabled: features.swarm,
