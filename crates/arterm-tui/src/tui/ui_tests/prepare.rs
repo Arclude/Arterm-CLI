@@ -1421,3 +1421,27 @@ fn the_notes_go_away_when_the_conversation_starts() {
         "rendered={rendered}"
     );
 }
+
+/// The header prep cache serves the last built header until the signature
+/// changes or the TTL lapses. Plan mode adds the `plan` status item to the
+/// persistent header, so a toggle that misses the signature leaves the stale
+/// badge-less header on screen for the whole TTL — exactly the "badge never
+/// appeared" symptom. Guard that the toggle is signature-visible.
+#[test]
+fn plan_mode_toggle_invalidates_the_header_signature() {
+    let base = TestState {
+        plan_mode_enabled: false,
+        ..Default::default()
+    };
+    let enabled = TestState {
+        plan_mode_enabled: true,
+        ..Default::default()
+    };
+
+    assert_ne!(
+        prepare::header_prep_signature(&base, 80),
+        prepare::header_prep_signature(&enabled, 80),
+        "toggling plan mode must change the header signature so the `plan` \
+         badge repaints on the next frame instead of waiting out the TTL"
+    );
+}

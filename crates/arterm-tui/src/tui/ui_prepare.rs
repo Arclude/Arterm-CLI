@@ -1085,7 +1085,10 @@ pub(crate) fn invalidate_header_prep_cache() {
 
 /// Hash of the header inputs that are cheap to read every frame. Anything
 /// expensive (disk probes) is intentionally excluded and covered by the TTL.
-fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
+// pub(super): visible to `ui` and its descendants, so the sibling `ui::tests`
+// module can guard cache-invalidation fields (see
+// plan_mode_toggle_invalidates_the_header_signature).
+pub(super) fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     width.hash(&mut hasher);
@@ -1100,6 +1103,10 @@ fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
     app.is_replay().hash(&mut hasher);
     app.is_remote_mode().hash(&mut hasher);
     app.is_canary().hash(&mut hasher);
+    // Plan mode adds the `plan` status item to the persistent header, so a
+    // toggle must repaint the header on the next frame instead of waiting out
+    // the cache TTL.
+    app.plan_mode_enabled().hash(&mut hasher);
     app.server_update_available().hash(&mut hasher);
     app.mcp_servers().hash(&mut hasher);
     app.connected_clients().hash(&mut hasher);
