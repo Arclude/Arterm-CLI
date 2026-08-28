@@ -98,6 +98,13 @@ impl App {
         if cmd == "frame-normalized" {
             return self.handle_debug_command("screen-json-normalized");
         }
+        if cmd == "screen-json" && crate::tui::visual_debug::latest_frame().is_none() {
+            // Local/tester TUIs may not have rendered since capture was
+            // enabled, leaving the frame buffer empty. Render one frame
+            // offscreen so frame dumps always reflect current state (the
+            // remote path already does this on ClientDebugRequest).
+            return self.render_offscreen_frame_json();
+        }
         if cmd == "enable" || cmd == "debug-enable" {
             crate::tui::visual_debug::enable();
             return "Visual debugging enabled.".to_string();
@@ -1036,6 +1043,28 @@ impl App {
         } else {
             format!("ERROR: unknown command '{}'. Use 'help' for list.", cmd)
         }
+    }
+
+    /// Render one frame with a ratatui `TestBackend` and return it as the
+    /// `screen-json` payload. Used as a fallback when the visual-debug frame
+    /// buffer is empty, so headless tester TUIs can still serve frame dumps.
+    pub(in crate::tui::app) fn render_offscreen_frame_json(&mut self) -> String {
+        crate::tui::visual_debug::enable();
+        let (width, height) = crate::tui::ui::last_layout_snapshot()
+            .map(|layout| (layout.messages_area.width, layout.messages_area.height))
+            .unwrap_or((120, 40));
+        let width = width.max(20);
+        let height = height.max(10);
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = match ratatui::Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(error) => return format!("screen-json: offscreen terminal error: {error}"),
+        };
+        if let Err(error) = terminal.draw(|frame| crate::tui::ui::draw(frame, self)) {
+            return format!("screen-json: offscreen draw error: {error}");
+        }
+        crate::tui::visual_debug::latest_frame_json()
+            .unwrap_or_else(|| "screen-json: no frames captured".to_string())
     }
 
     /// Check for new stable version and trigger migration if at safe point
