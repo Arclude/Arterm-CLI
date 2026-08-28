@@ -114,6 +114,7 @@ impl App {
         self.new_terminal_key = keybind::load_new_terminal_key();
         self.open_resume_key = keybind::load_open_resume_key();
         self.jobs_picker_key = keybind::load_jobs_picker_key();
+        self.plan_mode_key = keybind::load_plan_mode_toggle_key();
         self.fallback_switch_key = keybind::load_fallback_switch_key();
         self.scroll_keys = keybind::load_scroll_keys();
         crate::logging::info("KEYBINDINGS: reloaded from config change");
@@ -665,6 +666,7 @@ impl App {
             new_terminal_key: keybind::load_new_terminal_key(),
             open_resume_key: keybind::load_open_resume_key(),
             jobs_picker_key: keybind::load_jobs_picker_key(),
+            plan_mode_key: keybind::load_plan_mode_toggle_key(),
             fallback_switch_key: keybind::load_fallback_switch_key(),
             scroll_keys: keybind::load_scroll_keys(),
             keybindings_config_generation: crate::config::config_reload_generation(),
@@ -1122,6 +1124,7 @@ impl App {
             new_terminal_key: keybind::load_new_terminal_key(),
             open_resume_key: keybind::load_open_resume_key(),
             jobs_picker_key: keybind::load_jobs_picker_key(),
+            plan_mode_key: keybind::load_plan_mode_toggle_key(),
             fallback_switch_key: keybind::load_fallback_switch_key(),
             scroll_keys: keybind::load_scroll_keys(),
             keybindings_config_generation: crate::config::config_reload_generation(),

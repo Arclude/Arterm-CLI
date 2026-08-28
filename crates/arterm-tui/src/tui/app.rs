@@ -1488,6 +1488,8 @@ pub struct App {
     open_resume_key: OptionalBinding,
     // Optional configured keybinding for opening the background jobs picker
     jobs_picker_key: OptionalBinding,
+    // Configured keybinding for toggling read-only Plan Mode (default Alt+P)
+    plan_mode_key: crate::tui::keybind::ToggleBinding,
     // Optional configured keybinding for accepting the post-error fallback offer
     fallback_switch_key: OptionalBinding,
     // Config reload generation the keybinding snapshot above was parsed at.

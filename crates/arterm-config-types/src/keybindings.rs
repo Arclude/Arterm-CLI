@@ -342,6 +342,14 @@ pub const KEYBINDING_DEFAULTS: &[KeybindingDefault] = &[
         macos: PlatformDefault::dev("alt+down"),
         other: PlatformDefault::dev("alt+down"),
     },
+    KeybindingDefault {
+        id: "plan_mode_toggle",
+        description: "Toggle read-only Plan Mode (/planmode)",
+        // Alt+P for "Plan". Option+P on macOS terminals arrives as 'π' and the
+        // ToggleBinding macOS option-letter fallback handles that encoding.
+        macos: PlatformDefault::dev("alt+p"),
+        other: PlatformDefault::dev("alt+p"),
+    },
 ];
 
 /// Look up a keybinding action by id.

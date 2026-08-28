@@ -24,6 +24,42 @@ fn alt_down_hotkey_opens_the_local_jobs_picker() {
 }
 
 #[test]
+fn alt_p_hotkey_toggles_plan_mode() {
+    let mut app = crate::tui::app::tests::create_test_app();
+    let session_id = app.session_id().to_string();
+    assert!(
+        !session_id.is_empty(),
+        "test app must have an active session for the plan mode state"
+    );
+    assert!(
+        !arterm_app_core::tool::is_plan_mode(&session_id),
+        "plan mode starts off"
+    );
+
+    let handled = super::super::input::handle_pre_control_shortcuts(
+        &mut app,
+        crossterm::event::KeyCode::Char('p'),
+        crossterm::event::KeyModifiers::ALT,
+    );
+    assert!(handled, "Alt+P should be consumed by the plan mode hotkey");
+    assert!(
+        arterm_app_core::tool::is_plan_mode(&session_id),
+        "Alt+P must enable plan mode"
+    );
+
+    let handled = super::super::input::handle_pre_control_shortcuts(
+        &mut app,
+        crossterm::event::KeyCode::Char('p'),
+        crossterm::event::KeyModifiers::ALT,
+    );
+    assert!(handled, "second Alt+P should also be consumed");
+    assert!(
+        !arterm_app_core::tool::is_plan_mode(&session_id),
+        "second Alt+P must disable plan mode again"
+    );
+}
+
+#[test]
 fn parse_diff_mode_name_maps_known_aliases() {
     use crate::config::DiffDisplayMode;
     assert_eq!(parse_diff_mode_name("off"), Some(DiffDisplayMode::Off));

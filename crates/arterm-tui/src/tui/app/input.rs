@@ -1587,6 +1587,11 @@ impl App {
             .unwrap_or(false)
     }
 
+    /// Whether the configured `keybindings.plan_mode_toggle` chord matches this key.
+    pub(crate) fn plan_mode_key_matches(&self, code: KeyCode, modifiers: KeyModifiers) -> bool {
+        self.plan_mode_key.matches(code, modifiers)
+    }
+
     /// Whether the configured `keybindings.fallback_switch` chord matches this key.
     pub(crate) fn fallback_switch_key_matches(
         &self,
@@ -2144,6 +2149,10 @@ pub(super) fn handle_pre_control_shortcuts(
     }
     if app.jobs_picker_key_matches(code, modifiers) {
         app.open_jobs_picker(false);
+        return true;
+    }
+    if app.plan_mode_key_matches(code, modifiers) {
+        super::commands::toggle_plan_mode(app);
         return true;
     }
     if let Some(direction) = app.model_switch_keys.direction_for(code, modifiers) {

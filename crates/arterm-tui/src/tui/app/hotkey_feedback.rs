@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use super::App;
 use crate::tui::keybind::{
     CenteredToggleKeys, EffortSwitchKeys, KeyBinding, ModelSwitchKeys, OptionalBinding, ScrollKeys,
-    ToggleKeys, WorkspaceNavigationKeys,
+    ToggleBinding, ToggleKeys, WorkspaceNavigationKeys,
 };
 
 /// An action is "familiar" once used this many times via its hotkey.
@@ -99,6 +99,7 @@ pub(super) struct RegistryInputs<'a> {
     pub new_terminal: &'a OptionalBinding,
     pub open_resume: &'a OptionalBinding,
     pub jobs_picker: &'a OptionalBinding,
+    pub plan_mode: &'a ToggleBinding,
     pub fallback_switch: &'a OptionalBinding,
     /// Workspace navigation only dispatches in remote/client mode.
     pub remote: bool,
@@ -175,6 +176,11 @@ pub(super) fn build_registry(inputs: &RegistryInputs<'_>) -> Vec<KnownHotkey> {
         inputs.jobs_picker.binding.clone(),
         "jobs_picker",
         "open the background jobs picker",
+    );
+    push(
+        inputs.plan_mode.binding().cloned(),
+        "plan_mode_toggle",
+        "toggle read-only Plan Mode",
     );
     // Context-armed accept key (fallback offer / update merge). Quiet: it only
     // acts when an offer is on screen, which already explains itself.
@@ -730,6 +736,7 @@ impl App {
             new_terminal: &self.new_terminal_key,
             open_resume: &self.open_resume_key,
             jobs_picker: &self.jobs_picker_key,
+            plan_mode: &self.plan_mode_key,
             fallback_switch: &self.fallback_switch_key,
             remote,
         })
@@ -903,6 +910,7 @@ mod tests {
             binding: Some(key(KeyCode::Down, KeyModifiers::ALT)),
             label: Some("Alt+Down".to_string()),
         };
+        let plan_mode = ToggleBinding::load("alt+p", 'p');
         let fallback_switch = OptionalBinding {
             binding: Some(ctrl('y')),
             label: Some("Ctrl+Y".to_string()),
@@ -918,6 +926,7 @@ mod tests {
             new_terminal: &new_terminal,
             open_resume: &open_resume,
             jobs_picker: &jobs_picker,
+            plan_mode: &plan_mode,
             fallback_switch: &fallback_switch,
             remote,
         })
@@ -1070,6 +1079,7 @@ mod tests {
             ("new_terminal", Some(&["new_terminal"])),
             ("open_resume", Some(&["open_resume"])),
             ("jobs_picker", Some(&["jobs_picker"])),
+            ("plan_mode_toggle", Some(&["plan_mode_toggle"])),
         ];
 
         let registry = test_inputs_registry(true);

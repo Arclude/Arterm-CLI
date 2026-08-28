@@ -2027,6 +2027,11 @@ fn handle_disconnected_key_internal(
         return Ok(());
     }
 
+    if app.plan_mode_key_matches(code, modifiers) {
+        super::commands::toggle_plan_mode(app);
+        return Ok(());
+    }
+
     if crate::tui::app::input::newline::enter_inserts_newline(app, code, modifiers) {
         return Ok(());
     }

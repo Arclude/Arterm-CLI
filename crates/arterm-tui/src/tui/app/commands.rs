@@ -1666,10 +1666,17 @@ fn handle_planmode_command(app: &mut App, trimmed: &str) -> bool {
     if !matches!(trimmed, "/planmode" | "/plan-mode" | "/plan_mode") {
         return false;
     }
+    toggle_plan_mode(app);
+    true
+}
+
+/// Toggle read-only Plan Mode for the current session and surface the
+/// resulting state. Shared by the `/planmode` command and the Alt+P hotkey.
+pub(in crate::tui) fn toggle_plan_mode(app: &mut App) {
     let session_id = app.session_id().to_string();
     if session_id.is_empty() {
         app.set_status_notice("No active session");
-        return true;
+        return;
     }
     let currently_active = arterm_app_core::tool::is_plan_mode(&session_id);
     if currently_active {
@@ -1679,7 +1686,6 @@ fn handle_planmode_command(app: &mut App, trimmed: &str) -> bool {
         arterm_app_core::tool::set_plan_mode(&session_id, true);
         app.set_status_notice("Plan Mode ON — write tools blocked (edit, write, bash, etc.)");
     }
-    true
 }
 
 pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
