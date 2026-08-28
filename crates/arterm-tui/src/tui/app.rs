@@ -1767,7 +1767,8 @@ impl App {
     /// re-read from disk. Short enough that a freshly installed skill shows
     /// up after a keystroke or two, long enough that the disk scan stays off
     /// the per-frame path.
-    pub(crate) const COMMAND_CANDIDATES_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+    pub(crate) const COMMAND_CANDIDATES_TTL: std::time::Duration =
+        std::time::Duration::from_secs(2);
     const AUTO_RETRY_BASE_DELAY_SECS: u64 = 2;
     const AUTO_RETRY_MAX_ATTEMPTS: u8 = 3;
     /// Budget for completion-confidence gate nudges per auto-poke cycle.

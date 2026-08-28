@@ -372,7 +372,10 @@ impl App {
         let reloaded = crate::skill::SkillRegistry::load_global().unwrap_or_default();
         let reloaded = crate::skill::SkillRegistry::effective_for_working_dir(
             &reloaded,
-            self.session.working_dir.as_deref().map(std::path::Path::new),
+            self.session
+                .working_dir
+                .as_deref()
+                .map(std::path::Path::new),
         );
         if let Ok(mut shared) = self.registry.skills().try_write() {
             *shared = reloaded.clone();

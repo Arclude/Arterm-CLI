@@ -3287,7 +3287,13 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         capture.state.queued_count = pending_count;
         capture.state.message_count = app.display_messages().len();
         capture.state.streaming_text_len = app.streaming_text().len();
-        capture.state.has_suggestions = !app.command_suggestions().is_empty();
+        let debug_suggestions = app.command_suggestions();
+        capture.state.has_suggestions = !debug_suggestions.is_empty();
+        capture.state.suggestion_preview = debug_suggestions
+            .iter()
+            .take(8)
+            .map(|(cmd, _)| cmd.clone())
+            .collect();
         capture.state.status = format!("{:?}", app.status());
         capture.state.diagram_mode = Some(format!("{:?}", diagram_mode));
         capture.state.diagram_focus = diagram_focus;

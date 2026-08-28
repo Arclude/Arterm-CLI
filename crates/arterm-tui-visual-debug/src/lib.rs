@@ -185,6 +185,9 @@ pub struct StateSnapshot {
     pub message_count: usize,
     pub streaming_text_len: usize,
     pub has_suggestions: bool,
+    /// First few command-suggestion rows (label only) so a frame dump can
+    /// verify what the completion popover is actually showing.
+    pub suggestion_preview: Vec<String>,
     pub status: String,
     pub diagram_mode: Option<String>,
     pub diagram_focus: bool,

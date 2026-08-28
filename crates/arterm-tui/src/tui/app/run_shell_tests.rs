@@ -307,7 +307,9 @@ impl ratatui::backend::Backend for CursorQueryRefusingBackend {
         &mut self,
         position: P,
     ) -> Result<(), Self::Error> {
-        self.inner.set_cursor_position(position).map_err(infallible_to_io)
+        self.inner
+            .set_cursor_position(position)
+            .map_err(infallible_to_io)
     }
 
     fn clear(&mut self) -> Result<(), Self::Error> {
@@ -315,7 +317,9 @@ impl ratatui::backend::Backend for CursorQueryRefusingBackend {
     }
 
     fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
-        self.inner.clear_region(clear_type).map_err(infallible_to_io)
+        self.inner
+            .clear_region(clear_type)
+            .map_err(infallible_to_io)
     }
 
     fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
@@ -363,7 +367,8 @@ fn hard_clear_survives_a_backend_that_refuses_cursor_queries() {
 
     hard_clear_without_cursor_query(&mut terminal).expect("hard clear must not query the cursor");
     assert_eq!(
-        terminal.backend().cursor_queries, 0,
+        terminal.backend().cursor_queries,
+        0,
         "the cursor-safe hard clear must never issue a cursor-position query"
     );
 
