@@ -182,6 +182,11 @@ pub fn arterm_bindings(cfg: &KeybindingsConfig) -> Vec<ArtermBinding> {
             cfg.info_widget_toggle.as_str(),
         ),
         (
+            "plan_mode_toggle",
+            "Toggle read-only Plan Mode",
+            cfg.plan_mode_toggle.as_str(),
+        ),
+        (
             "new_terminal",
             "Spawn new terminal session",
             cfg.new_terminal.as_str(),
