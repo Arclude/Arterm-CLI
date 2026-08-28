@@ -1285,6 +1285,20 @@ mod tests {
     }
 
     #[test]
+    fn persistent_header_plan_badge_survives_narrow_terminals() {
+        // The plan badge leads the status segment ("arterm · plan · ..."), so
+        // even a 60-col terminal keeps it on screen.
+        let app = create_test_app();
+        let session_id = app.session_id().to_string();
+        arterm_app_core::tool::set_plan_mode(&session_id, true);
+        let narrow = rendered_header_lines(&app, 60);
+        assert!(
+            narrow.iter().any(|line| line.contains("· plan")),
+            "60-col header should still show the plan badge: {narrow:?}"
+        );
+    }
+
+    #[test]
     fn persistent_header_client_line_shows_name_icon_with_connection_hint() {
         let mut app = create_test_app();
         app.set_remote_server_identity_for_tests(
