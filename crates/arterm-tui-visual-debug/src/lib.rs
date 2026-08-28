@@ -204,6 +204,9 @@ pub struct StateSnapshot {
 /// Actual rendered text content
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct RenderedText {
+    /// First line(s) of the persistent header (product name, status items),
+    /// joined with ` · ` for grep-able badge verification.
+    pub header_preview: String,
     /// Status line text (spinner, tokens, elapsed, etc.)
     pub status_line: String,
     /// Input area text (what the user is typing)

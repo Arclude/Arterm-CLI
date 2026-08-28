@@ -129,6 +129,13 @@ pub enum PreparedSectionKind {
     InlineImages,
 }
 
+impl PreparedSectionKind {
+    /// True for the persistent header section (product name + status items).
+    pub fn is_header(&self) -> bool {
+        matches!(self, PreparedSectionKind::Header)
+    }
+}
+
 #[derive(Clone)]
 pub struct PreparedChatFrame {
     pub sections: Vec<PreparedSection>,

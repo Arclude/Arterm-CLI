@@ -3331,6 +3331,27 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
 
         // Status line content
         capture.rendered_text.status_line = format_status_for_debug(app);
+
+        // Persistent header first lines (product name + status items like the
+        // `plan` badge), for grep-able badge verification in frame dumps.
+        // The header section leads the prepared frame; skip the centering
+        // pad lines, which are empty.
+        capture.rendered_text.header_preview = prepared
+            .sections
+            .iter()
+            .find(|section| section.kind.is_header())
+            .map(|section| {
+                section
+                    .prepared
+                    .wrapped_plain_lines
+                    .iter()
+                    .filter(|line| !line.trim().is_empty())
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
     }
 
     if let Some(ref mut capture) = debug_capture {
