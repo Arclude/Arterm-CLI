@@ -1198,6 +1198,11 @@ struct FullPrepCacheKey {
     expanded_images_version: u64,
     /// Signature of live swarm member cards embedded beneath spawn tool calls.
     swarm_members_signature: u64,
+    /// Plan mode adds the `plan` status item to the persistent header baked
+    /// into the prepared frame. Without this field an exact cache hit on the
+    /// very next frame after a toggle never reaches the header rebuild, so the
+    /// badge stays stale until some unrelated key field changes.
+    plan_mode_enabled: bool,
     /// The startup screen's "where we left off" lines. They arrive from a
     /// background read a moment after the first frame, so without them in the
     /// key the frame prepared before they landed is served forever and the

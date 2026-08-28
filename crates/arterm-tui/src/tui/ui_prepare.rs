@@ -724,6 +724,7 @@ pub(super) fn prepare_messages(
         inline_images_visible: app.inline_images_visible(),
         expanded_images_version: app.expanded_images_version(),
         swarm_members_signature: swarm_members_signature(&app.swarm_members_for_transcript()),
+        plan_mode_enabled: app.plan_mode_enabled(),
         startup_notes_signature: startup_notes_signature(app),
     };
 
