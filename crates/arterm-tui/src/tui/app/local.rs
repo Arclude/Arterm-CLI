@@ -114,7 +114,12 @@ pub(super) fn handle_tick(app: &mut App) -> bool {
     needs_redraw |= super::commands::poll_local_transfer_prepare(app);
     needs_redraw |= super::commands::maybe_begin_pending_local_transfer(app);
     needs_redraw |= app.maybe_progress_provider_failover_countdown();
-    app.check_debug_command();
+    // Tester/file-driven debug commands mutate input and UI state without a
+    // terminal event, so a successful command must force a repaint or the
+    // PTY-driven TUI keeps serving the previous frame.
+    if app.check_debug_command().is_some() {
+        needs_redraw = true;
+    }
     needs_redraw |= app.check_stable_version();
     needs_redraw |= app.refresh_keybindings_if_config_reloaded();
     needs_redraw |= app.maybe_finish_background_client_reload();

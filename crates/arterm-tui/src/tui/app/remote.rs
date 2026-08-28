@@ -160,7 +160,11 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= app.onboarding_tick();
     needs_redraw |= app.refresh_keybindings_if_config_reloaded();
 
-    let _ = check_debug_command(app, remote).await;
+    // File-driven debug commands (tester PTYs) mutate input/UI state with no
+    // terminal event; force a repaint so frame dumps reflect them.
+    if check_debug_command(app, remote).await.is_some() {
+        needs_redraw = true;
+    }
 
     if !app.is_processing {
         if let Some(request) = app.take_pending_catchup_resume() {
