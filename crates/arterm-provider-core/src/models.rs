@@ -332,8 +332,14 @@ pub fn open_weight_family_context_limit(model: &str) -> Option<usize> {
 
     // --- Z.AI GLM family ---
     if m.contains("glm") {
-        // GLM-5.2: first GLM with a truly usable 1M-token context window.
-        if m.contains("glm-5.2") || m.contains("glm-52") || m.contains("glm-5p2") {
+        // GLM-5.2 and GLM-5.3: 1M-token context windows.
+        if m.contains("glm-5.2")
+            || m.contains("glm-52")
+            || m.contains("glm-5p2")
+            || m.contains("glm-5.3")
+            || m.contains("glm-53")
+            || m.contains("glm-5p3")
+        {
             return Some(1_000_000);
         }
         // GLM-5 / GLM-5.1 and GLM-4.6 / GLM-4.7: 200K context.

@@ -1092,6 +1092,9 @@ fn open_weight_family_context_limits_match_published_windows() {
     assert_eq!(f("glm-5.1"), Some(200_000));
     assert_eq!(f("zai-glm-5-1"), Some(200_000));
     assert_eq!(f("glm-5.2"), Some(1_000_000));
+    assert_eq!(f("glm-5.3"), Some(1_000_000));
+    assert_eq!(f("z-ai/glm-5.3"), Some(1_000_000));
+    assert_eq!(f("glm-5p3"), Some(1_000_000));
 
     // Other open-weight families.
     assert_eq!(f("kimi-k2.5"), Some(262_144));
