@@ -562,3 +562,143 @@ async fn abort_live_tasks_for_reload_keeps_naturally_finished_status() -> Result
     );
     Ok(())
 }
+
+#[test]
+fn transient_task_appears_in_list_sync_while_running_and_vanishes_after() {
+    let tmp = tempdir().expect("tempdir");
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+
+    // Nothing transient initially.
+    assert!(manager
+        .list_sync()
+        .iter()
+        .all(|task| task.session_id != "session-transient"));
+
+    let id = manager.register_transient(
+        "bash",
+        Some("docker build -t app .".to_string()),
+        "session-transient",
+    );
+
+    let listed = manager.list_sync();
+    let entry = listed
+        .iter()
+        .find(|task| task.task_id == id)
+        .expect("transient command must appear in the jobs list while running");
+    assert_eq!(entry.tool_name, "bash");
+    assert_eq!(entry.status, BackgroundTaskStatus::Running);
+    assert_eq!(
+        entry.display_name.as_deref(),
+        Some("docker build -t app .")
+    );
+    assert!(entry.duration_secs.is_some_and(|secs| secs >= 0.0));
+
+    manager.complete_transient(&id);
+    let after = manager.list_sync();
+    assert!(
+        after.iter().all(|task| task.task_id != id),
+        "transient entry must disappear once the command finishes (no bloat)"
+    );
+}
+
+#[test]
+fn transient_task_appears_in_async_list_too() {
+    let tmp = tempdir().expect("tempdir");
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+    let id = manager.register_transient("bash", None, "session-async");
+    let listed = futures_executor_block_on(manager.list());
+    assert!(listed.iter().any(|task| task.task_id == id));
+    manager.complete_transient(&id);
+    let after = futures_executor_block_on(manager.list());
+    assert!(after.iter().all(|task| task.task_id != id));
+}
+
+/// Minimal single-thread executor so the sync test can drive the async list().
+fn futures_executor_block_on<F: std::future::Future>(future: F) -> F::Output {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime");
+    rt.block_on(future)
+}
+
+#[test]
+fn prune_drops_old_terminal_tasks_and_caps_the_rest() {
+    let tmp = tempdir().expect("tempdir");
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+
+    let mut rows = Vec::new();
+    let now = chrono::Utc::now();
+    // 20 fresh completed tasks -> only the newest 12 survive the cap.
+    for i in 0..20 {
+        rows.push(fake_terminal_status(
+            &manager,
+            &format!("fresh{i:02}"),
+            BackgroundTaskStatus::Completed,
+            Some(now),
+        ));
+    }
+    // One completed task 2h old -> dropped by TTL.
+    rows.push(fake_terminal_status(
+        &manager,
+        "stale",
+        BackgroundTaskStatus::Failed,
+        Some(now - chrono::Duration::hours(2)),
+    ));
+    // One running task with an old completed_at timestamp (nonsensical but
+    // defensive) -> kept because Running is never pruned.
+    rows.push(fake_terminal_status(
+        &manager,
+        "runner",
+        BackgroundTaskStatus::Running,
+        Some(now - chrono::Duration::hours(3)),
+    ));
+    // A terminal task without completed_at -> kept (age unknown, be safe).
+    rows.push(fake_terminal_status(
+        &manager,
+        "no-ts",
+        BackgroundTaskStatus::Completed,
+        None,
+    ));
+
+    // prune_terminal_tasks assumes newest-first ordering, same as list().
+    rows.sort_by(|a, b| b.task_id.cmp(&a.task_id));
+    super::prune_terminal_tasks(&mut rows);
+
+    assert!(rows.iter().any(|task| task.task_id == "fresh19"));
+    assert!(rows.iter().any(|task| task.task_id == "fresh09"), "11 fresh + the no-timestamp terminal task fill the 12 cap");
+    assert!(
+        !rows.iter().any(|task| task.task_id == "fresh08"),
+        "terminal cap must keep at most 12 newest"
+    );
+    assert!(!rows.iter().any(|task| task.task_id == "stale"));
+    assert!(rows.iter().any(|task| task.task_id == "runner"));
+    assert!(rows.iter().any(|task| task.task_id == "no-ts"));
+}
+
+fn fake_terminal_status(
+    _manager: &BackgroundTaskManager,
+    task_id: &str,
+    status: BackgroundTaskStatus,
+    completed_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> TaskStatusFile {
+    TaskStatusFile {
+        task_id: task_id.to_string(),
+        tool_name: "bash".to_string(),
+        display_name: None,
+        session_id: "session-prune".to_string(),
+        status,
+        exit_code: Some(0),
+        error: None,
+        started_at: chrono::Utc::now().to_rfc3339(),
+        completed_at: completed_at.map(|ts| ts.to_rfc3339()),
+        duration_secs: Some(1.0),
+        pid: None,
+        owner_pid: Some(std::process::id()),
+        owner_instance: None,
+        detached: false,
+        notify: false,
+        wake: false,
+        progress: None,
+        event_history: Vec::new(),
+    }
+}

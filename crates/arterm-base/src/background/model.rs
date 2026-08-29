@@ -234,6 +234,20 @@ pub(super) struct RunningTask {
     pub(super) handle: JoinHandle<Result<TaskResult>>,
 }
 
+/// A foreground command being tracked live in the /jobs overlay.
+///
+/// Disk-less by design: it exists only while the command runs, so the overlay
+/// can show "docker build" executing right now without the completed-task
+/// bloat that real background tasks accumulate.
+pub(super) struct TransientTask {
+    pub(super) task_id: String,
+    pub(super) tool_name: String,
+    pub(super) display_name: Option<String>,
+    pub(super) session_id: String,
+    pub(super) started_at: Instant,
+    pub(super) started_at_rfc3339: String,
+}
+
 /// Result from a background task execution
 pub struct TaskResult {
     pub exit_code: Option<i32>,
