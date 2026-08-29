@@ -213,6 +213,9 @@ impl App {
                 "diagram_pane_position": format!("{:?}", self.diagram_pane_position),
                 "diagram_zoom": self.diagram_zoom,
                 "diagram_count": crate::tui::mermaid::get_active_diagrams().len(),
+                "overscroll_active": self.chat_overscroll_active(),
+                "overscroll_remaining": self.chat_overscroll_remaining(),
+                "plan_mode": crate::tui::TuiState::plan_mode_enabled(self),
                 "version": arterm_build_meta::version(),
             })
             .to_string()

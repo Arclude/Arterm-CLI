@@ -1940,22 +1940,14 @@ pub(super) fn draw_notification(frame: &mut Frame, app: &dyn TuiState, area: Rec
 /// access method, reasoning level, and context usage percentage, with a live
 /// `(overscroll x.x)` countdown pinned to the right so users can see the line
 /// is temporary and rebounds away on its own.
-pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area: Rect) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
+/// Build the info spans of the overscroll status line (plan badge, model,
+/// provider, auth, context bar, cwd) without the transient countdown. Split
+/// out of `draw_overscroll_status` so debug frame captures can serialize the
+/// same text the renderer draws.
+pub(super) fn overscroll_status_spans(app: &dyn TuiState) -> Vec<Span<'static>> {
     let data = app.info_widget_data();
 
     let sep = || Span::styled(" · ", Style::default().fg(rgb(100, 100, 110)));
-
-    // The countdown is the priority affordance: it explains the line exists and
-    // is going away. Build it first so it always gets space on the right edge.
-    let countdown: Option<Span> = app.chat_overscroll_remaining().map(|secs| {
-        Span::styled(
-            format!("(overscroll {:.1})", secs.max(0.0)),
-            Style::default().fg(rgb(150, 150, 165)).italic(),
-        )
-    });
 
     let mut spans: Vec<Span> = Vec::new();
 
@@ -2048,6 +2040,25 @@ pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area
             ));
         }
     }
+
+    spans
+}
+
+pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    // The countdown is the priority affordance: it explains the line exists and
+    // is going away. Build it first so it always gets space on the right edge.
+    let countdown: Option<Span> = app.chat_overscroll_remaining().map(|secs| {
+        Span::styled(
+            format!("(overscroll {:.1})", secs.max(0.0)),
+            Style::default().fg(rgb(150, 150, 165)).italic(),
+        )
+    });
+
+    let spans = overscroll_status_spans(app);
 
     let total_width = area.width as usize;
 

@@ -3549,6 +3549,17 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
 
     if overscroll_height > 0 {
         input_ui::draw_overscroll_status(frame, app, chunks[8]);
+        if let Some(ref mut capture) = debug_capture {
+            // Serialize the exact span text the renderer just drew so frame
+            // dumps can verify badges on this row (e.g. the plan badge).
+            let spans = input_ui::overscroll_status_spans(app);
+            if spans.is_empty() {
+                capture.rendered_text.overscroll_status = Some(String::new());
+            } else {
+                capture.rendered_text.overscroll_status =
+                    Some(spans.iter().map(|s| s.content.as_ref()).collect::<String>());
+            }
+        }
     }
 
     if donut_height > 0 {

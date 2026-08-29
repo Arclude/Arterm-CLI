@@ -209,6 +209,9 @@ pub struct RenderedText {
     pub header_preview: String,
     /// Status line text (spinner, tokens, elapsed, etc.)
     pub status_line: String,
+    /// Overscroll status line text below the input (contains the plan badge
+    /// when Plan Mode is on), captured when the row is part of the layout.
+    pub overscroll_status: Option<String>,
     /// Input area text (what the user is typing)
     pub input_area: String,
     /// Hint text shown above input (if any)
