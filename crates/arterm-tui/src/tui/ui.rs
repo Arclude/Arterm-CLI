@@ -3215,6 +3215,17 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     }
     let prep_elapsed = prep_start.elapsed();
     let content_height = prepared.total_wrapped_lines().max(1) as u16;
+    // The pinned todo band (`display.pin_todos`) draws inside the messages
+    // area from the very top of the frame and refuses to render below a
+    // 9-row viewport (see `pinned_todo_band_lines`). The header no longer
+    // pads short transcripts mid-conversation, so a short document must not
+    // shrink the chunk below that floor while the band has content.
+    let pinned_todo_band_min_height = if app.pinned_todos_payload().is_some() {
+        9
+    } else {
+        0
+    };
+    let content_height = content_height.max(pinned_todo_band_min_height);
 
     // Terminal-style clear (Ctrl+L): the trailing spacer makes every visible
     // transcript row blank, so a normal bottom-anchored layout would park the

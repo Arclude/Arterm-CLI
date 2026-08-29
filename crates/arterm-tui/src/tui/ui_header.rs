@@ -1044,6 +1044,17 @@ pub(super) fn build_header_sections(
     app: &dyn TuiState,
     width: u16,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    // The header is a welcome-screen element. Once a real conversation is
+    // underway (a user or assistant message exists) it must show nothing at
+    // all — no product row, no server/client/model rows, no
+    // auth/mcp/skills/dir detail lines — so the transcript starts at the very
+    // top of the viewport. Launch system notices (a configured hotkey, a
+    // recovered session) are not a conversation, so the header stays while
+    // only those are on screen. The overscroll status line (Down at the
+    // bottom) carries the mode badges instead.
+    if app.conversation_started() {
+        return (Vec::new(), Vec::new());
+    }
     let auth = app.auth_status();
     let active = ActiveCredentialOverrides::from_app(app);
     (

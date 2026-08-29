@@ -72,6 +72,42 @@ fn create_scroll_test_app(
     (app, terminal)
 }
 
+/// Like [`create_scroll_test_app`], but with two user prompts so a
+/// prompt-jump lands on a wrapped line below the very top of the document.
+/// With the mid-conversation header hidden, the first prompt of a single-turn
+/// transcript starts at wrapped line 0, which makes "jump to latest prompt"
+/// legitimately resolve to offset 0; a second turn keeps these tests
+/// meaningful.
+fn create_prompt_jump_test_app(
+    width: u16,
+    height: u16,
+    diagrams: usize,
+    padding: usize,
+) -> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
+    let (mut app, terminal) = create_scroll_test_app(width, height, diagrams, padding);
+    let content = App::build_scroll_test_content(diagrams, padding, None);
+    app.display_messages.extend([
+        DisplayMessage {
+            role: "user".to_string(),
+            content: "Scroll test again".to_string(),
+            tool_calls: vec![],
+            duration_secs: None,
+            title: None,
+            tool_data: None,
+        },
+        DisplayMessage {
+            role: "assistant".to_string(),
+            content,
+            tool_calls: vec![],
+            duration_secs: None,
+            title: None,
+            tool_data: None,
+        },
+    ]);
+    app.bump_display_messages_version();
+    (app, terminal)
+}
+
 fn create_copy_test_app() -> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
     let mut app = create_test_app();
     app.display_messages = vec![
@@ -1084,7 +1120,7 @@ fn test_reconnect_target_does_not_consume_resume_session_id() {
 #[test]
 fn test_prompt_jump_ctrl_brackets() {
     let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
+    let (mut app, mut terminal) = create_prompt_jump_test_app(100, 30, 1, 20);
 
     // Seed max scroll estimates before key handling.
     render_and_snap(&app, &mut terminal);

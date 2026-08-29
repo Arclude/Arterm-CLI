@@ -1,7 +1,7 @@
 #[test]
 fn test_prompt_jump_ctrl_digit_is_recency_rank_in_app() {
     let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
+    let (mut app, mut terminal) = create_prompt_jump_test_app(100, 30, 1, 20);
 
     // Seed max scroll estimates before key handling.
     render_and_snap(&app, &mut terminal);
@@ -10,10 +10,14 @@ fn test_prompt_jump_ctrl_digit_is_recency_rank_in_app() {
     app.handle_key(prompt_up_code, prompt_up_mods).unwrap();
     assert!(app.scroll_offset > 0);
 
-    // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
+    // Ctrl+5 means "5th most-recent prompt". With only two prompts in the
+    // document it clamps to the oldest, whose wrapped line is 0 now that the
+    // mid-conversation header is hidden, so the jump resolves to the very top
+    // instead of stalling on the previous position.
     app.handle_key(KeyCode::Char('5'), KeyModifiers::CONTROL)
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert_eq!(app.scroll_offset, 0);
+    assert!(app.auto_scroll_paused);
 }
 
 #[test]
@@ -245,7 +249,7 @@ fn test_remote_ctrl_up_retrieves_pending_queue_before_prompt_history() {
 #[test]
 fn test_remote_prompt_jump_ctrl_brackets() {
     let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
+    let (mut app, mut terminal) = create_prompt_jump_test_app(100, 30, 1, 20);
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
@@ -336,7 +340,7 @@ fn test_remote_ctrl_digit_side_panel_preset() {
 #[test]
 fn test_remote_prompt_jump_ctrl_digit_is_recency_rank() {
     let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
+    let (mut app, mut terminal) = create_prompt_jump_test_app(100, 30, 1, 20);
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
@@ -349,10 +353,13 @@ fn test_remote_prompt_jump_ctrl_digit_is_recency_rank() {
         .unwrap();
     assert!(app.scroll_offset > 0);
 
-    // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
+    // Ctrl+5 means "5th most-recent prompt". Clamped to the oldest prompt,
+    // which sits at wrapped line 0 now that the mid-conversation header is
+    // hidden, the jump lands at the very top of the document.
     rt.block_on(app.handle_remote_key(KeyCode::Char('5'), KeyModifiers::CONTROL, &mut remote))
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert_eq!(app.scroll_offset, 0);
+    assert!(app.auto_scroll_paused);
 }
 
 #[test]

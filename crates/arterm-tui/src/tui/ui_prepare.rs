@@ -982,37 +982,11 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
     }
 
     let compose_start = Instant::now();
-    // Re-apply the initial-screen centering pad above the header so the
-    // transition from the empty screen to the first message does not shift
-    // anything. The pad scrolls off naturally as the transcript grows.
-    let pad_top = initial_header_pad_top(height, header_prepared.wrapped_lines.len());
-    let padded_header = if pad_top > 0 {
-        let mut lines = build_top_pad_lines(width, pad_top, app.centered_mode());
-        lines.reserve(header_prepared.wrapped_lines.len());
-        lines.extend(header_prepared.wrapped_lines.iter().cloned());
-        let count = lines.len();
-        let plain = Arc::new(lines.iter().map(ui::line_plain_text).collect());
-        Arc::new(PreparedMessages {
-            wrapped_lines: lines,
-            wrapped_plain_lines: plain,
-            wrapped_copy_offsets: Arc::new(vec![0; count]),
-            raw_plain_lines: Arc::new(Vec::new()),
-            wrapped_line_map: Arc::new(Vec::new()),
-            wrapped_user_indices: Vec::new(),
-            wrapped_user_prompt_starts: Vec::new(),
-            wrapped_user_prompt_ends: Vec::new(),
-            user_prompt_texts: Vec::new(),
-            image_regions: Vec::new(),
-            edit_tool_ranges: Vec::new(),
-            copy_targets: Vec::new(),
-            message_boundaries: Vec::new(),
-            mermaid_pending_epoch: None,
-        })
-    } else {
-        header_prepared
-    };
+    // The header is welcome-screen-only now: once a conversation is underway
+    // its section is empty, so no top padding is re-applied either — the
+    // transcript starts at the very top of the viewport.
     let frame = PreparedChatFrame::from_sections(vec![
-        (PreparedSectionKind::Header, padded_header),
+        (PreparedSectionKind::Header, header_prepared),
         (PreparedSectionKind::Body, body_prepared),
         (PreparedSectionKind::InlineImages, inline_images_prepared),
         (PreparedSectionKind::BatchProgress, batch_progress_prepared),
@@ -1108,6 +1082,10 @@ pub(super) fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
     // empty -> first-message transition must invalidate the header cache
     // immediately instead of waiting out the TTL.
     app.chat_is_initially_empty().hash(&mut hasher);
+    // The whole header hides once a real conversation starts (a user or
+    // assistant message exists), so that transition must also invalidate the
+    // prepared-header cache immediately.
+    app.conversation_started().hash(&mut hasher);
     // Plan mode adds the `plan` status item to the persistent header, so a
     // toggle must repaint the header on the next frame instead of waiting out
     // the cache TTL.

@@ -68,6 +68,15 @@ fn smoothness_benchmark_simulated_streaming_turn_stays_within_budget() {
     let _guard = rt.enter();
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
+    // A real streaming turn always starts after a user prompt. The prompt also
+    // flips the header to its hidden mid-conversation state before recording
+    // begins, so the one-shot welcome-to-conversation transition (the whole
+    // header vanishing at once) is not measured as a streaming reflow.
+    app.display_messages = vec![crate::tui::DisplayMessage::user(
+        "Run the benchmark turn",
+    )];
+    app.bump_display_messages_version();
+
     // 60 rows, not 32: the header grew when unconfigured providers became dim
     // rows (8101d1077), and at 32 rows the streamed turn no longer fit, so each
     // late frame had to reflow the whole screen. That produced a
