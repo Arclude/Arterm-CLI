@@ -389,7 +389,9 @@ pub(super) fn render_context_usage_line(
 }
 
 fn format_token_k(tokens: usize) -> String {
-    if tokens >= 1000 {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1000 {
         format!("{}k", tokens / 1000)
     } else {
         format!("{}", tokens)
