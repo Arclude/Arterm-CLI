@@ -144,8 +144,6 @@ if proc.poll() is None:
 if not frame:
     print("FAIL: no screen-json response from the running TUI")
     sys.exit(2)
-with open("/tmp/plan_frame_last.json", "w") as f:
-    f.write(frame)
 
 payload = json.loads(frame)
 rows = []
