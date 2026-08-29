@@ -1968,6 +1968,11 @@ pub(super) fn overscroll_status_spans(app: &dyn TuiState) -> Vec<Span<'static>> 
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| app.provider_model());
     if !model.is_empty() && !overscroll_is_placeholder(&model) {
+        // Separate from the leading plan badge (or any earlier span) instead
+        // of running straight into it (`planOpus` reads as one token).
+        if !spans.is_empty() {
+            spans.push(sep());
+        }
         spans.push(Span::styled(
             session_facts::pretty_model(&model),
             Style::default().fg(rgb(255, 150, 200)).bold(),

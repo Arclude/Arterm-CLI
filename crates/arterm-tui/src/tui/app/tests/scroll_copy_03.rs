@@ -1987,28 +1987,40 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
     let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");
 
     // Bottom position (tail-follow): the header has scrolled off, the sticky
-    // band must pin the status row at the viewport top. Plan Mode no longer
-    // badges the header (it lives in the overscroll status line instead), so
-    // assert on the `arterm` name row and the absence of the plan badge.
+    // band must pin the status row at the viewport top. The product-name row
+    // (`arterm ...`) hides once a conversation is underway, so the pinned
+    // status row is the first surviving header row (`server:`/`client:`/...
+    // or the model row in local sessions); assert on the pinned band via the
+    // client row and the absence of both the plan badge and the product row.
     let text = render_and_snap(&app, &mut terminal);
     let rows: Vec<&str> = text.lines().collect();
     let status_rows = rows
         .iter()
-        .filter(|row| row.trim_start().starts_with("arterm"))
+        .filter(|row| {
+            let t = row.trim_start();
+            t.starts_with("client:") || t.starts_with("arterm")
+        })
         .count();
     assert_eq!(
         status_rows, 1,
-        "exactly one pinned status row with the arterm name:\n{text}"
+        "exactly one pinned status row (client row; the arterm product row hides mid-conversation):\n{text}"
     );
     assert!(
         rows.iter()
             .take(3)
-            .any(|row| row.trim_start().starts_with("arterm")),
+            .any(|row| {
+                let t = row.trim_start();
+                t.starts_with("client:") || t.starts_with("arterm")
+            }),
         "the pinned status row must sit at the very top of the viewport:\n{text}"
     );
     assert!(
         !rows.iter().any(|row| row.contains("· plan")),
         "plan mode must not badge the header or the sticky band:\n{text}"
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("self-dev")),
+        "the product-name row (arterm self-dev) must hide mid-conversation:\n{text}"
     );
     assert!(
         text.contains("resp 5 line 14"),
@@ -2023,7 +2035,10 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
     let top_rows: Vec<&str> = top_text.lines().collect();
     let top_status_rows = top_rows
         .iter()
-        .filter(|row| row.trim_start().starts_with("arterm"))
+        .filter(|row| {
+            let t = row.trim_start();
+            t.starts_with("client:") || t.starts_with("arterm")
+        })
         .count();
     assert_eq!(
         top_status_rows, 1,

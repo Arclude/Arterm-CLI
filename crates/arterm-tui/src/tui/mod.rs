@@ -618,6 +618,15 @@ pub trait TuiState {
     fn copy_selection_range(&self) -> Option<CopySelectionRange>;
     /// Persistent status for in-app copy selection mode.
     fn copy_selection_status(&self) -> Option<CopySelectionStatus>;
+    /// Whether the chat still shows its initial empty state: no display
+    /// messages, nothing processing, and nothing streaming. Drives the
+    /// product-name header row (shown on the welcome/empty screen, hidden
+    /// once a conversation is underway).
+    fn chat_is_initially_empty(&self) -> bool {
+        self.display_messages().is_empty()
+            && !self.is_processing()
+            && self.streaming_text().is_empty()
+    }
     /// Whether the first-run onboarding empty state is being previewed in this session.
     // ---- Onboarding ----
     fn onboarding_preview_mode(&self) -> bool {

@@ -1104,6 +1104,10 @@ pub(super) fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
     app.is_replay().hash(&mut hasher);
     app.is_remote_mode().hash(&mut hasher);
     app.is_canary().hash(&mut hasher);
+    // The product-name row hides once a conversation is underway, so the
+    // empty -> first-message transition must invalidate the header cache
+    // immediately instead of waiting out the TTL.
+    app.chat_is_initially_empty().hash(&mut hasher);
     // Plan mode adds the `plan` status item to the persistent header, so a
     // toggle must repaint the header on the next frame instead of waiting out
     // the cache TTL.

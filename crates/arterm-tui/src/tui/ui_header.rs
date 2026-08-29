@@ -641,12 +641,9 @@ fn build_persistent_header_with_auth(
     } else if is_remote {
         status_items.push("client");
     }
-    if server_update {
-        status_items.push("srv↑");
-    }
-    if client_update {
-        status_items.push("cli↑");
-    }
+    // `srv↑`/`cli↑` are appended to the `server:`/`client:` rows (they need
+    // to stay visible after the product-name row hides mid-conversation), so
+    // they are not part of the product row's status items here.
     if let Some(badge) = crate::perf::profile().tier.badge() {
         status_items.push(badge);
     }
@@ -682,8 +679,13 @@ fn build_persistent_header_with_auth(
         .map(|version| header_version_label(version, include_hash));
 
     // First line: `arterm` (+ `self-dev` when running a dev/canary build),
-    // followed by any remaining status badges rendered dimly.
-    {
+    // followed by any remaining status badges rendered dimly. This is the
+    // product-name row: it greats the user on the empty/welcome screen, but
+    // once a conversation is underway it is redundant chrome and is dropped
+    // so the transcript starts higher. Its update badges (`srv↑`/`cli↑`)
+    // move onto the `server:`/`client:` rows, which persist.
+    let show_product_row = app.chat_is_initially_empty();
+    if show_product_row {
         let mut spans = vec![Span::styled(
             "arterm".to_string(),
             Style::default().fg(header_name_color()).bold(),
@@ -720,6 +722,15 @@ fn build_persistent_header_with_auth(
                 spans.push(Span::styled(suffix, version_style));
             }
         }
+        // The server update badge lived on the product-name row, which is
+        // hidden once a conversation starts. Keep the affordance reachable
+        // by carrying it here, where it belongs anyway.
+        if server_update {
+            spans.push(Span::styled(
+                " · srv↑".to_string(),
+                Style::default().fg(rgb(255, 200, 100)),
+            ));
+        }
         lines.push(Line::from(spans).alignment(align));
     }
 
@@ -738,15 +749,26 @@ fn build_persistent_header_with_auth(
                 spans.push(Span::styled(suffix, version_style));
             }
         }
+        // Client update badge, moved off the (now hidden) product-name row.
+        if client_update {
+            spans.push(Span::styled(
+                " · cli↑".to_string(),
+                Style::default().fg(rgb(255, 200, 100)),
+            ));
+        }
         lines.push(Line::from(spans).alignment(align));
     } else if server_name.is_none() {
-        lines.push(
-            Line::from(Span::styled(
-                "Arterm".to_string(),
-                Style::default().fg(header_name_color()),
-            ))
-            .alignment(align),
-        );
+        // No session name yet (local fresh boot): keep a dim product marker
+        // only while the chat is still empty.
+        if app.chat_is_initially_empty() {
+            lines.push(
+                Line::from(Span::styled(
+                    "Arterm".to_string(),
+                    Style::default().fg(header_name_color()),
+                ))
+                .alignment(align),
+            );
+        }
     }
 
     // Single model line: dim active-route method on the left, styled model
