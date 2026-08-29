@@ -10,6 +10,7 @@ pub use arterm_tui_mermaid::{
     debug_flicker_benchmark, debug_image_scroll_benchmark, debug_image_state,
     debug_memory_benchmark, debug_memory_profile, debug_render, debug_stats, debug_stats_json,
     debug_test_render, debug_test_resize_stability, debug_test_scroll, deferred_render_epoch,
+    deferred_render_pending_count,
     diagram_placeholder_lines, error_lines_for, error_to_lines, estimate_image_height,
     evict_old_cache, evict_render_cache_for_content, get_active_diagrams, get_cached_path,
     get_cached_png, get_font_size, image_protocol_available, image_widget_placeholder_markdown,

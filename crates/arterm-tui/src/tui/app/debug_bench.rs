@@ -563,7 +563,15 @@ impl App {
         self.scroll_offset = scroll_offset;
         self.auto_scroll_paused = mode == "paused";
         let draw_start = std::time::Instant::now();
-        if let Err(e) = terminal.draw(|f| crate::tui::ui::draw(f, self)) {
+        // The scroll suite exercises the inline placeholder/region pipeline
+        // (marker scan, geometry, lazy draw) which is protocol-independent,
+        // but headless testers never initialize an image-protocol picker.
+        // Force the capability on for the offscreen draw so the suite stays
+        // meaningful without a real terminal protocol.
+        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(
+            Some(true),
+            || terminal.draw(|f| crate::tui::ui::draw(f, self)),
+        ) {
             return Err(format!("draw error ({}): {}", label, e));
         }
         let draw_ms = draw_start.elapsed().as_secs_f64() * 1000.0;
@@ -838,10 +846,31 @@ impl App {
             }
         };
 
-        // Baseline render (bottom) for metrics
+        // Baseline render (bottom) for metrics. Same protocol override as the
+        // per-step draws so the baseline frame also reports inline regions.
         self.follow_chat_bottom();
-        if let Err(e) = terminal.draw(|f| crate::tui::ui::draw(f, self)) {
+        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(
+            Some(true),
+            || terminal.draw(|f| crate::tui::ui::draw(f, self)),
+        ) {
             errors.push(format!("baseline draw error: {}", e));
+        }
+
+        // The first draw may have queued the diagrams onto the deferred
+        // render worker and only produced pending placeholders. Wait for the
+        // worker to drain (bounded), then redraw so the baseline frame and
+        // the scroll positions derived from it reflect the real diagrams.
+        let wait_start = std::time::Instant::now();
+        while crate::tui::mermaid::deferred_render_pending_count() > 0
+            && wait_start.elapsed() < std::time::Duration::from_secs(10)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(
+            Some(true),
+            || terminal.draw(|f| crate::tui::ui::draw(f, self)),
+        ) {
+            errors.push(format!("post-deferred draw error: {}", e));
         }
 
         // Derive scroll positions using the latest frame
