@@ -6,7 +6,7 @@ fn inline_view_display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
 
-pub(super) fn inline_ui_height(app: &dyn TuiState) -> u16 {
+pub(super) fn inline_ui_height(app: &dyn TuiState, width: u16) -> u16 {
     match app.inline_ui_state() {
         Some(crate::tui::InlineUiStateRef::Interactive(picker)) => {
             let visible_rows = picker.filtered.len() as u16;
@@ -32,19 +32,20 @@ pub(super) fn inline_ui_height(app: &dyn TuiState) -> u16 {
             rows_needed.min(10)
         }
         Some(crate::tui::InlineUiStateRef::AskUser(ask)) => {
-            // question row + option rows (+ detail lines) + hint row + border
-            let mut rows = 1u16;
+            // Wrapped rows: mirror draw_ask_user's layout math so the reserved
+            // height matches what actually renders (no cut-off labels).
+            let wrap_width = (width.saturating_sub(2)).max(8) as usize;
+            let mut rows = 0usize;
+            rows += wrap_plain(&ask.question, wrap_width).len().max(1);
             for option in &ask.options {
-                rows += 1;
-                if option.detail.is_some() {
-                    rows += 1;
+                rows += wrap_plain(&option.label, wrap_width.saturating_sub(5)).len();
+                if let Some(detail) = option.detail.as_deref() {
+                    rows += wrap_plain(detail, wrap_width.saturating_sub(5)).len();
                 }
             }
-            if ask.allow_custom {
-                rows += 1;
-            }
-            rows += 2; // "1-9/↑↓ choose · Enter submit" hint
-            rows + 2
+            rows += 2; // custom-answer hint + key hint
+            rows += 2; // box borders
+            rows.min(14) as u16
         }
         None => 0,
     }
@@ -85,29 +86,51 @@ fn draw_ask_user(
         .add_modifier(Modifier::BOLD);
     let hint_color = rgb(110, 130, 150);
 
+    // Wrap width: box borders (2) + the "▸ N. " option prefix reserve.
+    let wrap_width = width.saturating_sub(2).max(8);
+    let option_prefix = "▸ 9. ".len(); // widest prefix, kept on wrap indents
+
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        ask.question.clone(),
-        Style::default().fg(question_color).add_modifier(Modifier::BOLD),
-    )));
+    for (i, chunk) in wrap_plain(&ask.question, wrap_width).into_iter().enumerate() {
+        let style = Style::default()
+            .fg(question_color)
+            .add_modifier(Modifier::BOLD);
+        lines.push(Line::from(Span::styled(
+            if i == 0 { chunk } else { format!("  {chunk}") },
+            style,
+        )));
+    }
     for (index, option) in ask.options.iter().enumerate() {
         let number = index + 1;
         let is_selected = index == ask.selected;
         let marker = if is_selected { "▸" } else { " " };
-        let label_span = if is_selected {
-            Span::styled(format!("{marker} {number}. {}", option.label), highlight)
+        let style = if is_selected {
+            highlight
         } else {
-            Span::styled(
-                format!("{marker} {number}. {}", option.label),
-                Style::default().fg(option_color),
-            )
+            Style::default().fg(option_color)
         };
-        lines.push(Line::from(label_span));
+        let head = format!("{marker} {number}. ");
+        // Wrap the label, carrying the visual indent on continuation lines so
+        // a long label reads as one option instead of spilling into the next.
+        let label_wrapped = wrap_plain(&option.label, wrap_width.saturating_sub(head.width()));
+        for (i, chunk) in label_wrapped.into_iter().enumerate() {
+            if i == 0 {
+                lines.push(Line::from(Span::styled(format!("{head}{chunk}"), style)));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    format!("{}{chunk}", " ".repeat(head.width())),
+                    style,
+                )));
+            }
+        }
         if let Some(detail) = option.detail.as_deref() {
-            lines.push(Line::from(Span::styled(
-                format!("     {detail}"),
-                Style::default().fg(dim),
-            )));
+            let indent = " ".repeat(option_prefix);
+            for chunk in wrap_plain(detail, wrap_width.saturating_sub(option_prefix)) {
+                lines.push(Line::from(Span::styled(
+                    format!("{indent}{chunk}"),
+                    Style::default().fg(dim),
+                )));
+            }
         }
     }
     if ask.allow_custom {
@@ -121,10 +144,29 @@ fn draw_ask_user(
         Style::default().fg(hint_color),
     )));
 
-    // Clamp to the available rows, keeping the question row visible.
+    // Clamp to the available rows. Prioritize: question, every option label,
+    // the hint, then details last (details are the only optional rows).
     let max_rows = height.saturating_sub(2);
     if lines.len() > max_rows {
+        // Drop detail continuation/hint rows from the bottom until it fits,
+        // then hard-truncate whatever remains.
+        let hint = lines.pop();
+        while lines.len() > max_rows.saturating_sub(1) && lines.len() > 1 {
+            lines.pop();
+        }
+        if let Some(hint) = hint {
+            lines.push(hint);
+        }
         lines.truncate(max_rows);
+        // Signal that content was elided so the user knows more exists.
+        if lines.len() == max_rows {
+            if let Some(last) = lines.last_mut() {
+                *last = Line::from(Span::styled(
+                    "… (daha fazlası için terminali büyüt)",
+                    Style::default().fg(hint_color),
+                ));
+            }
+        }
     }
 
     let block = Block::default()
@@ -143,6 +185,63 @@ fn draw_ask_user(
         Paragraph::new(lines).block(block)
     };
     frame.render_widget(paragraph, area);
+}
+
+/// Word-wrap a plain (unstyled) string to `width` display columns.
+/// Long unbroken tokens are hard-split at the width. Never panics on
+/// multi-byte text: slicing happens on char boundaries.
+fn wrap_plain(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    for raw_line in text.split('\n') {
+        if raw_line.is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        let mut current = String::new();
+        let mut current_width = 0usize;
+        for word in raw_line.split_whitespace() {
+            let word_width = UnicodeWidthStr::width(word);
+            let sep = if current.is_empty() { 0 } else { 1 };
+            if current_width + sep + word_width <= width {
+                if sep == 1 {
+                    current.push(' ');
+                    current_width += 1;
+                }
+                current.push_str(word);
+                current_width += word_width;
+            } else if word_width <= width {
+                out.push(std::mem::take(&mut current));
+                current.push_str(word);
+                current_width = word_width;
+            } else {
+                // Hard-split the oversized token across lines.
+                if !current.is_empty() {
+                    out.push(std::mem::take(&mut current));
+                }
+                let mut chunk = String::new();
+                let mut chunk_width = 0usize;
+                for ch in word.chars() {
+                    let ch_width = UnicodeWidthStr::width(ch.to_string().as_str());
+                    if chunk_width + ch_width > width {
+                        out.push(std::mem::take(&mut chunk));
+                        chunk_width = 0;
+                    }
+                    chunk.push(ch);
+                    chunk_width += ch_width;
+                }
+                current = chunk;
+                current_width = chunk_width;
+            }
+        }
+        out.push(current);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
 }
 
 fn draw_inline_view(
@@ -211,4 +310,10 @@ fn draw_inline_view(
     }
 
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Test-only exposure of the plain-text wrapper used by the ask_user box.
+#[cfg(test)]
+pub(in crate::tui) fn wrap_plain_for_test(text: &str, width: usize) -> Vec<String> {
+    wrap_plain(text, width)
 }

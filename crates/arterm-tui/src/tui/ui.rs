@@ -123,6 +123,8 @@ use file_diff_ui::{
 };
 pub(crate) use header::capitalize;
 use inline_ui::{draw_inline_ui, inline_ui_height};
+#[cfg(test)]
+pub(in crate::tui) use inline_ui::wrap_plain_for_test;
 pub(crate) use memory_estimates::{debug_memory_profile, debug_side_panel_memory_profile};
 use memory_estimates::{estimate_prepared_chat_frame_bytes, estimate_prepared_messages_bytes};
 #[cfg(test)]
@@ -3055,7 +3057,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         input_ui::wrapped_input_line_count(app, chat_area.width, next_prompt).min(10) as u16;
     // Add 1 line for command suggestions, shell mode hints, or the Ctrl+Enter hint.
     let hint_line_height = input_ui::input_hint_line_height(app);
-    let inline_block_height: u16 = inline_ui_height(app);
+    let inline_block_height: u16 = inline_ui_height(app, chat_area.width);
     let inline_ui_gap_height: u16 = if inline_block_height > 0 { 1 } else { 0 };
     let input_height = base_input_height + hint_line_height;
 
