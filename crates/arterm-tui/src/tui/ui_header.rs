@@ -634,9 +634,8 @@ fn build_persistent_header_with_auth(
     let server_update = app.server_update_available() == Some(true);
     let client_update = app.client_update_available();
     let mut status_items: Vec<&str> = Vec::new();
-    if app.plan_mode_enabled() {
-        status_items.push("plan");
-    }
+    // Plan Mode is surfaced in the elastic overscroll status line (revealed by
+    // Down at the bottom) instead of the header.
     if app.is_replay() {
         status_items.push("replay");
     } else if is_remote {
@@ -1266,36 +1265,20 @@ mod tests {
     }
 
     #[test]
-    fn persistent_header_shows_plan_badge_while_plan_mode_is_on() {
+    fn persistent_header_never_shows_plan_badge() {
+        // Plan Mode moved to the elastic overscroll status line; the header
+        // must not badge it anymore, in any mode or width.
         let app = create_test_app();
         let session_id = app.session_id().to_string();
         arterm_app_core::tool::set_plan_mode(&session_id, true);
-        let on_lines = rendered_header_lines(&app, 120);
+        for width in [120, 60] {
+            let lines = rendered_header_lines(&app, width);
+            assert!(
+                !lines.iter().any(|line| line.contains("· plan")),
+                "plan mode must not badge the header (width {width}): {lines:?}"
+            );
+        }
         arterm_app_core::tool::set_plan_mode(&session_id, false);
-        let off_lines = rendered_header_lines(&app, 120);
-
-        assert!(
-            on_lines.iter().any(|line| line.contains("· plan")),
-            "plan mode on should badge the header: {on_lines:?}"
-        );
-        assert!(
-            !off_lines.iter().any(|line| line.contains("· plan")),
-            "plan mode off should drop the header badge: {off_lines:?}"
-        );
-    }
-
-    #[test]
-    fn persistent_header_plan_badge_survives_narrow_terminals() {
-        // The plan badge leads the status segment ("arterm · plan · ..."), so
-        // even a 60-col terminal keeps it on screen.
-        let app = create_test_app();
-        let session_id = app.session_id().to_string();
-        arterm_app_core::tool::set_plan_mode(&session_id, true);
-        let narrow = rendered_header_lines(&app, 60);
-        assert!(
-            narrow.iter().any(|line| line.contains("· plan")),
-            "60-col header should still show the plan badge: {narrow:?}"
-        );
     }
 
     #[test]

@@ -1959,6 +1959,16 @@ pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area
 
     let mut spans: Vec<Span> = Vec::new();
 
+    // Plan Mode leads the line when active, mirroring the badges this line
+    // can already carry, so the mode stays visible where the user looks while
+    // composing.
+    if app.plan_mode_enabled() {
+        spans.push(Span::styled(
+            "plan",
+            Style::default().fg(rgb(255, 200, 100)),
+        ));
+    }
+
     // Model
     let model = data
         .model

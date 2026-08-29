@@ -1,6 +1,51 @@
 use super::*;
 
 #[test]
+fn overscroll_status_line_shows_plan_badge_when_plan_mode_is_on() {
+    use ratatui::backend::TestBackend;
+
+    fn overscroll_row(plan_mode_enabled: bool) -> String {
+        let state = TestState {
+            plan_mode_enabled,
+            // Reveal the line: the countdown branch requires an active
+            // overscroll, which is exactly the Down-at-the-bottom gesture.
+            chat_overscroll_active: true,
+            ..Default::default()
+        };
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                super::super::input_ui::draw_overscroll_status(
+                    frame,
+                    &state,
+                    ratatui::layout::Rect::new(0, 0, 80, 1),
+                );
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().to_string())
+            .collect::<String>()
+            .trim()
+            .to_string()
+    }
+
+    let on = overscroll_row(true);
+    assert!(
+        on.starts_with("plan"),
+        "plan mode on should lead the overscroll status line: {on:?}"
+    );
+    let off = overscroll_row(false);
+    assert!(
+        !off.starts_with("plan"),
+        "plan mode off should not badge the overscroll line: {off:?}"
+    );
+}
+
+#[test]
 fn test_render_rounded_box_sides_aligned() {
     let content = vec![
         Line::from("short"),
