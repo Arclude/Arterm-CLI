@@ -2332,6 +2332,14 @@ pub(crate) fn copy_viewport_visible_range() -> Option<(usize, usize)> {
     Some((snapshot.scroll, snapshot.visible_end))
 }
 
+/// Content area of the chat copy viewport: where transcript line 0 of the
+/// viewport actually renders (below the sticky header band and prompt preview).
+#[cfg(test)]
+pub(crate) fn copy_viewport_content_area() -> Option<ratatui::layout::Rect> {
+    let snapshot = copy_snapshot_for_pane(crate::tui::CopySelectionPane::Chat)?;
+    Some(snapshot.content_area)
+}
+
 #[cfg(test)]
 pub(crate) fn side_pane_visible_range() -> Option<(usize, usize)> {
     let snapshot = copy_snapshot_for_pane(crate::tui::CopySelectionPane::SidePane)?;

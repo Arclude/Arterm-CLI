@@ -257,6 +257,33 @@ impl PreparedChatFrame {
         self.total_wrapped_lines
     }
 
+    /// Sticky header support: returns `(status_line, status_idx, header_end)`
+    /// for the persistent header section when the viewport should pin it. The
+    /// header leads the frame; `header_end` is the exclusive end line of the
+    /// whole section (including its initial-screen centering pad and the
+    /// Updates box). `status_line`/`status_idx` locate the first non-blank line
+    /// of the section — the `arterm self-dev · plan · client` status row —
+    /// skipping pad rows so the sticky band pins the status, not empty padding.
+    /// Returns `None` when there is no header section (empty frame) or it has
+    /// no visible content.
+    pub fn sticky_header_status_line(&self) -> Option<(Line<'static>, usize, usize)> {
+        let section = self.sections.iter().find(|s| s.kind.is_header())?;
+        let lines = &section.prepared.wrapped_lines;
+        let header_end = section.line_start + lines.len();
+        let (status_idx, status_line) = lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| {
+                !line.spans.is_empty()
+                    && line
+                        .spans
+                        .iter()
+                        .any(|span| !span.content.trim().is_empty())
+            })
+            .map(|(idx, line)| (section.line_start + idx, line.clone()))?;
+        Some((status_line, status_idx, header_end))
+    }
+
     pub fn wrapped_plain_line_count(&self) -> usize {
         self.total_wrapped_lines
     }

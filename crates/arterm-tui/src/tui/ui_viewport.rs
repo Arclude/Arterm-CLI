@@ -362,12 +362,27 @@ pub(super) fn draw_messages(
     // Pinned todo band (display.pin_todos): the full todo card rendered beneath
     // the sticky previous-prompt preview, including at the top of the transcript.
     let pinned_todo_band = pinned_todo_band_lines(app, text_render_area.width, render_area.height);
+    // Sticky header band: once the persistent header (which leads the frame)
+    // has fully scrolled off, pin its status row (`arterm · plan · ...`) to the
+    // top of the viewport so mode badges stay visible mid-conversation. Only
+    // when the status row itself is off-screen — while any part of the header
+    // is still visible the in-flow copy already shows it.
+    let sticky_header = (|| {
+        if render_area.height < 5 {
+            return None;
+        }
+        let (status_line, status_idx, header_end) = prepared.sticky_header_status_line()?;
+        Some((status_line, status_idx, header_end))
+    })();
     let max_scroll = compute_max_scroll_with_prompt_preview(
         total_lines,
         wrapped_user_prompt_starts,
         user_prompt_texts,
         text_render_area,
         pinned_todo_band.len() as u16,
+        sticky_header
+            .as_ref()
+            .map(|(_, _, header_end)| *header_end),
     );
 
     super::set_last_max_scroll(max_scroll);
@@ -402,6 +417,15 @@ pub(super) fn draw_messages(
     super::set_last_resolved_chat_scroll(scroll);
     super::set_last_chat_viewport_height(viewport_height);
 
+    // Sticky header band participates in the top-band budget only when the
+    // resolved scroll actually pins it.
+    let sticky_header_pinned = sticky_header
+        .as_ref()
+        .is_some_and(|(_, status_idx, header_end)| {
+            scroll_will_pin_header(*status_idx, *header_end, scroll)
+        });
+    let sticky_header_lines = if sticky_header_pinned { 1u16 } else { 0u16 };
+
     let prompt_preview_lines = if crate::config::config().display.prompt_preview && scroll > 0 {
         compute_prompt_preview_line_count(
             wrapped_user_prompt_starts,
@@ -413,9 +437,10 @@ pub(super) fn draw_messages(
         0u16
     };
     let pinned_todo_lines = pinned_todo_band.len() as u16;
-    // Total synthetic rows reserved at the top of the viewport (previous-prompt
-    // preview first, then the todo band, then transcript content).
-    let top_band_lines = pinned_todo_lines + prompt_preview_lines;
+    // Total synthetic rows reserved at the top of the viewport (sticky header
+    // status row first, then the previous-prompt preview, then the todo band,
+    // then transcript content).
+    let top_band_lines = sticky_header_lines + pinned_todo_lines + prompt_preview_lines;
 
     let content_area = Rect {
         x: text_render_area.x,
@@ -1157,12 +1182,28 @@ pub(super) fn draw_messages(
     if pinned_todo_lines > 0 {
         let band_area = Rect {
             x: content_area.x,
-            y: render_area.y.saturating_add(prompt_preview_lines),
+            y: render_area.y
+                .saturating_add(sticky_header_lines)
+                .saturating_add(prompt_preview_lines),
             width: content_area.width,
             height: pinned_todo_lines.min(render_area.height),
         };
         clear_area(frame, band_area);
         frame.render_widget(Paragraph::new(pinned_todo_band), band_area);
+    }
+
+    // Sticky header status band: drawn first among the top bands so later
+    // bands (prompt preview, todos) stack beneath it.
+    if sticky_header_pinned && let Some((status_line, ..)) = sticky_header.as_ref() {
+        let band_area = Rect {
+            x: content_area.x,
+            y: render_area.y,
+            // Leave the last column for the `↑N` scroll indicator.
+            width: content_area.width.saturating_sub(1),
+            height: 1,
+        };
+        clear_area(frame, band_area);
+        frame.render_widget(Paragraph::new(status_line.clone()), band_area);
     }
 
     if crate::config::config().display.prompt_preview && scroll > 0 {
@@ -1231,7 +1272,8 @@ pub(super) fn draw_messages(
                 let line_count = preview_lines.len() as u16;
                 let preview_area = Rect {
                     x: content_area.x,
-                    y: render_area.y,
+                    // Beneath the sticky header status band when it is pinned.
+                    y: render_area.y.saturating_add(sticky_header_lines),
                     width: content_area.width.saturating_sub(1),
                     height: line_count,
                 };
@@ -1377,12 +1419,21 @@ fn compute_prompt_preview_line_count(
     if display_width > content_width { 2 } else { 1 }
 }
 
+/// Whether the resolved `scroll` position pushes the header's status row fully
+/// off-screen, meaning the sticky band must pin it to the viewport top. The
+/// whole header section (including the Updates box below it) must be gone too
+/// so the band never duplicates rows that are still on screen.
+fn scroll_will_pin_header(status_idx: usize, header_end: usize, scroll: usize) -> bool {
+    scroll > status_idx && scroll >= header_end
+}
+
 fn compute_max_scroll_with_prompt_preview(
     total_lines: usize,
     wrapped_user_prompt_starts: &[usize],
     user_prompt_texts: &[String],
     area: Rect,
     pinned_todo_lines: u16,
+    sticky_header_end: Option<usize>,
 ) -> usize {
     let mut max_scroll = total_lines.saturating_sub(area.height as usize);
     let preview_enabled = crate::config::config().display.prompt_preview;
@@ -1401,9 +1452,15 @@ fn compute_max_scroll_with_prompt_preview(
         } else {
             0
         };
-        let content_height =
-            area.height
-                .saturating_sub(prompt_preview_lines + pinned_todo_lines) as usize;
+        // The sticky header band consumes one row at the bottom position only
+        // if the header has scrolled off there.
+        let sticky_header_lines = sticky_header_end
+            .filter(|header_end| max_scroll >= *header_end)
+            .map(|_| 1u16)
+            .unwrap_or(0);
+        let content_height = area.height.saturating_sub(
+            prompt_preview_lines + pinned_todo_lines + sticky_header_lines,
+        ) as usize;
         let adjusted = total_lines.saturating_sub(content_height);
         if adjusted == max_scroll {
             break;

@@ -1116,13 +1116,18 @@ fn test_copy_selection_drag_to_bottom_edge_when_pinned_does_not_snap_or_autoscro
     );
 
     let layout = crate::tui::ui::last_layout_snapshot().expect("layout snapshot");
+    // Transcript rows render inside the copy-viewport content area, which
+    // starts below the sticky header status band when it is pinned. Resolve
+    // row positions from there so the target lands on the real line.
+    let content_area = crate::tui::ui::copy_viewport_content_area()
+        .unwrap_or(layout.messages_area);
     let area = layout.messages_area;
     let col = area.x + 1;
 
     // Pick a real content line near (but not at) the bottom to target.
     let target_line = visible_end.saturating_sub(2);
     assert!(target_line >= visible_start, "need a visible target line");
-    let target_row = area.y + (target_line - visible_start) as u16;
+    let target_row = content_area.y + (target_line - visible_start) as u16;
     // The bottom edge band covers the last few rows; target_row must sit inside
     // it for this regression to be meaningful.
     let last_row = area.y + area.height - 1;
