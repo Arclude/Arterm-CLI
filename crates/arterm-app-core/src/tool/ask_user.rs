@@ -15,6 +15,7 @@
 //! callers is to plan without asking.
 
 use super::{Tool, ToolContext, ToolOutput};
+use arterm_agent_runtime::InterruptSignal;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -150,13 +151,36 @@ impl Tool for AskUserTool {
                 )
             })?;
 
-        let response = match tokio::time::timeout(ANSWER_TIMEOUT, response_rx).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(_send_err)) => {
-                anyhow::bail!("The user interface dropped the question before answering");
+        // Wait for the answer, but also poll the graceful-shutdown signal:
+        // an exec-style reload swaps the server process image and drops this
+        // task's oneshot without an error, which used to leave the question
+        // hanging for its full 24h timeout while the turn sat blocked.
+        let shutdown = ctx
+            .graceful_shutdown_signal
+            .clone()
+            .unwrap_or_else(InterruptSignal::new);
+        let deadline = tokio::time::Instant::now() + ANSWER_TIMEOUT;
+        let mut response_rx = std::pin::pin!(response_rx);
+        let response = loop {
+            if shutdown.is_set() {
+                anyhow::bail!(
+                    "Session is shutting down or reloading; the question was canceled. Ask again after the session resumes."
+                );
             }
-            Err(_elapsed) => {
+            if tokio::time::Instant::now() >= deadline {
                 anyhow::bail!("The question timed out after 24h without an answer");
+            }
+            tokio::select! {
+                biased;
+                response = &mut response_rx => {
+                    break match response {
+                        Ok(response) => response,
+                        Err(_) => {
+                            anyhow::bail!("The user interface dropped the question before answering");
+                        }
+                    };
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => continue,
             }
         };
 
@@ -296,5 +320,60 @@ mod tests {
             .await
             .expect_err("missing question must fail");
         assert!(err2.to_string().contains("question"));
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ask_user_cancels_quickly_when_shutdown_signal_fires() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut ctx = ToolContext::new(
+            "s1".into(),
+            "m1".into(),
+            "t1".into(),
+            None,
+            arterm_tool_core::ToolExecutionMode::AgentTurn,
+        );
+        ctx.ask_user_request_tx = Some(tx);
+        let shutdown = InterruptSignal::new();
+        ctx.graceful_shutdown_signal = Some(shutdown.clone());
+
+        let tool = AskUserTool::new();
+        let handle = tokio::spawn(async move {
+            tool.execute(
+                json!({
+                    "question": "Q?",
+                    "options": [{"label": "A"}, {"label": "B"}],
+                    "intent": "shutdown test"
+                }),
+                ctx,
+            )
+            .await
+        });
+
+        // The question must arrive...
+        let req = rx.recv().await.expect("request must arrive");
+        // ...then the session begins shutting down (e.g. exec reload).
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        shutdown.fire();
+
+        // The tool must fail fast (well under the 24h timeout) instead of
+        // hanging on a dead oneshot.
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("must resolve within 5s of shutdown")
+            .expect("task must join");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        let err = result.expect_err("must error on shutdown");
+        assert!(
+            err.to_string().contains("shutting down"),
+            "unexpected error: {err}"
+        );
+        // The pending oneshot sender is dropped with the request; nothing leaks.
+        drop(req);
     }
 }
