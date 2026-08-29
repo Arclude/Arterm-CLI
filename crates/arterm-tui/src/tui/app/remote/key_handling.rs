@@ -299,6 +299,45 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    // A pending ask_user question owns the unmodified option keys (digits,
+    // arrows, Enter). Typing other text falls through so the user can answer
+    // free-form through the normal input; handle_enter then routes a non-empty
+    // input to the pending question instead of sending a new turn.
+    if app.pending_ask_user.is_some() && modifiers.is_empty() {
+        match code {
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                app.select_ask_user_option((c as u8 - b'1') as usize);
+                return Ok(());
+            }
+            KeyCode::Up => {
+                app.move_ask_user_selection(-1);
+                return Ok(());
+            }
+            KeyCode::Down => {
+                app.move_ask_user_selection(1);
+                return Ok(());
+            }
+            KeyCode::Enter => {
+                if app.input.trim().is_empty() {
+                    if let Err(e) = app.submit_ask_user_with(remote).await {
+                        app.set_status_notice(format!("Answer failed: {e}"));
+                    }
+                    return Ok(());
+                }
+                // Non-empty input: fall through so handle_enter's normal
+                // submit_input path can route it to the pending question
+                // (see App::submit_input).
+            }
+            KeyCode::Esc => {
+                app.set_status_notice(
+                    "Type your own answer and press Enter, or pick an option with 1-9 / arrows",
+                );
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     if app.prompt_history_search.is_some() {
         app.handle_prompt_history_search_key(code, modifiers);
         return Ok(());

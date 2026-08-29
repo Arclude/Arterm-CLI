@@ -390,6 +390,14 @@ impl Agent {
         self.stdin_request_tx = Some(tx);
     }
 
+    /// Set the ask-user request channel for multiple-choice questions
+    pub fn set_ask_user_request_tx(
+        &mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<crate::tool::AskUserRequest>,
+    ) {
+        self.ask_user_request_tx = Some(tx);
+    }
+
     pub(super) async fn tool_definitions(&mut self) -> Vec<ToolDefinition> {
         if self.session.is_canary {
             self.registry.register_selfdev_tools().await;

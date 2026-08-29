@@ -867,6 +867,24 @@ impl RemoteConnection {
         self.send_request(request).await
     }
 
+    /// Answer a pending ask_user question: a selected option (0-based) or
+    /// free-form custom text.
+    pub async fn send_ask_user_response(
+        &mut self,
+        request_id: &str,
+        selected_index: Option<usize>,
+        custom: Option<String>,
+    ) -> Result<()> {
+        let request = Request::AskUserResponse {
+            id: self.next_request_id,
+            request_id: request_id.to_string(),
+            selected_index,
+            custom,
+        };
+        self.next_request_id += 1;
+        self.send_request(request).await
+    }
+
     /// Cancel the current generation on the server
     pub async fn cancel(&mut self) -> Result<()> {
         self.cancel_with_reason("remote.cancel").await

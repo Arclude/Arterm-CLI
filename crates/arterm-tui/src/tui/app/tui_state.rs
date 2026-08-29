@@ -1838,6 +1838,10 @@ impl crate::tui::TuiState for App {
         self.inline_view_state.as_ref()
     }
 
+    fn pending_ask_user(&self) -> Option<&crate::tui::PendingAskUser> {
+        self.pending_ask_user.as_ref()
+    }
+
     fn changelog_scroll(&self) -> Option<usize> {
         self.changelog_scroll
     }

@@ -131,8 +131,12 @@ impl Agent {
                 You are in Plan Mode. Write tools (edit, write, multiedit, patch, apply_patch, bash, open) are blocked.\n\
                 Do NOT attempt to make changes. Instead:\n\
                 1. Explore the codebase using read-only tools (read, ls, agentgrep, websearch, etc.)\n\
-                2. Present a clear, structured plan to the user\n\
-                3. Wait for the user to approve the plan\n\
+                2. When a decision between concrete alternatives would change the plan's shape \
+                (which approach, which file, how aggressive), use the `ask_user` tool so the user \
+                picks from numbered options instead of guessing. Batch related questions; do not \
+                ask about anything you can decide yourself.\n\
+                3. Present a clear, structured plan to the user\n\
+                4. Wait for the user to approve the plan\n\
                 The user will disable Plan Mode (via /planmode) when they are ready for you to execute.",
             );
         }

@@ -12,6 +12,7 @@ fn ctx(session: &str, dir: &PathBuf) -> ToolContext {
         tool_call_id: "t".into(),
         working_dir: Some(dir.clone()),
         stdin_request_tx: None,
+            ask_user_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
     }

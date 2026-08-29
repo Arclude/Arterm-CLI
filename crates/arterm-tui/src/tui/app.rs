@@ -90,6 +90,7 @@ mod onboarding_sim;
 mod productivity;
 mod prompt_history;
 mod queued;
+mod ask_user;
 mod remote;
 mod remote_notifications;
 mod replay;
@@ -1439,6 +1440,12 @@ pub struct App {
     inline_view_state: Option<super::InlineViewState>,
     // Interactive model/provider picker
     inline_interactive_state: Option<super::InlineInteractiveState>,
+    /// A pending ask_user question from the agent. While set, the numbered
+    /// option list renders above the input and keys 1-9/↑↓/Enter answer it.
+    pub(crate) pending_ask_user: Option<super::PendingAskUser>,
+    /// A user answer to a pending ask_user question, waiting for the event
+    /// loop (which owns the connection) to send it.
+    pub(crate) pending_ask_user_answer: Option<ask_user::PendingAskUserAnswer>,
     // Cached model picker entries. Building these can require hydrating large provider catalogs.
     model_picker_cache: Option<ModelPickerCache>,
     model_picker_catalog_revision: u64,

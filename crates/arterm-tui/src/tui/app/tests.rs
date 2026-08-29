@@ -30,6 +30,8 @@ include!("tests/login_xai_wiring.rs");
 include!("tests/remote_events_reload_05.rs");
 include!("tests/swarm_plan_no_inline_graph.rs");
 include!("tests/remote_model_picker_hotkeys.rs");
+include!("tests/ask_user_flow.rs");
+include!("tests/ask_user_render.rs");
 include!("tests/scroll_copy_01/part_01.rs");
 include!("tests/scroll_copy_01/part_02.rs");
 include!("tests/scroll_copy_02/part_01.rs");

@@ -443,6 +443,22 @@ async fn apply_terminal_event(
             app.update_copy_badge_key_event(key);
             if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                 handle_remote_key_event(app, key, remote).await?;
+                if let Some(answer) = app.take_pending_ask_user_answer() {
+                    if let Err(error) = remote
+                        .send_ask_user_response(
+                            &answer.request_id,
+                            answer.selected_index,
+                            answer.custom,
+                        )
+                        .await
+                    {
+                        app.push_display_message(DisplayMessage::error(format!(
+                            "Failed to send answer: {}",
+                            error
+                        )));
+                        app.set_status_notice("Answer send failed");
+                    }
+                }
                 if let Some(selection) = app.pending_route_selection.take() {
                     app.pending_model_switch = None;
                     match remote.set_route_selection(selection).await {

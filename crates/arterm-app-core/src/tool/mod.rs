@@ -2,6 +2,7 @@ mod agentgrep;
 pub mod ambient;
 mod apply_patch;
 mod arterm_docs;
+mod ask_user;
 mod bash;
 mod batch;
 mod bg;
@@ -66,7 +67,7 @@ use std::sync::{LazyLock, RwLock as StdRwLock};
 use tokio::sync::RwLock;
 
 pub(crate) use arterm_tool_core::intent_schema_property;
-pub use arterm_tool_core::{StdinInputRequest, Tool, ToolContext, ToolExecutionMode};
+pub use arterm_tool_core::{AskUserOption, AskUserRequest, AskUserResponse, StdinInputRequest, Tool, ToolContext, ToolExecutionMode};
 pub use arterm_tool_types::{ToolImage, ToolOutput};
 pub(crate) use session_search::spawn_recent_index_warmup;
 
@@ -327,6 +328,7 @@ impl Registry {
             );
             Self::insert_tool_timed(&mut m, &mut timings, "todo", todo::TodoTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "bg", bg::BgTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "ask_user", ask_user::AskUserTool::new);
             Self::insert_tool_timed(
                 &mut m,
                 &mut timings,
@@ -1421,6 +1423,7 @@ mod permission_gate_tests {
             tool_call_id: format!("{session}-call"),
             working_dir: Some(std::env::temp_dir()),
             stdin_request_tx: None,
+            ask_user_request_tx: None,
             graceful_shutdown_signal: None,
             execution_mode: ToolExecutionMode::Direct,
         }

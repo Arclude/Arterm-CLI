@@ -2876,6 +2876,29 @@ pub(in crate::tui::app) fn handle_server_event(
             app.set_status_notice("⌨ Interactive terminal detected (command will timeout)");
             false
         }
+        ServerEvent::AskUserRequest {
+            request_id,
+            question,
+            options,
+            allow_custom_hint,
+            ..
+        } => {
+            let pending = crate::tui::PendingAskUser {
+                request_id,
+                question,
+                options: options
+                    .into_iter()
+                    .map(|opt| crate::tui::AskUserOptionView {
+                        label: opt.label,
+                        detail: opt.detail,
+                    })
+                    .collect(),
+                allow_custom: allow_custom_hint.is_some(),
+                selected: 0,
+            };
+            app.pending_ask_user = Some(pending);
+            true
+        }
         _ => false,
     }
 }

@@ -577,10 +577,18 @@ pub trait TuiState {
     fn inline_view_state(&self) -> Option<&InlineViewState> {
         None
     }
+    /// Pending ask_user question shown above input
+    fn pending_ask_user(&self) -> Option<&PendingAskUser> {
+        None
+    }
     /// General inline UI state shown above input.
     fn inline_ui_state(&self) -> Option<InlineUiStateRef<'_>> {
         self.inline_interactive_state()
             .map(InlineUiStateRef::Interactive)
+            .or_else(|| {
+                self.pending_ask_user()
+                    .map(InlineUiStateRef::AskUser)
+            })
             .or_else(|| self.inline_view_state().map(InlineUiStateRef::View))
     }
     /// Changelog overlay scroll offset (None = not showing)
@@ -1089,6 +1097,27 @@ pub struct InlineViewState {
     pub lines: Vec<String>,
 }
 
+/// A pending `ask_user` question rendered above the input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAskUser {
+    /// Matches the server-side oneshot map.
+    pub request_id: String,
+    /// The question shown above the numbered list.
+    pub question: String,
+    /// Options in wire order; digits 1-9 map onto them.
+    pub options: Vec<AskUserOptionView>,
+    /// Whether typing free-form text (and Enter) is accepted as an answer.
+    pub allow_custom: bool,
+    /// Currently highlighted row.
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskUserOptionView {
+    pub label: String,
+    pub detail: Option<String>,
+}
+
 impl InlineViewState {
     pub fn debug_memory_profile(&self) -> serde_json::Value {
         let title_bytes = self.title.capacity();
@@ -1112,6 +1141,7 @@ impl InlineViewState {
 pub enum InlineUiStateRef<'a> {
     View(&'a InlineViewState),
     Interactive(&'a InlineInteractiveState),
+    AskUser(&'a PendingAskUser),
 }
 
 impl PickerKind {

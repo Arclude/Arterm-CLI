@@ -387,6 +387,21 @@ pub enum Request {
         input: String,
     },
 
+    /// Answer an `ask_user_request`: either a selected option (0-based index)
+    /// or free-form custom text.
+    #[serde(rename = "ask_user_response")]
+    AskUserResponse {
+        id: u64,
+        /// Matches the request_id from AskUserRequest
+        request_id: String,
+        /// 0-based index into the request's options, when one was selected
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selected_index: Option<usize>,
+        /// The user's free-form answer, when they typed one instead
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom: Option<String>,
+    },
+
     // === Agent-to-agent communication ===
     /// Register as an external agent
     #[serde(rename = "agent_register")]
@@ -1506,6 +1521,34 @@ pub enum ServerEvent {
         /// Tool call ID this is associated with
         tool_call_id: String,
     },
+
+    /// The agent is asking the user a multiple-choice question (ask_user
+    /// tool). The client renders the numbered options as a selectable list and
+    /// answers through `ask_user_response`.
+    #[serde(rename = "ask_user_request")]
+    AskUserRequest {
+        /// Unique request ID for matching the response
+        request_id: String,
+        /// The question to display above the options
+        question: String,
+        /// Numbered options, in order
+        options: Vec<AskUserWireOption>,
+        /// Hint for the free-text escape hatch, when the agent allows it
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allow_custom_hint: Option<String>,
+        /// Tool call ID this is associated with
+        tool_call_id: String,
+    },
+}
+
+/// One selectable option in an `ask_user_request`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AskUserWireOption {
+    /// Short label shown in the list
+    pub label: String,
+    /// Longer dimmed explanation, if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// One background job as shown in the /jobs overlay.
