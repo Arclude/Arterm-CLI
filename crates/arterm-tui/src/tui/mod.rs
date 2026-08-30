@@ -627,9 +627,10 @@ pub trait TuiState {
     /// Persistent status for in-app copy selection mode.
     fn copy_selection_status(&self) -> Option<CopySelectionStatus>;
     /// Whether the chat still shows its initial empty state: no display
-    /// messages, nothing processing, and nothing streaming. Drives the
-    /// product-name header row (shown on the welcome/empty screen, hidden
-    /// once a conversation is underway).
+    /// messages, nothing processing, and nothing streaming. Feeds the
+    /// prepared-header cache signature so the empty -> first-message
+    /// transition (startup notes drop out of the header) repaints
+    /// immediately instead of waiting out the cache TTL.
     fn chat_is_initially_empty(&self) -> bool {
         self.display_messages().is_empty()
             && !self.is_processing()
