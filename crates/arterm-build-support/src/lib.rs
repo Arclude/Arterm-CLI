@@ -556,11 +556,22 @@ pub fn smoke_test_server_binary(binary: &Path) -> Result<()> {
     let stderr_path = temp.path().join("arterm-smoke.stderr.log");
     let stderr = File::create(&stderr_path)?;
 
+    // The subscribed-client probe below creates a real session. Without an
+    // isolated `ARTERM_HOME` that session (and its `active_pids` marker) is
+    // written into the *user's* `~/.arterm` store. The probe client exits
+    // immediately, the temp server is killed, and the marker's PID goes dead —
+    // so the next real launch flags the smoke session as crashed and prints a
+    // bogus "💥 Session <name> crashed" resume hint (with a long, useless ID).
+    // Sandboxing ARTERM_HOME keeps every artifact of the probe under `temp`.
+    let home_dir = temp.path().join("home");
+    storage::ensure_dir(&home_dir)?;
+
     let mut child = Command::new(binary)
         .arg("serve")
         .arg("--socket")
         .arg(&socket_path)
         .env("ARTERM_NON_INTERACTIVE", "1")
+        .env("ARTERM_HOME", &home_dir)
         .env("ARTERM_RUNTIME_DIR", &runtime_dir)
         .env("ARTERM_GATEWAY_ENABLED", "0")
         .env("ARTERM_TEMP_SERVER", "1")
