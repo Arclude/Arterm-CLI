@@ -1,0 +1,15 @@
+{
+  "version": "0.10.14",
+  "date": "2026-08-30",
+  "highlights": [
+    "The chat header stays visible mid-conversation again, and a launch notice no longer un-centers the welcome screen",
+    "Session false-crash cleanup: build smoke tests no longer leak sessions into the user store, headless 'arterm run' closes its session on exit, and temporary servers close every hosted session before shutting down",
+    "ask_user questions now render as Claude Code-style numbered options with wrapped text instead of truncating"
+  ],
+  "fixes": [
+    "Foreground commands stream live into the jobs overlay without flooding it",
+    "Context usage widgets render 1M-token limits as 1.0M instead of 1000k",
+    "Pending ask_user questions are cancelled on session shutdown/reload",
+    "The stale 'hidden mid-conversation header' comments were updated after the restore"
+  ]
+}
