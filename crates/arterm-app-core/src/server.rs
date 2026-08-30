@@ -1767,6 +1767,7 @@ impl Server {
 
         if let Some(policy) = temporary_server_policy {
             lifecycle::spawn_temporary_lifecycle_monitor(
+                Arc::clone(&self.sessions),
                 Arc::clone(&self.client_count),
                 self.socket_path.clone(),
                 self.debug_socket_path.clone(),

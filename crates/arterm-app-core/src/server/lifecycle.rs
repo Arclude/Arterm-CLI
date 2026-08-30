@@ -1,8 +1,9 @@
+use crate::agent::Agent;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 const TEMP_SERVER_ENV: &str = "ARTERM_TEMP_SERVER";
 const SERVER_SCOPE_ENV: &str = "ARTERM_SERVER_SCOPE";
@@ -136,6 +137,7 @@ pub(crate) fn cleanup_temporary_metadata(socket_path: &Path) {
 }
 
 pub(crate) fn spawn_temporary_lifecycle_monitor(
+    sessions: super::SessionAgents,
     client_count: Arc<RwLock<usize>>,
     socket_path: PathBuf,
     debug_socket_path: PathBuf,
@@ -157,7 +159,8 @@ pub(crate) fn spawn_temporary_lifecycle_monitor(
                     "Temporary server owner pid {} is gone. Shutting down.",
                     owner_pid
                 ));
-                shutdown_temporary_server(&server_name, &socket_path, &debug_socket_path).await;
+                shutdown_temporary_server(&server_name, &socket_path, &debug_socket_path, &sessions)
+                    .await;
             }
 
             let count = *client_count.read().await;
@@ -177,7 +180,8 @@ pub(crate) fn spawn_temporary_lifecycle_monitor(
                         "Temporary server idle for {} seconds. Shutting down.",
                         since.elapsed().as_secs()
                     ));
-                    shutdown_temporary_server(&server_name, &socket_path, &debug_socket_path).await;
+                    shutdown_temporary_server(&server_name, &socket_path, &debug_socket_path, &sessions)
+                        .await;
                 }
             } else {
                 if idle_since.is_some() {
@@ -195,7 +199,27 @@ async fn shutdown_temporary_server(
     server_name: &str,
     socket_path: &Path,
     debug_socket_path: &Path,
+    sessions: &super::SessionAgents,
 ) -> ! {
+    // Close every hosted session before exiting. A temporary server dies with
+    // or shortly after its client; without this, each session stays `Active`
+    // on disk with a PID that is about to be dead, and the next launch
+    // reports it as crashed with a bogus resume hint (the same false-alarm
+    // family as the smoke-probe leak).
+    let hosted: Vec<Arc<Mutex<Agent>>> = {
+        let mut registry = sessions.write().await;
+        let agents: Vec<Arc<Mutex<Agent>>> = registry.values().cloned().collect();
+        registry.clear();
+        agents
+    };
+    for agent in hosted {
+        let mut agent = match tokio::time::timeout(Duration::from_secs(2), agent.lock()).await {
+            Ok(guard) => guard,
+            Err(_) => continue,
+        };
+        agent.mark_closed();
+    }
+
     let _ = crate::registry::unregister_server(server_name).await;
     crate::transport::remove_socket(socket_path);
     crate::transport::remove_socket(debug_socket_path);
