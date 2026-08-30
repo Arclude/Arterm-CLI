@@ -162,13 +162,13 @@ fn draw_ask_user(
         }
         lines.truncate(max_rows);
         // Signal that content was elided so the user knows more exists.
-        if lines.len() == max_rows {
-            if let Some(last) = lines.last_mut() {
-                *last = Line::from(Span::styled(
-                    "… (daha fazlası için terminali büyüt)",
-                    Style::default().fg(hint_color),
-                ));
-            }
+        if lines.len() == max_rows
+            && let Some(last) = lines.last_mut()
+        {
+            *last = Line::from(Span::styled(
+                "… (daha fazlası için terminali büyüt)",
+                Style::default().fg(hint_color),
+            ));
         }
     }
 

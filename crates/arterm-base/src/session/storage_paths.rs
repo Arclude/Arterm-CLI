@@ -58,7 +58,7 @@ pub fn delete_session_files(session_id: &str) {
         return;
     };
     delete_session_files_at(&snapshot);
-    let _ = crate::storage::unregister_active_pid(session_id);
+    crate::storage::unregister_active_pid(session_id);
 }
 
 /// Remove a session's artifacts starting from the snapshot path, for callers
@@ -74,11 +74,11 @@ pub(crate) fn delete_session_files_at(snapshot: &Path) {
     let _ = std::fs::remove_file(snapshot);
     let _ = std::fs::remove_file(&journal);
     let _ = std::fs::remove_file(&rolling_backup);
-    if let Some(dir) = snapshot.parent() {
-        if let Some(stem) = snapshot.file_name().and_then(|n| n.to_str()) {
-            let prefix = format!("{stem}.pre-wipe-");
-            let _ = prune_pre_wipe_backups(dir, &prefix);
-        }
+    if let Some(dir) = snapshot.parent()
+        && let Some(stem) = snapshot.file_name().and_then(|n| n.to_str())
+    {
+        let prefix = format!("{stem}.pre-wipe-");
+        let _ = prune_pre_wipe_backups(dir, &prefix);
     }
 }
 

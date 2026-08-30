@@ -492,8 +492,7 @@ impl SessionPicker {
         // sending; a local row's dir is already known to the local daemon.
         row.server_name
             .as_ref()
-            .map(|_| row.working_dir.clone())
-            .flatten()
+            .and_then(|_| row.working_dir.clone())
     }
 }
 

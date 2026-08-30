@@ -42,10 +42,10 @@ impl App {
             snapshot_jobs(all_sessions, Some(self.session.id.as_str()))
         };
         self.jobs_picker_overlay = Some(JobsPicker::new(rows, all_sessions));
-        if self.pending_jobs_cancel.is_some() || self.pending_jobs_remote_cancel.is_some() {
-            if let Some(picker) = self.jobs_picker_overlay.as_mut() {
-                picker.set_status("⏳ already stopping a job...".to_string());
-            }
+        if (self.pending_jobs_cancel.is_some() || self.pending_jobs_remote_cancel.is_some())
+            && let Some(picker) = self.jobs_picker_overlay.as_mut()
+        {
+            picker.set_status("⏳ already stopping a job...".to_string());
         }
         if self.is_remote {
             self.pending_jobs_list = true;

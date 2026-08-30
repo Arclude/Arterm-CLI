@@ -5,7 +5,6 @@
 // conversation — before the fix it stayed on disk forever, which is how the
 // session store (and every picker list) filled with empty rows.
 
-use super::*;
 
 #[tokio::test]
 async fn handle_resume_session_deletes_unused_boot_session_files() -> Result<()> {

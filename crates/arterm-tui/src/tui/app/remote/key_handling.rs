@@ -364,35 +364,34 @@ async fn handle_remote_key_internal(
     }
 
     if app.jobs_picker_overlay.is_some() {
-        if let Some(outcome) = app.handle_jobs_picker_key_outcome(code, modifiers) {
-            if let crate::tui::jobs_picker::JobsPickerOutcome::Action {
+        if let Some(outcome) = app.handle_jobs_picker_key_outcome(code, modifiers)
+            && let crate::tui::jobs_picker::JobsPickerOutcome::Action {
                 action,
                 task_id,
                 all_sessions,
             } = outcome
+        {
+            if action == "cancel" && app.pending_jobs_remote_cancel.is_some() {
+                if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+                    picker.set_status("⏳ already stopping a job...".to_string());
+                }
+                app.request_full_redraw();
+                return Ok(());
+            }
+            match remote
+                .bg_action(action, task_id.as_deref(), all_sessions)
+                .await
             {
-                if action == "cancel" && app.pending_jobs_remote_cancel.is_some() {
+                Ok(request_id) => {
+                    if action == "cancel" {
+                        app.pending_jobs_remote_cancel = Some(request_id);
+                    }
+                }
+                Err(error) => {
                     if let Some(picker) = app.jobs_picker_overlay.as_mut() {
-                        picker.set_status("⏳ already stopping a job...".to_string());
+                        picker.set_status(format!("Could not {action} jobs: {error:#}"));
                     }
                     app.request_full_redraw();
-                    return Ok(());
-                }
-                match remote
-                    .bg_action(action, task_id.as_deref(), all_sessions)
-                    .await
-                {
-                    Ok(request_id) => {
-                        if action == "cancel" {
-                            app.pending_jobs_remote_cancel = Some(request_id);
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
-                            picker.set_status(format!("Could not {action} jobs: {error:#}"));
-                        }
-                        app.request_full_redraw();
-                    }
                 }
             }
         }

@@ -27,7 +27,7 @@ fn pending_ask_user_renders_options_offscreen() {
     terminal
         .draw(|frame| crate::tui::ui::draw(frame, &app))
         .expect("draw");
-    let content = terminal.backend().buffer().content().clone();
+    let content = terminal.backend().buffer().content();
     let text: String = content
         .iter()
         .map(|cell| cell.symbol().to_string())
@@ -71,7 +71,7 @@ fn long_labels_wrap_instead_of_truncating() {
     terminal
         .draw(|frame| crate::tui::ui::draw(frame, &app))
         .expect("draw");
-    let content = terminal.backend().buffer().content().clone();
+    let content = terminal.backend().buffer().content();
     let text: String = content
         .iter()
         .map(|cell| cell.symbol().to_string())

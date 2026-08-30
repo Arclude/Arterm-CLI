@@ -122,10 +122,9 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
             .is_some_and(|picker| picker.all_sessions());
         if let Err(error) = remote.bg_action("list", None, all_sessions).await
             && app.pending_jobs_remote_cancel.is_none()
+            && let Some(picker) = app.jobs_picker_overlay.as_mut()
         {
-            if let Some(picker) = app.jobs_picker_overlay.as_mut() {
-                picker.set_status(format!("Could not list jobs: {error:#}"));
-            }
+            picker.set_status(format!("Could not list jobs: {error:#}"));
         }
         needs_redraw = true;
     }
@@ -443,21 +442,20 @@ async fn apply_terminal_event(
             app.update_copy_badge_key_event(key);
             if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                 handle_remote_key_event(app, key, remote).await?;
-                if let Some(answer) = app.take_pending_ask_user_answer() {
-                    if let Err(error) = remote
+                if let Some(answer) = app.take_pending_ask_user_answer()
+                    && let Err(error) = remote
                         .send_ask_user_response(
                             &answer.request_id,
                             answer.selected_index,
                             answer.custom,
                         )
                         .await
-                    {
-                        app.push_display_message(DisplayMessage::error(format!(
-                            "Failed to send answer: {}",
-                            error
-                        )));
-                        app.set_status_notice("Answer send failed");
-                    }
+                {
+                    app.push_display_message(DisplayMessage::error(format!(
+                        "Failed to send answer: {}",
+                        error
+                    )));
+                    app.set_status_notice("Answer send failed");
                 }
                 if let Some(selection) = app.pending_route_selection.take() {
                     app.pending_model_switch = None;
@@ -1028,10 +1026,10 @@ pub(super) fn handle_disconnect(
         ));
     }
     app.reset_streaming_tps();
-    if app.pending_jobs_remote_cancel.take().is_some() {
-        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
-            picker.set_status("Connection lost; job may still be running.".to_string());
-        }
+    if app.pending_jobs_remote_cancel.take().is_some()
+        && let Some(picker) = app.jobs_picker_overlay.as_mut()
+    {
+        picker.set_status("Connection lost; job may still be running.".to_string());
     }
     if app.jobs_picker_overlay.is_some() {
         app.pending_jobs_list = true;

@@ -10,12 +10,15 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
+#[cfg(unix)]
 use std::fs::OpenOptions;
 use std::path::Path;
+#[cfg(unix)]
 use std::process::Command as StdCommand;
 use std::process::Stdio;
 use std::sync::LazyLock;
 use std::time::Duration;
+#[cfg(unix)]
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
@@ -608,16 +611,6 @@ fn build_detached_shell_wrapper(command: &str) -> StdCommand {
     cmd
 }
 
-#[cfg(not(unix))]
-fn build_detached_shell_wrapper(command: &str) -> StdCommand {
-    // The reload-detach wrapper is Unix-shell glue; on Windows run the
-    // command through cmd.exe directly so the foreground-jobs path still
-    // compiles and works instead of failing the build.
-    let mut cmd = StdCommand::new("cmd");
-    cmd.arg("/C").arg(command);
-    cmd
-}
-
 fn format_command_output(mut output: String, exit_code: Option<i32>, command: &str) -> String {
     // Failure-coupled and evidence-coupled, the same shape as the checkpoint's
     // confinement note. A command that succeeded was not short of anything, and
@@ -1100,6 +1093,7 @@ impl BashTool {
         result
     }
 
+    #[cfg(unix)]
     async fn execute_reload_persistable_foreground_inner(
         &self,
         params: &BashInput,

@@ -6,7 +6,6 @@
 // older than `App::COMMAND_CANDIDATES_TTL`, so the observable contract is:
 // stale cache + typed slash prefix => the new skill is suggested.
 
-use super::*;
 
 /// Directly exercise the cache path: prime the candidates, let the cache go
 /// stale, install a new skill into the global registry, and confirm the

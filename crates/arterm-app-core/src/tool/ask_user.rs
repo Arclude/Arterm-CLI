@@ -15,6 +15,7 @@
 //! callers is to plan without asking.
 
 use super::{Tool, ToolContext, ToolOutput};
+#[cfg(test)]
 use arterm_agent_runtime::InterruptSignal;
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -157,10 +158,7 @@ impl Tool for AskUserTool {
         // an exec-style reload swaps the server process image and drops this
         // task's oneshot without an error, which used to leave the question
         // hanging for its full 24h timeout while the turn sat blocked.
-        let shutdown = ctx
-            .graceful_shutdown_signal
-            .clone()
-            .unwrap_or_else(InterruptSignal::new);
+        let shutdown = ctx.graceful_shutdown_signal.clone().unwrap_or_default();
         let deadline = tokio::time::Instant::now() + ANSWER_TIMEOUT;
         let mut response_rx = std::pin::pin!(response_rx);
         let response = loop {

@@ -342,6 +342,7 @@ fn parse_late_color_reply(drained: &[u8]) -> Option<terminal_colorsaurus::Color>
 
 /// Wait until `readable` reports data (or an error/hangup) is available.
 /// Returns false on timeout or when polling is unavailable on this platform.
+#[cfg(unix)]
 fn poll_readable(readable: &impl std::os::fd::AsRawFd, slice: std::time::Duration) -> bool {
     let mut pfd = libc::pollfd {
         fd: readable.as_raw_fd(),

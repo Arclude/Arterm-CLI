@@ -5,8 +5,6 @@
 //! screen at all — the failure that cost an evening once already, when a modal
 //! was drawn by one dispatch path and answered by neither.
 
-use super::*;
-
 /// `/device` must be recognised on its own, and not steal a longer command that
 /// happens to start the same way.
 #[test]
