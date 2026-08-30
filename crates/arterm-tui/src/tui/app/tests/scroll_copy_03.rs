@@ -1964,6 +1964,21 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
     let session_id = app.session_id().to_string();
     arterm_app_core::tool::set_plan_mode(&session_id, true);
 
+    // The Updates box sits inside the header's top pad and its presence
+    // depends on unseen-changelog state, which differs between a fresh CI
+    // ARTERM_HOME and a used local one. With the box present the header
+    // section grows, the bottom-most scroll no longer clears `header_end`,
+    // and the band is correctly *not* pinned — so pin the box away for a
+    // deterministic geometry.
+    crate::tui::ui::header::set_unseen_changelog_entries_override_for_tests(Some(Vec::new()));
+    struct ClearUnseenOverride;
+    impl Drop for ClearUnseenOverride {
+        fn drop(&mut self) {
+            crate::tui::ui::header::set_unseen_changelog_entries_override_for_tests(None);
+        }
+    }
+    let _clear_override = ClearUnseenOverride;
+
     let mut messages = Vec::new();
     for prompt in 0..6 {
         messages.push(DisplayMessage::user(format!("prompt number {prompt}")));

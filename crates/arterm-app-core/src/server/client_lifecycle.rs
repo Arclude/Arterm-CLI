@@ -19,8 +19,8 @@ use super::client_lightweight_control::{
     LightweightControlContext, handle_lightweight_control_request, parse_swarm_spawn_mode,
 };
 use super::client_session::{
-    handle_bg_action, handle_clear_session, handle_mcp_action, handle_reload, handle_resume_session,
-    handle_subscribe,
+    handle_bg_action, handle_clear_session, handle_mcp_action, handle_reload,
+    handle_resume_session, handle_subscribe,
 };
 use super::client_state::{
     HistoryRefreshArgs, handle_get_compacted_history, handle_get_model_catalog, handle_get_state,
@@ -702,8 +702,9 @@ pub(super) async fn handle_client(
 
     // Same pattern for ask_user: the tool blocks on a oneshot; we hold the
     // sender until the TUI answers with an ask_user_response request.
-    let ask_user_responses: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<crate::tool::AskUserResponse>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let ask_user_responses: Arc<
+        Mutex<HashMap<String, tokio::sync::oneshot::Sender<crate::tool::AskUserResponse>>>,
+    > = Arc::new(Mutex::new(HashMap::new()));
     let (ask_req_tx, mut ask_req_rx) =
         tokio::sync::mpsc::unbounded_channel::<crate::tool::AskUserRequest>();
     {

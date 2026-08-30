@@ -108,10 +108,7 @@ impl App {
             selected_index: Some(selected),
             custom: None,
         });
-        self.push_display_message(crate::tui::DisplayMessage::system(format!(
-            "▸ {}",
-            label
-        )));
+        self.push_display_message(crate::tui::DisplayMessage::system(format!("▸ {}", label)));
         Ok(())
     }
 }

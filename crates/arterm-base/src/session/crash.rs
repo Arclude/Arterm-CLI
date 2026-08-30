@@ -692,10 +692,7 @@ mod smoke_probe_tests {
 
     #[test]
     fn leaked_smoke_probe_session_is_ignored() {
-        let session = session_with_working_dir(
-            "/repo/crates/arterm-build-support",
-            1,
-        );
+        let session = session_with_working_dir("/repo/crates/arterm-build-support", 1);
         assert!(
             is_smoke_probe_session(&session),
             "a build-support session with no user turns must be treated as a smoke probe"
@@ -704,10 +701,7 @@ mod smoke_probe_tests {
 
     #[test]
     fn build_support_session_with_real_history_is_not_filtered() {
-        let session = session_with_working_dir(
-            "/repo/crates/arterm-build-support",
-            3,
-        );
+        let session = session_with_working_dir("/repo/crates/arterm-build-support", 3);
         assert!(
             !is_smoke_probe_session(&session),
             "a session with real user turns must keep its crash hint"

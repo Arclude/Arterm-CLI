@@ -380,9 +380,7 @@ pub(super) fn draw_messages(
         user_prompt_texts,
         text_render_area,
         pinned_todo_band.len() as u16,
-        sticky_header
-            .as_ref()
-            .map(|(_, _, header_end)| *header_end),
+        sticky_header.as_ref().map(|(_, _, header_end)| *header_end),
     );
 
     super::set_last_max_scroll(max_scroll);
@@ -1182,7 +1180,8 @@ pub(super) fn draw_messages(
     if pinned_todo_lines > 0 {
         let band_area = Rect {
             x: content_area.x,
-            y: render_area.y
+            y: render_area
+                .y
                 .saturating_add(sticky_header_lines)
                 .saturating_add(prompt_preview_lines),
             width: content_area.width,
@@ -1458,9 +1457,10 @@ fn compute_max_scroll_with_prompt_preview(
             .filter(|header_end| max_scroll >= *header_end)
             .map(|_| 1u16)
             .unwrap_or(0);
-        let content_height = area.height.saturating_sub(
-            prompt_preview_lines + pinned_todo_lines + sticky_header_lines,
-        ) as usize;
+        let content_height = area
+            .height
+            .saturating_sub(prompt_preview_lines + pinned_todo_lines + sticky_header_lines)
+            as usize;
         let adjusted = total_lines.saturating_sub(content_height);
         if adjusted == max_scroll {
             break;

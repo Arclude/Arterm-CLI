@@ -49,6 +49,7 @@ pub enum AppRuntimeMode {
     TestHarness,
 }
 
+mod ask_user;
 mod auth;
 mod auth_account_picker_saved_accounts;
 mod auth_device_logins;
@@ -90,7 +91,6 @@ mod onboarding_sim;
 mod productivity;
 mod prompt_history;
 mod queued;
-mod ask_user;
 mod remote;
 mod remote_notifications;
 mod replay;

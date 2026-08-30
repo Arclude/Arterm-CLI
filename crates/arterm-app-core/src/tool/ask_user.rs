@@ -17,7 +17,7 @@
 use super::{Tool, ToolContext, ToolOutput};
 use arterm_agent_runtime::InterruptSignal;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 /// How long to wait for a user answer before giving up. Generous by design:
@@ -117,7 +117,10 @@ impl Tool for AskUserTool {
                 .map(str::trim)
                 .filter(|d| !d.is_empty())
                 .map(ToString::to_string);
-            options.push(crate::tool::AskUserOption { label: label.to_string(), detail });
+            options.push(crate::tool::AskUserOption {
+                label: label.to_string(),
+                detail,
+            });
         }
 
         let allow_custom = input
@@ -141,8 +144,7 @@ impl Tool for AskUserTool {
                 request_id: request_id.clone(),
                 question: question.to_string(),
                 options: options.clone(),
-                allow_custom_hint: allow_custom
-                    .then(|| "or type your own answer".to_string()),
+                allow_custom_hint: allow_custom.then(|| "or type your own answer".to_string()),
                 response_tx,
             })
             .map_err(|_| {
@@ -208,8 +210,7 @@ impl Tool for AskUserTool {
 mod tests {
     use super::*;
 
-    fn ctx_with_channel(
-    ) -> (
+    fn ctx_with_channel() -> (
         ToolContext,
         tokio::sync::mpsc::UnboundedReceiver<crate::tool::AskUserRequest>,
     ) {

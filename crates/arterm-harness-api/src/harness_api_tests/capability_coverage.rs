@@ -37,6 +37,10 @@ use Disposition::{ClientInternal, Covered, Gap};
 ///
 /// Sorted by name so additions produce clean diffs.
 const LEDGER: &[(&str, Disposition)] = &[
+    // The TUI's answer to an agent's ask_user question (numbered options).
+    // The daemon routes it to the blocked tool call; a harness API client
+    // building an interactive loop needs exactly this to resume the turn.
+    ("AskUserResponse", Covered),
     ("BackgroundTool", ClientInternal),
     ("BgAction", ClientInternal),
     ("Cancel", Covered),

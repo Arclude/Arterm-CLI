@@ -585,10 +585,7 @@ pub trait TuiState {
     fn inline_ui_state(&self) -> Option<InlineUiStateRef<'_>> {
         self.inline_interactive_state()
             .map(InlineUiStateRef::Interactive)
-            .or_else(|| {
-                self.pending_ask_user()
-                    .map(InlineUiStateRef::AskUser)
-            })
+            .or_else(|| self.pending_ask_user().map(InlineUiStateRef::AskUser))
             .or_else(|| self.inline_view_state().map(InlineUiStateRef::View))
     }
     /// Changelog overlay scroll offset (None = not showing)

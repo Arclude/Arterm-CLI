@@ -1907,8 +1907,7 @@ async fn restore_with_working_dir_override_stamps_the_targets_own_dir() {
         Some(peer_advertised_dir),
         "the live agent must run in the target session's own directory"
     );
-    let on_disk =
-        crate::session::Session::load(&target.id).expect("reload persisted session");
+    let on_disk = crate::session::Session::load(&target.id).expect("reload persisted session");
     assert_eq!(
         on_disk.working_dir.as_deref(),
         Some(peer_advertised_dir),

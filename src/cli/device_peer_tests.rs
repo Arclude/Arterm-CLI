@@ -225,7 +225,9 @@ fn an_inherited_socket_from_another_session_earns_a_warning() {
 /// socket is this machine's own. No note, no noise.
 #[test]
 fn no_inherited_socket_means_no_note() {
-    assert!(inherited_socket_note(None, std::path::Path::new("/run/user/1000/arterm.sock")).is_none());
+    assert!(
+        inherited_socket_note(None, std::path::Path::new("/run/user/1000/arterm.sock")).is_none()
+    );
 }
 
 /// When the environment names exactly this machine's own default socket the
@@ -234,11 +236,13 @@ fn no_inherited_socket_means_no_note() {
 /// own session's socket.
 #[test]
 fn an_inherited_socket_matching_the_default_path_stays_quiet() {
-    assert!(inherited_socket_note(
-        Some(std::ffi::OsStr::new("/run/user/1000/arterm.sock")),
-        std::path::Path::new("/run/user/1000/arterm.sock"),
-    )
-    .is_none());
+    assert!(
+        inherited_socket_note(
+            Some(std::ffi::OsStr::new("/run/user/1000/arterm.sock")),
+            std::path::Path::new("/run/user/1000/arterm.sock"),
+        )
+        .is_none()
+    );
 }
 
 /// The local socket is a door to another machine's agent, so it must not be

@@ -704,4 +704,3 @@ mod generation {
         );
     }
 }
-

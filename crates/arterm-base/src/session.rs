@@ -51,8 +51,8 @@ pub use crash::{
     find_session_by_name_or_id, recover_crashed_sessions, recover_crashed_sessions_by_ids,
 };
 use journal::{PersistVectorMode, SessionJournalMeta, SessionPersistState};
-pub use maintenance::prune_old_session_backups;
 pub use maintenance::prune_empty_boot_sessions;
+pub use maintenance::prune_old_session_backups;
 pub use memory_profile::SessionMemoryProfileSnapshot;
 use memory_profile::{
     ContentBlockMemoryStats, SessionMemoryProfileCache, summarize_blocks, summarize_message_content,
@@ -65,12 +65,12 @@ pub use render::{
     render_messages, render_messages_and_images, render_messages_and_images_with_compacted_history,
     summarize_tool_calls,
 };
+pub(crate) use storage_paths::delete_session_files_at;
 pub use storage_paths::session_journal_path_from_snapshot;
 #[cfg(test)]
 pub(crate) use storage_paths::session_path_in_dir;
-use storage_paths::{estimate_json_bytes, persist_vector_mode_label};
 pub use storage_paths::{delete_session_files, session_exists, session_journal_path, session_path};
-pub(crate) use storage_paths::delete_session_files_at;
+use storage_paths::{estimate_json_bytes, persist_vector_mode_label};
 
 fn stored_messages_to_messages(messages: &[StoredMessage]) -> Vec<Message> {
     messages.iter().map(StoredMessage::to_message).collect()

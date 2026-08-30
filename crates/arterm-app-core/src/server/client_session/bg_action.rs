@@ -199,7 +199,8 @@ mod tests {
             &tx,
         )
         .await;
-        let ServerEvent::BgTaskList { id, tasks } = rx.recv().await.expect("cancel snapshot") else {
+        let ServerEvent::BgTaskList { id, tasks } = rx.recv().await.expect("cancel snapshot")
+        else {
             panic!("cancel must answer with a refreshed BgTaskList");
         };
         assert_eq!(id, 8);

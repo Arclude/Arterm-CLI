@@ -53,7 +53,7 @@ mod file_diff_ui;
 #[path = "ui_frame_metrics.rs"]
 mod frame_metrics;
 #[path = "ui_header.rs"]
-mod header;
+pub(crate) mod header;
 #[path = "ui_inline_image.rs"]
 pub(crate) mod inline_image_ui;
 #[path = "ui_inline_interactive.rs"]
@@ -122,9 +122,9 @@ use file_diff_ui::{
     FileDiffCacheKey, FileDiffViewCacheEntry, file_content_signature, file_diff_cache,
 };
 pub(crate) use header::capitalize;
-use inline_ui::{draw_inline_ui, inline_ui_height};
 #[cfg(test)]
 pub(in crate::tui) use inline_ui::wrap_plain_for_test;
+use inline_ui::{draw_inline_ui, inline_ui_height};
 pub(crate) use memory_estimates::{debug_memory_profile, debug_side_panel_memory_profile};
 use memory_estimates::{estimate_prepared_chat_frame_bytes, estimate_prepared_messages_bytes};
 #[cfg(test)]

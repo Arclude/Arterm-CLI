@@ -127,9 +127,9 @@ fn snapshot_is_empty_boot(snapshot: &[u8]) -> bool {
     let Some(messages) = value.get("messages").and_then(|m| m.as_array()) else {
         return true;
     };
-    messages.iter().all(|message| {
-        !json_is_visible_conversation_message(message)
-    })
+    messages
+        .iter()
+        .all(|message| !json_is_visible_conversation_message(message))
 }
 
 /// JSON mirror of `is_visible_conversation_message` (session.rs).
@@ -154,11 +154,9 @@ fn json_is_visible_conversation_message(message: &serde_json::Value) -> bool {
         .and_then(|mut blocks| blocks.next())
         .is_some_and(|text| text.trim_start().starts_with("<system-reminder>"));
     let scheduled_task = message.get("role").and_then(|r| r.as_str()) == Some("user")
-        && text_blocks()
-            .is_some_and(|mut blocks| {
-                blocks
-                    .any(|text| text.trim_start().starts_with("[Scheduled task]\n"))
-            });
+        && text_blocks().is_some_and(|mut blocks| {
+            blocks.any(|text| text.trim_start().starts_with("[Scheduled task]\n"))
+        });
     display_role_none && !internal_reminder && !scheduled_task
 }
 
@@ -312,8 +310,7 @@ mod tests {
     }
 
     fn write_session_json(dir: &std::path::Path, session: &super::super::Session) {
-        let json =
-            serde_json::to_vec(session).expect("serialize session");
+        let json = serde_json::to_vec(session).expect("serialize session");
         fs::write(dir.join(format!("{}.json", session.id)), json).expect("write session json");
     }
 
@@ -332,11 +329,7 @@ mod tests {
         // authoritative `Session::has_visible_conversation` on the exact bytes
         // a real `Session::save` produces.
         let cases: Vec<(&str, Vec<super::super::StoredMessage>, bool)> = vec![
-            (
-                "empty",
-                Vec::new(),
-                true,
-            ),
+            ("empty", Vec::new(), true),
             (
                 "only session context",
                 vec![super::super::StoredMessage {
@@ -413,11 +406,8 @@ mod tests {
         let dir = boot_sweep_dir("mixed");
 
         // Old empty boot session: swept.
-        let old_empty = super::super::Session::create_with_id(
-            "old-empty".into(),
-            None,
-            Some("boot".into()),
-        );
+        let old_empty =
+            super::super::Session::create_with_id("old-empty".into(), None, Some("boot".into()));
         write_session_json(&dir, &old_empty);
 
         // Old boot session the user actually typed into: kept.
@@ -442,11 +432,8 @@ mod tests {
 
         // Recent empty boot session: a live client may still resume away from
         // it through the in-band path; the sweep leaves it to that path.
-        let recent_empty = super::super::Session::create_with_id(
-            "recent-empty".into(),
-            None,
-            Some("boot".into()),
-        );
+        let recent_empty =
+            super::super::Session::create_with_id("recent-empty".into(), None, Some("boot".into()));
         write_session_json(&dir, &recent_empty);
 
         age_file(
@@ -480,11 +467,8 @@ mod tests {
     fn boot_sweep_removes_journal_and_backups_too() {
         let dir = boot_sweep_dir("journal");
 
-        let session = super::super::Session::create_with_id(
-            "old-empty-j".into(),
-            None,
-            Some("boot".into()),
-        );
+        let session =
+            super::super::Session::create_with_id("old-empty-j".into(), None, Some("boot".into()));
         write_session_json(&dir, &session);
         // Stray artifacts the atomic-write layer or a wipe guard may leave
         // next to the snapshot; deleting the session must remove them too.

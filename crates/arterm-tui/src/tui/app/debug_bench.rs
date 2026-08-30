@@ -568,10 +568,9 @@ impl App {
         // but headless testers never initialize an image-protocol picker.
         // Force the capability on for the offscreen draw so the suite stays
         // meaningful without a real terminal protocol.
-        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(
-            Some(true),
-            || terminal.draw(|f| crate::tui::ui::draw(f, self)),
-        ) {
+        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(Some(true), || {
+            terminal.draw(|f| crate::tui::ui::draw(f, self))
+        }) {
             return Err(format!("draw error ({}): {}", label, e));
         }
         let draw_ms = draw_start.elapsed().as_secs_f64() * 1000.0;
@@ -849,10 +848,9 @@ impl App {
         // Baseline render (bottom) for metrics. Same protocol override as the
         // per-step draws so the baseline frame also reports inline regions.
         self.follow_chat_bottom();
-        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(
-            Some(true),
-            || terminal.draw(|f| crate::tui::ui::draw(f, self)),
-        ) {
+        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(Some(true), || {
+            terminal.draw(|f| crate::tui::ui::draw(f, self))
+        }) {
             errors.push(format!("baseline draw error: {}", e));
         }
 
@@ -866,10 +864,9 @@ impl App {
         {
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
-        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(
-            Some(true),
-            || terminal.draw(|f| crate::tui::ui::draw(f, self)),
-        ) {
+        if let Err(e) = crate::tui::mermaid::with_image_protocol_override(Some(true), || {
+            terminal.draw(|f| crate::tui::ui::draw(f, self))
+        }) {
             errors.push(format!("post-deferred draw error: {}", e));
         }
 

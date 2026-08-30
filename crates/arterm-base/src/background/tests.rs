@@ -569,10 +569,12 @@ fn transient_task_appears_in_list_sync_while_running_and_vanishes_after() {
     let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
 
     // Nothing transient initially.
-    assert!(manager
-        .list_sync()
-        .iter()
-        .all(|task| task.session_id != "session-transient"));
+    assert!(
+        manager
+            .list_sync()
+            .iter()
+            .all(|task| task.session_id != "session-transient")
+    );
 
     let id = manager.register_transient(
         "bash",
@@ -587,10 +589,7 @@ fn transient_task_appears_in_list_sync_while_running_and_vanishes_after() {
         .expect("transient command must appear in the jobs list while running");
     assert_eq!(entry.tool_name, "bash");
     assert_eq!(entry.status, BackgroundTaskStatus::Running);
-    assert_eq!(
-        entry.display_name.as_deref(),
-        Some("docker build -t app .")
-    );
+    assert_eq!(entry.display_name.as_deref(), Some("docker build -t app ."));
     assert!(entry.duration_secs.is_some_and(|secs| secs >= 0.0));
 
     manager.complete_transient(&id);
@@ -665,7 +664,10 @@ fn prune_drops_old_terminal_tasks_and_caps_the_rest() {
     super::prune_terminal_tasks(&mut rows);
 
     assert!(rows.iter().any(|task| task.task_id == "fresh19"));
-    assert!(rows.iter().any(|task| task.task_id == "fresh09"), "11 fresh + the no-timestamp terminal task fill the 12 cap");
+    assert!(
+        rows.iter().any(|task| task.task_id == "fresh09"),
+        "11 fresh + the no-timestamp terminal task fill the 12 cap"
+    );
     assert!(
         !rows.iter().any(|task| task.task_id == "fresh08"),
         "terminal cap must keep at most 12 newest"

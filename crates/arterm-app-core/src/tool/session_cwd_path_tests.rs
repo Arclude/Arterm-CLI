@@ -53,7 +53,7 @@ fn test_ctx(root: &Path) -> ToolContext {
         tool_call_id: "cwd-path".to_string(),
         working_dir: Some(root.to_path_buf()),
         stdin_request_tx: None,
-            ask_user_request_tx: None,
+        ask_user_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
     }

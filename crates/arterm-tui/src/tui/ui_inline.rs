@@ -91,7 +91,10 @@ fn draw_ask_user(
     let option_prefix = "▸ 9. ".len(); // widest prefix, kept on wrap indents
 
     let mut lines: Vec<Line> = Vec::new();
-    for (i, chunk) in wrap_plain(&ask.question, wrap_width).into_iter().enumerate() {
+    for (i, chunk) in wrap_plain(&ask.question, wrap_width)
+        .into_iter()
+        .enumerate()
+    {
         let style = Style::default()
             .fg(question_color)
             .add_modifier(Modifier::BOLD);

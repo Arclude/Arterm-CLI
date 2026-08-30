@@ -67,7 +67,10 @@ use std::sync::{LazyLock, RwLock as StdRwLock};
 use tokio::sync::RwLock;
 
 pub(crate) use arterm_tool_core::intent_schema_property;
-pub use arterm_tool_core::{AskUserOption, AskUserRequest, AskUserResponse, StdinInputRequest, Tool, ToolContext, ToolExecutionMode};
+pub use arterm_tool_core::{
+    AskUserOption, AskUserRequest, AskUserResponse, StdinInputRequest, Tool, ToolContext,
+    ToolExecutionMode,
+};
 pub use arterm_tool_types::{ToolImage, ToolOutput};
 pub(crate) use session_search::spawn_recent_index_warmup;
 

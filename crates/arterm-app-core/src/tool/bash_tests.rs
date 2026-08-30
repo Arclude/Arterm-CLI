@@ -50,7 +50,7 @@ fn make_agent_ctx(signal: arterm_agent_runtime::InterruptSignal) -> ToolContext 
         tool_call_id: "test-call-agent".to_string(),
         working_dir: Some(std::path::PathBuf::from("/tmp")),
         stdin_request_tx: None,
-            ask_user_request_tx: None,
+        ask_user_request_tx: None,
         graceful_shutdown_signal: Some(signal),
         execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
     }
@@ -884,7 +884,7 @@ fn gate_ctx(working_dir: &str) -> ToolContext {
         tool_call_id: "c".to_string(),
         working_dir: Some(std::path::PathBuf::from(working_dir)),
         stdin_request_tx: None,
-            ask_user_request_tx: None,
+        ask_user_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: crate::tool::ToolExecutionMode::Direct,
     }
