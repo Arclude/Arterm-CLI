@@ -817,6 +817,10 @@ fn build_top_pad_lines(width: u16, pad_top: usize, centered: bool) -> Vec<Line<'
 
 fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> PreparedChatFrame {
     let header_start = Instant::now();
+    // The welcome block below renders launch system notices through the same
+    // renderer as the transcript body, so the code-block centering flag the
+    // renderer reads must be set before it runs.
+    markdown::set_center_code_blocks(app.centered_mode());
     let header_prepared = prepare_header_cached(app, width);
     let header_ms = header_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -877,10 +881,15 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
     };
     let streaming_ms = streaming_start.elapsed().as_secs_f64() * 1000.0;
 
+    // The welcome layout keys off "has a conversation started", not "is the
+    // transcript empty". A launch routinely pushes system notices before the
+    // first prompt (a configured hotkey, a recovered session, a network
+    // notice); keying off emptiness is what un-centered the whole welcome
+    // screen as soon as one landed — everything packed to the top edge while
+    // the user had done nothing. The notices themselves are rendered as part
+    // of the centered block below, so they stay visible.
     let is_initial_empty = app.onboarding_preview_mode()
-        || (app.display_messages().is_empty()
-            && !app.is_processing()
-            && app.streaming_text().is_empty());
+        || (!app.conversation_started() && !app.is_processing() && app.streaming_text().is_empty());
 
     if is_initial_empty {
         let compose_start = Instant::now();
@@ -892,6 +901,18 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
             ratatui::layout::Alignment::Left
         };
         let mut wrapped_lines = header_prepared.wrapped_lines.clone();
+
+        // Launch notices (a configured hotkey, a recovered session, a swarm
+        // broadcast that arrived before the first prompt) are not a
+        // conversation, so they render inside this centered welcome block
+        // instead of dropping the screen into the packed top-aligned layout.
+        // Reuse the already-prepared body lines so every message type keeps
+        // its real renderer (swarm cards, background-task cards, error
+        // banners) rather than a lossy special case here.
+        if !body_prepared.wrapped_lines.is_empty() {
+            wrapped_lines.push(Line::from(""));
+            wrapped_lines.extend(body_prepared.wrapped_lines.iter().cloned());
+        }
 
         // The "where we left off" notes are part of the header (see
         // `ui_header::build_header_lines_with_auth`), which these lines start
