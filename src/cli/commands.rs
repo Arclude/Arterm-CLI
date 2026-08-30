@@ -2410,11 +2410,14 @@ pub async fn run_single_message_command(
             text,
             usage: agent.last_usage().clone(),
         };
+        agent.mark_closed();
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else if emit_ndjson {
         run_single_message_command_ndjson(&mut agent, provider.clone(), message).await?;
+        agent.mark_closed();
     } else {
         run_single_message_command_plain_with_auto_poke(&mut agent, message).await?;
+        agent.mark_closed();
     }
 
     Ok(())
