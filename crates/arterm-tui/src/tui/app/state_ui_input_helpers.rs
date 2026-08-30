@@ -160,6 +160,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/info", "Show session info and tokens"),
     RegisteredCommand::public("/usage", "Show connected provider usage limits"),
     RegisteredCommand::public("/mcp", "Show MCP servers and their tools for this session"),
+    RegisteredCommand::public("/jobs", "List, time, and stop background jobs"),
     RegisteredCommand::public(
         "/productivity",
         "Generate a shareable usage report + dashboard image",
@@ -355,8 +356,32 @@ impl App {
 
     fn command_candidates(&self) -> Vec<(String, &'static str)> {
         if let Some(cache) = self.command_candidates_cache.borrow().as_ref() {
-            return cache.candidates.clone();
+            // A skill can be installed while this TUI is open (uipro init,
+            // npx skills add, a plain mkdir in ~/.arterm/skills). Re-read
+            // skills from disk when the cache went stale while the user is
+            // typing a slash prefix, so completion picks new skills up
+            // without a restart. Only refresh on the slash-completion path:
+            // this runs up to once per input change, not per frame.
+            if cache.computed_at.elapsed() < Self::COMMAND_CANDIDATES_TTL {
+                return cache.candidates.clone();
+            }
         }
+        // refresh_skills_snapshot takes &mut self; command_candidates is
+        // called from render paths with &self. Rebuild from the shared
+        // global registry directly and swap the cached copy.
+        let reloaded = crate::skill::SkillRegistry::load_global().unwrap_or_default();
+        let reloaded = crate::skill::SkillRegistry::effective_for_working_dir(
+            &reloaded,
+            self.session
+                .working_dir
+                .as_deref()
+                .map(std::path::Path::new),
+        );
+        if let Ok(mut shared) = self.registry.skills().try_write() {
+            *shared = reloaded.clone();
+        }
+        self.invalidate_command_candidates_cache();
+        self.advance_command_suggestions_epoch();
 
         fn push_skill_commands(
             commands: &mut Vec<(String, &'static str)>,
@@ -395,6 +420,7 @@ impl App {
 
         *self.command_candidates_cache.borrow_mut() = Some(CommandCandidatesCache {
             candidates: commands.clone(),
+            computed_at: std::time::Instant::now(),
         });
         commands
     }

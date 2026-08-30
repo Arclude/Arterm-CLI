@@ -377,6 +377,11 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             // this line a machine that cannot reach the live catalog (fresh
             // install, bad key) showed a list that stopped at glm-5.1.
             push("glm-5.2");
+            // Same story as glm-5.3's predecessor: served on the live coding
+            // endpoint and in daily use; a missing entry made the config
+            // default_model fall back to the profile's glm-4.5 default on
+            // machines without live-catalog access.
+            push("glm-5.3");
             push("glm-4.7-flash");
             push("glm-4.7-flashx");
         }

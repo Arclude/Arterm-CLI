@@ -35,6 +35,9 @@ use model::{
 /// Manages background task execution
 pub struct BackgroundTaskManager {
     tasks: Arc<RwLock<HashMap<String, RunningTask>>>,
+    /// Foreground commands currently executing, shown live in the /jobs overlay
+    /// without touching disk. See [`register_transient`].
+    transient_tasks: Arc<RwLock<HashMap<String, model::TransientTask>>>,
     output_dir: PathBuf,
 }
 
@@ -46,6 +49,7 @@ impl BackgroundTaskManager {
         std::fs::create_dir_all(&output_dir).ok();
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
+            transient_tasks: Arc::new(RwLock::new(HashMap::new())),
             output_dir,
         }
     }
@@ -829,8 +833,15 @@ impl BackgroundTaskManager {
             }
         }
 
+        // Live transient (foreground) commands are disk-less; splice them in so
+        // `bg list` shows a docker run that is executing right now.
+        for transient in self.transient_statuses() {
+            results.push(transient);
+        }
+
         // Sort by task_id (which includes timestamp)
         results.sort_by(|a, b| b.task_id.cmp(&a.task_id));
+        prune_terminal_tasks(&mut results);
         results
     }
 
@@ -1398,6 +1409,105 @@ impl BackgroundTaskManager {
         )
     }
 
+    /// Best-effort synchronous snapshot of every status file on disk.
+    /// Used by the TUI /jobs overlay so local sessions can list jobs without
+    /// blocking the runtime from inside a tick/key handler.
+    pub fn list_sync(&self) -> Vec<TaskStatusFile> {
+        let mut results = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&self.output_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    continue;
+                }
+                let Ok(content) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let Ok(status) = serde_json::from_str::<TaskStatusFile>(&content) else {
+                    continue;
+                };
+                results.push(status);
+            }
+        }
+        // Live transient (foreground) commands are disk-less; splice them in so
+        // the /jobs overlay shows a docker run that is executing right now.
+        for transient in self.transient_statuses() {
+            results.push(transient);
+        }
+        results.sort_by(|a, b| b.task_id.cmp(&a.task_id));
+        prune_terminal_tasks(&mut results);
+        results
+    }
+
+    /// Snapshot of the live transient (foreground) commands, as status files.
+    fn transient_statuses(&self) -> Vec<TaskStatusFile> {
+        let transients = match self.transient_tasks.try_read() {
+            Ok(map) => map,
+            Err(_) => return Vec::new(),
+        };
+        let now = Instant::now();
+        transients
+            .values()
+            .map(|task| TaskStatusFile {
+                task_id: task.task_id.clone(),
+                tool_name: task.tool_name.clone(),
+                display_name: task.display_name.clone(),
+                session_id: task.session_id.clone(),
+                status: BackgroundTaskStatus::Running,
+                exit_code: None,
+                error: None,
+                started_at: task.started_at_rfc3339.clone(),
+                completed_at: None,
+                duration_secs: Some(now.duration_since(task.started_at).as_secs_f64()),
+                pid: None,
+                owner_pid: Some(std::process::id()),
+                owner_instance: Some(model::process_instance_token().to_string()),
+                detached: false,
+                notify: false,
+                wake: false,
+                progress: None,
+                event_history: Vec::new(),
+            })
+            .collect()
+    }
+
+    /// Register a foreground command as a transient job entry.
+    ///
+    /// Foreground commands (a `docker build`, a quick `cargo build`) normally
+    /// leave no trace until they time out into a real background task, so the
+    /// /jobs overlay cannot show what is executing right now. A transient entry
+    /// is memory-only: it appears in `list_sync` while the command runs and is
+    /// dropped on completion, so it never accumulates on disk or in the panel.
+    /// Returns a guard token whose completion must be reported through
+    /// [`BackgroundTaskManager::complete_transient`].
+    pub fn register_transient(
+        &self,
+        tool_name: &str,
+        display_name: Option<String>,
+        session_id: &str,
+    ) -> String {
+        let task_id = Self::generate_task_id();
+        let entry = model::TransientTask {
+            task_id: task_id.clone(),
+            tool_name: tool_name.to_string(),
+            display_name,
+            session_id: session_id.to_string(),
+            started_at: Instant::now(),
+            started_at_rfc3339: chrono::Utc::now().to_rfc3339(),
+        };
+        if let Ok(mut map) = self.transient_tasks.try_write() {
+            map.insert(task_id.clone(), entry);
+        }
+        task_id
+    }
+
+    /// Remove a transient entry registered by [`register_transient`].
+    pub fn complete_transient(&self, task_id: &str) {
+        if let Ok(mut map) = self.transient_tasks.try_write() {
+            map.remove(task_id);
+        }
+    }
+
     /// Best-effort synchronous lookup of detached tasks that are still running
     /// for a specific session.
     ///
@@ -1460,6 +1570,45 @@ static BACKGROUND_MANAGER: std::sync::OnceLock<BackgroundTaskManager> = std::syn
 pub fn global() -> &'static BackgroundTaskManager {
     BACKGROUND_MANAGER.get_or_init(BackgroundTaskManager::new)
 }
+
+/// Keep the /jobs overlay from bloating with long-dead completed tasks.
+///
+/// Rules, applied to the *listed* rows only (disk files stay until the
+/// explicit `bg cleanup` action or its default 24h sweep, so `bg output`
+/// on an old task still works):
+/// - terminal tasks (completed/failed/superseded) older than
+///   [`TERMINAL_TASK_LIST_TTL_SECS`] are dropped from the listing;
+/// - at most [`MAX_LISTED_TERMINAL_TASKS`] terminal tasks are shown,
+///   newest first, regardless of age.
+const TERMINAL_TASK_LIST_TTL_SECS: i64 = 30 * 60;
+const MAX_LISTED_TERMINAL_TASKS: usize = 12;
+
+fn prune_terminal_tasks(rows: &mut Vec<TaskStatusFile>) {
+    let now = chrono::Utc::now();
+    let mut kept_terminal = 0usize;
+    rows.retain(|task| {
+        let terminal = task.status.is_terminal();
+        if !terminal {
+            return true;
+        }
+        let age_ok = task
+            .completed_at
+            .as_deref()
+            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+            .map(|done| {
+                now.signed_duration_since(done).num_seconds()
+                    <= TERMINAL_TASK_LIST_TTL_SECS
+            })
+            .unwrap_or(true);
+        if age_ok && kept_terminal < MAX_LISTED_TERMINAL_TASKS {
+            kept_terminal += 1;
+            true
+        } else {
+            false
+        }
+    });
+}
+
 
 #[cfg(test)]
 mod tests;

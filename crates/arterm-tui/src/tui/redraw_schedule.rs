@@ -170,6 +170,7 @@ const FULL_FRAME_REDRAW_REASONS: &[&str] = &[
     "status_animation",
     "swarm_spinner",
     "session_picker_spinner",
+    "jobs_overlay",
 ];
 
 fn record_full_frame_redraw_reason(reason: &'static str) {
@@ -201,6 +202,9 @@ pub(crate) fn current_full_frame_redraw_reason(state: &dyn TuiState) -> Option<&
     }
     if session_picker_spinner_redraw_active(state) {
         return Some("session_picker_spinner");
+    }
+    if state.jobs_picker_overlay().is_some() {
+        return Some("jobs_overlay");
     }
     live_activity_redraw_reason(state)
 }
@@ -596,6 +600,7 @@ fn periodic_redraw_required_inner(state: &dyn TuiState, include_idle_animation: 
         && crate::build::read_build_progress().is_none()
         && !swarm_spinner_redraw_active(state)
         && !session_picker_spinner_redraw_active(state)
+        && state.jobs_picker_overlay().is_none()
     {
         return false;
     }
@@ -618,6 +623,11 @@ fn periodic_redraw_required_inner(state: &dyn TuiState, include_idle_animation: 
 
     if session_picker_spinner_redraw_active(state) {
         record_full_frame_redraw_reason("session_picker_spinner");
+        return true;
+    }
+
+    if state.jobs_picker_overlay().is_some() {
+        record_full_frame_redraw_reason("jobs_overlay");
         return true;
     }
 
@@ -705,6 +715,7 @@ mod tests {
             "status_animation",
             "swarm_spinner",
             "session_picker_spinner",
+            "jobs_overlay",
         ] {
             assert!(
                 FULL_FRAME_REDRAW_REASONS.contains(&reason),

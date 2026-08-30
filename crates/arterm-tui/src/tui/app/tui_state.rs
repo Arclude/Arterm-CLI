@@ -815,6 +815,14 @@ impl crate::tui::TuiState for App {
         self.is_replay
     }
 
+    fn plan_mode_enabled(&self) -> bool {
+        if self.is_remote {
+            self.remote_plan_mode_enabled
+        } else {
+            arterm_app_core::tool::is_plan_mode(&self.session.id)
+        }
+    }
+
     fn diff_mode(&self) -> crate::config::DiffDisplayMode {
         self.diff_mode
     }
@@ -1830,6 +1838,10 @@ impl crate::tui::TuiState for App {
         self.inline_view_state.as_ref()
     }
 
+    fn pending_ask_user(&self) -> Option<&crate::tui::PendingAskUser> {
+        self.pending_ask_user.as_ref()
+    }
+
     fn changelog_scroll(&self) -> Option<usize> {
         self.changelog_scroll
     }
@@ -1942,6 +1954,10 @@ impl crate::tui::TuiState for App {
 
     fn mcp_picker_overlay(&self) -> Option<&crate::tui::mcp_picker::McpPicker> {
         self.mcp_picker_overlay.as_ref()
+    }
+
+    fn jobs_picker_overlay(&self) -> Option<&crate::tui::jobs_picker::JobsPicker> {
+        self.jobs_picker_overlay.as_ref()
     }
 
     fn device_pairing(&self) -> Option<crate::tui::DevicePairingView<'_>> {

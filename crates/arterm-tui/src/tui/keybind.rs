@@ -325,7 +325,7 @@ pub struct ToggleBinding {
 }
 
 impl ToggleBinding {
-    fn load(raw: &str, default_letter: char) -> Self {
+    pub(crate) fn load(raw: &str, default_letter: char) -> Self {
         Self::load_with_default(
             raw,
             KeyBinding {
@@ -609,6 +609,30 @@ pub fn load_open_resume_key() -> OptionalBinding {
         },
         None => OptionalBinding::default(),
     }
+}
+
+/// Optional binding that opens the background jobs (`/jobs`) picker.
+/// Default: Alt+Down everywhere. Set "" to disable.
+pub fn load_jobs_picker_key() -> OptionalBinding {
+    let cfg = config();
+    let raw = cfg.keybindings.jobs_picker.trim();
+    if raw.is_empty() || is_disabled(raw) {
+        return OptionalBinding::default();
+    }
+    match parse_keybinding(raw) {
+        Some(binding) => OptionalBinding {
+            label: Some(format_binding(&binding)),
+            binding: Some(binding),
+        },
+        None => OptionalBinding::default(),
+    }
+}
+
+/// Optional binding that toggles read-only Plan Mode (`/planmode`).
+/// Default: Alt+P everywhere. Set "" to disable.
+pub fn load_plan_mode_toggle_key() -> ToggleBinding {
+    let cfg = config();
+    ToggleBinding::load(&cfg.keybindings.plan_mode_toggle, 'p')
 }
 
 #[cfg(test)]

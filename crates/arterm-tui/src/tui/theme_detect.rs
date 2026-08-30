@@ -14,6 +14,7 @@
 //! adapts colors for light backgrounds at frame time.
 
 use arterm_tui_style::ThemeMode;
+use std::io::IsTerminal;
 use std::sync::{Mutex, OnceLock};
 
 static DETECTED: OnceLock<ThemeMode> = OnceLock::new();
@@ -189,6 +190,7 @@ fn detect_terminal_theme() -> Option<ThemeMode> {
     // OSC support but never replies (multiplexers, remote shells), so keep it
     // far below the perceptible-stall threshold.
     options.timeout = std::time::Duration::from_millis(120);
+    let query_timeout = options.timeout;
     // Ask for only OSC 11. `theme_mode` queries both OSC 10 (foreground) and
     // OSC 11 (background); on some terminals the two replies can be split far
     // enough apart that the query consumes one and crossterm later decodes the
@@ -196,23 +198,44 @@ fn detect_terminal_theme() -> Option<ThemeMode> {
     // `10;rgb:cdcd/d6d6/f4f4\\11;rgb:0000/0000/0000\\` at startup. Background
     // lightness is all our renderer needs, and a single request has no second
     // reply that can escape into the event reader.
-    match terminal_colorsaurus::background_color(options) {
+    let mut query = terminal_colorsaurus::background_color(options);
+    // A timeout — or an "unsupported terminal" verdict that raced a slow OSC 11
+    // behind a fast DA1 — can leave the reply unread on the tty. Wait one grace
+    // window in raw mode and consume it, both to keep it from echoing into the
+    // shell and to recover the color it carries.
+    #[cfg(unix)]
+    if query.is_err()
+        && let Some(color) = drain_late_color_reply_after_timeout(query_timeout)
+    {
+        query = Ok(color);
+    }
+    match query {
         Ok(background) if background.perceived_lightness() > 0.5 => {
             crate::logging::info("Detected light terminal background; adapting theme");
             Some(ThemeMode::Light)
         }
         Ok(_) => Some(ThemeMode::Dark),
         Err(e) => {
-            if matches!(e, terminal_colorsaurus::Error::Timeout(_)) {
+            // Both of these verdicts mean "this terminal will never give us a
+            // timely color": a pure timeout, and the DA1-race where DA1 answers
+            // fast while OSC 11 never lands inside the window. Remember either
+            // one so subsequent launches skip the query (and its escape-sequence
+            // debris) entirely.
+            if matches!(
+                e,
+                terminal_colorsaurus::Error::Timeout(_)
+                    | terminal_colorsaurus::Error::UnsupportedTerminal(_)
+            ) {
                 cache_silent_terminal_at(
                     silent_terminal_cache_path().as_deref(),
                     &terminal_identity(),
                 );
             }
-            // The query went out and nothing came back in time. The reply may
-            // still be in flight, and once the TUI owns the terminal it would be
-            // decoded as typing: `11;rgb:1c1c/1c1c/1c1c\` appearing in an empty
-            // composer at startup. Arm the filter that swallows it.
+            // A late reply may still be in flight. The drain above already tried
+            // to consume it while raw mode suppressed the echo; if bytes slipped
+            // past it they would be decoded as typing: `11;rgb:1c1c/1c1c/1c1c\`
+            // appearing in an empty composer at startup, so also arm the filter
+            // that swallows them.
             crate::tui::terminal_reply_filter::arm_for_late_color_reply();
             crate::logging::info(&format!(
                 "Terminal background detection unavailable ({e}); defaulting to dark theme"
@@ -220,6 +243,113 @@ fn detect_terminal_theme() -> Option<ThemeMode> {
             None
         }
     }
+}
+
+/// Consume a terminal color reply left unread by a failed color query.
+///
+/// `terminal_colorsaurus` gives up on its deadline or when its DA1 feature
+/// probe outraces a slow color answer, and either way a reply can still land
+/// afterwards. Once the process leaves raw mode the kernel echoes those bytes,
+/// printing garbage like `^[]11;rgb:0909/0b0b/0c0c^[\` into the shell after
+/// arterm exits. Re-enter raw mode briefly and keep polling for anything that
+/// arrives within a short grace window, discarding it before it can echo.
+///
+/// Best-effort: when nothing arrives within the grace window we stop, and the
+/// in-TUI reply filter remains the safety net for a later straggler. When a
+/// reply does land, it is parsed and returned so the caller can still use the
+/// color instead of treating the terminal as silent.
+#[cfg(unix)]
+fn drain_late_color_reply_after_timeout(
+    query_timeout: std::time::Duration,
+) -> Option<terminal_colorsaurus::Color> {
+    use std::io::Read as _;
+
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return None;
+    }
+
+    let Ok(mut terminal) = terminal_trx::terminal() else {
+        return None;
+    };
+    let mut lock = terminal.lock();
+    let Ok(mut raw) = lock.enable_raw_mode() else {
+        return None;
+    };
+
+    // The reply needed more than the original timeout to land, so give it the
+    // same amount again, capped: a reply that only lands after several grace
+    // windows would already have been disruptive, and the verdict gets cached
+    // so at most one launch pays for it.
+    let grace = query_timeout
+        .saturating_mul(2)
+        .min(std::time::Duration::from_millis(500));
+    let deadline = std::time::Instant::now() + grace;
+    let mut scratch = [0u8; 128];
+    let mut drained = Vec::new();
+    while std::time::Instant::now() < deadline {
+        if !poll_readable(&raw, std::time::Duration::from_millis(50)) {
+            if !drained.is_empty() {
+                // Drained a burst; a quiet slice after it means the reply is done.
+                break;
+            }
+            continue;
+        }
+        match raw.read(&mut scratch) {
+            Ok(0) => break,
+            Ok(n) => drained.extend_from_slice(&scratch[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+        if let Some(color) = parse_late_color_reply(&drained) {
+            crate::logging::info(
+                "Recovered a terminal color reply that arrived after the query timeout",
+            );
+            return Some(color);
+        }
+    }
+    if !drained.is_empty() {
+        crate::logging::info("Discarded terminal bytes that arrived after the query timeout");
+    }
+    // Guards drop here: raw mode off first, then the terminal lock, restoring
+    // the modes colorsaurus left behind.
+    None
+}
+
+/// Extract an OSC 11 color from bytes drained off the tty.
+///
+/// Terminals wrap the reply as `ESC ] 11 ; <spec> (ST | BEL)`; parse the spec
+/// with the same X11 parser colorsaurus uses so the recovered value is
+/// indistinguishable from an on-time answer.
+#[cfg(unix)]
+fn parse_late_color_reply(drained: &[u8]) -> Option<terminal_colorsaurus::Color> {
+    // Tolerate a leading DA1 reply (`ESC[c`) from the feature-detection probe
+    // that may precede the color answer in the same drained buffer.
+    let start = drained
+        .windows(4)
+        .position(|w| w == b"\x1b]11")
+        .map(|i| i + 4)?;
+    let rest = &drained[start..];
+    let mut spec = rest.split(|&b| b == b'\x07' || b == b'\x1b');
+    let spec = spec.next()?;
+    let spec = spec.strip_prefix(b";")?;
+    let color = xterm_color::Color::parse(spec).ok()?;
+    Some(terminal_colorsaurus::Color::rgb(
+        color.red,
+        color.green,
+        color.blue,
+    ))
+}
+
+/// Wait until `readable` reports data (or an error/hangup) is available.
+/// Returns false on timeout or when polling is unavailable on this platform.
+fn poll_readable(readable: &impl std::os::fd::AsRawFd, slice: std::time::Duration) -> bool {
+    let mut pfd = libc::pollfd {
+        fd: readable.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let timeout_ms = slice.as_millis().min(i32::MAX as u128) as libc::c_int;
+    (unsafe { libc::poll(&mut pfd, 1, timeout_ms) }) > 0
 }
 
 /// Identity of the terminal we are talking to, for caching purposes. Keep it
@@ -279,6 +409,10 @@ fn cache_silent_terminal_at(path: Option<&std::path::Path>, identity: &str) {
     }
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     if existing.lines().any(|line| line == identity) {
+        // Re-touch the cache so the TTL window restarts: a terminal that is
+        // still not answering today should not expire into a launch-timeout
+        // every 7 days just because it was written down once and never moved.
+        let _ = std::fs::write(path, existing);
         return;
     }
     let mut kept: Vec<&str> = existing
@@ -322,6 +456,63 @@ mod tests {
         SILENT_TERMINAL_CACHE_MAX, cache_silent_terminal_at, silent_terminal_is_cached_at,
         terminal_background_query_supported,
     };
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_a_st_terminated_late_osc11_reply() {
+        let reply = b"\x1b]11;rgb:0909/0b0b/0c0c\x1b\\";
+        let color = super::parse_late_color_reply(reply).unwrap();
+        assert_eq!(color.scale_to_8bit(), (0x09, 0x0b, 0x0c));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_a_bel_terminated_late_osc11_reply() {
+        let reply = b"\x1b]11;rgb:ffff/ffff/ffff\x07";
+        let color = super::parse_late_color_reply(reply).unwrap();
+        assert!(color.perceived_lightness() > 0.5);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_a_reply_preceded_by_a_da1_response() {
+        let reply = b"\x1b[?1;2c\x1b]11;rgb:1c1c/1c1c/1c1c\x1b\\";
+        assert!(super::parse_late_color_reply(reply).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignores_drained_bytes_that_are_not_a_color_reply() {
+        assert!(super::parse_late_color_reply(b"\x1b[?1;2c").is_none());
+        assert!(super::parse_late_color_reply(b"garbage").is_none());
+    }
+
+    #[test]
+    fn recaching_a_silent_terminal_refreshes_the_ttl_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("osc11-silent-terminals");
+
+        cache_silent_terminal_at(Some(&path), "xterm-256color||");
+        // Backdate the entry past the TTL so only a refreshed mtime keeps it
+        // alive, then re-cache the same identity like a later launch would.
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 60 * 24 * 30);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(!silent_terminal_is_cached_at(
+            Some(&path),
+            "xterm-256color||"
+        ));
+
+        cache_silent_terminal_at(Some(&path), "xterm-256color||");
+        assert!(silent_terminal_is_cached_at(
+            Some(&path),
+            "xterm-256color||"
+        ));
+    }
 
     #[test]
     fn skips_terminals_without_osc_query_support() {

@@ -3,6 +3,71 @@ use super::parse_diff_mode_name;
 use super::parse_manual_subagent_spec;
 
 #[test]
+fn alt_down_hotkey_opens_the_local_jobs_picker() {
+    let mut app = crate::tui::app::tests::create_test_app();
+    assert!(app.jobs_picker_overlay.is_none());
+
+    let handled = super::super::input::handle_pre_control_shortcuts(
+        &mut app,
+        crossterm::event::KeyCode::Down,
+        crossterm::event::KeyModifiers::ALT,
+    );
+
+    assert!(
+        handled,
+        "Alt+Down should be consumed by the local pre-control shortcut path"
+    );
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "Alt+Down must open the jobs picker overlay on a local session"
+    );
+}
+
+#[test]
+fn alt_p_hotkey_toggles_plan_mode() {
+    let mut app = crate::tui::app::tests::create_test_app();
+    let session_id = app.session_id().to_string();
+    assert!(
+        !session_id.is_empty(),
+        "test app must have an active session for the plan mode state"
+    );
+    assert!(
+        !arterm_app_core::tool::is_plan_mode(&session_id),
+        "plan mode starts off"
+    );
+
+    let handled = super::super::input::handle_pre_control_shortcuts(
+        &mut app,
+        crossterm::event::KeyCode::Char('p'),
+        crossterm::event::KeyModifiers::ALT,
+    );
+    assert!(handled, "Alt+P should be consumed by the plan mode hotkey");
+    assert!(
+        arterm_app_core::tool::is_plan_mode(&session_id),
+        "Alt+P must enable plan mode"
+    );
+    assert!(
+        app.remote_plan_mode_enabled,
+        "local toggle must keep the client mirror in sync"
+    );
+
+    let handled = super::super::input::handle_pre_control_shortcuts(
+        &mut app,
+        crossterm::event::KeyCode::Char('p'),
+        crossterm::event::KeyModifiers::ALT,
+    );
+    assert!(handled, "second Alt+P should also be consumed");
+    assert!(
+        !arterm_app_core::tool::is_plan_mode(&session_id),
+        "second Alt+P must disable plan mode again"
+    );
+    assert!(
+        !app.remote_plan_mode_enabled,
+        "client mirror must follow plan mode off"
+    );
+}
+
+#[test]
 fn parse_diff_mode_name_maps_known_aliases() {
     use crate::config::DiffDisplayMode;
     assert_eq!(parse_diff_mode_name("off"), Some(DiffDisplayMode::Off));
@@ -201,6 +266,389 @@ mod mcp {
         assert!(
             !dispatch_local_command(&mut app, "/mcpsomething"),
             "prefix collisions must not be claimed"
+        );
+    }
+}
+
+/// Behavioral test for `/jobs`, driven through the real `App`.
+mod jobs {
+    use crate::tui::app::commands_dispatch::dispatch_local_command;
+    use crate::tui::app::tests::create_test_app;
+
+    #[test]
+    fn the_jobs_command_opens_the_overlay() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+
+        assert!(
+            dispatch_local_command(&mut app, "/jobs"),
+            "/jobs should be claimed by the shared dispatch table"
+        );
+        assert!(
+            app.jobs_picker_overlay.is_some(),
+            "bare /jobs opens the interactive overlay"
+        );
+        app.jobs_picker_overlay = None;
+
+        assert!(
+            dispatch_local_command(&mut app, "/jobs all"),
+            "/jobs all should be claimed"
+        );
+        assert!(
+            app.jobs_picker_overlay
+                .as_ref()
+                .is_some_and(|picker| picker.all_sessions()),
+            "/jobs all lists every session"
+        );
+
+        assert!(
+            !dispatch_local_command(&mut app, "/jobsomething"),
+            "prefix collisions must not be claimed"
+        );
+    }
+
+    #[test]
+    fn help_jobs_and_slash_suggestions_describe_the_overlay() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+
+        assert!(
+            app.get_suggestions_for("/jo")
+                .iter()
+                .any(|(command, _)| command == "/jobs"),
+            "/jobs must appear in slash autocomplete"
+        );
+        assert!(
+            dispatch_local_command(&mut app, "/help jobs"),
+            "/help jobs should be claimed"
+        );
+        let help = app
+            .display_messages()
+            .iter()
+            .rev()
+            .find(|message| message.role == "system")
+            .map(|message| message.content.as_str())
+            .expect("/help jobs should print overlay help");
+        assert!(help.contains("/jobs"), "{help}");
+        assert!(help.contains("x (or Delete)"), "{help}");
+        assert!(help.contains("/jobs all"), "{help}");
+    }
+
+    #[test]
+    fn jobs_overlay_lists_elapsed_time_and_stops_a_running_task() {
+        let _lock = crate::storage::lock_test_env();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let _guard = rt.enter();
+
+        let mut app = create_test_app();
+        let session_id = app.session.id.clone();
+        let info = rt.block_on(crate::background::global().spawn_with_notify(
+            "bash",
+            Some("sleep for overlay".to_string()),
+            &session_id,
+            false,
+            false,
+            |_output| async {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                Ok(crate::background::TaskResult::completed(Some(0)))
+            },
+        ));
+
+        assert!(dispatch_local_command(&mut app, "/jobs"));
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("sleep for overlay") && text.contains("running"),
+            "overlay should list the live job with elapsed time, got:\n{text}"
+        );
+        assert!(
+            text.contains("s") && (text.contains("running")),
+            "overlay should show a duration for the running job"
+        );
+
+        let outcome = app
+            .handle_jobs_picker_key_outcome(
+                crossterm::event::KeyCode::Char('x'),
+                crossterm::event::KeyModifiers::empty(),
+            )
+            .expect("x should request cancel");
+        app.handle_jobs_picker_action_local(outcome);
+
+        let started = std::time::Instant::now();
+        loop {
+            let _ = crate::tui::app::local::handle_tick(&mut app);
+            if app.pending_jobs_cancel.is_none() {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(3),
+                "local cancel result should land on a tick"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let status = rt
+            .block_on(crate::background::global().status(&info.task_id))
+            .expect("cancelled job status");
+        assert_eq!(
+            status.error.as_deref(),
+            Some("Cancelled by user"),
+            "overlay stop must use BackgroundTaskManager::cancel"
+        );
+
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("failed") && text.contains("sleep for overlay"),
+            "local cancel must refresh the overlay without waiting for a bus event, got:\n{text}"
+        );
+        assert!(
+            !text.contains("press r") && !text.contains("stopping") && text.contains("esc close"),
+            "successful cancel must clear the stopping footer, got:\n{text}"
+        );
+
+        app.handle_jobs_picker_action_local(crate::tui::jobs_picker::JobsPickerOutcome::Action {
+            action: "cancel",
+            task_id: Some(info.task_id.clone()),
+            all_sessions: false,
+        });
+        let started = std::time::Instant::now();
+        loop {
+            let _ = crate::tui::app::local::handle_tick(&mut app);
+            if app.pending_jobs_cancel.is_none() {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(3),
+                "missed cancel result should land on a tick"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open after a missed cancel");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains(&format!(
+                "Background job '{}' is not running.",
+                info.task_id
+            )),
+            "a second stop must report the miss in the footer, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn jobs_overlay_reports_a_dropped_cancel_worker() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+        assert!(dispatch_local_command(&mut app, "/jobs"));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.pending_jobs_cancel = Some(rx);
+        drop(tx);
+
+        assert!(
+            crate::tui::app::local::handle_tick(&mut app),
+            "a dropped cancel worker must request a redraw"
+        );
+        assert!(
+            app.pending_jobs_cancel.is_none(),
+            "the disconnected channel must be cleared"
+        );
+
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("Background job cancel failed: worker dropped."),
+            "dropped cancel workers must leave a footer, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn jobs_overlay_keeps_an_in_flight_cancel() {
+        let _lock = crate::storage::lock_test_env();
+        let mut app = create_test_app();
+        assert!(dispatch_local_command(&mut app, "/jobs"));
+        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+            picker.set_rows(vec![crate::protocol::BgTaskSummary {
+                task_id: "first".to_string(),
+                tool_name: "bash".to_string(),
+                display_name: Some("sleep for overlay".to_string()),
+                session_id: app.session.id.clone(),
+                status: "running".to_string(),
+                started_at: chrono::Utc::now().to_rfc3339(),
+                completed_at: None,
+                duration_secs: None,
+                pid: Some(7),
+                detached: false,
+                progress: None,
+                error: None,
+            }]);
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.pending_jobs_cancel = Some(rx);
+        let outcome = app
+            .handle_jobs_picker_key_outcome(
+                crossterm::event::KeyCode::Char('x'),
+                crossterm::event::KeyModifiers::empty(),
+            )
+            .expect("x should still request cancel");
+        app.handle_jobs_picker_action_local(outcome);
+        assert!(
+            app.pending_jobs_cancel.is_some(),
+            "a second stop must not drop the in-flight cancel channel"
+        );
+
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("already stopping a job"),
+            "a second x must wait for the in-flight cancel, got:\n{text}"
+        );
+
+        let outcome = app
+            .handle_jobs_picker_key_outcome(
+                crossterm::event::KeyCode::Char('r'),
+                crossterm::event::KeyModifiers::empty(),
+            )
+            .expect("r should still request a list");
+        app.handle_jobs_picker_action_local(outcome);
+        assert!(
+            app.pending_jobs_cancel.is_some(),
+            "a list refresh must not drop the in-flight cancel channel"
+        );
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open after list");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("already stopping a job"),
+            "list-while-cancel must keep the in-flight footer, got:\n{text}"
+        );
+
+        tx.send(crate::tui::app::LocalJobsCancelResult::NotRunning {
+            task_id: "first".to_string(),
+        })
+        .expect("original cancel result must still have a live channel");
+        let started = std::time::Instant::now();
+        loop {
+            let _ = crate::tui::app::local::handle_tick(&mut app);
+            if app.pending_jobs_cancel.is_none() {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(3),
+                "original cancel result should land after overlapping x"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let picker = app
+            .jobs_picker_overlay
+            .as_ref()
+            .expect("overlay should stay open after the original result");
+        let backend = ratatui::backend::TestBackend::new(90, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| picker.render(frame))
+            .expect("draw overlay");
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("Background job 'first' is not running."),
+            "overlapping x must not lose the original cancel result, got:\n{text}"
         );
     }
 }

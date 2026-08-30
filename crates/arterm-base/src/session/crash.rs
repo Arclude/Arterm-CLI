@@ -314,6 +314,24 @@ pub fn find_recent_crashed_sessions() -> Vec<(String, String)> {
     find_crashed_legacy_scan()
 }
 
+/// Whether a crashed session is a build/smoke-test artifact that never had a
+/// real user turn, so it must not surface a "💥 Session crashed" resume hint.
+///
+/// The self-dev smoke probe (`arterm-build-support`) used to subscribe a
+/// throwaway client against a temp server while writing the probe session into
+/// the *user's* store. The probe exits immediately, its PID dies, and the next
+/// real launch reported the stale marker as a crash — complete with a long,
+/// useless session ID. Sessions created by that probe are identifiable by
+/// their working directory (the build-support crate) and their empty
+/// transcript (a single internal seed message at most).
+fn is_smoke_probe_session(session: &Session) -> bool {
+    let working_dir = session.working_dir.as_deref().unwrap_or_default();
+    let is_build_support_dir = working_dir
+        .strip_suffix("crates/arterm-build-support")
+        .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with('/'));
+    is_build_support_dir && session.messages.len() <= 1
+}
+
 /// Fast path: check active_pids/ directory for dead PIDs.
 fn find_crashed_via_pid_files() -> Option<Vec<(String, String)>> {
     let dir = active_pids_dir()?;
@@ -349,6 +367,15 @@ fn find_crashed_via_pid_files() -> Option<Vec<(String, String)>> {
 
         match Session::load(&session_id) {
             Ok(mut session) => {
+                if is_smoke_probe_session(&session) {
+                    // A leaked build-smoke probe session: relabel as closed so
+                    // it stops resurfacing as a bogus crash on every launch,
+                    // then drop the stale marker so it is never rechecked.
+                    session.mark_closed();
+                    let _ = session.save();
+                    let _ = std::fs::remove_file(entry.path());
+                    continue;
+                }
                 session.mark_crashed(Some(format!(
                     "Process {} exited unexpectedly (no shutdown signal captured)",
                     pid
@@ -637,6 +664,64 @@ pub fn find_session_by_name_or_id(name_or_id: &str) -> Result<String> {
     // Sort by updated_at descending and return the most recent match.
     matches.sort_by(|a, b| b.1.cmp(&a.1));
     Ok(matches[0].0.clone())
+}
+
+#[cfg(test)]
+mod smoke_probe_tests {
+    use super::*;
+    use crate::message::{ContentBlock, Role};
+
+    fn session_with_working_dir(working_dir: &str, messages: usize) -> Session {
+        let mut session = Session::create_with_id(
+            "session_smoke_probe_test_1".to_string(),
+            None,
+            Some("smoke probe".to_string()),
+        );
+        session.working_dir = Some(working_dir.to_string());
+        for _ in 0..messages {
+            session.add_message(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: "hi".to_string(),
+                    cache_control: None,
+                }],
+            );
+        }
+        session
+    }
+
+    #[test]
+    fn leaked_smoke_probe_session_is_ignored() {
+        let session = session_with_working_dir(
+            "/repo/crates/arterm-build-support",
+            1,
+        );
+        assert!(
+            is_smoke_probe_session(&session),
+            "a build-support session with no user turns must be treated as a smoke probe"
+        );
+    }
+
+    #[test]
+    fn build_support_session_with_real_history_is_not_filtered() {
+        let session = session_with_working_dir(
+            "/repo/crates/arterm-build-support",
+            3,
+        );
+        assert!(
+            !is_smoke_probe_session(&session),
+            "a session with real user turns must keep its crash hint"
+        );
+    }
+
+    #[test]
+    fn empty_session_outside_build_support_is_not_filtered() {
+        let session = session_with_working_dir("/home/user/project", 1);
+        assert!(
+            !is_smoke_probe_session(&session),
+            "a normal empty session elsewhere must keep its crash hint"
+        );
+    }
 }
 
 #[cfg(test)]

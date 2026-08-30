@@ -110,10 +110,16 @@ pub(super) fn handle_tick(app: &mut App) -> bool {
     needs_redraw |= app.onboarding_tick();
     needs_redraw |= app.poll_compaction_completion();
     needs_redraw |= app.maybe_refresh_overnight_display_card();
+    needs_redraw |= app.poll_jobs_cancel();
     needs_redraw |= super::commands::poll_local_transfer_prepare(app);
     needs_redraw |= super::commands::maybe_begin_pending_local_transfer(app);
     needs_redraw |= app.maybe_progress_provider_failover_countdown();
-    app.check_debug_command();
+    // Tester/file-driven debug commands mutate input and UI state without a
+    // terminal event, so a successful command must force a repaint or the
+    // PTY-driven TUI keeps serving the previous frame.
+    if app.check_debug_command().is_some() {
+        needs_redraw = true;
+    }
     needs_redraw |= app.check_stable_version();
     needs_redraw |= app.refresh_keybindings_if_config_reloaded();
     needs_redraw |= app.maybe_finish_background_client_reload();
@@ -429,6 +435,7 @@ fn apply_terminal_event(
 }
 
 fn handle_background_task_completed(app: &mut App, task: BackgroundTaskCompleted) {
+    app.refresh_jobs_overlay_if_open();
     if !task.notify || task.session_id != app.session.id {
         return;
     }
@@ -470,6 +477,7 @@ fn handle_background_task_completed(app: &mut App, task: BackgroundTaskCompleted
 }
 
 fn handle_background_task_progress(app: &mut App, event: BackgroundTaskProgressEvent) {
+    app.refresh_jobs_overlay_if_open();
     if event.session_id != app.session.id {
         return;
     }

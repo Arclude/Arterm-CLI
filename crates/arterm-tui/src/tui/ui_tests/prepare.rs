@@ -1421,3 +1421,79 @@ fn the_notes_go_away_when_the_conversation_starts() {
         "rendered={rendered}"
     );
 }
+
+/// The welcome screen must stay vertically centered when a launch pushes a
+/// system notice before the first prompt. The first version keyed the welcome
+/// layout off "transcript is empty", so one notice (a configured hotkey, a
+/// recovered session) collapsed the whole screen to the top-packed layout.
+#[test]
+fn a_startup_system_notice_keeps_the_welcome_screen_centered() {
+    let notice = TestState {
+        display_messages: vec![DisplayMessage::system(
+            "Configured Arterm launch hotkeys (KDE Plasma): Super+;".to_string(),
+        )],
+        suggestions: vec![("Build a small CLI tool".to_string(), "build".to_string())],
+        ..Default::default()
+    };
+    let empty = TestState {
+        suggestions: vec![("Build a small CLI tool".to_string(), "build".to_string())],
+        ..Default::default()
+    };
+
+    let render_lines = |state: &TestState| {
+        prepare::prepare_messages(state, 110, 40)
+            .materialize_all_lines()
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+    };
+    let notice_lines = render_lines(&notice);
+    let empty_lines = render_lines(&empty);
+
+    // The notice itself stays visible...
+    assert!(
+        notice_lines
+            .iter()
+            .any(|line| line.contains("launch hotkeys")),
+        "notice must render: {notice_lines:?}"
+    );
+    // ...and the vertical padding (blank lines above the first content row)
+    // must survive it, so the block stays centered instead of packing to the
+    // top. Compare the index of the first non-blank line in both renders.
+    let first_content = |lines: &[String]| {
+        lines
+            .iter()
+            .position(|line| !line.trim().is_empty())
+            .unwrap_or(lines.len())
+    };
+    let with_notice = first_content(&notice_lines);
+    let without = first_content(&empty_lines);
+    assert!(
+        with_notice >= without,
+        "a launch notice must not un-center the welcome screen: first content row {with_notice} < {without}"
+    );
+}
+
+/// The header prep cache serves the last built header until the signature
+/// changes or the TTL lapses. Plan mode adds the `plan` status item to the
+/// persistent header, so a toggle that misses the signature leaves the stale
+/// badge-less header on screen for the whole TTL — exactly the "badge never
+/// appeared" symptom. Guard that the toggle is signature-visible.
+#[test]
+fn plan_mode_toggle_invalidates_the_header_signature() {
+    let base = TestState {
+        plan_mode_enabled: false,
+        ..Default::default()
+    };
+    let enabled = TestState {
+        plan_mode_enabled: true,
+        ..Default::default()
+    };
+
+    assert_ne!(
+        prepare::header_prep_signature(&base, 80),
+        prepare::header_prep_signature(&enabled, 80),
+        "toggling plan mode must change the header signature so the `plan` \
+         badge repaints on the next frame instead of waiting out the TTL"
+    );
+}

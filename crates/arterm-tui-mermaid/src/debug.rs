@@ -12,6 +12,13 @@ pub fn debug_stats_json() -> Option<serde_json::Value> {
     debug_support::debug_stats_json()
 }
 
+/// Number of deferred mermaid renders still queued or in flight. Offscreen
+/// benches (scroll suite) poll this to wait until the background worker has
+/// produced the diagrams the draw path expects to find in the render cache.
+pub fn deferred_render_pending_count() -> usize {
+    debug_support::deferred_render_pending_count()
+}
+
 pub fn debug_cache() -> Vec<MermaidCacheEntry> {
     debug_support::debug_cache()
 }

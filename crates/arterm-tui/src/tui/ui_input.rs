@@ -419,6 +419,10 @@ pub(super) fn input_prompt(app: &dyn TuiState) -> (&'static str, Color) {
     let mode = composer_mode(app.input(), app.is_remote_mode());
     if mode.is_shell() {
         ("$ ", shell_mode_color())
+    } else if app.plan_mode_enabled() {
+        // Distinct glyph + amber color so read-only Plan Mode stays visibly on
+        // while composing, mirroring the shell mode's `$ ` treatment.
+        ("◈ ", rgb(255, 193, 7))
     } else if app.is_processing() {
         ("… ", queued_color())
     } else if app.active_skill().is_some() {
@@ -1936,24 +1940,26 @@ pub(super) fn draw_notification(frame: &mut Frame, app: &dyn TuiState, area: Rec
 /// access method, reasoning level, and context usage percentage, with a live
 /// `(overscroll x.x)` countdown pinned to the right so users can see the line
 /// is temporary and rebounds away on its own.
-pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area: Rect) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
+/// Build the info spans of the overscroll status line (plan badge, model,
+/// provider, auth, context bar, cwd) without the transient countdown. Split
+/// out of `draw_overscroll_status` so debug frame captures can serialize the
+/// same text the renderer draws.
+pub(super) fn overscroll_status_spans(app: &dyn TuiState) -> Vec<Span<'static>> {
     let data = app.info_widget_data();
 
     let sep = || Span::styled(" · ", Style::default().fg(rgb(100, 100, 110)));
 
-    // The countdown is the priority affordance: it explains the line exists and
-    // is going away. Build it first so it always gets space on the right edge.
-    let countdown: Option<Span> = app.chat_overscroll_remaining().map(|secs| {
-        Span::styled(
-            format!("(overscroll {:.1})", secs.max(0.0)),
-            Style::default().fg(rgb(150, 150, 165)).italic(),
-        )
-    });
-
     let mut spans: Vec<Span> = Vec::new();
+
+    // Plan Mode leads the line when active, mirroring the badges this line
+    // can already carry, so the mode stays visible where the user looks while
+    // composing.
+    if app.plan_mode_enabled() {
+        spans.push(Span::styled(
+            "plan",
+            Style::default().fg(rgb(255, 200, 100)),
+        ));
+    }
 
     // Model
     let model = data
@@ -1962,6 +1968,11 @@ pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| app.provider_model());
     if !model.is_empty() && !overscroll_is_placeholder(&model) {
+        // Separate from the leading plan badge (or any earlier span) instead
+        // of running straight into it (`planOpus` reads as one token).
+        if !spans.is_empty() {
+            spans.push(sep());
+        }
         spans.push(Span::styled(
             session_facts::pretty_model(&model),
             Style::default().fg(rgb(255, 150, 200)).bold(),
@@ -2034,6 +2045,25 @@ pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area
             ));
         }
     }
+
+    spans
+}
+
+pub(super) fn draw_overscroll_status(frame: &mut Frame, app: &dyn TuiState, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    // The countdown is the priority affordance: it explains the line exists and
+    // is going away. Build it first so it always gets space on the right edge.
+    let countdown: Option<Span> = app.chat_overscroll_remaining().map(|secs| {
+        Span::styled(
+            format!("(overscroll {:.1})", secs.max(0.0)),
+            Style::default().fg(rgb(150, 150, 165)).italic(),
+        )
+    });
+
+    let spans = overscroll_status_spans(app);
 
     let total_width = area.width as usize;
 

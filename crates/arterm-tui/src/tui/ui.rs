@@ -123,6 +123,8 @@ use file_diff_ui::{
 };
 pub(crate) use header::capitalize;
 use inline_ui::{draw_inline_ui, inline_ui_height};
+#[cfg(test)]
+pub(in crate::tui) use inline_ui::wrap_plain_for_test;
 pub(crate) use memory_estimates::{debug_memory_profile, debug_side_panel_memory_profile};
 use memory_estimates::{estimate_prepared_chat_frame_bytes, estimate_prepared_messages_bytes};
 #[cfg(test)]
@@ -1198,6 +1200,11 @@ struct FullPrepCacheKey {
     expanded_images_version: u64,
     /// Signature of live swarm member cards embedded beneath spawn tool calls.
     swarm_members_signature: u64,
+    /// Plan mode adds the `plan` status item to the persistent header baked
+    /// into the prepared frame. Without this field an exact cache hit on the
+    /// very next frame after a toggle never reaches the header rebuild, so the
+    /// badge stays stale until some unrelated key field changes.
+    plan_mode_enabled: bool,
     /// The startup screen's "where we left off" lines. They arrive from a
     /// background read a moment after the first frame, so without them in the
     /// key the frame prepared before they landed is served forever and the
@@ -2327,6 +2334,14 @@ pub(crate) fn copy_viewport_visible_range() -> Option<(usize, usize)> {
     Some((snapshot.scroll, snapshot.visible_end))
 }
 
+/// Content area of the chat copy viewport: where transcript line 0 of the
+/// viewport actually renders (below the sticky header band and prompt preview).
+#[cfg(test)]
+pub(crate) fn copy_viewport_content_area() -> Option<ratatui::layout::Rect> {
+    let snapshot = copy_snapshot_for_pane(crate::tui::CopySelectionPane::Chat)?;
+    Some(snapshot.content_area)
+}
+
 #[cfg(test)]
 pub(crate) fn side_pane_visible_range() -> Option<(usize, usize)> {
     let snapshot = copy_snapshot_for_pane(crate::tui::CopySelectionPane::SidePane)?;
@@ -2743,6 +2758,18 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         return;
     }
 
+    if let Some(overlay) = app.jobs_picker_overlay() {
+        overlay.render(frame);
+        finalize_frame_metrics(
+            app,
+            total_start,
+            Duration::ZERO,
+            total_start.elapsed(),
+            None,
+        );
+        return;
+    }
+
     if let Some(picker_cell) = app.session_picker_overlay() {
         let mut picker = picker_cell.borrow_mut();
         picker.render(frame);
@@ -3030,7 +3057,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         input_ui::wrapped_input_line_count(app, chat_area.width, next_prompt).min(10) as u16;
     // Add 1 line for command suggestions, shell mode hints, or the Ctrl+Enter hint.
     let hint_line_height = input_ui::input_hint_line_height(app);
-    let inline_block_height: u16 = inline_ui_height(app);
+    let inline_block_height: u16 = inline_ui_height(app, chat_area.width);
     let inline_ui_gap_height: u16 = if inline_block_height > 0 { 1 } else { 0 };
     let input_height = base_input_height + hint_line_height;
 
@@ -3190,6 +3217,17 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     }
     let prep_elapsed = prep_start.elapsed();
     let content_height = prepared.total_wrapped_lines().max(1) as u16;
+    // The pinned todo band (`display.pin_todos`) draws inside the messages
+    // area from the very top of the frame and refuses to render below a
+    // 9-row viewport (see `pinned_todo_band_lines`). The header no longer
+    // pads short transcripts mid-conversation, so a short document must not
+    // shrink the chunk below that floor while the band has content.
+    let pinned_todo_band_min_height = if app.pinned_todos_payload().is_some() {
+        9
+    } else {
+        0
+    };
+    let content_height = content_height.max(pinned_todo_band_min_height);
 
     // Terminal-style clear (Ctrl+L): the trailing spacer makes every visible
     // transcript row blank, so a normal bottom-anchored layout would park the
@@ -3275,7 +3313,13 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         capture.state.queued_count = pending_count;
         capture.state.message_count = app.display_messages().len();
         capture.state.streaming_text_len = app.streaming_text().len();
-        capture.state.has_suggestions = !app.command_suggestions().is_empty();
+        let debug_suggestions = app.command_suggestions();
+        capture.state.has_suggestions = !debug_suggestions.is_empty();
+        capture.state.suggestion_preview = debug_suggestions
+            .iter()
+            .take(8)
+            .map(|(cmd, _)| cmd.clone())
+            .collect();
         capture.state.status = format!("{:?}", app.status());
         capture.state.diagram_mode = Some(format!("{:?}", diagram_mode));
         capture.state.diagram_focus = diagram_focus;
@@ -3313,6 +3357,27 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
 
         // Status line content
         capture.rendered_text.status_line = format_status_for_debug(app);
+
+        // Persistent header first lines (product name + status items like the
+        // `plan` badge), for grep-able badge verification in frame dumps.
+        // The header section leads the prepared frame; skip the centering
+        // pad lines, which are empty.
+        capture.rendered_text.header_preview = prepared
+            .sections
+            .iter()
+            .find(|section| section.kind.is_header())
+            .map(|section| {
+                section
+                    .prepared
+                    .wrapped_plain_lines
+                    .iter()
+                    .filter(|line| !line.trim().is_empty())
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
     }
 
     if let Some(ref mut capture) = debug_capture {
@@ -3497,6 +3562,17 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
 
     if overscroll_height > 0 {
         input_ui::draw_overscroll_status(frame, app, chunks[8]);
+        if let Some(ref mut capture) = debug_capture {
+            // Serialize the exact span text the renderer just drew so frame
+            // dumps can verify badges on this row (e.g. the plan badge).
+            let spans = input_ui::overscroll_status_spans(app);
+            if spans.is_empty() {
+                capture.rendered_text.overscroll_status = Some(String::new());
+            } else {
+                capture.rendered_text.overscroll_status =
+                    Some(spans.iter().map(|s| s.content.as_ref()).collect::<String>());
+            }
+        }
     }
 
     if donut_height > 0 {

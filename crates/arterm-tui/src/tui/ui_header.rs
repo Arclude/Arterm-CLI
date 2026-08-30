@@ -634,17 +634,16 @@ fn build_persistent_header_with_auth(
     let server_update = app.server_update_available() == Some(true);
     let client_update = app.client_update_available();
     let mut status_items: Vec<&str> = Vec::new();
+    // Plan Mode is surfaced in the elastic overscroll status line (revealed by
+    // Down at the bottom) instead of the header.
     if app.is_replay() {
         status_items.push("replay");
     } else if is_remote {
         status_items.push("client");
     }
-    if server_update {
-        status_items.push("srv↑");
-    }
-    if client_update {
-        status_items.push("cli↑");
-    }
+    // `srv↑`/`cli↑` are appended to the `server:`/`client:` rows (they need
+    // to stay visible after the product-name row hides mid-conversation), so
+    // they are not part of the product row's status items here.
     if let Some(badge) = crate::perf::profile().tier.badge() {
         status_items.push(badge);
     }
@@ -680,7 +679,10 @@ fn build_persistent_header_with_auth(
         .map(|version| header_version_label(version, include_hash));
 
     // First line: `arterm` (+ `self-dev` when running a dev/canary build),
-    // followed by any remaining status badges rendered dimly.
+    // followed by any remaining status badges rendered dimly. This row stays
+    // for the whole session: it is the session's identity line, and hiding it
+    // mid-conversation made the transcript lose its anchor at the top of the
+    // scrollback (users could no longer scroll up to see the header).
     {
         let mut spans = vec![Span::styled(
             "arterm".to_string(),
@@ -718,6 +720,15 @@ fn build_persistent_header_with_auth(
                 spans.push(Span::styled(suffix, version_style));
             }
         }
+        // The server update badge lived on the product-name row, which is
+        // hidden once a conversation starts. Keep the affordance reachable
+        // by carrying it here, where it belongs anyway.
+        if server_update {
+            spans.push(Span::styled(
+                " · srv↑".to_string(),
+                Style::default().fg(rgb(255, 200, 100)),
+            ));
+        }
         lines.push(Line::from(spans).alignment(align));
     }
 
@@ -735,6 +746,13 @@ fn build_persistent_header_with_auth(
             if client_text.chars().count() + suffix.chars().count() <= w {
                 spans.push(Span::styled(suffix, version_style));
             }
+        }
+        // Client update badge, moved off the (now hidden) product-name row.
+        if client_update {
+            spans.push(Span::styled(
+                " · cli↑".to_string(),
+                Style::default().fg(rgb(255, 200, 100)),
+            ));
         }
         lines.push(Line::from(spans).alignment(align));
     } else if server_name.is_none() {
@@ -1260,6 +1278,23 @@ mod tests {
                 .any(|line| line.contains("client:") && line.contains(" · v")),
             "local mode client line should not carry a version label: {lines:?}"
         );
+    }
+
+    #[test]
+    fn persistent_header_never_shows_plan_badge() {
+        // Plan Mode moved to the elastic overscroll status line; the header
+        // must not badge it anymore, in any mode or width.
+        let app = create_test_app();
+        let session_id = app.session_id().to_string();
+        arterm_app_core::tool::set_plan_mode(&session_id, true);
+        for width in [120, 60] {
+            let lines = rendered_header_lines(&app, width);
+            assert!(
+                !lines.iter().any(|line| line.contains("· plan")),
+                "plan mode must not badge the header (width {width}): {lines:?}"
+            );
+        }
+        arterm_app_core::tool::set_plan_mode(&session_id, false);
     }
 
     #[test]

@@ -23,6 +23,7 @@ mod info_widget_layout;
 mod info_widget_overview;
 mod info_widget_settle;
 pub mod info_widget_stability;
+pub mod jobs_picker;
 pub mod keybind;
 mod layout_utils;
 pub mod login_picker;
@@ -360,6 +361,12 @@ pub trait TuiState {
     fn is_canary(&self) -> bool;
     /// Whether running in replay mode
     fn is_replay(&self) -> bool;
+    /// Whether read-only Plan Mode is active for the current session. The UI
+    /// keeps a persistent visual indicator (header badge + prompt glyph) while
+    /// this is on, since the toggle's status notice only flashes briefly.
+    fn plan_mode_enabled(&self) -> bool {
+        false
+    }
     /// Diff display mode (off/inline/full-inline/pinned/file)
     fn diff_mode(&self) -> crate::config::DiffDisplayMode;
     /// Current session ID (if available)
@@ -570,10 +577,18 @@ pub trait TuiState {
     fn inline_view_state(&self) -> Option<&InlineViewState> {
         None
     }
+    /// Pending ask_user question shown above input
+    fn pending_ask_user(&self) -> Option<&PendingAskUser> {
+        None
+    }
     /// General inline UI state shown above input.
     fn inline_ui_state(&self) -> Option<InlineUiStateRef<'_>> {
         self.inline_interactive_state()
             .map(InlineUiStateRef::Interactive)
+            .or_else(|| {
+                self.pending_ask_user()
+                    .map(InlineUiStateRef::AskUser)
+            })
             .or_else(|| self.inline_view_state().map(InlineUiStateRef::View))
     }
     /// Changelog overlay scroll offset (None = not showing)
@@ -611,6 +626,16 @@ pub trait TuiState {
     fn copy_selection_range(&self) -> Option<CopySelectionRange>;
     /// Persistent status for in-app copy selection mode.
     fn copy_selection_status(&self) -> Option<CopySelectionStatus>;
+    /// Whether the chat still shows its initial empty state: no display
+    /// messages, nothing processing, and nothing streaming. Feeds the
+    /// prepared-header cache signature so the empty -> first-message
+    /// transition (startup notes drop out of the header) repaints
+    /// immediately instead of waiting out the cache TTL.
+    fn chat_is_initially_empty(&self) -> bool {
+        self.display_messages().is_empty()
+            && !self.is_processing()
+            && self.streaming_text().is_empty()
+    }
     /// Whether the first-run onboarding empty state is being previewed in this session.
     // ---- Onboarding ----
     fn onboarding_preview_mode(&self) -> bool {
@@ -644,6 +669,10 @@ pub trait TuiState {
     }
     /// The `/mcp` server-status overlay, when it is open.
     fn mcp_picker_overlay(&self) -> Option<&mcp_picker::McpPicker> {
+        None
+    }
+    /// The `/jobs` background-job overlay, when it is open.
+    fn jobs_picker_overlay(&self) -> Option<&jobs_picker::JobsPicker> {
         None
     }
     /// The `/memory clean` confirmation, when one is waiting on an answer.
@@ -1069,6 +1098,27 @@ pub struct InlineViewState {
     pub lines: Vec<String>,
 }
 
+/// A pending `ask_user` question rendered above the input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAskUser {
+    /// Matches the server-side oneshot map.
+    pub request_id: String,
+    /// The question shown above the numbered list.
+    pub question: String,
+    /// Options in wire order; digits 1-9 map onto them.
+    pub options: Vec<AskUserOptionView>,
+    /// Whether typing free-form text (and Enter) is accepted as an answer.
+    pub allow_custom: bool,
+    /// Currently highlighted row.
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskUserOptionView {
+    pub label: String,
+    pub detail: Option<String>,
+}
+
 impl InlineViewState {
     pub fn debug_memory_profile(&self) -> serde_json::Value {
         let title_bytes = self.title.capacity();
@@ -1092,6 +1142,7 @@ impl InlineViewState {
 pub enum InlineUiStateRef<'a> {
     View(&'a InlineViewState),
     Interactive(&'a InlineInteractiveState),
+    AskUser(&'a PendingAskUser),
 }
 
 impl PickerKind {

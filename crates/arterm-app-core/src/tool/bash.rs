@@ -841,6 +841,24 @@ impl BashTool {
                 .await;
         }
 
+        let transient_id = crate::background::global().register_transient(
+            "bash",
+            Some(summarize_background_command(
+                params.intent.as_deref(),
+                &params.command,
+            )),
+            &ctx.session_id,
+        );
+        let result = self.execute_foreground_inner(params, ctx).await;
+        crate::background::global().complete_transient(&transient_id);
+        result
+    }
+
+    async fn execute_foreground_inner(
+        &self,
+        params: &BashInput,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput> {
         let timeout_ms = params.timeout.unwrap_or(DEFAULT_TIMEOUT_MS).min(600000);
         let timeout_duration = Duration::from_millis(timeout_ms);
 
@@ -1056,6 +1074,26 @@ impl BashTool {
 
     #[cfg(unix)]
     async fn execute_reload_persistable_foreground(
+        &self,
+        params: &BashInput,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput> {
+        let transient_id = crate::background::global().register_transient(
+            "bash",
+            Some(summarize_background_command(
+                params.intent.as_deref(),
+                &params.command,
+            )),
+            &ctx.session_id,
+        );
+        let result = self
+            .execute_reload_persistable_foreground_inner(params, ctx)
+            .await;
+        crate::background::global().complete_transient(&transient_id);
+        result
+    }
+
+    async fn execute_reload_persistable_foreground_inner(
         &self,
         params: &BashInput,
         ctx: &ToolContext,

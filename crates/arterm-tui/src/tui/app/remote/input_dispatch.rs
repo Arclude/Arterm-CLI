@@ -171,18 +171,17 @@ pub(in crate::tui::app) async fn submit_remote_slash_input(
         return submit_prepared_remote_input(app, remote, prepared).await;
     }
 
+    // Builtin slash commands (/jobs, /mcp, /help, ...) are not skills. They
+    // still parse as identifier-shaped invocations. Handle them through the
+    // shared local dispatch table before treating a trailing prompt as a skill
+    // turn. Do not go through `App::submit_input`: that queues remote turns
+    // and would send `/jobs` to the model.
     let Some(invocation) = snapshot.resolve_invocation(&raw_input) else {
-        app.input = raw_input;
-        app.cursor_pos = app.input.len();
-        app.submit_input();
-        return Ok(());
-    };
-
-    let Some(trailing_prompt) = invocation.prompt else {
-        app.input = raw_input;
-        app.cursor_pos = app.input.len();
-        app.submit_input();
-        return Ok(());
+        if crate::tui::app::commands_dispatch::dispatch_local_command(app, trimmed) {
+            crate::telemetry::record_command_family(trimmed);
+            return Ok(());
+        }
+        return submit_prepared_remote_input(app, remote, prepared).await;
     };
 
     let skill_name = invocation.name.to_string();
@@ -192,13 +191,26 @@ pub(in crate::tui::app) async fn submit_remote_slash_input(
         skill = app.current_skills_snapshot().get(&skill_name).cloned();
     }
     if skill.is_none() {
-        // Preserve the existing unknown-skill and built-in slash-command
-        // handling, including the helpful endorsed-skill installation hint.
+        if crate::tui::app::commands_dispatch::dispatch_local_command(app, trimmed) {
+            crate::telemetry::record_command_family(trimmed);
+            return Ok(());
+        }
         app.input = raw_input;
         app.cursor_pos = app.input.len();
         app.submit_input();
         return Ok(());
     }
+
+    let Some(trailing_prompt) = invocation.prompt else {
+        if crate::tui::app::commands_dispatch::dispatch_local_command(app, trimmed) {
+            crate::telemetry::record_command_family(trimmed);
+            return Ok(());
+        }
+        app.input = raw_input;
+        app.cursor_pos = app.input.len();
+        app.submit_input();
+        return Ok(());
+    };
 
     // Reuse the normal bare invocation path to update active_skill and show
     // the activation notice, then prepare only the trailing prompt for the

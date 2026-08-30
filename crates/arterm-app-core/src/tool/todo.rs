@@ -1604,6 +1604,7 @@ mod tests {
             tool_call_id: "call".to_string(),
             working_dir: None,
             stdin_request_tx: None,
+            ask_user_request_tx: None,
             graceful_shutdown_signal: None,
             execution_mode: crate::tool::ToolExecutionMode::Direct,
         }

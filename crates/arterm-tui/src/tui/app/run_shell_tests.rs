@@ -259,3 +259,136 @@ fn status_spinner_partial_does_not_overwrite_slash_palette_cell() {
         "late overlays own the status cell until the next full frame"
     );
 }
+
+/// A backend that mimics crossterm when the shared event-reader mutex is
+/// parked by the `EventStream` thread: every cursor-position query fails
+/// after the lock timeout. Everything else delegates to `TestBackend`.
+struct CursorQueryRefusingBackend {
+    inner: ratatui::backend::TestBackend,
+    cursor_queries: u32,
+}
+
+impl CursorQueryRefusingBackend {
+    fn new(width: u16, height: u16) -> Self {
+        Self {
+            inner: ratatui::backend::TestBackend::new(width, height),
+            cursor_queries: 0,
+        }
+    }
+}
+
+impl ratatui::backend::Backend for CursorQueryRefusingBackend {
+    type Error = std::io::Error;
+
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+    {
+        self.inner.draw(content).map_err(infallible_to_io)
+    }
+
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.hide_cursor().map_err(infallible_to_io)
+    }
+
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.show_cursor().map_err(infallible_to_io)
+    }
+
+    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+        self.cursor_queries += 1;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "The cursor position could not be read within a normal duration",
+        ))
+    }
+
+    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+        &mut self,
+        position: P,
+    ) -> Result<(), Self::Error> {
+        self.inner
+            .set_cursor_position(position)
+            .map_err(infallible_to_io)
+    }
+
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear().map_err(infallible_to_io)
+    }
+
+    fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+        self.inner
+            .clear_region(clear_type)
+            .map_err(infallible_to_io)
+    }
+
+    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+        self.inner.size().map_err(infallible_to_io)
+    }
+
+    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+        self.inner.window_size().map_err(infallible_to_io)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.flush().map_err(infallible_to_io)
+    }
+}
+
+fn infallible_to_io(error: core::convert::Infallible) -> std::io::Error {
+    match error {}
+}
+
+/// Regression for the startup/resume crash "Error: The cursor position could
+/// not be read within a normal duration": ratatui's `Terminal::clear()`
+/// queries the cursor position first, and under crossterm that query dies
+/// whenever the `EventStream` reader thread parks on the shared event-reader
+/// mutex. The hard-clear path must clear via `clear_region(All)` (the same
+/// ED2 escape, no cursor round-trip) and still force the next draw to
+/// re-emit every cell.
+#[test]
+fn hard_clear_survives_a_backend_that_refuses_cursor_queries() {
+    use super::hard_clear_without_cursor_query;
+
+    let render = |f: &mut ratatui::Frame| {
+        let area = f.area();
+        for y in 0..area.height {
+            f.render_widget(
+                ratatui::widgets::Paragraph::new(format!("frame line {y:02}")),
+                ratatui::layout::Rect::new(0, y, area.width, 1),
+            );
+        }
+    };
+
+    let backend = CursorQueryRefusingBackend::new(40, 8);
+    let mut terminal = ratatui::Terminal::new(backend).expect("test terminal");
+    terminal.draw(render).expect("initial draw");
+    let painted = terminal.backend().inner.buffer().clone();
+
+    hard_clear_without_cursor_query(&mut terminal).expect("hard clear must not query the cursor");
+    assert_eq!(
+        terminal.backend().cursor_queries,
+        0,
+        "the cursor-safe hard clear must never issue a cursor-position query"
+    );
+
+    // The screen was wiped by ED2, so the next draw must re-emit every cell,
+    // not just the ones that differ from the previous frame.
+    terminal.draw(render).expect("repaint after hard clear");
+    assert_eq!(
+        terminal.backend().inner.buffer(),
+        &painted,
+        "after a hard clear the next draw must fully repaint the screen"
+    );
+
+    // The old code path really is fatal against this backend: this pins why
+    // the helper exists rather than calling `Terminal::clear()`.
+    let err = terminal
+        .clear()
+        .expect_err("Terminal::clear must fail when the cursor query is refused");
+    assert!(
+        err.to_string()
+            .contains("cursor position could not be read"),
+        "unexpected error: {err}"
+    );
+}

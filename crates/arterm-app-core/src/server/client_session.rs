@@ -25,6 +25,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 
+mod bg_action;
+pub(super) use bg_action::handle_bg_action;
 mod mcp_action;
 pub(super) use mcp_action::handle_mcp_action;
 

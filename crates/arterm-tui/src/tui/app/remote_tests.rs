@@ -1125,6 +1125,864 @@ fn remote_dropped_file_path_is_sent_as_a_prompt_not_a_slash_command() {
 }
 
 #[test]
+fn remote_jobs_slash_opens_the_overlay_instead_of_a_model_turn() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+    rt.block_on(crate::tui::app::remote::submit_remote_slash_input(
+        &mut app,
+        &mut remote,
+        crate::tui::app::input::PreparedInput {
+            raw_input: "/jobs".to_string(),
+            expanded: "/jobs".to_string(),
+            images: vec![],
+        },
+    ))
+    .expect("remote /jobs should open locally");
+
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "/jobs must open the overlay on a remote TUI"
+    );
+    assert!(!app.is_processing, "/jobs must not start a model turn");
+    assert!(
+        app.queued_messages().is_empty(),
+        "/jobs must not be queued as a user prompt"
+    );
+}
+
+#[test]
+fn remote_jobs_all_slash_requests_a_bg_list_on_the_next_tick() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+    rt.block_on(crate::tui::app::remote::submit_remote_slash_input(
+        &mut app,
+        &mut remote,
+        crate::tui::app::input::PreparedInput {
+            raw_input: "/jobs all".to_string(),
+            expanded: "/jobs all".to_string(),
+            images: vec![],
+        },
+    ))
+    .expect("remote /jobs all should open locally");
+
+    assert!(
+        app.jobs_picker_overlay
+            .as_ref()
+            .is_some_and(|picker| picker.all_sessions()),
+        "/jobs all must list every session"
+    );
+    assert!(
+        app.pending_jobs_list,
+        "remote overlay must request a live BgAction list on the next tick"
+    );
+}
+
+fn jobs_overlay_text(app: &crate::tui::app::App) -> String {
+    let picker = app
+        .jobs_picker_overlay
+        .as_ref()
+        .expect("jobs overlay should be open");
+    let backend = ratatui::backend::TestBackend::new(90, 24);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| picker.render(frame))
+        .expect("draw overlay");
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+fn running_bg_task(task_id: &str, started_at: &str) -> crate::protocol::BgTaskSummary {
+    crate::protocol::BgTaskSummary {
+        task_id: task_id.to_string(),
+        tool_name: "bash".to_string(),
+        display_name: Some("sleep for overlay".to_string()),
+        session_id: "session_one".to_string(),
+        status: "running".to_string(),
+        started_at: started_at.to_string(),
+        completed_at: None,
+        duration_secs: Some(8.0),
+        pid: Some(7),
+        detached: true,
+        progress: None,
+        error: None,
+    }
+}
+
+#[test]
+fn alt_down_hotkey_opens_the_remote_jobs_picker() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    assert!(app.jobs_picker_overlay.is_none());
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    rt.block_on(async {
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::ALT,
+            &mut remote,
+        )
+        .await
+        .expect("Alt+Down should be handled");
+    });
+
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "Alt+Down must open the jobs picker overlay"
+    );
+    assert!(
+        app.pending_jobs_list,
+        "opening via the hotkey must queue a background list refresh"
+    );
+}
+
+#[test]
+fn remote_jobs_tick_sends_bg_action_list_on_the_wire() {
+    use tokio::io::AsyncBufReadExt;
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(true);
+    assert!(app.pending_jobs_list);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let line = rt.block_on(async {
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        let peer = remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream");
+        let (reader, _writer) = peer.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+
+        super::handle_tick(&mut app, &mut remote).await;
+
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .await
+            .expect("BgAction list should be readable by peer");
+        line
+    });
+
+    match serde_json::from_str::<crate::protocol::Request>(&line)
+        .expect("tick should send a protocol request")
+    {
+        crate::protocol::Request::BgAction {
+            action,
+            task_id,
+            all_sessions,
+            ..
+        } => {
+            assert_eq!(action, "list");
+            assert!(task_id.is_none());
+            assert!(all_sessions, "/jobs all must list every session");
+        }
+        other => panic!("expected BgAction list, got {other:?}"),
+    }
+    assert!(
+        !app.pending_jobs_list,
+        "the list request must be consumed after the tick"
+    );
+}
+
+#[test]
+fn remote_tick_clears_a_dropped_local_jobs_cancel() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+    app.pending_jobs_list = false;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.pending_jobs_cancel = Some(rx);
+    drop(tx);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    rt.block_on(async {
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        super::handle_tick(&mut app, &mut remote).await;
+    });
+
+    assert!(
+        app.pending_jobs_cancel.is_none(),
+        "remote ticks must poll the local cancel channel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job cancel failed: worker dropped."),
+        "remote ticks must surface a dropped cancel worker, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_applies_bg_task_list_and_x_cancels_on_the_wire() {
+    use tokio::io::AsyncBufReadExt;
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("sleep for overlay") && text.contains("running") && text.contains("8s"),
+        "BgTaskList must paint the live job with elapsed time, got:\n{text}"
+    );
+
+    let line = rt.block_on(async {
+        let peer = remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream");
+        let (reader, _writer) = peer.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("x should send cancel");
+
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .await
+            .expect("BgAction cancel should be readable by peer");
+        line
+    });
+
+    match serde_json::from_str::<crate::protocol::Request>(&line)
+        .expect("overlay stop should send a protocol request")
+    {
+        crate::protocol::Request::BgAction {
+            action,
+            task_id,
+            all_sessions,
+            ..
+        } => {
+            assert_eq!(action, "cancel");
+            assert_eq!(task_id.as_deref(), Some("abc123"));
+            assert!(!all_sessions);
+        }
+        other => panic!("expected BgAction cancel, got {other:?}"),
+    }
+}
+
+#[test]
+fn remote_overlapping_x_does_not_send_a_second_cancel() {
+    use tokio::io::AsyncReadExt;
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+
+    let lines = rt.block_on(async {
+        let peer = remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream");
+        let (reader, _writer) = peer.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("first x should send cancel");
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("second x should be refused locally");
+
+        drop(remote);
+        let mut collected = String::new();
+        reader
+            .read_to_string(&mut collected)
+            .await
+            .expect("read remaining overlay requests");
+        collected
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    });
+
+    assert_eq!(
+        lines.len(),
+        1,
+        "overlapping x must not send a second BgAction, got {lines:?}"
+    );
+    match serde_json::from_str::<crate::protocol::Request>(&lines[0])
+        .expect("first stop should send a protocol request")
+    {
+        crate::protocol::Request::BgAction {
+            action, task_id, ..
+        } => {
+            assert_eq!(action, "cancel");
+            assert_eq!(task_id.as_deref(), Some("abc123"));
+        }
+        other => panic!("expected BgAction cancel, got {other:?}"),
+    }
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "second x must wait for the in-flight remote cancel, got:\n{text}"
+    );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "first cancel uses dummy request id 1"
+    );
+
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 8,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "a list snapshot must not drop the in-flight remote cancel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "list-while-cancel must keep the in-flight footer, got:\n{text}"
+    );
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 9,
+            message: "Background job 'other' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "an unrelated job error must not drop the in-flight remote cancel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "an unrelated job error must not clobber the in-flight footer, got:\n{text}"
+    );
+    assert!(
+        !text.contains("Background job 'other' is not running."),
+        "unrelated job errors must wait until cancel settles, got:\n{text}"
+    );
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 1,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "the cancel's own BgTaskList must clear the in-flight guard"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_shows_background_job_errors() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+    app.pending_jobs_remote_cancel = Some(8);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "job errors must land in the overlay footer, got:\n{text}"
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "the cancel's own Error must clear the in-flight guard"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_error_without_pending_cancel_still_paints() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "job errors must land in the overlay footer even without an in-flight cancel, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_close_keeps_in_flight_cancel() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+    app.pending_jobs_remote_cancel = Some(1);
+
+    assert!(
+        app.handle_jobs_picker_key_outcome(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::empty(),
+        )
+        .is_none(),
+        "esc closes the overlay"
+    );
+    assert!(
+        app.jobs_picker_overlay.is_none(),
+        "esc must close the overlay"
+    );
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "closing must not drop the in-flight remote cancel"
+    );
+    assert!(
+        !app.pending_jobs_list,
+        "closing must not send a list after the overlay is gone"
+    );
+
+    app.open_jobs_picker(false);
+    assert_eq!(
+        app.pending_jobs_remote_cancel,
+        Some(1),
+        "reopening must keep the in-flight remote cancel"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("already stopping a job"),
+        "reopening during cancel must restore the in-flight footer, got:\n{text}"
+    );
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 1,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a matching error after reopen must clear the in-flight guard"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "a matching error after reopen must land in the footer, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_list_does_not_finish_a_resumed_turn() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.status = crate::tui::app::ProcessingStatus::RunningTool("bash".to_string());
+    app.remote_resume_activity = Some(crate::tui::app::RemoteResumeActivity {
+        session_id: "session_resume_jobs".to_string(),
+        observed_at: std::time::Instant::now(),
+        current_tool_name: Some("bash".to_string()),
+    });
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.is_processing,
+        "overlay BgTaskList must not settle a resumed remote turn"
+    );
+    assert!(
+        matches!(
+            app.status,
+            crate::tui::app::ProcessingStatus::RunningTool(_)
+        ),
+        "resumed tool status must survive overlay list"
+    );
+    assert!(
+        app.remote_resume_activity.is_some(),
+        "resumed activity must survive overlay list"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("sleep for overlay") && text.contains("8s"),
+        "overlay must still paint the snapshot, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_background_task_notification_requests_a_jobs_list() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+    app.pending_jobs_list = false;
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::Notification {
+            from_session: "background_task".to_string(),
+            from_name: Some("background task".to_string()),
+            notification_type: crate::protocol::NotificationType::Message {
+                scope: Some("background_task".to_string()),
+                channel: None,
+                tldr: None,
+            },
+            message: "**Background task** `abc123` · `bash` · ✓ completed · 8.0s · exit 0"
+                .to_string(),
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.pending_jobs_list,
+        "a background-task notification must refresh the open overlay"
+    );
+    assert!(
+        app.jobs_picker_overlay.is_some(),
+        "overlay must stay open after a completion notification"
+    );
+}
+
+#[test]
+fn remote_jobs_overlay_error_does_not_finish_a_live_turn() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.status = crate::tui::app::ProcessingStatus::Streaming;
+    app.open_jobs_picker(false);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    assert!(app.is_processing, "job errors must not abort the live turn");
+    assert_eq!(app.current_message_id, Some(3));
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Background job 'abc123' is not running."),
+        "job errors must land in the overlay footer, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_error_with_closed_overlay_does_not_finish_a_live_turn() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.status = crate::tui::app::ProcessingStatus::Streaming;
+    app.pending_jobs_remote_cancel = Some(8);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Background job 'abc123' is not running.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.jobs_picker_overlay.is_none(),
+        "the overlay stays closed"
+    );
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a matching cancel Error must clear the in-flight guard even when closed"
+    );
+    assert!(
+        app.is_processing,
+        "closed-overlay job errors must not abort the live turn"
+    );
+    assert_eq!(app.current_message_id, Some(3));
+    assert!(
+        !app.display_messages
+            .iter()
+            .any(|m| m.content.contains("Background job")),
+        "closed-overlay job errors must not leak into the transcript"
+    );
+}
+
+#[test]
+fn remote_jobs_cancel_error_matches_by_request_id() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.status = crate::tui::app::ProcessingStatus::Streaming;
+    app.open_jobs_picker(false);
+    app.pending_jobs_remote_cancel = Some(8);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 8,
+            message: "Unsupported background job action 'cancel'.".to_string(),
+            retry_after_secs: None,
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a cancel Error must match by request id, not only the Background job prefix"
+    );
+    assert!(
+        app.is_processing,
+        "cancel Errors must not abort the live turn"
+    );
+    assert_eq!(app.current_message_id, Some(3));
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Unsupported background job action 'cancel'."),
+        "a matching cancel Error must land in the overlay footer, got:\n{text}"
+    );
+}
+
+#[test]
+fn remote_jobs_closed_overlay_bg_task_list_clears_cancel() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.is_processing = true;
+    app.current_message_id = Some(3);
+    app.pending_jobs_remote_cancel = Some(8);
+
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 8,
+            tasks: vec![],
+        },
+        &mut remote,
+    );
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a matching cancel BgTaskList must clear the guard even when /jobs is closed"
+    );
+    assert!(
+        app.is_processing,
+        "closed-overlay BgTaskList must not abort the live turn"
+    );
+    assert_eq!(app.current_message_id, Some(3));
+    assert!(app.jobs_picker_overlay.is_none());
+}
+
+#[test]
+fn remote_jobs_cancel_send_error_stays_in_the_overlay() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    app.open_jobs_picker(false);
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 7,
+            tasks: vec![running_bg_task("abc123", &started_at)],
+        },
+        &mut remote,
+    );
+    drop(
+        remote
+            .take_dummy_peer()
+            .expect("dummy remote should retain peer stream"),
+    );
+
+    rt.block_on(async {
+        super::handle_remote_key(
+            &mut app,
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::empty(),
+            &mut remote,
+        )
+        .await
+        .expect("a failed cancel send must stay in the overlay");
+    });
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "a failed cancel send must not leave an in-flight guard"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Could not cancel jobs:"),
+        "a failed cancel send must land in the overlay footer, got:\n{text}"
+    );
+}
+
+#[test]
+fn disconnect_clears_in_flight_remote_jobs_cancel() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.open_jobs_picker(false);
+    app.pending_jobs_list = false;
+    app.pending_jobs_remote_cancel = Some(8);
+    if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+        picker.set_status("⏳ already stopping a job...");
+    }
+
+    let mut state = RemoteRunState::default();
+    super::handle_disconnect(&mut app, &mut state, None);
+
+    assert!(
+        app.pending_jobs_remote_cancel.is_none(),
+        "disconnect must drop the stale cancel id so reconnect can stop again"
+    );
+    assert!(
+        app.pending_jobs_list,
+        "an open overlay must refresh after reconnect"
+    );
+    let text = jobs_overlay_text(&app);
+    assert!(
+        text.contains("Connection lost"),
+        "disconnect must replace the stuck hourglass, got:\n{text}"
+    );
+}
+
+#[test]
 fn remote_submit_input_never_strands_a_local_pending_turn() {
     // Safety net: any path that reaches `App::submit_input` while attached to a
     // remote session must queue for the remote tick loop rather than set

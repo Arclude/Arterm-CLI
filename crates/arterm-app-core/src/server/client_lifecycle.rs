@@ -19,7 +19,8 @@ use super::client_lightweight_control::{
     LightweightControlContext, handle_lightweight_control_request, parse_swarm_spawn_mode,
 };
 use super::client_session::{
-    handle_clear_session, handle_mcp_action, handle_reload, handle_resume_session, handle_subscribe,
+    handle_bg_action, handle_clear_session, handle_mcp_action, handle_reload, handle_resume_session,
+    handle_subscribe,
 };
 use super::client_state::{
     HistoryRefreshArgs, handle_get_compacted_history, handle_get_model_catalog, handle_get_state,
@@ -693,6 +694,45 @@ pub(super) async fn handle_client(
                     request_id,
                     prompt: req.prompt,
                     is_password: req.is_password,
+                    tool_call_id: tool_call_id.clone(),
+                });
+            }
+        })
+    };
+
+    // Same pattern for ask_user: the tool blocks on a oneshot; we hold the
+    // sender until the TUI answers with an ask_user_response request.
+    let ask_user_responses: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<crate::tool::AskUserResponse>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let (ask_req_tx, mut ask_req_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tool::AskUserRequest>();
+    {
+        let mut agent_guard = agent.lock().await;
+        agent_guard.set_ask_user_request_tx(ask_req_tx);
+    }
+    let _ask_forwarder = {
+        let client_event_tx = client_event_tx.clone();
+        let ask_user_responses = ask_user_responses.clone();
+        let tool_call_id = String::new();
+        tokio::spawn(async move {
+            while let Some(req) = ask_req_rx.recv().await {
+                let request_id = req.request_id.clone();
+                ask_user_responses
+                    .lock()
+                    .await
+                    .insert(request_id.clone(), req.response_tx);
+                let _ = client_event_tx.send(ServerEvent::AskUserRequest {
+                    request_id,
+                    question: req.question,
+                    options: req
+                        .options
+                        .into_iter()
+                        .map(|opt| crate::protocol::AskUserWireOption {
+                            label: opt.label,
+                            detail: opt.detail,
+                        })
+                        .collect(),
+                    allow_custom_hint: req.allow_custom_hint,
                     tool_call_id: tool_call_id.clone(),
                 });
             }
@@ -1668,6 +1708,23 @@ pub(super) async fn handle_client(
                 handle_mcp_action(id, &action, server.as_deref(), &agent, &client_event_tx).await;
             }
 
+            Request::BgAction {
+                id,
+                action,
+                task_id,
+                all_sessions,
+            } => {
+                handle_bg_action(
+                    id,
+                    &action,
+                    task_id.as_deref(),
+                    all_sessions,
+                    &client_session_id,
+                    &client_event_tx,
+                )
+                .await;
+            }
+
             Request::ResumeSession {
                 id,
                 session_id,
@@ -1970,6 +2027,21 @@ pub(super) async fn handle_client(
             } => {
                 handle_stdin_response(id, request_id, input, &stdin_responses, &client_event_tx)
                     .await;
+            }
+
+            Request::AskUserResponse {
+                id,
+                request_id,
+                selected_index,
+                custom,
+            } => {
+                if let Some(tx) = ask_user_responses.lock().await.remove(&request_id) {
+                    let _ = tx.send(crate::tool::AskUserResponse {
+                        selected_index,
+                        custom,
+                    });
+                }
+                let _ = client_event_tx.send(ServerEvent::Done { id });
             }
 
             Request::AgentTask { id, task, .. } => {

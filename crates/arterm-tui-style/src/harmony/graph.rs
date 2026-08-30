@@ -116,24 +116,24 @@ impl Topology {
 /// `cargo test -p arterm-tui --lib print_measured_palette_topology -- --ignored --nocapture`
 /// after UI changes that shift how much area each role paints.
 ///
-/// The distribution is the point: `dim` covers 77% of painted cells while every
+/// The distribution is the point: `dim` covers 64% of painted cells while every
 /// semantic role covers under 1%. Any scoring that weights roles equally is
 /// therefore describing a screen nobody sees.
 pub fn default_topology() -> Topology {
     Topology::from_counts(
         [
-            (Role::Dim, 1004),
-            (Role::HeaderName, 137),
-            (Role::System, 63),
+            (Role::Dim, 689),
+            (Role::HeaderName, 153),
+            (Role::System, 90),
             (Role::UserText, 42),
-            (Role::Pending, 41),
-            (Role::User, 9),
-            (Role::Error, 3),
+            (Role::Pending, 80),
+            (Role::User, 12),
+            (Role::Error, 6),
             (Role::Warning, 1),
         ],
         [
-            (Role::Dim, Role::HeaderName, 10),
-            (Role::Error, Role::User, 3),
+            (Role::Dim, Role::HeaderName, 18),
+            (Role::Error, Role::User, 6),
             (Role::HeaderName, Role::UserText, 3),
             (Role::Pending, Role::User, 2),
             (Role::User, Role::Warning, 1),

@@ -1356,7 +1356,8 @@ pub use debug::{
     ImageStateInfo, ScrollFrameInfo, ScrollTestResult, TestRenderResult, clear_cache, debug_cache,
     debug_flicker_benchmark, debug_image_scroll_benchmark, debug_image_state,
     debug_memory_benchmark, debug_memory_profile, debug_render, debug_stats, debug_stats_json,
-    debug_test_render, debug_test_resize_stability, debug_test_scroll, reset_debug_stats,
+    debug_test_render, debug_test_resize_stability, debug_test_scroll,
+    deferred_render_pending_count, reset_debug_stats,
 };
 
 fn hash_content(content: &str) -> u64 {

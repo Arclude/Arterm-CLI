@@ -113,6 +113,8 @@ impl App {
         self.dictation_key = keybind::load_dictation_key();
         self.new_terminal_key = keybind::load_new_terminal_key();
         self.open_resume_key = keybind::load_open_resume_key();
+        self.jobs_picker_key = keybind::load_jobs_picker_key();
+        self.plan_mode_key = keybind::load_plan_mode_toggle_key();
         self.fallback_switch_key = keybind::load_fallback_switch_key();
         self.scroll_keys = keybind::load_scroll_keys();
         crate::logging::info("KEYBINDINGS: reloaded from config change");
@@ -366,6 +368,7 @@ impl App {
         let autojudge_enabled = session
             .autojudge_enabled
             .unwrap_or(config().autojudge.enabled);
+        let plan_mode_initially_on = arterm_app_core::tool::is_plan_mode(&session.id);
         let context_limit = provider.context_window() as u64;
         let mut runtime_memory_log = if crate::runtime_memory_log::client_logging_enabled() {
             Some(crate::runtime_memory_log::RuntimeMemoryLogController::new(
@@ -580,6 +583,7 @@ impl App {
             memory_enabled: features.memory,
             autoreview_enabled,
             autojudge_enabled,
+            remote_plan_mode_enabled: plan_mode_initially_on,
             improve_mode,
             last_injected_memory_signature: None,
             swarm_enabled: features.swarm,
@@ -642,6 +646,8 @@ impl App {
             side_panel_native_scrollbar: display.native_scrollbars.side_panel,
             inline_view_state: None,
             inline_interactive_state: None,
+            pending_ask_user: None,
+            pending_ask_user_answer: None,
             model_picker_cache: None,
             model_picker_catalog_revision: 0,
             recent_authenticated_provider: None,
@@ -663,6 +669,8 @@ impl App {
             dictation_key: keybind::load_dictation_key(),
             new_terminal_key: keybind::load_new_terminal_key(),
             open_resume_key: keybind::load_open_resume_key(),
+            jobs_picker_key: keybind::load_jobs_picker_key(),
+            plan_mode_key: keybind::load_plan_mode_toggle_key(),
             fallback_switch_key: keybind::load_fallback_switch_key(),
             scroll_keys: keybind::load_scroll_keys(),
             keybindings_config_generation: crate::config::config_reload_generation(),
@@ -747,6 +755,10 @@ impl App {
             pending_session_picker_load: None,
             settings_overlay: None,
             mcp_picker_overlay: None,
+            jobs_picker_overlay: None,
+            pending_jobs_list: false,
+            pending_jobs_cancel: None,
+            pending_jobs_remote_cancel: None,
             pending_startup_notes_load: None,
             startup_notes: Vec::new(),
             catchup_return_stack: Vec::new(),
@@ -788,6 +800,7 @@ impl App {
         let autojudge_enabled = session
             .autojudge_enabled
             .unwrap_or(config().autojudge.enabled);
+        let plan_mode_initially_on = arterm_app_core::tool::is_plan_mode(&session.id);
         let context_limit = provider.context_window() as u64;
         let mut runtime_memory_log = if crate::runtime_memory_log::client_logging_enabled() {
             Some(crate::runtime_memory_log::RuntimeMemoryLogController::new(
@@ -1032,6 +1045,7 @@ impl App {
             memory_enabled: features.memory,
             autoreview_enabled,
             autojudge_enabled,
+            remote_plan_mode_enabled: plan_mode_initially_on,
             improve_mode,
             last_injected_memory_signature: None,
             swarm_enabled: features.swarm,
@@ -1094,6 +1108,8 @@ impl App {
             side_panel_native_scrollbar: display.native_scrollbars.side_panel,
             inline_view_state: None,
             inline_interactive_state: None,
+            pending_ask_user: None,
+            pending_ask_user_answer: None,
             model_picker_cache: None,
             model_picker_catalog_revision: 0,
             recent_authenticated_provider: None,
@@ -1115,6 +1131,8 @@ impl App {
             dictation_key: keybind::load_dictation_key(),
             new_terminal_key: keybind::load_new_terminal_key(),
             open_resume_key: keybind::load_open_resume_key(),
+            jobs_picker_key: keybind::load_jobs_picker_key(),
+            plan_mode_key: keybind::load_plan_mode_toggle_key(),
             fallback_switch_key: keybind::load_fallback_switch_key(),
             scroll_keys: keybind::load_scroll_keys(),
             keybindings_config_generation: crate::config::config_reload_generation(),
@@ -1199,6 +1217,10 @@ impl App {
             pending_session_picker_load: None,
             settings_overlay: None,
             mcp_picker_overlay: None,
+            jobs_picker_overlay: None,
+            pending_jobs_list: false,
+            pending_jobs_cancel: None,
+            pending_jobs_remote_cancel: None,
             pending_startup_notes_load: None,
             startup_notes: Vec::new(),
             catchup_return_stack: Vec::new(),

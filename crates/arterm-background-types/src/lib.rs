@@ -11,6 +11,13 @@ pub enum BackgroundTaskStatus {
     Failed,
 }
 
+impl BackgroundTaskStatus {
+    /// Whether this status can no longer change (everything except Running).
+    pub fn is_terminal(&self) -> bool {
+        !matches!(self, Self::Running)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BackgroundTaskProgressKind {

@@ -113,6 +113,22 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= app.update_pinned_images_auto_hide();
     // Dissolve stale (off-screen) reasoning traces with zero visible motion.
     needs_redraw |= app.gc_offscreen_reasoning_traces();
+    needs_redraw |= app.poll_jobs_cancel();
+    if app.pending_jobs_list {
+        app.pending_jobs_list = false;
+        let all_sessions = app
+            .jobs_picker_overlay
+            .as_ref()
+            .is_some_and(|picker| picker.all_sessions());
+        if let Err(error) = remote.bg_action("list", None, all_sessions).await
+            && app.pending_jobs_remote_cancel.is_none()
+        {
+            if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+                picker.set_status(format!("Could not list jobs: {error:#}"));
+            }
+        }
+        needs_redraw = true;
+    }
     needs_redraw |= dispatch_compacted_history_load(app, remote).await;
     // Adopt the resolved scroll position once a frame containing newly loaded
     // older history has rendered, so manual scrolling resumes seamlessly.
@@ -144,7 +160,11 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= app.onboarding_tick();
     needs_redraw |= app.refresh_keybindings_if_config_reloaded();
 
-    let _ = check_debug_command(app, remote).await;
+    // File-driven debug commands (tester PTYs) mutate input/UI state with no
+    // terminal event; force a repaint so frame dumps reflect them.
+    if check_debug_command(app, remote).await.is_some() {
+        needs_redraw = true;
+    }
 
     if !app.is_processing {
         if let Some(request) = app.take_pending_catchup_resume() {
@@ -423,6 +443,22 @@ async fn apply_terminal_event(
             app.update_copy_badge_key_event(key);
             if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                 handle_remote_key_event(app, key, remote).await?;
+                if let Some(answer) = app.take_pending_ask_user_answer() {
+                    if let Err(error) = remote
+                        .send_ask_user_response(
+                            &answer.request_id,
+                            answer.selected_index,
+                            answer.custom,
+                        )
+                        .await
+                    {
+                        app.push_display_message(DisplayMessage::error(format!(
+                            "Failed to send answer: {}",
+                            error
+                        )));
+                        app.set_status_notice("Answer send failed");
+                    }
+                }
                 if let Some(selection) = app.pending_route_selection.take() {
                     app.pending_model_switch = None;
                     match remote.set_route_selection(selection).await {
@@ -992,6 +1028,14 @@ pub(super) fn handle_disconnect(
         ));
     }
     app.reset_streaming_tps();
+    if app.pending_jobs_remote_cancel.take().is_some() {
+        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+            picker.set_status("Connection lost; job may still be running.".to_string());
+        }
+    }
+    if app.jobs_picker_overlay.is_some() {
+        app.pending_jobs_list = true;
+    }
     app.is_processing = false;
     app.status = ProcessingStatus::Idle;
     app.stream_message_ended = false;
@@ -1789,6 +1833,9 @@ async fn handle_debug_command(app: &mut App, cmd: &str, remote: &mut RemoteConne
             "diagram_pane_position": format!("{:?}", app.diagram_pane_position),
             "diagram_zoom": app.diagram_zoom,
             "diagram_count": crate::tui::mermaid::get_active_diagrams().len(),
+            "overscroll_active": app.chat_overscroll_active(),
+            "overscroll_remaining": app.chat_overscroll_remaining(),
+            "plan_mode": app.remote_plan_mode_enabled || crate::tui::TuiState::plan_mode_enabled(app),
             "remote": true,
             "server_version": app.remote_server_version.clone(),
             "server_has_update": app.remote_server_has_update,
@@ -1996,6 +2043,14 @@ fn handle_disconnected_key_internal(
 
     if app.open_resume_key_matches(code, modifiers) {
         app.open_session_picker();
+        return Ok(());
+    }
+
+    if app.plan_mode_key_matches(code, modifiers) {
+        // Disconnected: no server to forward to. Flip the local mirror so the
+        // UI stays truthful; the server's authoritative state re-syncs both
+        // the mirror and the local registry via the History event on reconnect.
+        super::commands::toggle_plan_mode_local(app);
         return Ok(());
     }
 

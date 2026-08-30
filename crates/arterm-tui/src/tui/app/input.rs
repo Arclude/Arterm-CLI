@@ -1578,6 +1578,20 @@ impl App {
             .unwrap_or(false)
     }
 
+    /// Whether the configured `keybindings.jobs_picker` chord matches this key.
+    pub(crate) fn jobs_picker_key_matches(&self, code: KeyCode, modifiers: KeyModifiers) -> bool {
+        self.jobs_picker_key
+            .binding
+            .as_ref()
+            .map(|binding| binding.matches(code, modifiers))
+            .unwrap_or(false)
+    }
+
+    /// Whether the configured `keybindings.plan_mode_toggle` chord matches this key.
+    pub(crate) fn plan_mode_key_matches(&self, code: KeyCode, modifiers: KeyModifiers) -> bool {
+        self.plan_mode_key.matches(code, modifiers)
+    }
+
     /// Whether the configured `keybindings.fallback_switch` chord matches this key.
     pub(crate) fn fallback_switch_key_matches(
         &self,
@@ -2133,6 +2147,14 @@ pub(super) fn handle_pre_control_shortcuts(
         app.open_session_picker();
         return true;
     }
+    if app.jobs_picker_key_matches(code, modifiers) {
+        app.open_jobs_picker(false);
+        return true;
+    }
+    if app.plan_mode_key_matches(code, modifiers) {
+        super::commands::toggle_plan_mode_local(app);
+        return true;
+    }
     if let Some(direction) = app.model_switch_keys.direction_for(code, modifiers) {
         app.record_keybinding_fast(super::shortcut_hints::LearnableAction::ModelSwitch);
         app.cycle_model(direction);
@@ -2342,6 +2364,13 @@ pub(super) fn handle_modal_key(
     if app.mcp_picker_overlay.is_some() {
         if let Some((action, server)) = app.handle_mcp_picker_key_outcome(code, modifiers) {
             app.handle_mcp_picker_action_local(action, server);
+        }
+        return Ok(true);
+    }
+
+    if app.jobs_picker_overlay.is_some() {
+        if let Some(outcome) = app.handle_jobs_picker_key_outcome(code, modifiers) {
+            app.handle_jobs_picker_action_local(outcome);
         }
         return Ok(true);
     }
@@ -2702,6 +2731,46 @@ impl App {
 
         if handle_modal_key(self, code, modifiers)? {
             return Ok(());
+        }
+
+        // A pending ask_user question owns the unmodified keys that pick an
+        // option (digits), move the highlight (arrows), and submit (Enter).
+        // Everything else -- text typing included, so the free-form answer is
+        // just typed into the normal input -- falls through.
+        if self.pending_ask_user.is_some() && modifiers.is_empty() {
+            match code {
+                KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                    self.select_ask_user_option((c as u8 - b'1') as usize);
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.move_ask_user_selection(-1);
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.move_ask_user_selection(1);
+                    return Ok(());
+                }
+                KeyCode::Enter => {
+                    // Submit the highlighted option, or the typed free-form
+                    // text when nothing is highlighted. The send is queued
+                    // onto the connection writer via the shared helper.
+                    if let Err(e) = self.submit_ask_user_selection() {
+                        self.set_status_notice(format!("Answer failed: {e}"));
+                    }
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    // Escape does not answer; it just drops the highlight to
+                    // free-typing mode without canceling the question (the
+                    // agent is still waiting; Enter on typed text answers).
+                    self.set_status_notice(
+                        "Type your own answer and press Enter, or pick an option with 1-9 / arrows",
+                    );
+                    return Ok(());
+                }
+                _ => {}
+            }
         }
 
         if self.handle_onboarding_continue_prompt_key(code) {
@@ -3455,6 +3524,14 @@ impl App {
 
         if let Some(name) = self.pending_ssh_remote_name.take() {
             commands::handle_pending_ssh_remote_target(self, name, input);
+            return;
+        }
+
+        // While an ask_user question is pending, a typed non-slash answer goes
+        // to the question, not to a new agent turn.
+        if self.pending_ask_user.is_some() && !input.trim().starts_with('/') {
+            self.push_display_message(DisplayMessage::user(raw_input));
+            self.answer_pending_ask_user_custom(input.trim().to_string());
             return;
         }
 

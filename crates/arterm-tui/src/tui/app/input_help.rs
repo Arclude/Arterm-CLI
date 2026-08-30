@@ -31,6 +31,9 @@ impl App {
             "mcp" => {
                 "/mcp\nOpen the interactive MCP server panel: pick a server to see its status, command, config location, and tools, and run connect/reconnect/disconnect from a menu. `r` reloads the MCP config.\n\n/mcp status\nPush a one-shot colored status card into the transcript instead: connected (green, with tool count), connecting (yellow), not connected (red, with the connect failure when the session attempted one).\n\nManage servers with `arterm mcp add/list/remove` in a terminal."
             }
+            "jobs" => {
+                "/jobs\nOpen the background-job panel: bash, build, and docker commands the agent started with run_in_background. Each row shows elapsed time. x (or Delete) stops the selected running job, r refreshes, a toggles every session vs this one.{jobs_shortcut}\n\n/jobs all\nOpen the same panel listing jobs from every session on this machine."
+            }
             "provider-test-coverage"
             | "provider test coverage"
             | "model-status"
@@ -142,6 +145,9 @@ impl App {
             "plan" => {
                 "/plan [goal]\nDraft a plan without implementing anything. The model inspects the repo, then presents a structured plan (Goal, Scope, Approach, Validation, Open questions) as a dedicated plan card in the conversation.\n\nNothing is edited: it stops after presenting the plan. Once you approve, it converts the plan into a todo list and starts the work.\n\n/plan with no goal plans the task currently in focus."
             }
+            "planmode" | "plan-mode" | "plan_mode" => {
+                "/planmode\nToggle read-only Plan Mode for the session.{planmode_shortcut}\n\nWhile Plan Mode is on, write tools (edit, write, bash, ...) are blocked, so the model can only explore, read, and propose changes. Turn it off when you are ready for execution."
+            }
             "init" => {
                 "/init\nExplore the current project and write or update `AGENTS.md` so later Arterm sessions already know how the repo is laid out, how to build/test, and which conventions matter.\n\nArterm loads `AGENTS.md` into the system prompt at session start. If that file is missing, it falls back to `CLAUDE.md`.\n\nIf `AGENTS.md` already exists, /init improves it in place rather than wiping it."
             }
@@ -233,6 +239,21 @@ impl App {
             None => String::new(),
         };
         let help = help.replace("{resume_shortcut}", &resume_shortcut);
+        let jobs_shortcut = match crate::tui::keybind::load_jobs_picker_key().label {
+            Some(label) => format!(" You can also press {label} to open it directly."),
+            None => String::new(),
+        };
+        let help = help.replace("{jobs_shortcut}", &jobs_shortcut);
+        let planmode_shortcut = match crate::tui::keybind::load_plan_mode_toggle_key().binding() {
+            Some(binding) => {
+                format!(
+                    " You can also press {} to toggle it directly.",
+                    arterm_tui_core::keybind::format_binding(binding)
+                )
+            }
+            None => String::new(),
+        };
+        let help = help.replace("{planmode_shortcut}", &planmode_shortcut);
         // Mac keyboards have no "Alt" key; show the ⌥ keycap instead.
         let help = help.replace(
             "Alt+",

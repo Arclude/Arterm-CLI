@@ -161,7 +161,7 @@ pub fn generate_from_seed(seed: (u8, u8, u8), background: (u8, u8, u8)) -> Palet
         // separated by *lightness* as well. Lightness survives every CVD type,
         // which is why accessible palettes lean on it rather than hue alone.
         (Role::Accent, at(270.0, wide(0.55), 1.2)),
-        (Role::System, at(315.0, wide(-0.35), 1.0)),
+        (Role::System, at(270.0, wide(-0.35), 1.0)),
         (Role::Info, at(45.0, wide(-0.5), 0.9)),
         (Role::FileLink, at(0.0, step(0.35), 0.7)),
         (Role::HeaderIcon, at(180.0, fg_l, 0.9)),
@@ -704,3 +704,4 @@ mod generation {
         );
     }
 }
+

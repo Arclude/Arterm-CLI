@@ -1415,6 +1415,114 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
     );
 }
 
+#[tokio::test]
+async fn bg_action_as_the_first_request_requires_subscribe() {
+    let (server_stream, client_stream) = crate::transport::Stream::pair().expect("socket pair");
+    let forked = Arc::new(AtomicBool::new(false));
+    let provider_template: Arc<dyn Provider> = Arc::new(PanicOnForkProvider {
+        forked: Arc::clone(&forked),
+    });
+
+    let sessions: SessionAgents = Arc::new(RwLock::new(HashMap::new()));
+    let global_session_id = Arc::new(RwLock::new(String::new()));
+    let client_count = Arc::new(RwLock::new(0usize));
+    let client_connections = Arc::new(RwLock::new(HashMap::new()));
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::new()));
+    let shared_context = Arc::new(RwLock::new(HashMap::new()));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
+    let swarm_coordinators = Arc::new(RwLock::new(HashMap::new()));
+    let file_touch = FileTouchService::new();
+    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
+    let channel_subscriptions_by_session = Arc::new(RwLock::new(HashMap::new()));
+    let client_debug_state = Arc::new(RwLock::new(ClientDebugState::default()));
+    let (_debug_response_tx, _) = broadcast::channel(8);
+    let event_history = Arc::new(RwLock::new(std::collections::VecDeque::new()));
+    let event_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (swarm_event_tx, _) = broadcast::channel(8);
+    let (_global_event_tx, _) = broadcast::channel(8);
+    let global_is_processing = Arc::new(RwLock::new(false));
+    let shutdown_signals = Arc::new(RwLock::new(HashMap::new()));
+    let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    let mcp_pool = Arc::new(crate::mcp::SharedMcpPool::from_default_config());
+
+    let server_task = tokio::spawn(handle_client(
+        server_stream,
+        Arc::clone(&sessions),
+        _global_event_tx,
+        provider_template,
+        global_is_processing,
+        global_session_id,
+        client_count,
+        Arc::clone(&client_connections),
+        swarm_members,
+        swarms_by_id,
+        shared_context,
+        swarm_plans,
+        swarm_coordinators,
+        file_touch,
+        channel_subscriptions,
+        channel_subscriptions_by_session,
+        client_debug_state,
+        _debug_response_tx,
+        event_history,
+        event_counter,
+        swarm_event_tx,
+        "arterm-test".to_string(),
+        "🧪".to_string(),
+        mcp_pool,
+        shutdown_signals,
+        soft_interrupt_queues,
+        AwaitMembersRuntime::default(),
+        SwarmMutationRuntime::default(),
+    ));
+
+    let (client_reader, mut client_writer) = client_stream.into_split();
+    let mut client_reader = BufReader::new(client_reader);
+    let request = Request::BgAction {
+        id: 11,
+        action: "list".to_string(),
+        task_id: None,
+        all_sessions: false,
+    };
+    let payload = serde_json::to_string(&request).expect("serialize request") + "\n";
+    client_writer
+        .write_all(payload.as_bytes())
+        .await
+        .expect("write request");
+
+    let mut line = String::new();
+    client_reader
+        .read_line(&mut line)
+        .await
+        .expect("read error bytes");
+    match decode_request_or_event(&line) {
+        ServerEvent::Error { id, message, .. } => {
+            assert_eq!(id, 11);
+            assert!(
+                message.contains("must Subscribe"),
+                "unsubscribed BgAction must fail before a session is created: {message}"
+            );
+        }
+        other => panic!("expected Subscribe error, got {other:?}"),
+    }
+
+    drop(client_writer);
+    server_task
+        .await
+        .expect("server task join")
+        .expect("server task result");
+
+    assert!(
+        !forked.load(Ordering::SeqCst),
+        "BgAction without Subscribe must not fork a provider"
+    );
+    assert!(
+        sessions.read().await.is_empty(),
+        "BgAction without Subscribe must not allocate a session"
+    );
+}
+
 fn decode_request_or_event(line: &str) -> ServerEvent {
     serde_json::from_str(line.trim()).expect("decode server event")
 }

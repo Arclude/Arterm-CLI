@@ -364,6 +364,7 @@ fn test_remote_rewind_completion_shows_undo_hint_after_history_refresh() {
             subagent_model: None,
             autoreview_enabled: None,
             autojudge_enabled: None,
+            plan_mode_enabled: None,
             available_models: vec![],
             available_model_routes: vec![],
             mcp_servers: vec![],

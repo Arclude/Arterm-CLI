@@ -351,6 +351,7 @@ mod tests {
             tool_call_id: "test-call".into(),
             working_dir: Some(tmp.clone()),
             stdin_request_tx: None,
+            ask_user_request_tx: None,
             graceful_shutdown_signal: None,
             execution_mode: crate::tool::ToolExecutionMode::Direct,
         };

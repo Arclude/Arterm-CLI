@@ -185,6 +185,9 @@ pub struct StateSnapshot {
     pub message_count: usize,
     pub streaming_text_len: usize,
     pub has_suggestions: bool,
+    /// First few command-suggestion rows (label only) so a frame dump can
+    /// verify what the completion popover is actually showing.
+    pub suggestion_preview: Vec<String>,
     pub status: String,
     pub diagram_mode: Option<String>,
     pub diagram_focus: bool,
@@ -201,8 +204,14 @@ pub struct StateSnapshot {
 /// Actual rendered text content
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct RenderedText {
+    /// First line(s) of the persistent header (product name, status items),
+    /// joined with ` · ` for grep-able badge verification.
+    pub header_preview: String,
     /// Status line text (spinner, tokens, elapsed, etc.)
     pub status_line: String,
+    /// Overscroll status line text below the input (contains the plan badge
+    /// when Plan Mode is on), captured when the row is part of the layout.
+    pub overscroll_status: Option<String>,
     /// Input area text (what the user is typing)
     pub input_area: String,
     /// Hint text shown above input (if any)

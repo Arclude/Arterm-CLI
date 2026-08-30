@@ -318,6 +318,7 @@ pub(super) async fn handle_get_model_catalog(
         subagent_model: None,
         autoreview_enabled: None,
         autojudge_enabled: None,
+        plan_mode_enabled: None,
         compaction_mode: Default::default(),
         activity: None,
         side_panel: Default::default(),
@@ -555,6 +556,7 @@ async fn send_history_from_persisted_session(
     let subagent_model = session.subagent_model.clone();
     let autoreview_enabled = session.autoreview_enabled;
     let autojudge_enabled = session.autojudge_enabled;
+    let plan_mode_enabled = crate::tool::is_plan_mode(session_id);
     let is_canary = session.is_canary;
     let reasoning_effort = session
         .reasoning_effort
@@ -586,6 +588,7 @@ async fn send_history_from_persisted_session(
         subagent_model,
         autoreview_enabled,
         autojudge_enabled,
+        plan_mode_enabled: Some(plan_mode_enabled),
         available_models: Vec::new(),
         available_model_routes: Vec::new(),
         mcp_servers: Vec::new(),
@@ -799,6 +802,7 @@ pub(super) async fn send_history(
         subagent_model,
         autoreview_enabled,
         autojudge_enabled,
+        plan_mode_enabled: Some(crate::tool::is_plan_mode(session_id)),
         available_models,
         available_model_routes,
         mcp_servers,

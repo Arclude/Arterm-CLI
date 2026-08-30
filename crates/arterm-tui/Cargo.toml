@@ -41,7 +41,6 @@ serde_json = { version = "1", features = ["raw_value"] }
 
 # Utilities
 anyhow = "1"
-libc = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 dirs = "5"
@@ -116,3 +115,12 @@ arterm-app-core = { path = "../arterm-app-core", default-features = false, featu
 
 [target.'cfg(target_os = "macos")'.dependencies]
 global-hotkey = "0.7"
+
+[target.'cfg(unix)'.dependencies]
+# libc: PTY-based terminal tests and the late color-reply drain poll.
+libc = "0.2"
+# Raw-mode handle used to discard terminal replies that outlive the OSC 11
+# query timeout before they can be echoed into the shell, plus the X11 color
+# parser used to recover the reply's payload.
+terminal-trx = "0.2"
+xterm-color = "1.0"

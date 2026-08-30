@@ -1180,7 +1180,19 @@ fn test_workspace_info_widget_appears_in_visual_debug_frame_when_enabled() {
     app.centered = true;
     app.display_messages = vec![
         DisplayMessage::system("Workspace widget render test".to_string()),
-        DisplayMessage::assistant("Short content keeps room for info widgets.".to_string()),
+        DisplayMessage::assistant(
+            "Short content keeps room for info widgets.\n\
+             - filler row one so the transcript fills the viewport\n\
+             - filler row two so the transcript fills the viewport\n\
+             - filler row three so the transcript fills the viewport\n\
+             - filler row four so the transcript fills the viewport\n\
+             - filler row five so the transcript fills the viewport\n\
+             - filler row six so the transcript fills the viewport\n\
+             - filler row seven so the transcript fills the viewport\n\
+             - filler row eight so the transcript fills the viewport\n\
+             - filler row nine so the transcript fills the viewport\n\
+             - filler row ten so the transcript fills the viewport",
+        ),
     ];
     app.bump_display_messages_version();
 

@@ -108,6 +108,40 @@ fn native_scrollbar_visibility_requires_overflow() {
     assert!(native_scrollbar_visible(true, 6, 5));
 }
 
+#[test]
+fn plan_mode_prompt_uses_distinct_amber_glyph() {
+    let state = TestState {
+        plan_mode_enabled: true,
+        ..Default::default()
+    };
+    let (glyph, color) = super::input_ui::input_prompt(&state);
+    assert_eq!(glyph, "◈ ");
+    assert_eq!(color, crate::tui::color_support::rgb(255, 193, 7));
+}
+
+#[test]
+fn plan_mode_prompt_yields_to_shell_mode() {
+    // Shell mode keeps its `$ ` treatment even with Plan Mode on: the
+    // composer is composing a shell command, not a model prompt.
+    let state = TestState {
+        input: "! cargo test".to_string(),
+        plan_mode_enabled: true,
+        ..Default::default()
+    };
+    let (glyph, _) = super::input_ui::input_prompt(&state);
+    assert_eq!(glyph, "$ ");
+}
+
+#[test]
+fn plan_mode_prompt_off_falls_through_to_default() {
+    let state = TestState {
+        plan_mode_enabled: false,
+        ..Default::default()
+    };
+    let (glyph, _) = super::input_ui::input_prompt(&state);
+    assert_eq!(glyph, "> ");
+}
+
 #[derive(Clone, Default)]
 struct TestState {
     input: String,
@@ -131,6 +165,7 @@ struct TestState {
     anim_elapsed: f32,
     time_since_activity: Option<Duration>,
     remote_startup_phase_active: bool,
+    plan_mode_enabled: bool,
     inline_view_state: Option<crate::tui::InlineViewState>,
     inline_interactive_state: Option<crate::tui::InlineInteractiveState>,
     changelog_scroll: Option<usize>,
@@ -286,6 +321,9 @@ impl crate::tui::TuiState for TestState {
     }
     fn is_replay(&self) -> bool {
         false
+    }
+    fn plan_mode_enabled(&self) -> bool {
+        self.plan_mode_enabled
     }
     fn diff_mode(&self) -> crate::config::DiffDisplayMode {
         crate::config::DiffDisplayMode::Inline

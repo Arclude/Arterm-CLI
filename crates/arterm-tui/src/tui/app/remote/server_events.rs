@@ -1223,6 +1223,14 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.request_full_redraw();
                 return true;
             }
+            if app.pending_jobs_remote_cancel == Some(id) || message.starts_with("Background job ")
+            {
+                // Overlay traffic even when /jobs is closed: a matching cancel
+                // Error still clears the in-flight id, and must not abort a
+                // live turn or land in the transcript.
+                app.apply_jobs_overlay_error(id, message.clone());
+                return true;
+            }
             // The server rejects a Message request with this error while its
             // previous turn is still running. This typically happens when a
             // reload/reconnect raced the turn-end dispatch: the history
@@ -1535,6 +1543,7 @@ pub(in crate::tui::app) fn handle_server_event(
             subagent_model,
             autoreview_enabled,
             autojudge_enabled,
+            plan_mode_enabled,
             available_models,
             available_model_routes,
             mcp_servers,
@@ -1715,6 +1724,14 @@ pub(in crate::tui::app) fn handle_server_event(
                 autoreview_enabled.unwrap_or(crate::config::config().autoreview.enabled);
             app.autojudge_enabled =
                 autojudge_enabled.unwrap_or(crate::config::config().autojudge.enabled);
+            if let Some(plan_mode) = plan_mode_enabled {
+                // Server-authoritative Plan Mode state: the registry that gates
+                // tool execution lives in the server process, so re-sync both
+                // the client mirror and the local registry copy on
+                // reconnect/resume. Older servers omit the field.
+                arterm_app_core::tool::set_plan_mode(&session_id, plan_mode);
+                app.remote_plan_mode_enabled = plan_mode;
+            }
             if upstream_provider.is_some() {
                 app.upstream_provider = upstream_provider;
             }
@@ -2233,6 +2250,10 @@ pub(in crate::tui::app) fn handle_server_event(
             app.set_status_notice("Plan proposal received");
             false
         }
+        ServerEvent::BgTaskList { id, tasks } => {
+            app.apply_bg_task_list(id, tasks);
+            true
+        }
         ServerEvent::McpToolList { server, tools } => {
             if let Some(picker) = app.mcp_picker_overlay.as_mut() {
                 picker.set_tools(&server, tools.clone());
@@ -2573,6 +2594,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 }
                 persist_replay_display_message(app, "background_task", None, &message);
                 app.set_status_notice(presentation.status_notice);
+                app.refresh_jobs_overlay_if_open();
                 return false;
             }
 
@@ -2853,6 +2875,29 @@ pub(in crate::tui::app) fn handle_server_event(
         ServerEvent::StdinRequest { .. } => {
             app.set_status_notice("⌨ Interactive terminal detected (command will timeout)");
             false
+        }
+        ServerEvent::AskUserRequest {
+            request_id,
+            question,
+            options,
+            allow_custom_hint,
+            ..
+        } => {
+            let pending = crate::tui::PendingAskUser {
+                request_id,
+                question,
+                options: options
+                    .into_iter()
+                    .map(|opt| crate::tui::AskUserOptionView {
+                        label: opt.label,
+                        detail: opt.detail,
+                    })
+                    .collect(),
+                allow_custom: allow_custom_hint.is_some(),
+                selected: 0,
+            };
+            app.pending_ask_user = Some(pending);
+            true
         }
         _ => false,
     }

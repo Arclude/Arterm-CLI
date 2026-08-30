@@ -1335,10 +1335,12 @@ dependencies = [
  "similar",
  "tempfile",
  "terminal-colorsaurus",
+ "terminal-trx",
  "tokio",
  "unicode-width",
  "url",
  "urlencoding",
+ "xterm-color",
 ]
 
 [[package]]

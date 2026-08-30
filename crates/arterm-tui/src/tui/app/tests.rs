@@ -30,6 +30,8 @@ include!("tests/login_xai_wiring.rs");
 include!("tests/remote_events_reload_05.rs");
 include!("tests/swarm_plan_no_inline_graph.rs");
 include!("tests/remote_model_picker_hotkeys.rs");
+include!("tests/ask_user_flow.rs");
+include!("tests/ask_user_render.rs");
 include!("tests/scroll_copy_01/part_01.rs");
 include!("tests/scroll_copy_01/part_02.rs");
 include!("tests/scroll_copy_02/part_01.rs");
@@ -55,6 +57,7 @@ include!("tests/issue_699_ctrl_d_delete.rs");
 include!("tests/issue_832_remote_ctrl_k.rs");
 include!("tests/spinner_slash_commands.rs");
 include!("tests/command_suggestions_cache.rs");
+include!("tests/command_candidates_ttl.rs");
 include!("tests/skill_invocation_multi_word.rs");
 include!("tests/prompt_history_cross_session.rs");
 #[test]
@@ -1173,6 +1176,7 @@ fn stale_server_history_is_deferred_before_remote_state_is_applied() {
             subagent_model: Some("stale-subagent".to_string()),
             autoreview_enabled: Some(true),
             autojudge_enabled: Some(true),
+            plan_mode_enabled: None,
             available_models: vec!["stale-model".to_string()],
             available_model_routes: vec![],
             mcp_servers: vec!["stale-mcp:1".to_string()],
@@ -1263,6 +1267,7 @@ fn deferred_stale_server_history_captures_session_id_for_reload_handoff() {
             subagent_model: None,
             autoreview_enabled: None,
             autojudge_enabled: None,
+            plan_mode_enabled: None,
             available_models: vec![],
             available_model_routes: vec![],
             mcp_servers: vec![],
@@ -1345,6 +1350,7 @@ fn ancient_server_history_is_deferred_via_client_side_release_check() {
             subagent_model: Some("ancient-subagent".to_string()),
             autoreview_enabled: Some(true),
             autojudge_enabled: Some(true),
+            plan_mode_enabled: None,
             available_models: vec!["ancient-model".to_string()],
             available_model_routes: vec![],
             mcp_servers: vec!["ancient-mcp:1".to_string()],
@@ -1427,6 +1433,7 @@ fn older_server_reporting_no_update_is_still_deferred_via_client_check() {
             subagent_model: None,
             autoreview_enabled: None,
             autojudge_enabled: None,
+            plan_mode_enabled: None,
             available_models: vec!["m".to_string()],
             available_model_routes: vec![],
             mcp_servers: vec![],
@@ -1531,6 +1538,7 @@ fn older_server_history_repairs_stale_shared_server_channel_end_to_end() {
             subagent_model: None,
             autoreview_enabled: None,
             autojudge_enabled: None,
+            plan_mode_enabled: None,
             available_models: vec!["m".to_string()],
             available_model_routes: vec![],
             mcp_servers: vec![],
@@ -1607,6 +1615,7 @@ fn current_release_server_history_is_not_deferred_by_client_check() {
             subagent_model: None,
             autoreview_enabled: None,
             autojudge_enabled: None,
+            plan_mode_enabled: None,
             available_models: vec!["m".to_string()],
             available_model_routes: vec![],
             mcp_servers: vec![],
@@ -1780,4 +1789,74 @@ fn assert_clear_swarm_plan_reset(app: &App) {
     assert!(app.swarm_plan_items.is_empty());
     assert_eq!(app.swarm_plan_version, None);
     assert_eq!(app.swarm_plan_swarm_id, None);
+}
+
+#[test]
+fn remote_history_resyncs_plan_mode_mirror_from_server_state() {
+    // Reconnect/resume must not leave a stale client-side Plan Mode guess: the
+    // server reports the authoritative registry state in History, and the
+    // client re-syncs both its mirror and its local registry copy.
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.is_remote = true;
+    app.remote_session_id = Some("session_plan_sync".to_string());
+    // Client-side mirror desynced: server has Plan Mode ON, client thinks OFF.
+    assert!(!app.remote_plan_mode_enabled);
+    assert!(!arterm_app_core::tool::is_plan_mode("session_plan_sync"));
+
+    let redraw = app.handle_server_event(
+        crate::protocol::ServerEvent::History {
+            id: 1,
+            session_id: "session_plan_sync".to_string(),
+            messages: vec![],
+            images: vec![],
+            provider_name: Some("claude".to_string()),
+            provider_model: Some("claude-sonnet-4-20250514".to_string()),
+            subagent_model: None,
+            autoreview_enabled: None,
+            autojudge_enabled: None,
+            plan_mode_enabled: Some(true),
+            available_models: vec![],
+            available_model_routes: vec![],
+            mcp_servers: vec![],
+            skills: vec![],
+            total_tokens: None,
+            token_usage_totals: None,
+            all_sessions: vec![],
+            client_count: Some(1),
+            is_canary: Some(false),
+            reload_recovery: None,
+            server_version: None,
+            server_name: None,
+            server_icon: None,
+            server_has_update: Some(false),
+            was_interrupted: None,
+            connection_type: None,
+            status_detail: None,
+            upstream_provider: None,
+            resolved_credential: None,
+            reasoning_effort: None,
+            service_tier: None,
+            compaction_mode: Default::default(),
+            activity: None,
+            side_panel: Default::default(),
+        },
+        &mut remote,
+    );
+
+    assert!(redraw);
+    assert!(
+        app.remote_plan_mode_enabled,
+        "History must re-sync the client mirror to the server state"
+    );
+    assert!(
+        arterm_app_core::tool::is_plan_mode("session_plan_sync"),
+        "History must re-seed the local registry copy"
+    );
+
+    // Cleanup: do not leak plan mode into other tests through the global registry.
+    arterm_app_core::tool::set_plan_mode("session_plan_sync", false);
 }

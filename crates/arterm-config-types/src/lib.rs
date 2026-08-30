@@ -1040,6 +1040,12 @@ pub struct KeybindingsConfig {
     /// Open the `/resume` session picker (default: "cmd+b" on macOS, "alt+r"
     /// elsewhere). Set "" to disable.
     pub open_resume: String,
+    /// Open the background jobs picker (`/jobs` overlay) to list and stop
+    /// running background jobs (default: "alt+down"). Set "" to disable.
+    pub jobs_picker: String,
+    /// Toggle read-only Plan Mode (same as `/planmode`), which blocks write
+    /// tools for the session (default: "alt+p"). Set "" to disable.
+    pub plan_mode_toggle: String,
     /// Session picker Enter action: "current-terminal" (default) or "new-terminal".
     /// Ctrl+Enter performs the alternate action.
     pub session_picker_enter: SessionPickerResumeAction,
@@ -1091,6 +1097,8 @@ impl Default for KeybindingsConfig {
                     "alt+r"
                 },
             ),
+            jobs_picker: get("jobs_picker", "alt+down"),
+            plan_mode_toggle: get("plan_mode_toggle", "alt+p"),
             session_picker_enter: SessionPickerResumeAction::CurrentTerminal,
         }
     }

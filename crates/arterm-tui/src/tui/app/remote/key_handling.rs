@@ -299,6 +299,45 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
+    // A pending ask_user question owns the unmodified option keys (digits,
+    // arrows, Enter). Typing other text falls through so the user can answer
+    // free-form through the normal input; handle_enter then routes a non-empty
+    // input to the pending question instead of sending a new turn.
+    if app.pending_ask_user.is_some() && modifiers.is_empty() {
+        match code {
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                app.select_ask_user_option((c as u8 - b'1') as usize);
+                return Ok(());
+            }
+            KeyCode::Up => {
+                app.move_ask_user_selection(-1);
+                return Ok(());
+            }
+            KeyCode::Down => {
+                app.move_ask_user_selection(1);
+                return Ok(());
+            }
+            KeyCode::Enter => {
+                if app.input.trim().is_empty() {
+                    if let Err(e) = app.submit_ask_user_with(remote).await {
+                        app.set_status_notice(format!("Answer failed: {e}"));
+                    }
+                    return Ok(());
+                }
+                // Non-empty input: fall through so handle_enter's normal
+                // submit_input path can route it to the pending question
+                // (see App::submit_input).
+            }
+            KeyCode::Esc => {
+                app.set_status_notice(
+                    "Type your own answer and press Enter, or pick an option with 1-9 / arrows",
+                );
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     if app.prompt_history_search.is_some() {
         app.handle_prompt_history_search_key(code, modifiers);
         return Ok(());
@@ -320,6 +359,42 @@ async fn handle_remote_key_internal(
     if app.mcp_picker_overlay.is_some() {
         if let Some((action, server)) = app.handle_mcp_picker_key_outcome(code, modifiers) {
             remote.mcp_action(action, server.as_deref()).await?;
+        }
+        return Ok(());
+    }
+
+    if app.jobs_picker_overlay.is_some() {
+        if let Some(outcome) = app.handle_jobs_picker_key_outcome(code, modifiers) {
+            if let crate::tui::jobs_picker::JobsPickerOutcome::Action {
+                action,
+                task_id,
+                all_sessions,
+            } = outcome
+            {
+                if action == "cancel" && app.pending_jobs_remote_cancel.is_some() {
+                    if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+                        picker.set_status("⏳ already stopping a job...".to_string());
+                    }
+                    app.request_full_redraw();
+                    return Ok(());
+                }
+                match remote
+                    .bg_action(action, task_id.as_deref(), all_sessions)
+                    .await
+                {
+                    Ok(request_id) => {
+                        if action == "cancel" {
+                            app.pending_jobs_remote_cancel = Some(request_id);
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(picker) = app.jobs_picker_overlay.as_mut() {
+                            picker.set_status(format!("Could not {action} jobs: {error:#}"));
+                        }
+                        app.request_full_redraw();
+                    }
+                }
+            }
         }
         return Ok(());
     }
@@ -405,6 +480,19 @@ async fn handle_remote_key_internal(
 
     if app.open_resume_key_matches(code, modifiers) {
         app.open_session_picker();
+        return Ok(());
+    }
+
+    if app.jobs_picker_key_matches(code, modifiers) {
+        app.open_jobs_picker(false);
+        return Ok(());
+    }
+
+    if app.plan_mode_key_matches(code, modifiers) {
+        // In remote mode the tools execute in the server process, so the
+        // toggle must be forwarded there instead of flipping client-local
+        // state (which would not block anything server-side).
+        app_mod::commands::toggle_plan_mode_remote(app, remote).await?;
         return Ok(());
     }
 
@@ -1728,6 +1816,13 @@ async fn handle_remote_key_internal(
                         images: vec![],
                     };
                     route_prepared_input_to_new_remote_session(app, remote, prepared).await?;
+                    return Ok(());
+                }
+
+                if matches!(trimmed, "/planmode" | "/plan-mode" | "/plan_mode") {
+                    // Same rationale as the Alt+P hotkey: the server owns the
+                    // authoritative Plan Mode state, forward the toggle there.
+                    app_mod::commands::toggle_plan_mode_remote(app, remote).await?;
                     return Ok(());
                 }
 

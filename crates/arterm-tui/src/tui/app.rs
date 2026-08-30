@@ -58,6 +58,7 @@ mod commands_colors;
 mod commands_dispatch;
 mod commands_improve;
 mod commands_init;
+mod commands_jobs;
 mod commands_mcp;
 mod commands_overnight;
 mod commands_plan;
@@ -89,6 +90,7 @@ mod onboarding_sim;
 mod productivity;
 mod prompt_history;
 mod queued;
+mod ask_user;
 mod remote;
 mod remote_notifications;
 mod replay;
@@ -668,9 +670,14 @@ pub(super) struct OvernightAutoPokeState {
     pub final_wrap_poked: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct CommandCandidatesCache {
     candidates: Vec<(String, &'static str)>,
+    /// Instant the candidates were computed. Skills are re-read from disk
+    /// when a slash prefix is being typed and the cache is older than
+    /// [`App::COMMAND_CANDIDATES_TTL`], so a skill installed while the TUI
+    /// is open appears in `/` completion without a restart or `/skills`.
+    computed_at: std::time::Instant,
 }
 
 /// Memoized result of [`App::command_suggestions`] for one exact input buffer.
@@ -840,6 +847,15 @@ struct CostState {
 }
 
 /// State for an in-progress OAuth/API-key login flow triggered by `/login`.
+
+/// Result of a local `/jobs` overlay cancel, delivered off the TUI thread.
+#[derive(Debug)]
+pub(crate) enum LocalJobsCancelResult {
+    Stopped { all_sessions: bool },
+    NotRunning { task_id: String },
+    Failed { message: String },
+}
+
 /// TUI Application state
 pub struct App {
     provider: Arc<dyn Provider>,
@@ -1297,6 +1313,12 @@ pub struct App {
     autoreview_enabled: bool,
     // Automatic end-of-turn judge toggle for this session
     autojudge_enabled: bool,
+    // Plan Mode toggle mirror for remote sessions. The authoritative state
+    // lives in the server process (it gates tool execution there), so in
+    // remote mode this tracks the last value acknowledged by the server. In
+    // local mode the process-local registry is authoritative and this is a
+    // plain mirror for status display.
+    pub(crate) remote_plan_mode_enabled: bool,
     // Last requested `/improve` mode for this session.
     improve_mode: Option<ImproveMode>,
     // Suppress duplicate memory injection messages for near-identical prompts.
@@ -1418,6 +1440,12 @@ pub struct App {
     inline_view_state: Option<super::InlineViewState>,
     // Interactive model/provider picker
     inline_interactive_state: Option<super::InlineInteractiveState>,
+    /// A pending ask_user question from the agent. While set, the numbered
+    /// option list renders above the input and keys 1-9/↑↓/Enter answer it.
+    pub(crate) pending_ask_user: Option<super::PendingAskUser>,
+    /// A user answer to a pending ask_user question, waiting for the event
+    /// loop (which owns the connection) to send it.
+    pub(crate) pending_ask_user_answer: Option<ask_user::PendingAskUserAnswer>,
     // Cached model picker entries. Building these can require hydrating large provider catalogs.
     model_picker_cache: Option<ModelPickerCache>,
     model_picker_catalog_revision: u64,
@@ -1471,6 +1499,10 @@ pub struct App {
     new_terminal_key: OptionalBinding,
     // Optional configured keybinding for opening the /resume session picker
     open_resume_key: OptionalBinding,
+    // Optional configured keybinding for opening the background jobs picker
+    jobs_picker_key: OptionalBinding,
+    // Configured keybinding for toggling read-only Plan Mode (default Alt+P)
+    plan_mode_key: crate::tui::keybind::ToggleBinding,
     // Optional configured keybinding for accepting the post-error fallback offer
     fallback_switch_key: OptionalBinding,
     // Config reload generation the keybinding snapshot above was parsed at.
@@ -1655,6 +1687,15 @@ pub struct App {
     pub(crate) settings_overlay: Option<super::settings_overlay::SettingsOverlay>,
     /// The `/mcp` server-status overlay, when it is open.
     pub(crate) mcp_picker_overlay: Option<super::mcp_picker::McpPicker>,
+    /// The `/jobs` background-job overlay, when it is open.
+    pub(crate) jobs_picker_overlay: Option<super::jobs_picker::JobsPicker>,
+    /// Remote `/jobs` just opened; send a list request on the next tick.
+    pub(crate) pending_jobs_list: bool,
+    /// Local `/jobs` cancel result, delivered off the TUI thread.
+    pub(crate) pending_jobs_cancel: Option<std::sync::mpsc::Receiver<LocalJobsCancelResult>>,
+    /// Remote `/jobs` cancel request id, while that stop is in flight.
+    /// Overlapping x must not send another; a list snapshot must not clear it.
+    pub(crate) pending_jobs_remote_cancel: Option<u64>,
     session_picker_mode: SessionPickerMode,
     pending_session_picker_load: Option<PendingSessionPickerLoad>,
     /// "Where we left off" lines for the startup screen, and the read that
@@ -1737,6 +1778,12 @@ impl Provider for InertRuntimeProvider {
 }
 
 impl App {
+    /// How long `/` completion candidates stay cached before skills are
+    /// re-read from disk. Short enough that a freshly installed skill shows
+    /// up after a keystroke or two, long enough that the disk scan stays off
+    /// the per-frame path.
+    pub(crate) const COMMAND_CANDIDATES_TTL: std::time::Duration =
+        std::time::Duration::from_secs(2);
     const AUTO_RETRY_BASE_DELAY_SECS: u64 = 2;
     const AUTO_RETRY_MAX_ATTEMPTS: u8 = 3;
     /// Budget for completion-confidence gate nudges per auto-poke cycle.

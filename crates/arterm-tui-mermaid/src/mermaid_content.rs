@@ -225,7 +225,10 @@ pub fn result_to_lines(result: RenderResult, max_width: Option<usize>) -> Vec<Li
         result,
         max_width,
         VIDEO_EXPORT_MODE.load(Ordering::Relaxed),
-        PICKER.get().and_then(|p| p.as_ref()).is_some(),
+        // Route through `image_protocol_available()` so the thread-local
+        // protocol override (headless benches/tests) also enables the inline
+        // placeholder path, matching the other capability checks.
+        image_protocol_available(),
         uses_text_image_fallback(),
     )
 }

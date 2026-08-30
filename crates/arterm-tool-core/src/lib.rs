@@ -99,6 +99,56 @@ pub struct StdinInputRequest {
     pub response_tx: tokio::sync::oneshot::Sender<String>,
 }
 
+/// An agent-initiated multiple-choice question for the human user.
+///
+/// Carries numbered options the client renders as a selectable list (Claude
+/// Code style): the user picks one (or types free-form text) and the choice is
+/// delivered back through the oneshot channel, becoming the tool result the
+/// model sees.
+#[derive(Debug)]
+pub struct AskUserRequest {
+    pub request_id: String,
+    /// The question to display above the options.
+    pub question: String,
+    /// Numbered options; 2-9 entries. May be empty for a free-form-only ask,
+    /// though `ask_user` itself requires at least one option.
+    pub options: Vec<AskUserOption>,
+    /// Optional label for the free-text escape hatch (e.g. "or type your own").
+    pub allow_custom_hint: Option<String>,
+    pub response_tx: tokio::sync::oneshot::Sender<AskUserResponse>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskUserOption {
+    /// Short label shown in the list (e.g. "Option A: drop the table").
+    pub label: String,
+    /// Longer explanation shown dimmed under the label, if any.
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskUserResponse {
+    /// 0-based index into `AskUserRequest::options` when a listed option was
+    /// chosen; `None` when the user typed free-form text instead.
+    pub selected_index: Option<usize>,
+    /// The user's free-form answer, when they typed one.
+    pub custom: Option<String>,
+}
+
+impl AskUserResponse {
+    /// Canonical text form of the answer for the model: the selected option's
+    /// label, or the custom text.
+    pub fn answer_text(&self, options: &[AskUserOption]) -> String {
+        if let Some(custom) = self.custom.as_deref().filter(|c| !c.trim().is_empty()) {
+            return custom.trim().to_string();
+        }
+        match self.selected_index.and_then(|i| options.get(i)) {
+            Some(option) => option.label.clone(),
+            None => String::new(),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ToolContext {
     pub session_id: String,
@@ -106,6 +156,7 @@ pub struct ToolContext {
     pub tool_call_id: String,
     pub working_dir: Option<PathBuf>,
     pub stdin_request_tx: Option<tokio::sync::mpsc::UnboundedSender<StdinInputRequest>>,
+    pub ask_user_request_tx: Option<tokio::sync::mpsc::UnboundedSender<AskUserRequest>>,
     pub graceful_shutdown_signal: Option<InterruptSignal>,
     pub execution_mode: ToolExecutionMode,
 }
@@ -122,9 +173,10 @@ impl ToolContext {
     ///
     /// The fields are written out rather than left to `..Default::default()` on
     /// purpose: a field added later should stop the build here and make its
-    /// author say what a tool call means by it. `stdin_request_tx` and
-    /// `graceful_shutdown_signal` are the two only a live agent can supply --
-    /// see `Agent::tool_context` -- so they start empty.
+    /// author say what a tool call means by it. `stdin_request_tx`,
+    /// `ask_user_request_tx`, and `graceful_shutdown_signal` are the ones only
+    /// a live agent can supply -- see `Agent::tool_context` -- so they start
+    /// empty.
     ///
     /// The three ids are in the same order as the struct declares them.
     pub fn new(
@@ -140,6 +192,7 @@ impl ToolContext {
             tool_call_id,
             working_dir,
             stdin_request_tx: None,
+            ask_user_request_tx: None,
             graceful_shutdown_signal: None,
             execution_mode,
         }
@@ -152,6 +205,7 @@ impl ToolContext {
             tool_call_id,
             working_dir: self.working_dir.clone(),
             stdin_request_tx: self.stdin_request_tx.clone(),
+            ask_user_request_tx: self.ask_user_request_tx.clone(),
             graceful_shutdown_signal: self.graceful_shutdown_signal.clone(),
             execution_mode: self.execution_mode,
         }

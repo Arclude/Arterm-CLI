@@ -173,7 +173,7 @@ pub type ReloadRecoverySnapshot = arterm_selfdev_types::ReloadRecoveryDirective;
 
 mod wire;
 pub use wire::TaskGraphNodeSpec;
-pub use wire::{Request, ServerEvent};
+pub use wire::{AskUserWireOption, BgTaskSummary, Request, ServerEvent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallSummary {
@@ -586,6 +586,7 @@ impl Request {
             Request::Transcript { id, .. } => *id,
             Request::InputShell { id, .. } => *id,
             Request::McpAction { id, .. } => *id,
+            Request::BgAction { id, .. } => *id,
             Request::CycleModel { id, .. } => *id,
             Request::RefreshModels { id } => *id,
             Request::SetModel { id, .. } => *id,
@@ -607,6 +608,7 @@ impl Request {
             Request::SwitchAnthropicAccount { id, .. } => *id,
             Request::SwitchOpenAiAccount { id, .. } => *id,
             Request::StdinResponse { id, .. } => *id,
+            Request::AskUserResponse { id, .. } => *id,
             Request::AgentRegister { id, .. } => *id,
             Request::AgentTask { id, .. } => *id,
             Request::AgentCapabilities { id } => *id,
