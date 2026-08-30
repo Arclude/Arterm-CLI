@@ -1181,7 +1181,7 @@ impl BackgroundTaskManager {
                 terminal_event_record(event_status, event_exit_code, event_error.as_deref()),
             );
             if let Ok(json) = serde_json::to_string_pretty(&final_status) {
-                let _ = fs::write(&task.status_path, json).await;
+                atomic_write_status(&task.status_path, &json).await;
             }
 
             Ok(true)
