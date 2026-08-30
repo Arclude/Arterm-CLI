@@ -178,9 +178,9 @@ fn right_fact_stack_shifts_up_when_scheduled_notification_row_is_absent() {
     let _lock = viewport_snapshot_test_lock();
     clear_flicker_frame_history_for_tests();
     let mut state = fact_test_state(String::new(), false);
-    // The facts may only climb into genuinely blank transcript-tail rows. With
-    // the mid-conversation header hidden there are no header rows to host
-    // them, so the transcript must be tall enough to scroll.
+    // The facts may only climb into genuinely blank transcript-tail rows;
+    // the header is part of the scrollable transcript now, so the transcript
+    // must be tall enough that blank tail rows exist below the header.
     state.display_messages = tall_transcript_messages();
     let backend = TestBackend::new(120, 18);
     let mut terminal = Terminal::new(backend).expect("test terminal");
@@ -233,7 +233,7 @@ fn right_fact_stack_leaves_fully_used_input_rows_untouched_and_moves_up() {
 }
 
 /// A transcript tall enough that the fact stack's only available rows are the
-/// blank transcript tail (the mid-conversation header no longer hosts them).
+/// blank transcript tail (the header may host them when it is on screen).
 fn tall_transcript_messages() -> Vec<DisplayMessage> {
     vec![DisplayMessage::assistant(
         "- alpha filler line that is long enough to wrap on its own\n\
