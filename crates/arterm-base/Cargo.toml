@@ -46,7 +46,6 @@ regex = "1"
 urlencoding = "2"        # URL encoding for web search
 uuid = { version = "1", features = ["v4", "v5"] }
 proctitle = "0.1"
-include_dir = "0.7"      # embed bundled skills into the binary
 
 # Embeddings (local inference) - behind feature flag (163 crates, slow to compile)
 arterm-embedding = { path = "../arterm-embedding", optional = true }

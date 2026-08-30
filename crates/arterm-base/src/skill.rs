@@ -43,13 +43,6 @@ pub struct SkillRegistry {
 /// defensively but with a bound to avoid walking arbitrarily deep trees.
 const PLUGIN_SCAN_MAX_DEPTH: usize = 5;
 
-/// Skills bundled with the arterm binary itself (`crates/arterm-base/skills/`
-/// at build time). These ship with every install, so a fresh user has a
-/// working skill set before installing anything. Disk-backed skills with the
-/// same name override the bundled copy, so users can customize or shadow them
-/// via `~/.arterm/skills/` or a project overlay.
-static BUNDLED_SKILLS: include_dir::Dir<'_> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/skills");
-
 impl SkillRegistry {
     /// Process-wide shared mutable registry used by both `skill_manage` and
     /// direct slash invocation paths. Keeping a single registry prevents slash
@@ -241,10 +234,6 @@ impl SkillRegistry {
         // First-run import from Claude Code / Codex CLI
         Self::import_from_external();
 
-        // Materialize bundled skills into ~/.arterm/skills/ (never overwriting
-        // user copies) before the disk scan below picks everything up.
-        Self::materialize_bundled_skills();
-
         let mut registry = Self::default();
 
         // Load skills provided by Claude Code plugins/marketplace installs
@@ -341,112 +330,6 @@ impl SkillRegistry {
         crate::storage::user_home_path(".claude/plugins")
             .ok()
             .filter(|p| p.is_dir())
-    }
-
-    /// Directory where bundled skills are materialized on disk so their
-    /// companion files (playbooks, technique libraries) are readable via the
-    /// skill's `path`.
-    fn bundled_skills_dir() -> Option<PathBuf> {
-        crate::storage::arterm_dir()
-            .ok()
-            .map(|dir| dir.join("skills"))
-    }
-
-    /// Materialize the embedded bundled skills under `~/.arterm/skills/`
-    /// unless a user copy with the same name already exists there.
-    ///
-    /// Skill bodies reference companion files relative to the skill directory
-    /// (`techniques/00-index.md`, `ida-playbook.md`, ...), and the agent reads
-    /// those from disk using `skill.path`. So a bundled skill only works once
-    /// it exists on disk. Writing into `~/.arterm/skills/` (instead of a
-    /// hidden cache) has two upsides: the copy is user-visible and editable,
-    /// and it keeps the "disk skills override bundled ones" rule trivially
-    /// true — a materialized skill *is* a disk skill on every later load.
-    ///
-    /// Returns the number of skills materialized (0 when everything already
-    /// exists or the store is unavailable).
-    fn materialize_bundled_skills() -> usize {
-        let Some(root) = Self::bundled_skills_dir() else {
-            return 0;
-        };
-
-        let mut count = 0;
-        for entry in Self::bundled_skill_dirs() {
-            let Some(name) = entry
-                .path()
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(str::to_string)
-            else {
-                continue;
-            };
-
-            let dest = root.join(&name);
-            if dest.join("SKILL.md").exists() {
-                // A user copy (or a previous materialization) already exists.
-                // Never overwrite: the user may have edited it.
-                continue;
-            }
-
-            if let Err(e) = Self::write_embedded_entries(entry.entries(), &dest) {
-                crate::logging::warn(&format!(
-                    "Failed to materialize bundled skill '{name}': {e}"
-                ));
-                continue;
-            }
-            count += 1;
-        }
-        count
-    }
-
-    /// The embedded top-level directories that each contain a `SKILL.md`.
-    ///
-    /// `Dir::dirs()` yields the top-level directories of the embedded root,
-    /// but `get_file("SKILL.md")` on them does not resolve because include_dir
-    /// flattens children into path-prefixed entries (`name/SKILL.md`). So a
-    /// skill directory is detected by scanning its entries for a file whose
-    /// file name is exactly `SKILL.md`.
-    fn bundled_skill_dirs() -> Vec<include_dir::Dir<'static>> {
-        BUNDLED_SKILLS
-            .dirs()
-            .filter(|dir| {
-                dir.entries().iter().any(|entry| {
-                    matches!(entry, include_dir::DirEntry::File(_))
-                        && entry.path().file_name().is_some_and(|n| n == "SKILL.md")
-                })
-            })
-            .cloned()
-            .collect()
-    }
-
-    /// Write embedded entries to disk under `dest`, mapping each entry's
-    /// embedded path (`skill-name/sub/file`) onto the destination by dropping
-    /// the leading skill-name component.
-    fn write_embedded_entries(
-        entries: &[include_dir::DirEntry<'_>],
-        dest: &Path,
-    ) -> std::io::Result<()> {
-        std::fs::create_dir_all(dest)?;
-        for entry in entries {
-            let full = entry.path();
-            let relative = full
-                .strip_prefix(full.iter().next().unwrap_or_default())
-                .unwrap_or(full);
-            let out = dest.join(relative);
-            match entry {
-                include_dir::DirEntry::Dir(subdir) => {
-                    std::fs::create_dir_all(&out)?;
-                    Self::write_embedded_entries(subdir.entries(), &out)?;
-                }
-                include_dir::DirEntry::File(file) => {
-                    if let Some(parent) = out.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::write(&out, file.contents())?;
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Load skills provided by Claude Code plugins under `plugins_root`.
@@ -1052,88 +935,6 @@ fn normalize_skill_search_text(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[cfg(test)]
-mod bundled_skills_tests {
-    use super::*;
-
-    #[test]
-    fn bundled_skills_embed_at_least_one_valid_skill() {
-        // The repo ships skills/ with SKILL.md entries; the embedded dir must
-        // expose them so materialize_bundled_skills has something to write.
-        let names: Vec<String> = SkillRegistry::bundled_skill_dirs()
-            .iter()
-            .map(|d| {
-                d.path()
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .collect();
-        assert!(
-            !names.is_empty(),
-            "at least one bundled skill with a SKILL.md must be embedded"
-        );
-        assert!(
-            names.iter().all(|n| !n.is_empty()),
-            "bundled skill directory names must be non-empty: {names:?}"
-        );
-    }
-
-    #[test]
-    fn materialize_writes_bundled_skills_without_overwriting_user_copies() {
-        let _guard = crate::storage::lock_test_env();
-        let temp = tempfile::tempdir().expect("tempdir");
-        crate::env::set_var("ARTERM_HOME", temp.path());
-
-        // First materialization: everything embedded lands on disk.
-        let first = SkillRegistry::materialize_bundled_skills();
-        assert!(first > 0, "first run must materialize the bundled skills");
-
-        let skills_root = temp.path().join("skills");
-        let embedded_names: Vec<String> = SkillRegistry::bundled_skill_dirs()
-            .iter()
-            .map(|d| {
-                d.path()
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .collect();
-        for name in &embedded_names {
-            assert!(
-                skills_root.join(name).join("SKILL.md").exists(),
-                "materialized skill '{name}' must exist on disk"
-            );
-        }
-
-        // Edit one materialized copy like a user would.
-        if let Some(name) = embedded_names.first() {
-            let skill_md = skills_root.join(name).join("SKILL.md");
-            std::fs::write(&skill_md, "---\nname: edited\n---\nuser edit\n")
-                .expect("write user edit");
-        }
-
-        // Second materialization: user edits must survive (no overwrite).
-        let second = SkillRegistry::materialize_bundled_skills();
-        assert_eq!(
-            second, 0,
-            "second run must not re-materialize or overwrite existing copies"
-        );
-        if let Some(name) = embedded_names.first() {
-            let content =
-                std::fs::read_to_string(skills_root.join(name).join("SKILL.md")).unwrap();
-            assert!(
-                content.contains("user edit"),
-                "user edits to a materialized skill must never be overwritten"
-            );
-        }
-
-        crate::env::remove_var("ARTERM_HOME");
-    }
 }
 
 #[cfg(test)]
