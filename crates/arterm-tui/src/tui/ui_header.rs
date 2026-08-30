@@ -679,13 +679,11 @@ fn build_persistent_header_with_auth(
         .map(|version| header_version_label(version, include_hash));
 
     // First line: `arterm` (+ `self-dev` when running a dev/canary build),
-    // followed by any remaining status badges rendered dimly. This is the
-    // product-name row: it greats the user on the empty/welcome screen, but
-    // once a conversation is underway it is redundant chrome and is dropped
-    // so the transcript starts higher. Its update badges (`srv↑`/`cli↑`)
-    // move onto the `server:`/`client:` rows, which persist.
-    let show_product_row = app.chat_is_initially_empty();
-    if show_product_row {
+    // followed by any remaining status badges rendered dimly. This row stays
+    // for the whole session: it is the session's identity line, and hiding it
+    // mid-conversation made the transcript lose its anchor at the top of the
+    // scrollback (users could no longer scroll up to see the header).
+    {
         let mut spans = vec![Span::styled(
             "arterm".to_string(),
             Style::default().fg(header_name_color()).bold(),
@@ -758,17 +756,13 @@ fn build_persistent_header_with_auth(
         }
         lines.push(Line::from(spans).alignment(align));
     } else if server_name.is_none() {
-        // No session name yet (local fresh boot): keep a dim product marker
-        // only while the chat is still empty.
-        if app.chat_is_initially_empty() {
-            lines.push(
-                Line::from(Span::styled(
-                    "Arterm".to_string(),
-                    Style::default().fg(header_name_color()),
-                ))
-                .alignment(align),
-            );
-        }
+        lines.push(
+            Line::from(Span::styled(
+                "Arterm".to_string(),
+                Style::default().fg(header_name_color()),
+            ))
+            .alignment(align),
+        );
     }
 
     // Single model line: dim active-route method on the left, styled model
@@ -1044,17 +1038,6 @@ pub(super) fn build_header_sections(
     app: &dyn TuiState,
     width: u16,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-    // The header is a welcome-screen element. Once a real conversation is
-    // underway (a user or assistant message exists) it must show nothing at
-    // all — no product row, no server/client/model rows, no
-    // auth/mcp/skills/dir detail lines — so the transcript starts at the very
-    // top of the viewport. Launch system notices (a configured hotkey, a
-    // recovered session) are not a conversation, so the header stays while
-    // only those are on screen. The overscroll status line (Down at the
-    // bottom) carries the mode badges instead.
-    if app.conversation_started() {
-        return (Vec::new(), Vec::new());
-    }
     let auth = app.auth_status();
     let active = ActiveCredentialOverrides::from_app(app);
     (

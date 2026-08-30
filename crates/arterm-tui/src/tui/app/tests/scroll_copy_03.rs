@@ -1986,54 +1986,48 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
     let backend = ratatui::backend::TestBackend::new(80, 25);
     let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");
 
-    // Bottom position (tail-follow): the header is welcome-screen-only, so
-    // once a conversation is underway nothing from it may render — no
-    // product row, no server:/client: rows, no model row, and no sticky
-    // band pinning any of them at the viewport top. The previous-prompt
-    // preview (`3› ...`) is transcript content, not header residue.
+    // Bottom position (tail-follow): the header has scrolled off, the sticky
+    // band must pin the status row at the viewport top. Plan Mode no longer
+    // badges the header (it lives in the overscroll status line instead), so
+    // assert on the `arterm` name row and the absence of the plan badge.
     let text = render_and_snap(&app, &mut terminal);
     let rows: Vec<&str> = text.lines().collect();
-    let header_residue: Vec<&str> = rows
+    let status_rows = rows
         .iter()
-        .filter(|row| {
-            let t = row.trim_start();
-            t.starts_with("client:")
-                || t.starts_with("server:")
-                || t.starts_with("arterm")
-                || t.starts_with("/model to switch")
-                || t.starts_with("/login to add provider")
-        })
-        .map(|row| *row)
-        .collect();
+        .filter(|row| row.trim_start().starts_with("arterm"))
+        .count();
+    assert_eq!(
+        status_rows, 1,
+        "exactly one pinned status row with the arterm name:\n{text}"
+    );
     assert!(
-        header_residue.is_empty(),
-        "the header must be fully hidden mid-conversation (found {header_residue:?}):\n{text}"
+        rows.iter()
+            .take(3)
+            .any(|row| row.trim_start().starts_with("arterm")),
+        "the pinned status row must sit at the very top of the viewport:\n{text}"
     );
     assert!(
         !rows.iter().any(|row| row.contains("· plan")),
-        "plan mode must not badge the header or any pinned row:\n{text}"
-    );
-    assert!(
-        !rows.iter().any(|row| row.contains("self-dev")),
-        "the product-name row (arterm self-dev) must hide mid-conversation:\n{text}"
+        "plan mode must not badge the header or the sticky band:\n{text}"
     );
     assert!(
         text.contains("resp 5 line 14"),
-        "latest transcript content stays visible at the top:\n{text}"
+        "latest transcript content stays visible beneath the band:\n{text}"
     );
 
-    // Scroll up to the very top: the in-flow header is still hidden (the
-    // conversation exists), so the transcript itself starts at row 0.
+    // Scroll up into the header region: the in-flow header is visible again,
+    // so the band must not duplicate the status row.
     app.scroll_offset = 0;
     app.auto_scroll_paused = true;
     let top_text = render_and_snap(&app, &mut terminal);
-    assert!(
-        top_text.contains("prompt number 0"),
-        "scrolled to the top, the first prompt leads the viewport:\n{top_text}"
-    );
-    assert!(
-        !top_text.contains("client:") && !top_text.contains("server:"),
-        "no header rows even when scrolled fully up mid-conversation:\n{top_text}"
+    let top_rows: Vec<&str> = top_text.lines().collect();
+    let top_status_rows = top_rows
+        .iter()
+        .filter(|row| row.trim_start().starts_with("arterm"))
+        .count();
+    assert_eq!(
+        top_status_rows, 1,
+        "no duplicate status row while the header is in view:\n{top_text}"
     );
 
     arterm_app_core::tool::set_plan_mode(&session_id, false);
