@@ -46,6 +46,67 @@ fn overscroll_status_line_shows_plan_badge_when_plan_mode_is_on() {
 }
 
 #[test]
+fn overscroll_status_line_shows_bg_badge_when_background_task_runs() {
+    use ratatui::backend::TestBackend;
+
+    fn overscroll_row(background_running: Option<(usize, Vec<&str>)>) -> String {
+        let info_widget_data = match background_running {
+            None => Default::default(),
+            Some((count, tasks)) => info_widget::InfoWidgetData {
+                background_info: Some(info_widget::BackgroundInfo {
+                    running_count: count,
+                    running_tasks: tasks.iter().map(|t| t.to_string()).collect(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        };
+        let state = TestState {
+            chat_overscroll_active: true,
+            info_widget_data,
+            ..Default::default()
+        };
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                super::super::input_ui::draw_overscroll_status(
+                    frame,
+                    &state,
+                    ratatui::layout::Rect::new(0, 0, 80, 1),
+                );
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().to_string())
+            .collect::<String>()
+            .trim()
+            .to_string()
+    }
+
+    // No background tasks: no badge.
+    let idle = overscroll_row(None);
+    assert!(!idle.contains("bg"), "no bg badge when idle: {idle:?}");
+
+    // One running shell task: "shell bg" badge.
+    let one = overscroll_row(Some((1, vec!["shell"])));
+    assert!(
+        one.contains("shell bg"),
+        "single running task should show a 'shell bg' badge: {one:?}"
+    );
+
+    // Multiple tasks: first kind plus count.
+    let many = overscroll_row(Some((3, vec!["shell", "task", "task"])));
+    assert!(
+        many.contains("shell +2 bg"),
+        "multiple running tasks should show first kind + count: {many:?}"
+    );
+}
+
+#[test]
 fn test_render_rounded_box_sides_aligned() {
     let content = vec![
         Line::from("short"),

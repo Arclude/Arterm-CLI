@@ -1961,6 +1961,28 @@ pub(super) fn overscroll_status_spans(app: &dyn TuiState) -> Vec<Span<'static>> 
         ));
     }
 
+    // Active background tasks: a compact badge so the user scrolling at the
+    // bottom knows a shell/task is still running even when the transcript is
+    // quiet. Shows the task kind (e.g. "shell") or a plain count.
+    if let Some(bg) = data
+        .background_info
+        .as_ref()
+        .filter(|bg| bg.running_count > 0)
+    {
+        if !spans.is_empty() {
+            spans.push(sep());
+        }
+        let label = match bg.running_tasks.first() {
+            Some(first) if bg.running_count == 1 => format!("⚙ {first} bg"),
+            Some(first) => format!("⚙ {first} +{} bg", bg.running_count - 1),
+            None => format!("⚙ {} bg", bg.running_count),
+        };
+        spans.push(Span::styled(
+            label,
+            Style::default().fg(rgb(255, 200, 100)),
+        ));
+    }
+
     // Model
     let model = data
         .model
