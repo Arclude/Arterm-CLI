@@ -72,7 +72,9 @@ pub(super) fn parse_poke_command(trimmed: &str) -> Option<Result<PokeCommand, St
         "/poke on" => Some(Ok(PokeCommand::On)),
         "/poke off" => Some(Ok(PokeCommand::Off)),
         "/poke status" => Some(Ok(PokeCommand::Status)),
-        _ if trimmed.starts_with("/poke ") => Some(Err("Usage: /poke [on|off|status]".to_string())),
+        _ if trimmed.starts_with("/poke ") => Some(Err(
+            "Usage: /poke [on|off|status] (bare /poke toggles)".to_string(),
+        )),
         _ => None,
     }
 }
@@ -2148,7 +2150,20 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
                 app.set_status_notice("Poke: OFF");
                 app.push_display_message(DisplayMessage::system(poke_disabled_message(cleared)));
             }
-            Ok(PokeCommand::Trigger | PokeCommand::On) => {
+            Ok(PokeCommand::Trigger) => {
+                // Bare `/poke` toggles, matching the Ctrl+P hotkey: when
+                // auto-poke is already armed, a second `/poke` disarms it
+                // instead of re-arming forever. `/poke on` stays explicitly
+                // one-directional.
+                if app.auto_poke_incomplete_todos {
+                    let cleared = disable_auto_poke(app);
+                    app.set_status_notice("Poke: OFF");
+                    app.push_display_message(DisplayMessage::system(poke_disabled_message(cleared)));
+                } else {
+                    activate_auto_poke_local(app);
+                }
+            }
+            Ok(PokeCommand::On) => {
                 activate_auto_poke_local(app);
             }
         }

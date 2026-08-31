@@ -2201,7 +2201,9 @@ fn test_poke_arms_auto_poke_until_todos_are_done() {
         )
         .expect("save todos");
 
-        assert!(super::commands::handle_session_command(&mut app, "/poke"));
+        // Explicit `/poke on`: bare `/poke` now toggles, and the test app's
+        // auto-poke starts armed by default (features.auto_poke = true).
+        assert!(super::commands::handle_session_command(&mut app, "/poke on"));
 
         assert!(app.auto_poke_incomplete_todos);
         assert!(app.pending_turn);
@@ -2210,6 +2212,37 @@ fn test_poke_arms_auto_poke_until_todos_are_done() {
                 .contains("1 incomplete todo. We poked the agent")
                 && msg.content.contains("/poke off")
         }));
+    });
+}
+
+#[test]
+fn test_bare_poke_toggles_off_when_already_armed() {
+    with_temp_arterm_home(|| {
+        let mut app = create_test_app();
+        // Arm first, exactly like a user running `/poke on`.
+        assert!(super::commands::handle_session_command(&mut app, "/poke on"));
+        assert!(app.auto_poke_incomplete_todos);
+
+        // A second bare `/poke` must disarm (toggle), not re-arm.
+        assert!(super::commands::handle_session_command(&mut app, "/poke"));
+        assert!(
+            !app.auto_poke_incomplete_todos,
+            "bare /poke must toggle auto-poke off when it is already on"
+        );
+        assert!(!app.auto_poke_default_on);
+        assert_eq!(app.status_notice().as_deref().map(str::to_string), Some("Poke: OFF".to_string()));
+
+        // And a third bare `/poke` arms it again.
+        assert!(super::commands::handle_session_command(&mut app, "/poke"));
+        assert!(app.auto_poke_incomplete_todos);
+
+        // `/poke on` while already on stays on (explicit, not a toggle).
+        assert!(super::commands::handle_session_command(&mut app, "/poke on"));
+        assert!(app.auto_poke_incomplete_todos);
+        assert_eq!(
+            app.status_notice().as_deref().map(str::to_string),
+            Some("Poke: ON".to_string())
+        );
     });
 }
 
@@ -2337,7 +2370,7 @@ fn test_poke_queues_when_turn_is_in_progress() {
 
         app.is_processing = true;
 
-        assert!(super::commands::handle_session_command(&mut app, "/poke"));
+        assert!(super::commands::handle_session_command(&mut app, "/poke on"));
 
         assert!(app.auto_poke_incomplete_todos);
         assert!(app.is_processing);

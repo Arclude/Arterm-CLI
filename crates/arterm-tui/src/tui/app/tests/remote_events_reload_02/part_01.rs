@@ -27,7 +27,10 @@ fn test_remote_poke_queues_when_turn_is_in_progress() {
         app.is_processing = true;
         app.status = ProcessingStatus::Streaming;
         app.current_message_id = Some(42);
-        app.input = "/poke".to_string();
+        // Explicit `/poke on`: bare `/poke` toggles, and auto-poke starts
+        // armed by default (features.auto_poke = true), so a bare `/poke`
+        // would disarm instead of queueing.
+        app.input = "/poke on".to_string();
         app.cursor_pos = app.input.len();
 
         rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))

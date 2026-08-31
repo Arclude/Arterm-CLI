@@ -129,7 +129,7 @@ impl App {
                 "/dictate\nRun the configured external speech-to-text command and inject the transcript into arterm.\n\nConfigure [dictation] in ~/.arterm/config.toml:\n  command       shell command that prints transcript to stdout,\n                for example ~/.local/bin/my-whisper-script --grammar-target code\n  mode          insert|append|replace|send\n  key           optional hotkey (for example alt+;)\n  timeout_secs  max wait time"
             }
             "poke" => {
-                "/poke [on|off|status]\nPoke the model to resume when it has stopped with incomplete todos.\n\n\
+                "/poke [on|off|status]\nPoke the model to resume when it has stopped with incomplete todos. Bare /poke toggles; /poke on and /poke off are one-directional.\n\n\
                 Auto-poke now starts enabled by default, and Ctrl+P toggles it on/off.\n\
                 Set auto_poke = false under [features] in ~/.arterm/config.toml to start with it disabled.\n\
                 /poke or /poke on arms auto-poke and immediately pokes if work remains.\n\
