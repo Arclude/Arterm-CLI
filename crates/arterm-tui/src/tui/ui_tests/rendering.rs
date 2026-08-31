@@ -107,6 +107,93 @@ fn overscroll_status_line_shows_bg_badge_when_background_task_runs() {
 }
 
 #[test]
+fn overscroll_bg_badge_shows_live_spawned_task_end_to_end() {
+    use ratatui::backend::TestBackend;
+
+    let _lock = crate::storage::lock_test_env();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+
+    // Spawn a real background task (30s fake work) through the same manager
+    // the App's info_widget_data reads from, then mirror what that snapshot
+    // produces into the TestState the overscroll renderer consumes.
+    let session_id = "overscroll-badge-e2e".to_string();
+    let info = rt.block_on(crate::background::global().spawn_with_notify(
+        "bash",
+        Some("sleep for overscroll badge".to_string()),
+        &session_id,
+        false,
+        false,
+        |_output| async {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            Ok(crate::background::TaskResult::completed(Some(0)))
+        },
+    ));
+
+    // Let the manager register the task before the snapshot.
+    let started = std::time::Instant::now();
+    let running_tools = loop {
+        let summaries = rt.block_on(crate::background::global().list());
+        let running_tools: Vec<String> = summaries
+            .iter()
+            .filter(|task| task.task_id == info.task_id)
+            .map(|task| task.tool_name.clone())
+            .collect();
+        if !running_tools.is_empty() {
+            break running_tools;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "spawned task should register with the manager"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+
+    let info_widget_data = info_widget::InfoWidgetData {
+        background_info: Some(info_widget::BackgroundInfo {
+            // Other parallel tests may have live tasks in the shared global
+            // manager; scope the badge data to this test's own session so the
+            // assertion is deterministic.
+            running_count: 1,
+            running_tasks: running_tools,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let state = TestState {
+        chat_overscroll_active: true,
+        info_widget_data,
+        ..Default::default()
+    };
+
+    let backend = TestBackend::new(100, 1);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            super::super::input_ui::draw_overscroll_status(
+                frame,
+                &state,
+                ratatui::layout::Rect::new(0, 0, 100, 1),
+            );
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let text: String = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol().to_string())
+        .collect();
+
+    assert!(
+        text.contains("bash bg"),
+        "overscroll line should badge the live spawned task, got:\n{text}"
+    );
+
+    // Cleanup: cancel so the task does not leak into other tests.
+    let _ = rt.block_on(crate::background::global().cancel(&info.task_id));
+}
+
+#[test]
 fn test_render_rounded_box_sides_aligned() {
     let content = vec![
         Line::from("short"),
