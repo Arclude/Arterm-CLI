@@ -182,10 +182,7 @@ fn draw_ask_user(
     let total_rows = lines.len();
     let scroll = if total_rows > body_h && body_h > 0 {
         // First row of the highlighted option's block.
-        let sel_start = option_row_start
-            .get(ask.selected)
-            .copied()
-            .unwrap_or(0);
+        let sel_start = option_row_start.get(ask.selected).copied().unwrap_or(0);
         // Prefer one context row above the option block...
         let mut target = sel_start.saturating_sub(1);
         // ...but never let the option's own head row fall below the viewport.

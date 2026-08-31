@@ -1977,10 +1977,7 @@ pub(super) fn overscroll_status_spans(app: &dyn TuiState) -> Vec<Span<'static>> 
             Some(first) => format!("⚙ {first} +{} bg", bg.running_count - 1),
             None => format!("⚙ {} bg", bg.running_count),
         };
-        spans.push(Span::styled(
-            label,
-            Style::default().fg(rgb(255, 200, 100)),
-        ));
+        spans.push(Span::styled(label, Style::default().fg(rgb(255, 200, 100))));
     }
 
     // Model

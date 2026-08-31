@@ -2158,7 +2158,9 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
                 if app.auto_poke_incomplete_todos {
                     let cleared = disable_auto_poke(app);
                     app.set_status_notice("Poke: OFF");
-                    app.push_display_message(DisplayMessage::system(poke_disabled_message(cleared)));
+                    app.push_display_message(DisplayMessage::system(poke_disabled_message(
+                        cleared,
+                    )));
                 } else {
                     activate_auto_poke_local(app);
                 }
