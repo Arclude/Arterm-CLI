@@ -177,12 +177,19 @@ impl App {
         if self.pending_jobs_remote_cancel == Some(id) {
             self.pending_jobs_remote_cancel = None;
         }
+        // Keep the persistent snapshot current even when the overlay is
+        // closed: the overscroll status badge (and any other bg indicator)
+        // reads from it on remote sessions.
+        let snapshot_changed = self.remote_bg_tasks != tasks;
+        self.remote_bg_tasks = tasks;
         if let Some(picker) = self.jobs_picker_overlay.as_mut() {
             apply_jobs_rows(
                 picker,
-                tasks,
+                self.remote_bg_tasks.clone(),
                 self.pending_jobs_cancel.is_some() || self.pending_jobs_remote_cancel.is_some(),
             );
+            self.request_full_redraw();
+        } else if snapshot_changed {
             self.request_full_redraw();
         }
     }

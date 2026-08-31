@@ -1440,23 +1440,46 @@ impl crate::tui::TuiState for App {
 
         // Gather background task info
         let background_info = {
-            // Get running background tasks count
-            let bg_manager = crate::background::global();
-            let (running_count, running_tasks, progress) = bg_manager.running_snapshot();
-
-            if running_count > 0 {
-                Some(crate::tui::info_widget::BackgroundInfo {
-                    running_count,
-                    running_tasks,
-                    progress_summary: progress.as_ref().map(|progress| progress.label.clone()),
-                    progress_detail: progress
-                        .as_ref()
-                        .and_then(|progress| progress.detail.clone()),
-                    memory_agent_active: false,
-                    memory_agent_turns: 0,
-                })
+            if self.is_remote {
+                // Remote sessions have no in-process tasks; the overscroll
+                // badge and other bg indicators read the latest server
+                // snapshot instead (refreshed by the tick's throttled list).
+                let running: Vec<&crate::protocol::BgTaskSummary> = self
+                    .remote_bg_tasks
+                    .iter()
+                    .filter(|task| task.status == "running")
+                    .collect();
+                if running.is_empty() {
+                    None
+                } else {
+                    Some(crate::tui::info_widget::BackgroundInfo {
+                        running_count: running.len(),
+                        running_tasks: running.iter().map(|task| task.tool_name.clone()).collect(),
+                        progress_summary: None,
+                        progress_detail: None,
+                        memory_agent_active: false,
+                        memory_agent_turns: 0,
+                    })
+                }
             } else {
-                None
+                // Get running background tasks count
+                let bg_manager = crate::background::global();
+                let (running_count, running_tasks, progress) = bg_manager.running_snapshot();
+
+                if running_count > 0 {
+                    Some(crate::tui::info_widget::BackgroundInfo {
+                        running_count,
+                        running_tasks,
+                        progress_summary: progress.as_ref().map(|progress| progress.label.clone()),
+                        progress_detail: progress
+                            .as_ref()
+                            .and_then(|progress| progress.detail.clone()),
+                        memory_agent_active: false,
+                        memory_agent_turns: 0,
+                    })
+                } else {
+                    None
+                }
             }
         };
 

@@ -2005,3 +2005,53 @@ fn remote_submit_input_never_strands_a_local_pending_turn() {
         "the prompt should be queued for the remote tick loop"
     );
 }
+
+#[test]
+fn remote_bg_task_snapshot_feeds_the_overscroll_badge() {
+    use crate::tui::TuiState;
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+
+    let started_at = (chrono::Utc::now() - chrono::Duration::seconds(4)).to_rfc3339();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    // Before any server snapshot: no badge data.
+    assert!(app.info_widget_data().background_info.is_none());
+
+    // Server list arrives while no overlay is open: the persistent snapshot
+    // must still update (this is what the overscroll badge reads).
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 42,
+            tasks: vec![running_bg_task("bg-1", &started_at)],
+        },
+        &mut remote,
+    );
+    let info = app
+        .info_widget_data()
+        .background_info
+        .expect("remote snapshot must feed background_info");
+    assert_eq!(info.running_count, 1);
+    assert_eq!(info.running_tasks, vec!["bash".to_string()]);
+    assert!(
+        app.jobs_picker_overlay.is_none(),
+        "the snapshot must update without opening the overlay"
+    );
+
+    // A list with the task completed clears the badge data again.
+    let mut done = running_bg_task("bg-1", &started_at);
+    done.status = "completed".to_string();
+    handle_server_event(
+        &mut app,
+        ServerEvent::BgTaskList {
+            id: 43,
+            tasks: vec![done],
+        },
+        &mut remote,
+    );
+    assert!(app.info_widget_data().background_info.is_none());
+}

@@ -65,6 +65,10 @@ pub(super) use server_events::handle_server_event;
 
 const CONNECTION_MESSAGE_TITLE: &str = "Connection";
 const RELOAD_MARKER_MAX_AGE: Duration = Duration::from_secs(30);
+/// How often a remote session re-requests the server's bg-task list to keep
+/// the persistent snapshot (overscroll badge) live. Cheap request; the value
+/// trades freshness for idle chatter.
+const REMOTE_BG_LIST_REFRESH: Duration = Duration::from_secs(2);
 
 fn handle_ctrl_kill_to_end(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> bool {
     // Match the local draft semantics before remote navigation can claim Ctrl+K.
@@ -116,6 +120,7 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= app.poll_jobs_cancel();
     if app.pending_jobs_list {
         app.pending_jobs_list = false;
+        app.last_remote_bg_list_at = Some(std::time::Instant::now());
         let all_sessions = app
             .jobs_picker_overlay
             .as_ref()
@@ -127,6 +132,17 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
             picker.set_status(format!("Could not list jobs: {error:#}"));
         }
         needs_redraw = true;
+    } else if app.is_remote && app.last_remote_bg_list_at.is_none_or(|at| at.elapsed() >= REMOTE_BG_LIST_REFRESH)
+    {
+        // Keep the persistent bg-task snapshot (overscroll badge, indicators)
+        // live on remote sessions with a throttled periodic list request. The
+        // overlay path above handles explicit opens/refreshes immediately.
+        app.last_remote_bg_list_at = Some(std::time::Instant::now());
+        let all_sessions = app
+            .jobs_picker_overlay
+            .as_ref()
+            .is_some_and(|picker| picker.all_sessions());
+        let _ = remote.bg_action("list", None, all_sessions).await;
     }
     needs_redraw |= dispatch_compacted_history_load(app, remote).await;
     // Adopt the resolved scroll position once a frame containing newly loaded

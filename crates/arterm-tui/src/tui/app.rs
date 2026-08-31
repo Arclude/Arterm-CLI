@@ -1689,6 +1689,14 @@ pub struct App {
     pub(crate) jobs_picker_overlay: Option<super::jobs_picker::JobsPicker>,
     /// Remote `/jobs` just opened; send a list request on the next tick.
     pub(crate) pending_jobs_list: bool,
+    /// Latest bg-task list snapshot received from the server (remote
+    /// sessions). Feeds the overscroll status badge and other bg indicators;
+    /// local sessions read the in-process manager instead.
+    pub(crate) remote_bg_tasks: Vec<crate::protocol::BgTaskSummary>,
+    /// Instant of the last bg-list request on a remote session; the tick
+    /// throttles periodic refreshes so the badge stays live without a
+    /// request every redraw tick.
+    pub(crate) last_remote_bg_list_at: Option<std::time::Instant>,
     /// Local `/jobs` cancel result, delivered off the TUI thread.
     pub(crate) pending_jobs_cancel: Option<std::sync::mpsc::Receiver<LocalJobsCancelResult>>,
     /// Remote `/jobs` cancel request id, while that stop is in flight.
