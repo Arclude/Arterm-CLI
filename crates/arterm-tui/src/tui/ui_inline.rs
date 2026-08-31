@@ -33,7 +33,10 @@ pub(super) fn inline_ui_height(app: &dyn TuiState, width: u16) -> u16 {
         }
         Some(crate::tui::InlineUiStateRef::AskUser(ask)) => {
             // Wrapped rows: mirror draw_ask_user's layout math so the reserved
-            // height matches what actually renders (no cut-off labels).
+            // height matches what actually renders (no cut-off labels). The
+            // box scrolls when content exceeds the cap (20 rows, matching the
+            // interactive picker), so every option stays reachable even on
+            // tall questions in small terminals.
             let wrap_width = (width.saturating_sub(2)).max(8) as usize;
             let mut rows = 0usize;
             rows += wrap_plain(&ask.question, wrap_width).len().max(1);
@@ -45,7 +48,7 @@ pub(super) fn inline_ui_height(app: &dyn TuiState, width: u16) -> u16 {
             }
             rows += 2; // custom-answer hint + key hint
             rows += 2; // box borders
-            rows.min(14) as u16
+            rows.min(20) as u16
         }
         None => 0,
     }
@@ -63,6 +66,12 @@ pub(super) fn draw_inline_ui(frame: &mut Frame, app: &dyn TuiState, area: Rect) 
 }
 
 /// Claude Code-style numbered option list for a pending ask_user question.
+///
+/// Every option is always reachable regardless of terminal size: when the
+/// wrapped rows exceed the box height the list scrolls to keep the
+/// highlighted option visible (arrows/digits move the highlight; the view
+/// follows). A scroll indicator in the bottom border replaces the old
+/// "enlarge your terminal" truncation.
 fn draw_ask_user(
     frame: &mut Frame,
     app: &dyn TuiState,
@@ -90,7 +99,11 @@ fn draw_ask_user(
     let wrap_width = width.saturating_sub(2).max(8);
     let option_prefix = "▸ 9. ".len(); // widest prefix, kept on wrap indents
 
+    // Build the wrapped rows and remember where each option's rows start,
+    // so the viewport can always scroll to the highlighted option.
     let mut lines: Vec<Line> = Vec::new();
+    let mut tail: Vec<Line> = Vec::new();
+    let mut option_row_start: Vec<usize> = Vec::with_capacity(ask.options.len());
     for (i, chunk) in wrap_plain(&ask.question, wrap_width)
         .into_iter()
         .enumerate()
@@ -104,6 +117,7 @@ fn draw_ask_user(
         )));
     }
     for (index, option) in ask.options.iter().enumerate() {
+        option_row_start.push(lines.len());
         let number = index + 1;
         let is_selected = index == ask.selected;
         let marker = if is_selected { "▸" } else { " " };
@@ -137,57 +151,104 @@ fn draw_ask_user(
         }
     }
     if ask.allow_custom {
-        lines.push(Line::from(Span::styled(
+        tail.push(Line::from(Span::styled(
             "or type your own answer + Enter",
             Style::default().fg(hint_color),
         )));
     }
-    lines.push(Line::from(Span::styled(
+    tail.push(Line::from(Span::styled(
         "1-9/↑↓ choose · Enter submit",
         Style::default().fg(hint_color),
     )));
-
-    // Clamp to the available rows. Prioritize: question, every option label,
-    // the hint, then details last (details are the only optional rows).
-    let max_rows = height.saturating_sub(2);
-    if lines.len() > max_rows {
-        // Drop detail continuation/hint rows from the bottom until it fits,
-        // then hard-truncate whatever remains.
-        let hint = lines.pop();
-        while lines.len() > max_rows.saturating_sub(1) && lines.len() > 1 {
-            lines.pop();
-        }
-        if let Some(hint) = hint {
-            lines.push(hint);
-        }
-        lines.truncate(max_rows);
-        // Signal that content was elided so the user knows more exists.
-        if lines.len() == max_rows
-            && let Some(last) = lines.last_mut()
-        {
-            *last = Line::from(Span::styled(
-                "… (daha fazlası için terminali büyüt)",
-                Style::default().fg(hint_color),
-            ));
-        }
-    }
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(Span::styled(" ? ", Style::default().fg(question_color)));
-    let paragraph = if app.centered_mode() {
-        Paragraph::new(
-            lines
-                .iter()
-                .map(|l| l.clone().alignment(ratatui::layout::Alignment::Center))
-                .collect::<Vec<_>>(),
-        )
-        .block(block)
+    let inner = block.inner(area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    // Split the inner area: the body (question + options) scrolls, the tail
+    // hints are pinned to the last rows so the controls never scroll away.
+    // When rows are scarce the body wins: at least one option row is kept
+    // and the tail hints shrink (or vanish) instead of hiding every option.
+    let tail_height = (tail.len() as u16).min(inner.height.saturating_sub(1));
+    let body_height = inner.height - tail_height;
+
+    // Scroll the wrapped list so the highlighted option stays in view.
+    let body_h = body_height as usize;
+    let total_rows = lines.len();
+    let scroll = if total_rows > body_h && body_h > 0 {
+        // First row of the highlighted option's block.
+        let sel_start = option_row_start
+            .get(ask.selected)
+            .copied()
+            .unwrap_or(0);
+        // Prefer one context row above the option block...
+        let mut target = sel_start.saturating_sub(1);
+        // ...but never let the option's own head row fall below the viewport.
+        if sel_start + 1 > target + body_h {
+            target = sel_start + 1 - body_h;
+        }
+        // Clamp so the last body row stays filled.
+        target.min(total_rows - body_h)
     } else {
-        Paragraph::new(lines).block(block)
+        0
     };
-    frame.render_widget(paragraph, area);
+
+    // Scroll position lives on the bottom border so it never steals a row.
+    let more_below = (scroll + body_height as usize) < total_rows;
+    let block = if body_height > 0 && more_below {
+        let indicator = if scroll > 0 {
+            " ↑↓ more "
+        } else {
+            " ↑ more "
+        };
+        block.title_bottom(Span::styled(indicator, Style::default().fg(hint_color)))
+    } else if scroll > 0 {
+        block.title_bottom(Span::styled(" ↓ more ", Style::default().fg(hint_color)))
+    } else {
+        block
+    };
+    frame.render_widget(block, area);
+
+    fn center_line(l: Line) -> Line {
+        l.alignment(ratatui::layout::Alignment::Center)
+    }
+    let body_lines = if app.centered_mode() {
+        lines.into_iter().map(center_line).collect::<Vec<_>>()
+    } else {
+        lines
+    };
+    let tail_len = tail.len();
+    let tail_lines = if app.centered_mode() {
+        tail.into_iter().map(center_line).collect::<Vec<_>>()
+    } else {
+        tail
+    };
+    let body_area = Rect {
+        height: body_height,
+        ..inner
+    };
+    frame.render_widget(
+        Paragraph::new(body_lines).scroll((scroll as u16, 0)),
+        body_area,
+    );
+    if tail_height > 0 {
+        let tail_area = Rect {
+            y: inner.y + body_height,
+            height: tail_height,
+            ..inner
+        };
+        // Only the last `tail_height` hint rows fit when the tail shrank.
+        let visible_tail: Vec<Line> = tail_lines
+            .into_iter()
+            .skip(tail_len.saturating_sub(tail_height as usize))
+            .collect();
+        frame.render_widget(Paragraph::new(visible_tail), tail_area);
+    }
 }
 
 /// Word-wrap a plain (unstyled) string to `width` display columns.

@@ -110,3 +110,188 @@ fn wrap_plain_splits_words_and_hard_breaks_tokens() {
     assert_eq!(hard.len(), 4, "hard split: {hard:?}");
     assert!(hard.iter().all(|l| unicode_width::UnicodeWidthStr::width(l.as_str()) <= 6));
 }
+
+fn frame_text(
+    terminal: &mut ratatui::Terminal<ratatui::backend::TestBackend>,
+    app: &App,
+) -> String {
+    terminal
+        .draw(|frame| crate::tui::ui::draw(frame, app))
+        .expect("draw");
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol().to_string())
+        .collect()
+}
+
+fn five_option_question(selected: usize) -> crate::tui::PendingAskUser {
+    let options = ["Birinci", "Ikinci", "Ucuncu", "Dorduncu", "Besinci"]
+        .into_iter()
+        .map(|label| crate::tui::AskUserOptionView {
+            label: label.into(),
+            detail: None,
+        })
+        .collect();
+    crate::tui::PendingAskUser {
+        request_id: "ask-scroll".into(),
+        question: "Hangi secenegi istersin?".into(),
+        options,
+        allow_custom: true,
+        selected,
+    }
+}
+
+#[test]
+fn small_terminal_scrolls_to_keep_highlighted_option_visible() {
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+
+    // Select the LAST option: on a short terminal the list must scroll down
+    // so the highlighted option (and its marker) is on screen.
+    let mut app = create_test_app();
+    app.pending_ask_user = Some(five_option_question(4));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 12))
+        .expect("terminal");
+    terminal
+        .draw(|frame| crate::tui::ui::draw(frame, &app))
+        .expect("draw");
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol().to_string())
+        .collect();
+    assert!(
+        text.contains("▸ 5. Besinci"),
+        "highlighted last option must be visible after scroll, got:\n{text}"
+    );
+    // The scroll indicator replaces the old enlarge-your-terminal message.
+    assert!(
+        !text.contains("büyüt"),
+        "no enlarge-terminal message expected"
+    );
+}
+
+#[test]
+fn moving_highlight_scrolls_the_viewport() {
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+
+    let mut app = create_test_app();
+    app.pending_ask_user = Some(five_option_question(0));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 12))
+        .expect("terminal");
+
+    let before = frame_text(&mut terminal, &app);
+    assert!(
+        before.contains("▸ 1. Birinci"),
+        "first option visible initially"
+    );
+
+    // Move the highlight to the last option: the viewport must follow it.
+    app.move_ask_user_selection(1);
+    app.move_ask_user_selection(1);
+    app.move_ask_user_selection(1);
+    app.move_ask_user_selection(1);
+    let after = frame_text(&mut terminal, &app);
+    assert!(
+        after.contains("▸ 5. Besinci"),
+        "viewport must scroll to the newly highlighted option, got:\n{after}"
+    );
+    // Key hint stays pinned at the bottom of the box even while scrolled.
+    assert!(
+        after.contains("1-9/↑↓ choose"),
+        "key hint must stay pinned while scrolled"
+    );
+}
+
+#[test]
+fn large_terminal_shows_everything_without_scroll() {
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+
+    let mut app = create_test_app();
+    app.pending_ask_user = Some(five_option_question(0));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 40))
+        .expect("terminal");
+    terminal
+        .draw(|frame| crate::tui::ui::draw(frame, &app))
+        .expect("draw");
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol().to_string())
+        .collect();
+    for needle in ["1. Birinci", "2. Ikinci", "3. Ucuncu", "4. Dorduncu", "5. Besinci"] {
+        assert!(text.contains(needle), "missing {needle}");
+    }
+    assert!(
+        !text.contains("more"),
+        "no scroll indicator expected when everything fits"
+    );
+}
+
+#[test]
+fn tiny_terminal_still_renders_box_and_highlight() {
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+
+    // 10-row terminal with 5 options: the box must render with the
+    // highlighted option visible rather than vanishing or truncating away.
+    let mut app = create_test_app();
+    app.pending_ask_user = Some(five_option_question(2));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(50, 10))
+        .expect("terminal");
+    terminal
+        .draw(|frame| crate::tui::ui::draw(frame, &app))
+        .expect("draw");
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol().to_string())
+        .collect();
+    assert!(
+        text.contains("▸ 3. Ucuncu"),
+        "highlighted option must be visible on a 10-row terminal, got:\n{text}"
+    );
+}
+
+#[test]
+fn extreme_small_terminal_keeps_highlight_reachable() {
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+
+    // 8-row terminal: the layout still reserves the status line + input, so
+    // the inline box gets only a few rows. The highlighted option must still
+    // be the row the user sees (the scroll targets it), proving the list
+    // never gets stuck at the top and the box never collapses to nothing.
+    for selected in 0..5 {
+        let mut app = create_test_app();
+        app.pending_ask_user = Some(five_option_question(selected));
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(50, 8))
+            .expect("terminal");
+        terminal
+            .draw(|frame| crate::tui::ui::draw(frame, &app))
+            .expect("draw");
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().to_string())
+            .collect();
+        let expected = format!("▸ {}.", selected + 1);
+        assert!(
+            text.contains(&expected),
+            "selected {selected} must stay visible on an 8-row terminal (expected {expected}), got:\n{text}"
+        );
+    }
+}
