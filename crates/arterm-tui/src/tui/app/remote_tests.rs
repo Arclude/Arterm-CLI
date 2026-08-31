@@ -2055,3 +2055,103 @@ fn remote_bg_task_snapshot_feeds_the_overscroll_badge() {
     );
     assert!(app.info_widget_data().background_info.is_none());
 }
+
+#[test]
+fn set_feature_busy_rejection_queues_plan_mode_and_retries_when_idle() {
+    use crate::tui::TuiState;
+    use tokio::io::AsyncBufReadExt;
+
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    // The toggle inverts the known state: off -> intended on.
+    app.remote_plan_mode_enabled = false;
+
+    // A live turn is running when the server rejects the toggle.
+    app.is_processing = true;
+    app.status = crate::tui::ProcessingStatus::Thinking(std::time::Instant::now());
+    handle_server_event(
+        &mut app,
+        ServerEvent::Error {
+            id: 901,
+            message: "Cannot handle set_feature while the session is busy. Try again after the current turn finishes.".to_string(),
+            retry_after_secs: Some(1),
+        },
+        &mut remote,
+    );
+
+    // The intent is queued, NOT applied yet, and the live turn state survives
+    // (the generic error path would have torn it down).
+    assert_eq!(app.pending_plan_mode_state, Some(true));
+    assert!(
+        !app.remote_plan_mode_enabled,
+        "state must not flip until accepted"
+    );
+    assert!(
+        app.is_processing,
+        "busy rejection must not tear down the running turn"
+    );
+    assert!(
+        !app.display_messages().iter().any(|m| m.role == "error"),
+        "busy rejection must not land as a transcript error"
+    );
+
+    // Turn ends; the retry helper sends the queued intent on the wire and
+    // applies it locally (handle_tick invokes exactly this when idle).
+    rt.block_on(async {
+        super::retry_pending_plan_mode_toggle(&mut app, &mut remote, true).await;
+    });
+
+    assert!(
+        app.pending_plan_mode_state.is_none(),
+        "successful retry must clear the queued intent"
+    );
+    assert!(
+        app.remote_plan_mode_enabled,
+        "retried toggle must apply the intended state"
+    );
+
+    // The retry actually went out on the wire as a SetFeature request. Read
+    // exactly what the retry wrote (no EOF wait: the remote keeps its writer
+    // half open), bounded by one line more than expected requests.
+    let peer = remote
+        .take_dummy_peer()
+        .expect("dummy remote should retain peer stream");
+    let (reader, writer) = peer.into_split();
+    drop(writer);
+    let mut lines = rt.block_on(async {
+        let mut reader = tokio::io::BufReader::new(reader);
+        let mut lines = Vec::new();
+        for _ in 0..4 {
+            let mut line = String::new();
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                reader.read_line(&mut line),
+            )
+            .await
+            {
+                Ok(Ok(0)) | Ok(Err(_)) | Err(_) => break,
+                Ok(Ok(_)) => {
+                    let trimmed = line.trim().to_string();
+                    if !trimmed.is_empty() {
+                        lines.push(trimmed);
+                    }
+                }
+            }
+        }
+        lines
+    });
+    let saw_set_feature = lines.iter().any(|line| {
+        line.contains("\"type\":\"set_feature\"")
+            && line.contains("\"feature\":\"planmode\"")
+            && line.contains("\"enabled\":true")
+    });
+    assert!(
+        saw_set_feature,
+        "retry must send a PlanMode set_feature request, got: {lines:?}"
+    );
+}

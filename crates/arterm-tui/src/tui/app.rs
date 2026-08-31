@@ -1689,6 +1689,10 @@ pub struct App {
     pub(crate) jobs_picker_overlay: Option<super::jobs_picker::JobsPicker>,
     /// Remote `/jobs` just opened; send a list request on the next tick.
     pub(crate) pending_jobs_list: bool,
+    /// A Plan Mode toggle that the server rejected because the agent was
+    /// busy (set_feature busy guard). The intended state is retried once the
+    /// running turn finishes, instead of being silently dropped.
+    pub(crate) pending_plan_mode_state: Option<bool>,
     /// Latest bg-task list snapshot received from the server (remote
     /// sessions). Feeds the overscroll status badge and other bg indicators;
     /// local sessions read the in-process manager instead.

@@ -1213,6 +1213,26 @@ pub(in crate::tui::app) fn handle_server_event(
             message,
             retry_after_secs,
         } => {
+            // The server's busy guard rejected a feature toggle (e.g. Plan
+            // Mode via Alt+P) because the agent is mid-turn. Dropping it
+            // silently loses the user's intent, and the generic error path
+            // below would tear down the live turn state as if it failed.
+            // Queue the intent and retry once the turn finishes.
+            if message.starts_with("Cannot handle set_feature")
+                && app.pending_plan_mode_state.is_none()
+            {
+                // Only re-queue when we know which state was intended: the
+                // toggle inverts the last-known state, which is exactly what
+                // the user pressed.
+                let intended = !app.remote_plan_mode_enabled;
+                app.pending_plan_mode_state = Some(intended);
+                app.set_status_notice(if intended {
+                    "Plan Mode: waiting for the current turn to finish"
+                } else {
+                    "Plan Mode off: waiting for the current turn to finish"
+                });
+                return true;
+            }
             // An MCP action launched from the open /mcp overlay failed; land
             // the error in the overlay footer (where the "working..." note
             // sits) instead of only in the transcript behind the modal.

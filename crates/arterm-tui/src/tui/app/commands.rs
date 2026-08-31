@@ -1712,9 +1712,15 @@ pub(in crate::tui) async fn toggle_plan_mode_remote(
     remote: &mut crate::tui::backend::RemoteConnection,
 ) -> anyhow::Result<bool> {
     let new_state = !app.remote_plan_mode_enabled;
-    remote
+    if let Err(error) = remote
         .set_feature(crate::protocol::FeatureToggle::PlanMode, new_state)
-        .await?;
+        .await
+    {
+        // The wire send itself failed (disconnect); keep the intent queued so
+        // the reconnect path can retry it rather than dropping the toggle.
+        app.pending_plan_mode_state = Some(new_state);
+        return Err(error);
+    }
     apply_plan_mode_state(app, new_state);
     Ok(new_state)
 }

@@ -8,6 +8,7 @@ use super::{
 use crate::bus::BusEvent;
 use crate::message::ToolCall;
 use crate::protocol::{ServerEvent, TranscriptMode};
+use crate::tui::app as app_mod;
 use crate::tui::backend::{RemoteConnection, RemoteDisconnectReason, RemoteEventState, RemoteRead};
 use anyhow::Result;
 use crossterm::event::{
@@ -118,6 +119,15 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     // Dissolve stale (off-screen) reasoning traces with zero visible motion.
     needs_redraw |= app.gc_offscreen_reasoning_traces();
     needs_redraw |= app.poll_jobs_cancel();
+    // Retry a Plan Mode toggle the busy guard rejected: once the turn is over
+    // the server accepts set_feature again. Sends the remembered intent and
+    // clears it either way (another rejection re-queues it).
+    if let Some(intended) = app.pending_plan_mode_state
+        && !app.is_processing
+    {
+        retry_pending_plan_mode_toggle(app, remote, intended).await;
+        needs_redraw = true;
+    }
     if app.pending_jobs_list {
         app.pending_jobs_list = false;
         app.last_remote_bg_list_at = Some(std::time::Instant::now());
@@ -132,7 +142,10 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
             picker.set_status(format!("Could not list jobs: {error:#}"));
         }
         needs_redraw = true;
-    } else if app.is_remote && app.last_remote_bg_list_at.is_none_or(|at| at.elapsed() >= REMOTE_BG_LIST_REFRESH)
+    } else if app.is_remote
+        && app
+            .last_remote_bg_list_at
+            .is_none_or(|at| at.elapsed() >= REMOTE_BG_LIST_REFRESH)
     {
         // Keep the persistent bg-task snapshot (overscroll badge, indicators)
         // live on remote sessions with a throttled periodic list request. The
@@ -372,6 +385,30 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= detect_starved_queued_followup(app);
     needs_redraw |= app.maybe_finish_background_client_reload();
     needs_redraw
+}
+
+/// Send a queued Plan Mode toggle intent that the server's busy guard
+/// rejected earlier. On success the state is applied locally (mirroring
+/// `toggle_plan_mode_remote`); a wire error keeps the intent queued so the
+/// next tick retries again.
+pub(super) async fn retry_pending_plan_mode_toggle(
+    app: &mut App,
+    remote: &mut RemoteConnection,
+    intended: bool,
+) {
+    app.pending_plan_mode_state = None;
+    match remote
+        .set_feature(crate::protocol::FeatureToggle::PlanMode, intended)
+        .await
+    {
+        Ok(()) => {
+            app_mod::commands::apply_plan_mode_state(app, intended);
+        }
+        Err(_) => {
+            // Wire hiccup; keep the intent for the next tick.
+            app.pending_plan_mode_state = Some(intended);
+        }
+    }
 }
 
 /// Forward the reasoning-effort variant staged by a model-picker selection
