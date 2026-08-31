@@ -701,11 +701,16 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
     app.scroll_offset += 1;
     let scrolled = render_and_snap(&app, &mut terminal);
 
-    // A scroll can only carry the name off screen, never onto it, so any count
-    // above the pre-injection one is the ghost that survived the repaint.
-    assert!(
-        scrolled.matches('Z').count() > markers_before,
-        "expected an injected ghost marker to remain after scroll-like repaint:\n{scrolled}"
+    // A scroll can only carry the name off screen, never onto it, so any
+    // surviving Z above the pre-injection count is an unrepainted ghost cell.
+    // With the mid-conversation header hidden, the file-activity row no longer
+    // sits beneath a blank-to-blank header diff, so the repaint now covers the
+    // injected trail and the ghost is cleaned. Lock that in: ghosts must not
+    // survive a scroll repaint.
+    assert_eq!(
+        scrolled.matches('Z').count(),
+        markers_before,
+        "injected ghost must be cleaned by the scroll-like repaint:\n{scrolled}"
     );
 }
 

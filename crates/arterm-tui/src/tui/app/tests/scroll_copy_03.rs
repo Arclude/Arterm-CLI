@@ -2001,10 +2001,9 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
     let backend = ratatui::backend::TestBackend::new(80, 25);
     let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");
 
-    // Bottom position (tail-follow): the header has scrolled off, the sticky
-    // band must pin the status row at the viewport top. Plan Mode no longer
-    // badges the header (it lives in the overscroll status line instead), so
-    // assert on the `arterm` name row and the absence of the plan badge.
+    // Bottom position (tail-follow): the header is hidden entirely once a
+    // conversation exists (it is a startup screen), so no `arterm` status row
+    // and no sticky band may render — the viewport belongs to the transcript.
     let text = render_and_snap(&app, &mut terminal);
     let rows: Vec<&str> = text.lines().collect();
     let status_rows = rows
@@ -2012,14 +2011,8 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
         .filter(|row| row.trim_start().starts_with("arterm"))
         .count();
     assert_eq!(
-        status_rows, 1,
-        "exactly one pinned status row with the arterm name:\n{text}"
-    );
-    assert!(
-        rows.iter()
-            .take(3)
-            .any(|row| row.trim_start().starts_with("arterm")),
-        "the pinned status row must sit at the very top of the viewport:\n{text}"
+        status_rows, 0,
+        "header must stay hidden mid-conversation (no pinned status row):\n{text}"
     );
     assert!(
         !rows.iter().any(|row| row.contains("· plan")),
@@ -2027,11 +2020,11 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
     );
     assert!(
         text.contains("resp 5 line 14"),
-        "latest transcript content stays visible beneath the band:\n{text}"
+        "latest transcript content stays visible:\n{text}"
     );
 
-    // Scroll up into the header region: the in-flow header is visible again,
-    // so the band must not duplicate the status row.
+    // Scrolling back up must not resurrect the hidden header either: the
+    // transcript tops out at its own first prompt.
     app.scroll_offset = 0;
     app.auto_scroll_paused = true;
     let top_text = render_and_snap(&app, &mut terminal);
@@ -2041,8 +2034,8 @@ fn test_sticky_header_pins_status_row_when_scrolled_past_header() {
         .filter(|row| row.trim_start().starts_with("arterm"))
         .count();
     assert_eq!(
-        top_status_rows, 1,
-        "no duplicate status row while the header is in view:\n{top_text}"
+        top_status_rows, 0,
+        "header must not reappear when scrolled to the top mid-conversation:\n{top_text}"
     );
 
     arterm_app_core::tool::set_plan_mode(&session_id, false);

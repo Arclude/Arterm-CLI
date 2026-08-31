@@ -1038,6 +1038,14 @@ pub(super) fn build_header_sections(
     app: &dyn TuiState,
     width: u16,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    // The header is a startup screen: product row, server/client/model rows,
+    // auth inventory, skills. Once the first user/assistant message lands it
+    // hides entirely (the transcript is the interface from then on; update
+    // badges surface through status notices instead). The top pad is kept in
+    // ui_prepare so the transcript never jumps to the top edge.
+    if app.conversation_started() {
+        return (Vec::new(), Vec::new());
+    }
     let auth = app.auth_status();
     let active = ActiveCredentialOverrides::from_app(app);
     (

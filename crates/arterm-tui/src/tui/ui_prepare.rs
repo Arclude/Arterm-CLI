@@ -1005,8 +1005,16 @@ fn prepare_messages_inner(app: &dyn TuiState, width: u16, height: u16) -> Prepar
     let compose_start = Instant::now();
     // Re-apply the initial-screen centering pad above the header so the
     // transition from the empty screen to the first message does not shift
-    // anything. The pad scrolls off naturally as the transcript grows.
-    let pad_top = initial_header_pad_top(height, header_prepared.wrapped_lines.len());
+    // anything. The pad scrolls off naturally as the transcript grows. With
+    // the header hidden mid-conversation the pad would otherwise be computed
+    // for a zero-line header ((height-4)/2 blank rows of dead space), so cap
+    // it at a one-row top margin: the transcript still does not glue itself
+    // to the top edge, but no half-screen of blanks leads it either.
+    let pad_top = if app.conversation_started() {
+        1
+    } else {
+        initial_header_pad_top(height, header_prepared.wrapped_lines.len())
+    };
     let padded_header = if pad_top > 0 {
         let mut lines = build_top_pad_lines(width, pad_top, app.centered_mode());
         lines.reserve(header_prepared.wrapped_lines.len());
@@ -1128,8 +1136,11 @@ pub(super) fn header_prep_signature(app: &dyn TuiState, width: u16) -> u64 {
     // The header content changes when the first message lands (startup
     // notes render only before the conversation starts), so the empty ->
     // first-message transition must invalidate the header cache immediately
-    // instead of waiting out the TTL.
+    // instead of waiting out the TTL. `conversation_started` covers the
+    // stronger transition too: the header hides entirely once a real
+    // user/assistant message exists, which must repaint the same frame.
     app.chat_is_initially_empty().hash(&mut hasher);
+    app.conversation_started().hash(&mut hasher);
     // Plan mode adds the `plan` status item to the persistent header, so a
     // toggle must repaint the header on the next frame instead of waiting out
     // the cache TTL.
